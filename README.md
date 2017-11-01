@@ -1,6 +1,6 @@
 # Geosoft GX for GXC Repository
 
-This is the repository for Geosoft GX Developer support for GX Language development. Refer to the documentation for installation and developer information.
+This is the repository for Geosoft GX Developer support for GX Language development. Refer to the documentation for more information.
 
 [GX Developer documentation](https://geosoftgxdev.atlassian.net/wiki/display/GD/Python+in+GX+Developer)
 
