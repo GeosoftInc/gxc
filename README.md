@@ -6,6 +6,8 @@ This is the repository for Geosoft GX Developer support for GX Language developm
 
 [Geosoft GX Language](https://geosoftgxdev.atlassian.net/wiki/spaces/GXD93/pages/78020870/Geosoft+GX+Language)
 
+Also see the [Geosoft Inc . organization on Github](https://github.com/GeosoftInc) for the other programming language specific repos.
+
 License
 -------
 
