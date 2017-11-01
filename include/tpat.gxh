@@ -1,0 +1,241 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HTPAT_GXH_DEFINED
+#define HTPAT_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class TPAT
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// The full name of the pattern.
+// ex: "felsic volcanics"
+// Code:          Short-form of the pattern description. This is the value
+// which typically appears (for instance) in the "Rock code"
+// channel in a Wholeplot From-To data group.
+// ex: "FVOL"
+// The code is CASE-SENSITIVE.
+// 
+// Label:         Text to use as a short-form in labels, graphs etc.
+// By default, this is the same as the code.
+// ex: "FVol."
+// Pattern Attributes:  (See DEFAULT.PAT in \src\etc for more inforation)
+// Pattern:       The Pattern Index; defined in DEFAULT.PAT, or in the user's
+// USER.PAT file. If not specified, defaults to 0 (solid fill).
+// Size:          The pattern tile size. If not specified, defaults to 2.0mm.
+// Density:       The tiling density. If not specified, defaults to 1.0.
+// Thickness:     The line thickness in the tile, expressed as a integer
+// percentage (0-100) of the tile size.
+// Color:        The pattern line work color. If not specified, defaults to black.
+// 
+// Background color: The pattern background color. If not specified, defaults to
+// transparent (C_ANY_NONE)
+// 
+// 
+// Symbols:
+// 
+// Symbol Font     The name of the symbol font to use for a given symbol index
+// 
+// Symbol Number   Index into the font.
+// 
+// Symbol Rotation: Rotation in degrees CCW.
+// 
+// Symbol Scaling  Additional scale factor to apply to symbol size (Default 1.0)
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define TPAT_STRING_SIZE
+//
+// Default string sizes.
+//
+// TPAT_CODE_SIZE
+// 
+//
+// TPAT_LABEL_SIZE
+// 
+//
+// TPAT_DESC_SIZE
+// 
+//
+// TPAT_SYMBFONT_SIZE
+// 
+//
+//===========================================================================================================
+
+#define TPAT_CODE_SIZE 21
+#define TPAT_LABEL_SIZE 32
+#define TPAT_DESC_SIZE 128
+#define TPAT_SYMBFONT_SIZE 32
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// AddColor_TPAT Add a new color to the list
+//
+// Notes         The new code must be unique; not in the existing list.
+//
+// Available     7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void AddColor_TPAT(TPAT,     // TPAT handle
+                             string,   // Code (required - CASE SENSITIVE)
+                             string,   // Label (optional, can be "")
+                             string,   // Description (optional, can be "")
+                             int);     // Color (use iColor_MVIEW to convert to int).
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_TPAT Creates an empty thematic pattern object.
+//
+// Returns     TPAT object
+//
+// Available   7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] TPAT Create_TPAT();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_TPAT Destroys a pattern object.
+//
+// Available    7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_TPAT(TPAT);  // TPAT Handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iCode_TPAT Find the index of a given thematic pattern
+//
+// Returns    The code index, -1 if not found
+//
+// Available  7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iCode_TPAT(TPAT,     // TPAT handle
+                         string);  // Pattern code (case sensitive)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// IGetSolidPattern_TPAT Get solid pattern info from the TPAT.
+//
+// Notes                 Returns the solid color, pattern foreground color, or symbol
+//                       color, along with the code, label and description.
+//
+// Available             7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void IGetSolidPattern_TPAT(TPAT,         // TPAT handle
+                                     int,          // Index
+                                     var string,   // Returned Code
+                                     int,          // Length of supplied code string variable
+                                     var string,   // Returned Label
+                                     int,          // Length of supplied code string variable
+                                     var string,   // Returned Description
+                                     int,          // Length of supplied code string variable
+                                     var int);     // Color.
+#define GetSolidPattern_TPAT(tpat, index, code, label, descr, color) IGetSolidPattern_TPAT(tpat, index, code, sizeof(code), label, sizeof(label), descr, sizeof(descr), color)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iSize_TPAT Returns the number of rows (items) in the TPAT object.
+//
+// Returns    Number of TPAT items.
+//
+// Available  7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iSize_TPAT(TPAT);  // TPAT Handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadCSV_TPAT Load thematic patterns from a CSV file
+//
+// Notes        The type of thematic patterns file is recognized from the types
+//              of fields found inside it.
+//              
+//              The following fields are identified. Only the "CODE" field is
+//              required, as the "default" thematic pattern is a solid black color.
+//              
+//              CODE   The pattern code (required by all types - CASE SENSITIVE)
+//              LABEL  Longer text identifier to use in legends etc. (up to 31 characters)
+//              DESCRIPTION Much longer text string (up to 127 characters).
+//              
+//              COLOR  Line color used in patterns, and for solid colors, the color.
+//              If only this field is found (and none below), the pattern file
+//              is assumed to be type TPAT_TYPE_COLOR.
+//              
+//              PATTERN         Geosoft pattern ID.
+//              PAT_SIZE        Pattern tile size, or symbol size (default 2mm)
+//              PAT_DENSITY     Pattern tile density (default 1.0)
+//              PAT_THICKNESS   Pattern line thickness as % of size (default 5)
+//              BACK_COLOR      Background color for the pattern. Also used for symbols
+//              (Default background is transparent).
+//              
+//              SYMBFONT        Symbol font (e.g. "symbols.gfn")
+//              SYMBNUM         Symbol number of the current font
+//              SYMBROT         Symbol rotation
+//              SYMBSCL         Additional scaling factor applied to the current size
+//
+// Available    7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadCSV_TPAT(TPAT,     // TPAT handle
+                            string);  // Thematic Pattern file name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetupTranslationVV_TPAT Initializes a VV used to map TPAT indices to output values
+//
+// Notes                   The input LTB object should have key values matching the TPAT codes.
+//                         Whether the matches are case sensitive or not is dependent on how the
+//                         LTB oject was created (see ltb.h).
+//                         The LTB field values are converted to the output VV type.
+//
+// Available               7.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetupTranslationVV_TPAT(TPAT,   // TPAT Handle
+                                       LTB,    // Table containing TPAT codes as the key
+                                       int,    // Field in LTB with the output values (numeric or string)
+                                       VV);    // Returned values for each TPAT index
+
+
+
+
+
+//*** endblock Generated
+
+#endif

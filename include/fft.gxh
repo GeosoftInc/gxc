@@ -1,0 +1,434 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HFFT_GXH_DEFINED
+#define HFFT_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class FFT
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// This class allows for the application of predefined
+// filters to data in an OASIS database. The system uses
+// the Winograd algorithm to transform data in the spatial
+// domain to the wavenumber or Fourier domain.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define FFT_DETREND
+//
+// Detrending option
+//
+// FFT_DETREND_NONE
+// No trend remove
+//
+// FFT_DETREND_ENDS
+// Detrend order 1 using only two end points
+//
+// FFT_DETREND_ALL
+// Detrend order 1 using all data points
+//
+// FFT_DETREND_MEAN
+// Remove mean value
+//
+//===========================================================================================================
+
+#define FFT_DETREND_NONE 0
+#define FFT_DETREND_ENDS 1
+#define FFT_DETREND_ALL 2
+#define FFT_DETREND_MEAN 3
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// AppDens_FFT Appparent density filter
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void AppDens_FFT(FFT,    // FFT to filter
+                             real,   // Thickness (meters) of the earth model
+                             real);  // Background density (g/cm3) (default = 0)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// AppSusc_FFT Apparent susceptiblity filter
+//
+// Notes       Reduction to magnetic pole (RedPol_FFT) and downward continuation
+//             (Contin_FFT) should be called BEFORE using AppSusc_FFT.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void AppSusc_FFT(FFT,    // FFT to filter
+                             real);  // Total magnetic field strength
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// BandPass_FFT Bandpass filter (using low and high wavelength cutoffs)
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void BandPass_FFT(FFT,    // FFT to filter
+                              real,   // Low Cutoff wavelength (meters)
+                              real,   // High Cutoff wavelength (meter)
+                              int);   // 1= Pass the defined band (default); 0= Reject the band
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// BWorth_FFT Butterworth filter
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void BWorth_FFT(FFT,    // FFT to filter
+                            real,   // Central cutoff wavelength (meter)
+                            real,   // Degree of the filter function (default = 8.0)
+                            int);   // Filter type: 1= Low-pass (regional) filter (default) 0= High-pass (residual) filter
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// RCFilter_FFT RC filter
+//
+// Available    8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void RCFilter_FFT(FFT,    // FFT to filter
+                              real,   // Central cutoff wavelength (meter)
+                              int);   // Filter type: 1= Low-pass (regional) filter (default) 0= High-pass (residual) filter
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Contin_FFT Upward/Downward continuation filter
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void Contin_FFT(FFT,    // FFT to filter
+                            real);  // Distance to continue; positive = downwards negative = upwards
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CosRoll_FFT Cosine roll-off filter
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void CosRoll_FFT(FFT,    // FFT to filter
+                             real,   // Low wavelength start point (meters)
+                             real,   // High wavelength end point (meters)
+                             real,   // Degree of the filter function (default = 2.0)
+                             int);   // Filter type: 1= Low-pass (regional) filter (default) 0= High-pass (residual) filter
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_FFT Create a New FFT with detrend options.
+//
+// Returns    FFT Object
+//
+// Notes      The detrending options control the removal of a trend from the data
+//            before the FFT is applied. The default data expansion is 10% before FFT.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] FFT Create_FFT(VV,     // VV to transform.
+                           real,   // Element space interval
+                           int);   // FFT_DETREND
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateEx_FFT Create a New FFT with detrend and expansion options.
+//
+// Returns      FFT Object
+//
+// Notes        The detrending options control the removal of a trend from the data
+//              before the FFT is applied. The expansion options control the minimum
+//              data expansion before the FFT is applied.
+//
+// Available    5.1.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] FFT CreateEx_FFT(VV,     // VV to transform.
+                             real,   // Element space interval
+                             int,    // FFT_DETREND
+                             real);  // Minimum expansion %
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateRef_FFT Create FFT object with detrend options from reference (original) channel,
+//               but no FFT process.
+//
+// Returns       FFT Object
+//
+// Notes         This just creates an object.  It is intended to be called
+//               immediately after with SetVV_FFT.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] FFT CreateRef_FFT(VV,     // VV contains channel data to perform FFT operations upon.
+                              real,   // Element space interval, should be the same as in CreateEx_FFT call
+                              int);   // FFT_DETREND
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateRefEx_FFT Create FFT object with detrend and expansion options from reference (original) channel,
+//                 but no FFT process.
+//
+// Returns         FFT Object
+//
+// Notes           This just creates an object.  It is intended to be called
+//                 immediately after with SetVV_FFT.
+//
+// Available       5.1.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] FFT CreateRefEx_FFT(VV,     // VV contains channel data to perform FFT operations upon.
+                                real,   // Element space interval, should be the same as in CreateEx_FFT call
+                                int,    // FFT_DETREND
+                                real,   // Minimum expansion %, should be the same as in CreateEx_FFT call
+                                real);  // DC level multiple
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_FFT Destroy an FFT.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_FFT(FFT);  // FFT to destroy.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Gaus_FFT Gaussian filter
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void Gaus_FFT(FFT,    // FFT to filter
+                          real,   // Standard deviation cutoff of function (meters)
+                          int);   // Filter type: 1= Low-pass (residual) filter (default) 0= High-pass (regional) filter
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetVV_FFT Copies real and imaginary VV's to user VV's.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void GetVV_FFT(FFT,   //
+                           VV,    // Real component
+                           VV);   // Imaginary component
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// HDrv_FFT Horizontal derivative
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void HDrv_FFT(FFT,    // FFT to filter
+                          real);  // Order of differentiation (default = 1)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// HighPass_FFT High bandpass filter
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void HighPass_FFT(FFT,    // FFT to filter
+                              real,   // Cutoff wavelength (meter)
+                              real);  // Fiducial increment of the FFT's channel data
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// HInt_FFT Horizontal integration
+//
+// Available 5.1.4
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void HInt_FFT(FFT);  // FFT to integrate
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Inverse_FFT Inverse the FFT from wave number domain to space domain
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void Inverse_FFT(FFT,   // FFT to invert
+                             VV,    // Output VV
+                             VV);   // Original VV which was used to create FFT (will be used as mask for output VV; no masking if this parameter is NULL)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LowPass_FFT Low bandpass filter
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void LowPass_FFT(FFT,    // FFT to filter
+                             real);  // Cutoff wavelength (meters)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// RedPol_FFT Reduction to magnetic pole
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void RedPol_FFT(FFT,    // FFT to filter
+                            real,   // Geomagnetic inclination (degrees)
+                            real,   // Geomagnetic declination (degrees)
+                            real,   // Inclination (degrees) for amplitude correction (default = 20.0)
+                            real);  // Direction (degrees) of Line from North
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rNyquist_FFT Gets the Nyquist frequency (wavenumbers/sample unit).
+//
+// Returns      Nyquist frequency (wavenumbers/sample unit).
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] real rNyquist_FFT(FFT);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rSampIncr_FFT Gets the original sample increment.
+//
+// Returns       Original sample increment.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] real rSampIncr_FFT(FFT);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rWaveIncr_FFT Get the wave number increment.
+//
+// Returns       Wave number increment
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] real rWaveIncr_FFT(FFT);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetVV_FFT Sets real and imaginary VVs in FFT.
+//
+// Notes     The VV must have been obtained from the same FFT
+//           using the SetVV_FFT method.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void SetVV_FFT(FFT,   //
+                           VV,    // Real component
+                           VV);   // Imaginary component
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Spectrum_FFT Calculates a power spectrum
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void Spectrum_FFT(FFT,   // FFT to calculate power spectrum for
+                              VV);   // Output power spectrum VV
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// VDrv_FFT Vertical derivative
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void VDrv_FFT(FFT,    // FFT to filter
+                          real);  // Order of differentiation (default = 1)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// VInt_FFT Vertical integration
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void VInt_FFT(FFT);  // FFT to integrate
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// WriteSpectrum_FFT Writes a power spectrum to a file
+//
+// Available         5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void WriteSpectrum_FFT(FFT,      // FFT used to calculate power spectrum VV
+                                   VV,       // Output power spectrum VV
+                                   string);  // File name for output spectrum
+
+
+
+
+
+//*** endblock Generated
+
+#endif

@@ -1,0 +1,258 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HDBREAD_GXH_DEFINED
+#define HDBREAD_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class DBREAD
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// The DBREAD class is used to open and read from databases. Very large lines
+// are split into blocks and served up sequentially to prevent the over-use of virtual memory when channels are read into VVs or VAs.
+// Individual data blocks are limited by default to 1 MB (which is user-alterable). Single lines smaller than the block size
+// are served up whole, one block per line.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+
+
+
+//===========================================================================================================
+//
+// Create Methods
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_DBREAD Create a DBREAD object
+//               Add channels using the iAddChannel_DBREAD method.channel.
+//
+// Returns       DBREAD object
+//
+// Available     8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] DBREAD Create_DBREAD(DB,    // Database input
+                               LST);  // List of lines to process NAME = line name, VALUE = line symbol
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateXY_DBREAD Create a DBREAD object for a XY-located data. Add channels using the
+//                 iAddChannel_DBREAD method.
+//
+// Returns         DBREAD object
+//
+// Available       8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] DBREAD CreateXY_DBREAD(DB,    // Database input
+                                 LST);  // List of lines to process NAME = line name, VALUE = line symbol
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateXYZ_DBREAD Create a DBREAD object for a XYZ-located data.
+//                  Add channels using the iAddChannel_DBREAD method.
+//
+// Returns          DBREAD object
+//
+// Available        8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] DBREAD CreateXYZ_DBREAD(DB,    // Database input
+                                  LST);  // List of lines to process NAME = line name, VALUE = line symbol
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_DBREAD Destroy DBREAD handle.
+//
+// Available      8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_DBREAD(DBREAD);  // DBREAD handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iAddChannel_DBREAD Add a data channel to the DBREAD object.
+//
+// Returns            Channel index. Use for getting the correct VV or VA object.
+//
+// Available          8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iAddChannel_DBREAD(DBREAD,    // DBREAD handle
+                                 DB_SYMB);  // Channel handle (does not need to be locked, but can be.)
+
+
+
+//===========================================================================================================
+//
+// Data Access Methods
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetVV_DBREAD Get the VV handle for a channel.
+//
+// Returns      VV handle
+//
+// Notes        Call only for single-column (regular) channels. You can call the iGetChanArraySize_DBREAD
+//              function to find the number fo columns in a given channel. The VV is filled anew for 
+//              each block served up.
+//
+// Available    8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VV GetVV_DBREAD(DBREAD,   // DBREAD handle
+                          int);     // Index of channel to access.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetVA_DBREAD Get the VA handle for an array channel.
+//
+// Returns      VA handle
+//
+// Notes        Call only for array (multi-column) channels. You can call the iGetChanArraySize_DBREAD
+//              function to find the number fo columns in a given channel, or you can call iCol_VA on the returned VA handle.
+//              The VA is filled anew for each block served up.
+//
+// Available    8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VA GetVA_DBREAD(DBREAD,   // DBREAD handle
+                          int);     // Index of channel to access.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetVVx_DBREAD Get the X channel VV handle.
+//
+// Returns       VV handle
+//
+// Notes         Only available for the CreateXY or CreateXYZ methods.
+//               The VV is filled anew for each block served up.
+//
+// Available     8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VV GetVVx_DBREAD(DBREAD);  // DBREAD handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetVVy_DBREAD Get the Y channel VV handle.
+//
+// Returns       VV handle
+//
+// Notes         Only available for the CreateXY or CreateXYZ methods.
+//               The VV is filled anew for each block served up.
+//
+// Available     8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VV GetVVy_DBREAD(DBREAD);  // DBREAD handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetVVz_DBREAD Get the Z channel VV handle.
+//
+// Returns       VV handle
+//
+// Notes         Only available for the CreateXY or CreateXYZ methods.
+//               The VV is filled anew for each block served up.
+//               If the Z channel is an array channel, the returned VV is the "base" VV of the VA and contains all items sequentially.
+//
+// Available     8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VV GetVVz_DBREAD(DBREAD);  // DBREAD handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetChanArraySize_DBREAD Get the number of columns of data in a channel.
+//
+// Returns                  The number of columns (array size) for a channel
+//
+// Notes                    Regular channels have one column of data. Array channels have more than one column of data.
+//                          This function should be called to determine whether to use GetVV_DBREAD or GetVA_DBREAD to access data
+//                          for a channel.
+//
+// Available                8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetChanArraySize_DBREAD(DBREAD,   // DBREAD handle
+                                       int);     // Index of channel to access.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetNumberOfBlocksToProcess_DBREAD Get the number of blocks to be served up.
+//
+// Returns                            The number of blocks to process in the selected lines.
+//
+// Notes                              The selected lines are scanned. All lines where the served up data is less than the maximum block size for
+//                                    all channels are served as a single block. Any lines where any channel's data exceeds the maximum block size are split up into blocks.
+//                                    The value returned can be used as the progress message maximum iteration value.
+//
+// Available                          8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetNumberOfBlocksToProcess_DBREAD(DBREAD);  // DBREAD handle
+
+
+
+//===========================================================================================================
+//
+// Processing
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetNextBlock_DBREAD Get the next block of data.
+//
+// Returns              Returns the current block index, or -1 if at end of file (no new data returned).
+//
+// Notes                The next block of data is read and copied into the channel VV and/or VA objects, accessed using
+//                      the GetVV_DBREAD and GetVA_DBREAD functions.
+//
+// Available            8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetNextBlock_DBREAD(DBREAD,    // DBREAD handle
+                                   var int,   // (returned) The index into the input selected line list of the line whose data is contained in the current block
+                                   var int,   // (returned) The block index (0 to NBlocks-1) for the current line of data.
+                                   var int);  // (returned) The number of blocks that the current line is split into.
+
+
+
+
+
+//*** endblock Generated
+
+#endif

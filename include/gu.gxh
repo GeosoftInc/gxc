@@ -1,0 +1,754 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HGU_GXH_DEFINED
+#define HGU_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class GU
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// Not a class. A catch-all group of functions performing
+// various geophysical processes, including the calculation
+// of simple EM model responses, certain instrument dump
+// file imports, and 2D Euler deconvolution.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define EM_ERR
+//
+// Error Scaling
+//
+// EM_ERR_UNSCALED
+// 
+//
+// EM_ERR_LOGSCALING
+// 
+//
+//===========================================================================================================
+
+#define EM_ERR_UNSCALED 0
+#define EM_ERR_LOGSCALING 1
+
+
+//===========================================================================================================
+//
+// Define EM_INV
+//
+// Type of Inversion
+//
+// EM_INV_INPHASE
+// 
+//
+// EM_INV_QUADRATURE
+// 
+//
+// EM_INV_BOTH
+// 
+//
+//===========================================================================================================
+
+#define EM_INV_INPHASE 0
+#define EM_INV_QUADRATURE 1
+#define EM_INV_BOTH 2
+
+
+//===========================================================================================================
+//
+// Define EMPLATE_DOMAIN
+//
+// Type of Domain
+//
+// EMPLATE_FREQUENCY
+// 
+//
+// EMPLATE_TIME
+// 
+//
+//===========================================================================================================
+
+#define EMPLATE_FREQUENCY 1
+#define EMPLATE_TIME 9
+
+
+//===========================================================================================================
+//
+// Define EMPLATE_TX
+//
+// Orientation
+//
+// EMPLATE_TX_X
+// 
+//
+// EMPLATE_TX_Y
+// 
+//
+// EMPLATE_TX_Z
+// 
+//
+//===========================================================================================================
+
+#define EMPLATE_TX_X 1
+#define EMPLATE_TX_Y 2
+#define EMPLATE_TX_Z 3
+
+
+//===========================================================================================================
+//
+// Define GU_DAARC500_DATATYPE
+//
+// Supported serial data types for import
+//
+// GU_DAARC500_UNKNOWN
+// 
+//
+// GU_DAARC500_GENERIC_ASCII
+// 
+//
+// GU_DAARC500_GPS
+// 
+//
+// GU_DAARC500_GR820_256D
+// 
+//
+// GU_DAARC500_GR820_256DU
+// 
+//
+// GU_DAARC500_GR820_512DU
+// 
+//
+// GU_DAARC500_NAV
+// 
+//
+//===========================================================================================================
+
+#define GU_DAARC500_UNKNOWN 0
+#define GU_DAARC500_GENERIC_ASCII 1
+#define GU_DAARC500_GPS 2
+#define GU_DAARC500_GR820_256D 3
+#define GU_DAARC500_GR820_256DU 4
+#define GU_DAARC500_GR820_512DU 5
+#define GU_DAARC500_NAV 6
+
+
+//===========================================================================================================
+//
+// Define PEAKEULER_XY
+//
+// Fit Options
+//
+// PEAKEULER_XY_NOFIT
+// 
+//
+// PEAKEULER_XY_FIT
+// 
+//
+//===========================================================================================================
+
+#define PEAKEULER_XY_NOFIT 0
+#define PEAKEULER_XY_FIT 1
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// DipoleMag_GU Calculate a dipole magnetic field into XYZ file
+//
+// Available    5.1.6
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void DipoleMag_GU(string,   // sXYZ
+                              real,     // rDepth
+                              real,     // rInc
+                              int,      // iNX
+                              int,      // iNY
+                              real,     // rDX
+                              real);    // rDY
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// EMHalfSpaceInv_GU Inverts EM responses to the best halfspace model.
+//
+// Available         5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void EMHalfSpaceInv_GU(real,   // Coil spacing: error if == 0
+                                   real,   // Frequency
+                                   int,    // EMLAY_GEOMETRY
+                                   real,   // Fractional error in best fit resistivity
+                                   real,   // Don't invert values below this
+                                   VV,     // Height above ground
+                                   VV,     // In-phase part (ppm)
+                                   VV,     // Quadrature part (ppm)
+                                   VV,     // On return - inverted halfspace resistivities
+                                   int,    // EM_INV
+                                   int,    // EM_ERR
+                                   real);  // Starting value for inversion (can be rDUMMY)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// EMHalfSpaceVV_GU EM Halfspace forward model response.
+//
+// Available        5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void EMHalfSpaceVV_GU(real,   // Coil separation
+                                  real,   // Frequency
+                                  int,    // EMLAY_GEOMETRY
+                                  VV,     // Input resistivity values
+                                  VV,     // Input height values
+                                  VV,     // Output In-phase
+                                  VV);    // Output Quadrature-phase
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Geometrics2DB_GU Convert a Geometrics STN file to a database.
+//
+// Notes            Assumes that the database is new and empty. If not, existing channels
+//                  with names X, Y, Mag1, Mag2, Time, Date, and Mark will deleted and then created.  
+//                  Existing lines will be erased and then created if they are the same as the new ones.
+//
+// Available        5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Geometrics2DB_GU(DB,     // DB handle
+                                  RA,     // RA handle, STN file
+                                  WA,     // Log file WA handle
+                                  int,    // Simple mode (1) or Mapped mode (2)
+                                  int,    // Survey line orientation:  North-south - 0 East-west   - 1
+                                  int,    // Starting survey position: SW - 0, NW - 1, SE - 2, NE - 3,
+                                  int,    // Bidirectional (0) or Unidirectional (1)
+                                  real,   // Starting position X
+                                  real,   // Starting position Y
+                                  real,   // Mark spacing
+                                  real);  // Line spacing
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Geometrics2TBL_GU Convert a Geometrics station file (STN) to a table file (TBL)
+//
+// Available         5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Geometrics2TBL_GU(RA,   // RA handle, input station file
+                                   WA,   // Output TBL file
+                                   WA);  // Log file WA handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GeometricsQC_GU Correct reading positions in a database.
+//
+// Notes           There are six cases to consider:
+//                 
+//                 ========    ====  =============  ========================================
+//                 Case        Flag  Solutions      Symptoms
+//                 ========    ====  =============  ========================================
+//                 CASE 1A:    0     No correction  Recorded and actual Line lengths same
+//                                                  Reading densities vary slightly (passed
+//                                                  the tolerance test)
+//                 --------    ----  -------------  ----------------------------------------
+//                 CASE 1B     -1    No correction  Line lengths same
+//                                                  Reading densities vary and cannot
+//                                                  pass the tolerance test
+//                 --------    ----  -------------  ----------------------------------------
+//                 CASE 2A     1     Corrected by   Recorded line length too short
+//                                   extension      Possible high readings in segment(s)
+//                                                  Corrected (by extending) and actual
+//                                                  lengths become the same
+//                 --------    ----  -------------  ----------------------------------------
+//                 CASE 2B     2     Corrected by   Recorded line length too short
+//                                   interpolation  Possible high readings in segment(s)
+//                                                  Corrected (by extending) and actual
+//                                                  lengths are not same. Interpolation is
+//                                                  then applied
+//                 --------    ----  -------------  ----------------------------------------
+//                 CASE 3A     1     Corrected by   Recorded line length too long
+//                                   shifting or    Possible low readings in segment(s)
+//                                   (shrank)       Corrected (by shifting) and actual
+//                                                  lengths are same
+//                 --------    ----  -------------  ----------------------------------------
+//                 CASE 3B     2     Corrected by   Recorded line length too long
+//                                   interpolation  Possible low readings in segment(s)
+//                                                  Corrected (by shifting) and actual
+//                                                  lengths are not same. Interpolation
+//                                                  is then applied
+//                 ========    ====  =============  ========================================
+//                 
+//                 
+//                 TERMINOLOGY:
+//                 
+//                 Segments
+//                      A segment refers to the distance and its contents between
+//                      two adjacent fiducial markers
+//                 
+//                 Normal Density
+//                      The density (number of readings) shared by the segments in
+//                      a survey line. The number of segments with the density is greater 
+//                      than the number of segments having a different density in a line.
+//                 
+//                 Tolerance and Bound:
+//                      Tolerance is defined as a percentage, say 50% (=0.5).
+//                      Based on the tolerance, a lower bound and upper bound
+//                 
+//                      can be defined:
+//                 
+//                      ::
+//                 
+//                          Lower bound = (Normal Density) - (Normal Density)*Tolerance
+//                          Upper bound = (Normal Density) - (Normal Density)*Tolerance
+//                 
+//                      Segments will pass the tolerance test if the number of readings
+//                      falls within the Lower and Upper Bounds.
+//
+// Available       5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GeometricsQC_GU(WA,       // Output error log file
+                                 string,   // Database line number. For output to log file only
+                                 VV,       // Input VV, GS_DOUBLE
+                                 real,     // Tolerance defined as percentage, say 50.0 means 50%. Must be >=0.0 Lower bound = (Normal Density) - (Normal Density)*Tolerance Upper bound = (Normal Density) + (Normal Density)*Tolerance
+                                 real,     // Minimum coordinate (X or Y)
+                                 real,     // Maximum coordinate (X or Y)
+                                 VV,       // Output VV, GS_DOUBLE
+                                 VV);      // Output Flag VV, GS_LONG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Geonics3138Dump2DB_GU Convert a Geonics EM31/EM38 file in dump format to a database.
+//
+// Notes                 Assumes that the database is new and empty. If not, existing channels
+//                       with names X, Y, Station, Conductivity, Inphase, Quadrature,
+//                       and Time will deleted and then created.  Existing lines will
+//                       be erased and then created if they are the same as the new ones.
+//
+// Available             5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Geonics3138Dump2DB_GU(DB,     // DB handle
+                                       RA,     // RA handle, Header file
+                                       RA,     // RA handle, Dump file
+                                       WA,     // Log file WA handle
+                                       real,   // Line multiplier
+                                       real);  // Station multiplier
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Geonics61Dump2DB_GU Convert a Geonics EM61 file in dump format to a database.
+//
+// Notes               Assumes that the database is new and empty. If not, existing channels
+//                     with names X, Y, Station, Conductivity, Inphase, Quadrature,
+//                     and Time will deleted and then created.  Existing lines will
+//                     be erased and then created if they are the same as the new ones.
+//
+// Available           5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Geonics61Dump2DB_GU(DB,     // DB handle
+                                     RA,     // RA handle, dump file
+                                     WA,     // Log file WA handle
+                                     real,   // Line multiplier
+                                     real);  // Station multiplier - Not used in the calculation
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GeonicsDAT2DB_GU Convert a Geonics EM31/EM38/EM61 file in DAT format to a database.
+//
+// Notes            Assumes that the database is new and empty. If not, existing channels
+//                  with names X, Y, Station, Conductivity, Inphase, Quadrature,
+//                  and Time will deleted and then created.  Existing lines will
+//                  be erased and then created if they are the same as the new ones.
+//
+// Available        5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GeonicsDAT2DB_GU(DB,     // DB handle
+                                  RA,     // RA handle
+                                  WA,     // Log file WA handle
+                                  real,   // Line multiplier
+                                  real);  // Station multiplier - Not used in the calculation
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GrCurvCor_GU Gravity Curvature (Bullard B) Correction to Bouguer anomaly
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GrCurvCor_GU(VV,   // Input Elevation VV
+                              VV,   // Input Latitude VV
+                              VV);  // Bouguer VV for Curvature Correction
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GrCurvCorEx_GU Gravity Curvature (Bullard B) Correction to Bouguer anomaly, with user input cap density.
+//
+// Available      8.0.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GrCurvCorEx_GU(VV,     // Input Elevation VV
+                                VV,     // Input Latitude VV
+                                VV,     // Bouguer VV for Curvature Correction
+                                real);  // Cap Density (g/cm^3
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GrDEMVV_GU Get gravity DEM grid VV for Bouguer anomaly
+//
+// Available  6.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GrDEMVV_GU(IMG,   // DEM grid
+                            VV,    // Input X VV
+                            VV,    // Input Y VV
+                            VV);   // Output DEM VV for Bouguer Correction
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GrTest_GU Test triangular prism gravity calculation
+//
+// Available 5.1.4
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GrTest_GU(real,   // dXm  - model dimension x
+                           real,   // dYm  - model dimension y
+                           real,   // dZm  - model depth
+                           VV,     // VVx  - stations x
+                           VV,     // VVy  - stations y
+                           VV,     // VVg3 - 2 triangular prism gravity results
+                           VV,     // VVg4 - regtangular prism gravity results
+                           VV,     // VVg1 - lower triangular prism gravity results
+                           VV);    // VVg2 - upper triangular prism gravity results
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GravityStillReadingCorrection_GU Gravity Still Reading Correction on selected lines.
+//
+// Available                        8.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GravityStillReadingCorrection_GU(DB,        // Database
+                                                  DB_SYMB,   // Input gravity channel handle [DB_LOCK_READONLY]
+                                                  DB_SYMB,   // Input date channel handle [DB_LOCK_READONLY]
+                                                  DB_SYMB,   // Input time channel handle [DB_LOCK_READONLY]
+                                                  string,    // Still readings file
+                                                  DB_SYMB);  // Output gravity channel handle [DB_LOCK_READWRITE]
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iEMLayer_GU Calculate the EM response of a layered earth model.
+//
+// Returns     0 of OK
+//             1 if some error
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int iEMLayer_GU(real,       // Coil spacing, error if == 0
+                            real,       // Coil frequency
+                            real,       // Coil height above layer [0]
+                            int,        // EMLAY_GEOMETRY
+                            int,        // Number of layers (including lower halfspace)
+                            VV,         // sNLayer-1 thicknesses  [0] to [sNLayer-2]
+                            VV,         // sNLayer conductivities [0] to [sNLayer-1]
+                            var real,   // On return - in-phase part (ppm)
+                            var real);  // On return - quadrature part (ppm)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iEMPlate_GU Calculate the conductance of a thin plate model.
+//
+// Returns     0 of OK
+//             1 if some error
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int iEMPlate_GU(real,   // Plate strike length (m)
+                            real,   // Plate dip length (m)
+                            real,   // Plate strike (degrees) from X axis
+                            real,   // Plate dip (degrees) from horizontal
+                            real,   // Plate plunge (degrees) from horizontal
+                            real,   // Rx offset in X from Tx
+                            real,   // Rx offset in Y from Tx
+                            real,   // Rx offset in Z from Tx (+'ve down)
+                            real,   // Depth below Tx
+                            int,    // EMPLATE_DOMAIN
+                            VV,     // The plate conductances (VV length <= 100)
+                            int,    // EMPLATE_TX
+                            real,   // Tx frequency (for EMPLATE_TIME)
+                            real,   // Tx time window spacing (for EMPLATE_TIME)
+                            real,   // The frequency/time parameters (SI units: f[Hz] or t[s])
+                            VV,     // On return - X in-phase part (ppm)
+                            VV,     // On return - Y in-phase part (ppm)
+                            VV,     // On return - Z in-phase part (ppm)
+                            VV,     // On return - X quadrature part (ppm)
+                            VV,     // On return - Y quadrature part (ppm)
+                            VV);    // On return - Z quadrature part (ppm)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// IGenUXDetectSymbolsGroupName_GU Generate a group name string for UX-Detect symbols
+//
+// Notes                           Start a new group for the symbols in the UX-Detect system.
+//                                 The Target GDB is often in the form "GDB_Targets", where
+//                                 "GDB" is the original data. Cut off the part including the
+//                                 underscore when creating the map, so you don't get map group
+//                                 Names like "SYMBOLS_UxData_Targets_Targets".
+//
+// See also                        IGenGroupName_STR
+//
+// Available                       6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void IGenUXDetectSymbolsGroupName_GU(string,       // Input Targets database name
+                                               string,       // Input Targets group (line) name
+                                               var string,   // Output group name string
+                                               int);         // Output buffer lengths (maximum 32)
+#define GenUXDetectSymbolsGroupName_GU(target_gdb, targets, ostr) IGenUXDetectSymbolsGroupName_GU(target_gdb, targets, ostr, sizeof(ostr))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ImportDAARC500Ethernet_GU Import Ethernet data from the RMS Instruments DAARC500.
+//
+// Notes                     Imports Ethernet data recorded
+//                           by the RMS Instruments DAARC500 instrument, and outputs the data
+//                           to a new binary file, returning the number of bytes per
+//                           block, to make it easier to import the data using the regular binary import.
+//
+// Available                 7.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ImportDAARC500Ethernet_GU(string,    // File to import
+                                         string,    // Output binary file
+                                         var int);  // Returned number of bytes per block
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ImportDAARC500Serial_GU Import Serial data from the RMS Instruments DAARC500.
+//
+// Notes                   Imports a single channel of the up to 8 serial data channels recorded
+//                         by the RMS Instruments DAARC500 instrument, and outputs the data for
+//                         that channel to a new binary file, returning the number of bytes per
+//                         block, to make it easier to import the data using the regular binary import.
+//
+// Available               7.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ImportDAARC500Serial_GU(string,    // File to import
+                                       int,       // Channel to import, 1-8
+                                       string,    // Output binary file
+                                       var int);  // Returned number of bytes per block
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ImportP190_GU Import navigation data in the P190 format.
+//
+// Notes         Imports the data, and, if projection information is included
+//               set the "X" and "Y" channel projection info. (Note: the last file
+//               imported always takes precedence).
+//               Different record types are imported to separate lines, but in the
+//               same order as in the file. Data in existing lines is overwritten.
+//               If the record type is specified, only records beginning with that
+//               letter are imported, otherwise all records (except for the header "H"
+//               records) are imported.
+//
+// Available     6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void ImportP190_GU(DB,       // Database handle
+                               string,   // P190 file name
+                               string,   // Single letter code, e.g. "C", "E", "S", "T" or "V", or blank for all records.
+                               WA);      // Log file
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LagDAARC500GPS_GU Lag the GPS fid values for the DAARC500 import.
+//
+// Notes             The fiducial times recorded for the GPS in the RMS Instrument DAARC500
+//                   are delayed, and associated with the "wrong" fid value. They should actually
+//                   be moved to the previous fid value in the mag data where the event flag is non-zero.
+//
+// Available         7.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LagDAARC500GPS_GU(VV,   // Mag fid values   (GS_DOUBLE)
+                                 VV,   // Mag event values (GS_LONG)
+                                 VV);  // GPS fid values (GS_DOUBLE, altered on return)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// MaxwellPlateCorners_GU Calculate the corner point locations for a Maxwell Plate.
+//
+// Notes                  This routine calculates the corner locations of plates defined in the Maxwell Plate
+//                        program, given the top-center location and plate geometry parameters.
+//
+// Available              6.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void MaxwellPlateCorners_GU(real,       // Top-center point, X
+                                        real,       // Top-center point, Y
+                                        real,       // Top-center point, Z
+                                        real,       // Dip
+                                        real,       // Dip-direction
+                                        real,       // Plunge
+                                        real,       // Length
+                                        real,       // Width (height)
+                                        var real,   // [returned] Corner 1 X
+                                        var real,   // [returned] Corner 1 Y
+                                        var real,   // [returned] Corner 1 Z
+                                        var real,   // [returned] Corner 2 X
+                                        var real,   // [returned] Corner 2 Y
+                                        var real,   // [returned] Corner 2 Z
+                                        var real,   // [returned] Corner 3 X
+                                        var real,   // [returned] Corner 3 Y
+                                        var real,   // [returned] Corner 3 Z
+                                        var real,   // [returned] Corner 4 X
+                                        var real,   // [returned] Corner 4 Y
+                                        var real);  // [returned] Corner 4 Z
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ScanDAARC500Ethernet_GU Scan Ethernet data from the RMS Instruments DAARC500.
+//
+// Notes                   Scans the file to see what data type is in the Ethernet file.
+//                         Currently only detects GR820 types.
+//
+// Available               7.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ScanDAARC500Ethernet_GU(string,    // File to import
+                                       var int,   // Recognized type
+                                       var int);  // Number of items
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ScanDAARC500Serial_GU Scan Serial data from the RMS Instruments DAARC500.
+//
+// Notes                 Scans the file to see which of the 8 serial channels were used to store data.
+//
+// Available             7.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ScanDAARC500Serial_GU(string,   // File to import
+                                     VV,       // 8 Recognized types - GS_LONG
+                                     VV);      // 8 Numbers of items - GS_LONG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// VVEuler_GU Get Euler solutions of depth from VVs and grids.
+//
+// Notes      All VVs must be REAL
+//            
+//            The output X and Y values are the same as the inputs,
+//            except if PEAKEULER_XY_FIT is selected. All other
+//            output values are set to dummy if:
+//            
+//                 a) The input X or Y is a dummy
+//                 b) The derived window size is a dummy.
+//                 c) The derived solution is outside the range
+//                 d) The solution is invalid (singular matrix)
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void VVEuler_GU(VV,     // Input X VV
+                            VV,     // Input Y VV
+                            IMG,    // Field grid
+                            IMG,    // dF/dX grid
+                            IMG,    // dF/dY grid
+                            IMG,    // dF/dZ grid
+                            VV,     // Output X VV
+                            VV,     // Output Y VV
+                            VV,     // Output depth VV
+                            VV,     // Output background field VV
+                            VV,     // Output depth uncertainty VV
+                            VV,     // Output XY uncertainty VV
+                            int,    // Window size
+                            real,   // Structure index
+                            real,   // Weighting factor
+                            int);   // PEAKEULER_XY
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// VVEuler2_GU Get Euler solutions of depth from VVs and grids (method 2).
+//
+// Notes       All VVs must be REAL
+//
+// See also    VVEuler_GU
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void VVEuler2_GU(VV,     // Input X VV
+                             VV,     // Input Y VV
+                             IMG,    // Field grid
+                             IMG,    // dF/dX grid
+                             IMG,    // dF/dY grid
+                             IMG,    // dF/dZ grid
+                             VV,     // Output X VV
+                             VV,     // Output Y VV
+                             VV,     // Output depth VV
+                             VV,     // Output background field VV
+                             VV,     // Output depth uncertainty VV
+                             VV,     // Output XY uncertainty VV
+                             VV,     // Window size (diameters of targets)
+                             real,   // Structure index
+                             real,   // Weighting factor
+                             int);   // PEAKEULER_XY
+
+
+
+
+
+//*** endblock Generated
+
+#endif

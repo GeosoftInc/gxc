@@ -1,0 +1,421 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HARCMAP_GXH_DEFINED
+#define HARCMAP_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class ARCMAP
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// This library is not a class. It contains various utilities
+// used in maps and layers by the Geosoft extensions for ArcGIS.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define ARCMAP_LOAD_FLAGS
+//
+// Flags that can be combined and passed to iLoadMap_ARCMAP
+//
+// ARCMAP_LOAD_DELFRAME
+// If an existing frame is found delete it
+//
+// ARCMAP_LOAD_DELLAYER
+// If an existing layer is found delete it
+//
+// ARCMAP_LOAD_EXISTFRAME
+// If an existing frame is found add new layers to it
+//
+// ARCMAP_LOAD_COPYLAYER
+// If an existing layer is found make a copy
+//
+// ARCMAP_LOAD_HIDESIBLINGS
+// Hide all other existing layers in frame
+//
+// ARCMAP_LOAD_PREFIXMAPFRAME
+// Prefix the map filename part as part of the frame name
+//
+// ARCMAP_LOAD_PREFIXMAPLAYER
+// Prefix the map filename part as part of the layer name
+//
+// ARCMAP_LOAD_MERGETOSINGLEVIEW
+// Will render all views in single layer with the data view defining the coordinate system
+//
+// ARCMAP_LOAD_INTOCURRENTFRAME
+// Load everything into the current data frame
+//
+// ARCMAP_LOAD_NOMAPLAYERS
+// Use the map only for sizing data frames in layout, only load extra datasets.
+//
+// ARCMAP_LOAD_ACTIVATE
+// Activates the main quickmap layer when done (e.g. 3D Viewer)
+//
+// ARCMAP_LOAD_NEW
+// New method for loading maps introduced in 7.1. Will mimic what happens in montaj (i.e. base groups and 3D become graphics and views gets split into separate LYRs).
+//
+// ARCMAP_LOAD_NAMETAGISPREFIX
+// Use a provided name tag as prefix when naming a newly created map layer.
+//
+//===========================================================================================================
+
+#define ARCMAP_LOAD_DELFRAME 1
+#define ARCMAP_LOAD_DELLAYER 2
+#define ARCMAP_LOAD_EXISTFRAME 4
+#define ARCMAP_LOAD_COPYLAYER 8
+#define ARCMAP_LOAD_HIDESIBLINGS 16
+#define ARCMAP_LOAD_PREFIXMAPFRAME 32
+#define ARCMAP_LOAD_PREFIXMAPLAYER 64
+#define ARCMAP_LOAD_MERGETOSINGLEVIEW 128
+#define ARCMAP_LOAD_INTOCURRENTFRAME 256
+#define ARCMAP_LOAD_NOMAPLAYERS 512
+#define ARCMAP_LOAD_ACTIVATE 1024
+#define ARCMAP_LOAD_NEW 2048
+#define ARCMAP_LOAD_NAMETAGISPREFIX 4096
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ChangeSize_ARCMAP Changes the custom page size of the ArcGIS Map document.
+//
+// Available         8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ChangeSize_ARCMAP(real,   // X Size (mm)
+                                 real);  // Y Size (mm)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// DisplayIn3DView_ARCMAP Display a file in 3D view
+//
+// Available              8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void DisplayIn3DView_ARCMAP(string);  // File Name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ExportFeatureLayerByNameTo3DFile_ARCMAP Exports the shapes from a feature layer of the ArcMap document to a 3D File.
+//
+// Available                               8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void ExportFeatureLayerByNameTo3DFile_ARCMAP(string,   // MXD filename
+                                                         string,   // Dataframe name
+                                                         string,   // Layer name
+                                                         string);  // Output file name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ExportSelectedFeatureLayerTo3DFile_ARCMAP Exports the shapes from the currently selected feature layer (if any) in ArcMap to a 3D file (only on oriented frames i.e. sections).
+//
+// Available                                 8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void ExportSelectedFeatureLayerTo3DFile_ARCMAP(string);  // Output file name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetCurrentDocumentInfo_ARCMAP Get some info on the current MXD in ArcMap and selected layer (if any)
+//
+// Available                     8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetCurrentDocumentInfo_ARCMAP(var string,   // MXD filename
+                                             var string,   // Selected Layer name (If a layer is selected)
+                                             var string,   // Dataframe name containing selected layer (If a layer is selected)
+                                             int);         // Size of strings
+#define _GetCurrentDocumentInfo_ARCMAP(mxd, layer, map) GetCurrentDocumentInfo_ARCMAP(mxd, layer, map, sizeof(map))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetSelectedLayerInfo_ARCMAP Get the name info on the specified selected layer
+//
+// Available                   8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetSelectedLayerInfo_ARCMAP(int,          // Selected layer number
+                                           var string,   // Selected Layer name
+                                           var string,   // Dataframe name containing selected layer
+                                           int);         // Size of strings
+#define _GetSelectedLayerInfo_ARCMAP(layer_number, layer, map) GetSelectedLayerInfo_ARCMAP(layer_number, layer, map, sizeof(map))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetNumberOfSelectedLayers_ARCMAP Get the number of selected layers in the TOC
+//                                   
+//                                   Returns									 The number of layers selected.
+//
+// Available                         8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetNumberOfSelectedLayers_ARCMAP();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iLoadMAP_ARCMAP Loads a Geosoft map into the ArcMap document.
+//
+// Returns         0 - OK
+//                 1 - Error
+//                 -1 - Canceled
+//
+// Notes           The extra datasets CSV should contain the the following fields:
+//                 
+//                  ID          -  Unique identifier
+//                  DATASOURCE  -  Filename
+//                  TYPE        -  RASTER and SHAPE supported
+//                  MAPMATCH    -  Map to associate with (used for grouping logic)
+//                  VIEWMATCH   -  View to match with in associated map (used for grouping logic)
+//                  ZONEFILE    -  Used for type RASTER
+//
+// Available       8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iLoadMAP_ARCMAP(string,   // Map File Name
+                              string,   // Optional Extra Datasets CSV Filename (Rasters and shape files to display with layers)
+                              string,   // Optional frame/layer tag (suffix)
+                              int);     // Combination of ARCMAP_LOAD_FLAGS
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iLoadMAPEx_ARCMAP Loads a Geosoft map into the ArcMap document, specifying which View to use as Data view.
+//
+// Returns           0 - OK
+//                   1 - Error
+//                   -1 - Canceled
+//
+// Notes             The extra datasets CSV should contain the the following fields:
+//                   
+//                    ID          -  Unique identifier
+//                    DATASOURCE  -  Filename
+//                    TYPE        -  RASTER and SHAPE supported
+//                    MAPMATCH    -  Map to associate with (used for grouping logic)
+//                    VIEWMATCH   -  View to match with in associated map (used for grouping logic)
+//                    ZONEFILE    -  Used for type RASTER
+//
+// Available         8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iLoadMAPEx_ARCMAP(string,   // Map File Name
+                                string,   // View Name
+                                string,   // Optional Extra Datasets CSV Filename (Rasters and shape files to display with layers)
+                                string,   // Optional frame/layer tag (suffix)
+                                int);     // Combination of ARCMAP_LOAD_FLAGS
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iLoadShape_ARCMAP Load a shape file into ArcMap.
+//
+// Returns           0- OK, 1 - Error, -1 - Cancel
+//
+// Available         8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iLoadShape_ARCMAP(string,   // Shape file to load
+                                int);     // Delete existing layers?
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iLoadSPF_ARCMAP Load all the shape files generated by importing a SPF into ArcMap.
+//
+// Returns         0- OK, 1 - Error, -1 - Cancel
+//
+// Available       8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iLoadSPF_ARCMAP(string,   // List of shape files to load
+                              int);     // Number of shape files
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadLYR_ARCMAP Load a LYR file to the current data frame
+//
+// Available      8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadLYR_ARCMAP(string);  // File Name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadMap_ARCMAP Loads a Geosoft map into the current ArcMap document
+//
+// Notes          The extra datasets CSV should contain the the following fields:
+//                
+//                    ID          -  Unique identifier
+//                    DATASOURCE  -  Filename
+//                    TYPE        -  RASTER and SHAPE supported
+//                    MAPMATCH    -  Map to associate with (used for grouping logic)
+//                    VIEWMATCH   -  View to match with in associated map (used for grouping logic)
+//                    ZONEFILE    -  Used for type RASTER
+//
+// Available      8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadMap_ARCMAP(string,   // Map File Name
+                              string,   // View Name
+                              string,   // Optional Extra Datasets CSV Filename (Rasters and shape files to display with layers)
+                              string,   // Optional frame/layer tag (suffix)
+                              int,      // Fit to map size
+                              int,      // Activate view (3D)
+                              int);     // Layer name tag is prefix
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadMapView_ARCMAP Load a Geosoft Map as a layer into the current data frame
+//
+// Available          8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadMapView_ARCMAP(string,   // Map File Name
+                                  string,   // View Name
+                                  string,   // Layer Name
+                                  int);     // Pass TRUE to also render other views in map (Use second parameter view for location)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadRaster_ARCMAP Load a raster file to the current data frame
+//
+// Notes             Loads any file type recognized as "raster" formats by ARC GIS.
+//                   This includes geosoft GRD files.
+//
+// Available         8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadRaster_ARCMAP(string);  // File Name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadShape_ARCMAP Load a SHP file to the current data frame
+//
+// Notes            The input layer name is created using the (optional) prefix and suffix as follows:
+//                  
+//                  Prefix_NAME_Suffix
+//
+// Available        8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadShape_ARCMAP(string,   // File Name
+                                string,   // Layer Name Prefix: An underscore is added automatically
+                                string);  // Layer Name Suffix  An underscore is added automatically
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// MapViewToShape_ARCMAP Create SHP file(s) from a Geosoft Map view.
+//
+// Notes                 The output SHP file name(s) are made up as follows
+//                       (where NAME is the input SHP file name):
+//                       
+//                             NAME_pt.shp    (point objects)
+//                             NAME_ln.shp    (line or arc objects)
+//                             NAME_pg.shp    (polygon objects)
+//
+// Available             8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void MapViewToShape_ARCMAP(string,   // Map File Name
+                                     string,   // View Name
+                                     string,   // SHP File Name
+                                     LST);     // List to fill with shape files created
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// QuerySize_ARCMAP Query the page size in mm of the entire map page.
+//
+// Available        8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void QuerySize_ARCMAP(var real,   // X Size (mm)
+                                var real);  // Y Size (mm)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ShowLayerByNameIn3D_ARCMAP Shows a layer in ArcMap in a 3D view in an MXD
+//
+// Available                  8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void ShowLayerByNameIn3D_ARCMAP(string,   // MXD filename
+                                            string,   // Dataframe name
+                                            string);  // Layer name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ShowSelectedLayersIn3D_ARCMAP Shows the selected layers in ArcMap in a 3D view
+//
+// Available                     8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void ShowSelectedLayersIn3D_ARCMAP();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetIPJForPredefinedEsriGCS_ARCMAP Fills an IPJ with a predefined ESRI GCS
+//
+// Available                         8.0.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void GetIPJForPredefinedEsriGCS_ARCMAP(IPJ,   // IPJ to fill
+                                                   int);  // Predefined ESRI GCS Code
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetIPJForPredefinedEsriPCS_ARCMAP Fills an IPJ with a predefined ESRI PCS
+//
+// Available                         8.0.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void GetIPJForPredefinedEsriPCS_ARCMAP(IPJ,   // IPJ to fill
+                                                   int);  // Predefined ESRI PCS Code
+
+
+
+
+
+//*** endblock Generated
+
+#endif

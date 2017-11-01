@@ -1,0 +1,1041 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HIMG_GXH_DEFINED
+#define HIMG_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class IMG
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// The IMG class performs read and write operations on grid
+// file data. When efficient access along both rows and columns
+// is desired the PG class is recommended (see PG and PGU);
+// the IMG is first created, then the PG is obtained from
+// the IMG using GetPG_IMG.
+//
+//-----------------------------------------------------------------------------------------------------------
+// Notes
+//
+// The IMG methods use the XGD DATs to access grid files in different
+// formats.  The characteristics of a grid can be controlled using
+// decorations on a grid file name.  For example:
+// 
+// CreateNewFile_IMG(GS_DOUBLE,1,100,100,"mag.grd");
+// -> creates a new grid file "mag.grd" with all defaults.
+// 
+// CreateNewFile_IMG(GS_DOUBLE,1,100,100,"mag.grd(GRD;comp=none)");
+// -> creates a new grid file "mag.grd" with no compression.
+// 
+// CreateNewFile_IMG(GS_DOUBLE,1,100,100,"mag.grd(GRD;comp=size;type=short");
+// -> creates a new grid file "mag.grd" compressed for size, numbers
+// stored as 2-byte integers..
+// 
+// See DAT_XGD.DOC for information about file name decorations available
+// for all DAT types.
+// 
+// Different grid types support different features.  For example, not all
+// grid types support projection information.  Geosoft will always create
+// a *.gi file that is used to store all such information that we require
+// from a grid.  If the grid does support this information, both the grid
+// and the *.gi file will contain the information.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define IMG_NULL
+//
+// Image Null
+//
+//===========================================================================================================
+
+
+
+//===========================================================================================================
+//
+// Define IMG_FILE
+//
+// Image open modes
+//
+// IMG_FILE_READONLY
+// Reading only
+//
+// IMG_FILE_READWRITE
+// Reading and writting
+//
+// IMG_FILE_READORWRITE
+// Allows you to open read-only grids to change the
+// projection or location information.  If you can write
+// to the original grid (dat), the changed projection
+// or location information will be passed on to the grid,
+// otherwise changes will only occur in the .gi file.
+//
+//===========================================================================================================
+
+#define IMG_FILE_READONLY 0
+#define IMG_FILE_READWRITE 2
+#define IMG_FILE_READORWRITE 3
+
+
+//===========================================================================================================
+//
+// Define IMG_QUERY
+//
+// Information to Query
+//
+// IMG_QUERY_iWRITE
+// 
+//
+// IMG_QUERY_iPG
+// 
+//
+// IMG_QUERY_iWRITEPG
+// 
+//
+// IMG_QUERY_iIMGTYPE
+// The element type used to open the IMG.
+//
+// IMG_QUERY_iDATTYPE
+// DATTYPE is the native element type of the DAT.
+// Types are:   0 - byte
+// 1 - unsigned 16-bit short
+// 2 - 16-bit short
+// 3 - 32-bit long
+// 4 - 32-bit float
+// 5 - 64-bit double
+//
+// IMG_QUERY_iRENDER
+// Render modes are:    0 - interpolate
+// 1 - pixelate
+// 2 - color
+//
+// IMG_QUERY_iKX
+// 
+//
+// IMG_QUERY_iNX
+// 
+//
+// IMG_QUERY_iNY
+// 
+//
+// IMG_QUERY_iNV
+// 
+//
+// IMG_QUERY_iNE
+// 
+//
+// IMG_QUERY_rXO
+// 
+//
+// IMG_QUERY_rYO
+// 
+//
+// IMG_QUERY_rDX
+// 
+//
+// IMG_QUERY_rDY
+// 
+//
+// IMG_QUERY_rROT
+// 
+//
+// IMG_QUERY_rBASE
+// 
+//
+// IMG_QUERY_rMULT
+// 
+//
+// IMG_QUERY_rCOMPRESSION_RATIO
+// 
+//
+//===========================================================================================================
+
+#define IMG_QUERY_iWRITE 0
+#define IMG_QUERY_iPG 1
+#define IMG_QUERY_iWRITEPG 2
+#define IMG_QUERY_iIMGTYPE 3
+#define IMG_QUERY_iDATTYPE 4
+#define IMG_QUERY_iRENDER 5
+#define IMG_QUERY_iKX 6
+#define IMG_QUERY_iNX 7
+#define IMG_QUERY_iNY 8
+#define IMG_QUERY_iNV 9
+#define IMG_QUERY_iNE 10
+#define IMG_QUERY_rXO 11
+#define IMG_QUERY_rYO 12
+#define IMG_QUERY_rDX 13
+#define IMG_QUERY_rDY 14
+#define IMG_QUERY_rROT 15
+#define IMG_QUERY_rBASE 16
+#define IMG_QUERY_rMULT 17
+#define IMG_QUERY_rCOMPRESSION_RATIO 18
+
+
+//===========================================================================================================
+//
+// Define IMG_RELOCATE
+//
+// Relocation Style
+//
+// IMG_RELOCATE_FIT
+// Will fit the image to fill the specified area
+//
+// IMG_RELOCATE_ASPECT
+// Will maintain aspect ratio
+//
+//===========================================================================================================
+
+#define IMG_RELOCATE_FIT 0
+#define IMG_RELOCATE_ASPECT 1
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Average2_IMG Reduce the dimensions in a 2D pager by a factor of 2
+//
+// Notes        This method is useful for reducing the dimensions in a 2D pager by a factor of 2.
+//              The output pager retains the same origin, but the X and Y spacing is double that of the original. Essentially,
+//              the process removes all the even-indexed rows and columns, while leaving the locations of all the remaining
+//              data points in the "odd" rows and columns unchanged.
+//              
+//              The output values at the output data locations are created by performing an average of the original data point and
+//              its valid surrounding data points; what is essentially a 3x3 smoothing filter.
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Average2_IMG(string,   // Name of source Grid
+                            string);  // Name of output Grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Copy_IMG Copy IMGs.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Copy_IMG(IMG,   // Source IMG
+                        IMG);  // Target IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_IMG Creates an IMG not tied to a file at all
+//
+// Returns    IMG object
+//
+// Notes      Once destroyed all the data in this IMG is lost.
+//
+// Available  5.0.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] IMG Create_IMG(int,   // Data type GS_TYPES
+                         int,   // Grid orientation (KX): 1 (rows in X) -1 (rows in Y)
+                         int,   // Grid width
+                         int);  // Grid height
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateFile_IMG Creates an Image object tied to a grid file.
+//
+// Returns        IMG object
+//
+// Notes          When the GS_DOUBLE data type is chosen the actual on-disk
+//                type of the input image will be used instead of GS_DOUBLE
+//                if the on-disk values represent color data as opposed
+//                to real numbers.
+//
+// Available      5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] IMG CreateFile_IMG(int,      // Data type, GS_TYPES or GS_TYPE_DEFAULT to use native DAT type.
+                             string,   // Name of the Grid to link to
+                             int);     // Grid file open mode IMG_FILE
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateMem_IMG Creates an IMG object that is backed only by memory.
+//
+// Returns       IMG object
+//
+// Notes         Once destroyed all the data is lost. This is temporary.
+//
+// Available     5.0.6
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] IMG CreateMem_IMG(int,   // Data type, GS_TYPES
+                            int,   // Grid orientation (KX): 1 (rows in X) -1 (rows in Y)
+                            int,   // Grid width
+                            int);  // Grid height
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateNewFile_IMG Creates an output image file using User defined info.
+//
+// Returns           IMG object
+//
+// Notes             Special Note for developers who use this function and
+//                   related functions to output ERMapper image (ERS, ECW) files:
+//                   
+//                   This function internally called ERMapper plugin to create ERS header
+//                   files. To find the location of ERMapper plugin library, a registry setting
+//                   needs to set. The key in the registry is HKEY_LOCAL_MACHINE\SOFTWARE\"MyProgram(libversion7.0)"
+//                   and in that key register a string BASE_PATH = D:\Oasismontaj\plugins\er_mapper.
+//                   MyProgram is the name of your application and D:\Oasismontaj\plugins\er_mapper
+//                   is the location of ERMapper library.
+//                   
+//                   It is recommended that this registry key is set during the installation
+//                   of your application.
+//
+// Available         5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] IMG CreateNewFile_IMG(int,      // Data type, GS_TYPES Cannot be GS_TYPE_DEFAULT
+                                int,      // Grid orientation (KX): 1 (rows in X) -1 (rows in Y)
+                                int,      // Grid width
+                                int,      // Grid height
+                                string);  // Name of the Grid to link to
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateOutFile_IMG Creates an output image file using input image info.
+//
+// Returns           IMG object
+//
+// Notes             When the GS_DOUBLE data type is chosen the actual on-disk
+//                   type of the input image will be used instead of GS_DOUBLE
+//                   if the on-disk values represent color data as opposed
+//                   to real numbers.
+//
+// Available         5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] IMG CreateOutFile_IMG(int,      // Data type, GS_TYPES or GS_TYPE_DEFAULT
+                                string,   // Name of the Grid to link to
+                                IMG);     // Input Image for new image creation
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateProjected_IMG Applies a projection to an image.
+//
+// Notes               The IMG now appears to be in the projected coordinate
+//                     system space.
+//
+// Available           5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void CreateProjected_IMG(IMG,   // Input image to project
+                                   IPJ);  // Projection to apply
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateProjected2_IMG Applies a projection to an image, specify cell size.
+//
+// Notes                The IMG now appears to be in the projected coordinate
+//                      system space, with the specified cell size. If the cell
+//                      size is rDUMMY (GS_R8DM), one is automatically calculated,
+//                      as with CreateProjected_IMG.
+//
+// Available            5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void CreateProjected2_IMG(IMG,    // Input image to project
+                                    IPJ,    // Projection to apply
+                                    real);  // Cell size
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateProjected3_IMG Same as CreateProjected2_IMG, but set expansion of bounds.
+//
+// Notes                The IMG now appears to be in the projected coordinate
+//                      system space, with the specified cell size. If the cell
+//                      size is rDUMMY (GS_R8DM), one is automatically calculated,
+//                      as with CreateProjected_IMG.
+//                      The expansion percent expands the bounds of the projected grid
+//                      in order to allow for the curving of bounding edges. Normally,
+//                      edges are sampled in order to allow for curving, but this
+//                      parameter is set to 1.0 (for 1 percent) in the CreateProjected_IMG
+//                      and CreateProjected2_IMG wrappers, and will generally create a
+//                      white/dummy border around the new grid. This new method allows
+//                      you to specify the expansion, or turn it off (by setting it to 0).
+//                      If the value is set to rDUMMY, then expansion is left at 1.0,
+//                      the legacy behaviour.
+//
+// Available            6.3.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void CreateProjected3_IMG(IMG,    // Input image to project
+                                    IPJ,    // Projection to apply
+                                    real,   // Cell size
+                                    real);  // Expansion percent (>=0).
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_IMG This method destroys a table resource.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_IMG(IMG);  // Image Object to Destroy
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GethPG_IMG Get the actual pager of a grid.
+//
+// Returns    PG Object
+//
+// See also   GetPG_IMG to get just a copy of the grid's pager.
+//
+// Available  5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] PG GethPG_IMG(IMG);  // IMG object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetInfo_IMG Retrieves location information about this image.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetInfo_IMG(IMG,        // Image Object
+                           var real,   // X element separation
+                           var real,   // Y element separation
+                           var real,   // X location of first point
+                           var real,   // Y location of first point
+                           var real);  // Grid X axis rotation deg. CCW from reference X
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetIPJ_IMG Get the projection of a grid.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetIPJ_IMG(IMG,   // IMG object
+                          IPJ);  // Projection of the grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetMETA_IMG Get the metadata of a grid.
+//
+// Available   5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetMETA_IMG(IMG,    // IMG object
+                           META);  // Metadata of the grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetPG_IMG Get a copy of the pager of a grid.
+//
+// See also  GethPG_IMG to get the actual pager of the grid.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetPG_IMG(IMG,   // IMG object
+                         PG);   // PG object to hold pager of the grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetProjectedCellSize_IMG Returns default cell size from projected image.
+//
+// Notes                    Returns the cell size calculated by CreateProjected_PJIMG, or by
+//                          CreateProjected2_IMG when
+//                          GS_R8DM is entered as the optional cell size. No inheritance
+//                          is actually performed to the input IMG.
+//
+// Available                5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetProjectedCellSize_IMG(IMG,        // Input image to project
+                                        IPJ,        // Projection to apply
+                                        var real);  // Returned cell size
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetTR_IMG Get the trend information from a grid.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetTR_IMG(IMG,   // IMG object
+                         TR);   // Trend information from the grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iElementType_IMG Returns the element type.
+//
+// Returns          Element type
+//
+// Available        5.0.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iElementType_IMG(IMG,   // IMG object
+                               int);  // 0 for XGD, 1 for IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iEType_IMG Returns the element type.
+//
+// Returns    Element type
+//
+// Notes      Same as sElementType_IMG(img,1)
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iEType_IMG(IMG);  // Image Object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetDefITR_IMG Get default transform, if it exists
+//
+// Returns        0 - Okay
+//                1 - No default possible/available
+//
+// Available      5.0.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetDefITR_IMG(IMG,   // Image
+                             ITR);  // Transform
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iIsColour_IMG Is this a Geosoft color grid?
+//
+// Available     6.0.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iIsColour_IMG(IMG);  // IMG to query on
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iIsValidIMGFile_IMG Is this a valid IMG file?
+//
+// Available           8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iIsValidIMGFile_IMG(string);  // File to check
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iIsValidIMGFileEx_IMG Is this a valid IMG file? Returns error message if it cannot be opened for any reason.
+//
+// Available             8.0.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iIsValidIMGFileEx_IMG(string,       // File to check
+                                    var string,   // Error message registered if unable to open
+                                    int);         // Error message Buffer Size
+#define isValidIMGFileEx_IMG(file, err_msg) iIsValidIMGFileEx_IMG(file, err_msg, sizeof(err_msg))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iNE_IMG Gets the # of elements in the optimal KX direction.
+//
+// Returns # of elements in the optimal KX direction
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iNE_IMG(IMG);  // Source IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Inherit_IMG Inherit a projection/new cell size on the IMG.
+//
+// Notes       If cell size is GS_R8DM, then "nice" values for the cell
+//             size of the new projected grid will be determined so that
+//             the new grid has about the same number of cells as the old.
+//             If the cell size is specified, the inheritance will always
+//             work, even if the input IPJ is identical to the original
+//             IPJ, and the cell boundaries will be forced to be aligned
+//             with the new cell size.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Inherit_IMG(IMG,    // Image
+                           IPJ,    // Projection
+                           real);  // Optional cell size
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// InheritIMG_IMG Make a grids match in size and coordinate system
+//
+// Available      5.1.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void InheritIMG_IMG(IMG,   // IMG to make match source IMG
+                              IMG);  // Source IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iNV_IMG Gets the # of vectors in the optimal KX direction.
+//
+// Returns # of vectors in the optimal KX direction
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iNV_IMG(IMG);  // Source IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iNX_IMG Gets the # of X elements.
+//
+// Returns # of X elements.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iNX_IMG(IMG);  // Source IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iNY_IMG Gets the # of Y elements.
+//
+// Returns # of Y elements.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iNY_IMG(IMG);  // Source IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iQuery_IMG Query information about the IMG
+//
+// Returns    Information requested, dummy if unknown or invalid.
+//
+// Notes      You can call either funtion to retrieve any data,
+//            int or real.
+//
+// Available  5.0.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iQuery_IMG(IMG,   // IMG object
+                         int);  // IMG_QUERY
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iQueryKX_IMG Asks the IMG for the most efficient way to access the data.
+//
+// Returns      -1 by columns, 1 by rows, 0 rows and columns are equally efficient.
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iQueryKX_IMG(IMG);  // Image Object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iSetDefITR_IMG Set default transform
+//
+// Returns        0 - Okay
+//                1 - No default possible/available
+//
+// Available      5.0.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iSetDefITR_IMG(IMG,   // Image
+                             ITR);  // Transform
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iUserPreferenceToPlotAsColourShadedGrid_IMG Returns the global setting.
+//
+// Returns                                     0 - User wishes to plot grids as regular (flat) grid
+//                                             1 - User wishes to plot grids as color-shaded grids
+//
+// Available                                   7.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iUserPreferenceToPlotAsColourShadedGrid_IMG();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadIMG_IMG Loads an IMG into a master IMG.
+//
+// Notes       The cell sizes and projections must be the same.
+//
+// Available   5.0.6
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadIMG_IMG(IMG,   // Master IMG
+                           IMG);  // IMG to load
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LoadIntoPager_IMG Load IMG data from file into a pager to increase
+//                   access time.
+//
+// Available         5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LoadIntoPager_IMG(IMG);  // IMG object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// OptKX_IMG Force optimal KX as desired.
+//
+// Notes     This will force loading an image into a PG if it is not already
+//           accessible in the direction requested.
+//           
+//           Subsequent calls to methods that use the optimal KX will use the
+//           KX set here.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void OptKX_IMG(IMG,   // Image Object
+                         int);  // KX -1 by column 1 by row
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReadV_IMG Read a vector in the optimal KX direction.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ReadV_IMG(IMG,   // IMG handle
+                         int,   // Vector to Read
+                         int,   // Begining element # to read (0 is the first)
+                         int,   // # elements to read (0 for whole vector)
+                         VV);   // VV handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReadX_IMG Read a column (constant X)
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ReadX_IMG(IMG,   // IMG handle
+                         int,   // X column
+                         int,   // Start Y to read
+                         int,   // # Y to read (0 for whole vector)
+                         VV);   //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReadY_IMG Read a row (constant Y)
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ReadY_IMG(IMG,   // IMG handle
+                         int,   // Y row
+                         int,   // Start X to read
+                         int,   // # X to read (0 for whole vector)
+                         VV);   //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// RefreshGI_IMG Refresh the GI of a grid after it has moved or changed.
+//
+// Available     7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void RefreshGI_IMG(string);  // Grid name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Relocate_IMG Re-locate a grid image.
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Relocate_IMG(IMG,    // Image to relocate
+                            real,   // Area X minimum
+                            real,   // Area Y minimum
+                            real,   // Area X maximum
+                            real,   // Area Y maximum
+                            int);   // IMG_RELOCATE
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Report_IMG Writes grid info report to a file
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Report_IMG(string,   // Grid name
+                          WA,       // Text file to write to
+                          int,      // Recalc statistics (0 - no; 1 - yes)
+                          int,      // Number of decimals to put in results
+                          string);  // Title for report
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReportCSV_IMG Writes grid info as a line to a CSV file
+//
+// Notes         Appends the stats as a CSV line to the input text file.
+//               The header line should only be written to a new text file.
+//
+// Available     6.4.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ReportCSV_IMG(string,   // Grid name
+                             WA,       // Text file to write to
+                             int,      // Recalc statistics (0 - no; 1 - yes)
+                             int,      // Number of decimals to put in results
+                             int);     // Write header line (0 - no; 1 - yes)?
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetZ_IMG Gets the grid value at a point
+//
+// Returns   Grid value
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetZ_IMG(IMG,    // Source IMG
+                         real,   // X location in the grid projection
+                         real);  // Y location in the grid projection
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rQuery_IMG Query information about the IMG
+//
+// Returns    Information requested, dummy if unknown or invalid.
+//
+// Notes      You can call either funtion to retrieve any data,
+//            int or real.
+//
+// Available  5.0.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rQuery_IMG(IMG,   // IMG object
+                          int);  // IMG_QUERY
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetGridUnchanged_IMG Mark the grid as unchanged so it will not output lineage
+//
+// Available            7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetGridUnchanged_IMG(IMG);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetInfo_IMG Sets location information about this image.
+//
+// Notes       Calls to this function should be made BEFORE calls to SetIPJ_IMG,
+//             as the latter function sets up the bounding rectangle in the metadata.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetInfo_IMG(IMG,    // Image Object
+                           real,   // X element separation
+                           real,   // Y element separation
+                           real,   // X location of first point
+                           real,   // Y location of first point
+                           real);  // Grid X axis rotation deg. CCW from reference X
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetIPJ_IMG Set the projection of a grid.
+//
+// Notes      Calls to this function should be made AFTER calls to SetInfo_IMG,
+//            as SetIPJ_IMG sets up the bounding rectangle in the metadata.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetIPJ_IMG(IMG,   // Source IMG
+                          IPJ);  // Projection
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetMETA_IMG Set the metadata of a grid.
+//
+// Available   5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetMETA_IMG(IMG,    // Source IMG
+                           META);  // Metadata to add to the grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetPG_IMG Copy a pager into the pager of a grid.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetPG_IMG(IMG,   // IMG object
+                         PG);   // Pager object to copy into the pager of the grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetTR_IMG Set the trend information to a grid.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetTR_IMG(IMG,   // IMG object
+                         TR);   // Trend information to set for the grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Sync_IMG Syncronize the Metadata for this Grid
+//
+// Available 7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Sync_IMG(string);  // Grid name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// WriteV_IMG Write a vector in the optimal KX direction.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void WriteV_IMG(IMG,   // IMG handle
+                          int,   // Vector to write
+                          int,   // Begining element to write (0 is the first)
+                          int,   // # elements to write (0 for whole vector)
+                          VV);   // VV handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// WriteX_IMG Write a column (constant X)
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void WriteX_IMG(IMG,   // IMG handle
+                          int,   // X column
+                          int,   // Start Y to write
+                          int,   // # Y to write (0 for whole vector)
+                          VV);   //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// WriteY_IMG Write a row (constant Y)
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void WriteY_IMG(IMG,   // IMG handle
+                          int,   // Y row
+                          int,   // Start X to write
+                          int,   // # X write (0 for whole vector)
+                          VV);   //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetRealParameter_IMG Store a real parameter in an IMG object
+//
+// Available            8.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetRealParameter_IMG(IMG,      // IMG handle
+                                    string,   // Parameter name (case insensitive)
+                                    real);    // Parameter value to store
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetRealParameter_IMG Store a real parameter in an IMG object
+//
+// Returns               Parameter value, rDUMMY if not found.
+//
+// Available             8.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetRealParameter_IMG(IMG,      // IMG handle
+                                     string);  // Parameter name (case insensitive)
+
+
+
+
+
+//*** endblock Generated
+
+#endif

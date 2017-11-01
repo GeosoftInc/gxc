@@ -1,0 +1,426 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HST_GXH_DEFINED
+#define HST_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class ST
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// Mono-variate statistics. The ST class is used to accumulate statistical
+// information about a set of data. This class is usually used in conjunction
+// with others. For instance, Stat_DU (see DU) will add a channel's
+// data to the ST object, and sComputeST_IMG (see IMG) will compute
+// statistics for a grid.
+//
+//-----------------------------------------------------------------------------------------------------------
+// Notes
+//
+// .. _histogram_ranges:
+// 
+// *** Histogram ranges and color zone ranges ***
+// 
+// Histogram bins are defined with inclusive minima and exclusive maxima;
+// for instance if Min = 0 and Inc = 1, then the second bin would include
+// all values z such that  0 >= z > 1 (the first bin has all values < 0).
+// 
+// Color zones used in displaying grids (ITR, ZON etc...) are the
+// opposite, with exclusive minima and inclusive maxima.
+// For instance, if a zone is defined from 0 to 1, then it would
+// contain all values of z such that 0 > z >= 1.
+// 
+// These definitions mean that it is impossible to perfectly assign
+// ITR colors to individual bars of a histogram. The best work-around
+// when the data values are integers is to define the color zones using
+// 0.5 values between the integers. A general work-around is to make the
+// number of histogram bins much larger than the number of color zones.
+// 
+// See also  ST2 (bi-variate statistics)
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define ST_INFO
+//
+// Information to retrieve
+//
+// ST_ITEMS
+// Number of non-dummy items
+//
+// ST_NPOS
+// Number of items greater than zero
+//
+// ST_NZERO
+// Number of items equal to zero
+//
+// ST_DUMMIES
+// 
+//
+// ST_MIN
+// 
+//
+// ST_MAX
+// 
+//
+// ST_RANGE
+// 
+//
+// ST_MEAN
+// 
+//
+// ST_MEDIAN
+// 
+//
+// ST_MODE
+// 
+//
+// ST_GEOMEAN
+// 
+//
+// ST_VARIANCE
+// 
+//
+// ST_STDDEV
+// 
+//
+// ST_STDERR
+// 
+//
+// ST_SKEW
+// 
+//
+// ST_KURTOSIS
+// 
+//
+// ST_BASE
+// 
+//
+// ST_SUM
+// Sums and sums of powers
+//
+// ST_SUM2
+// 
+//
+// ST_SUM3
+// 
+//
+// ST_SUM4
+// 
+//
+// ST_MINPOS
+// Smallest value greater than zero.
+//
+// ST_HIST_MAXCOUNT
+// 
+//
+//===========================================================================================================
+
+#define ST_ITEMS 0
+#define ST_NPOS 1
+#define ST_NZERO 22
+#define ST_DUMMIES 2
+#define ST_MIN 3
+#define ST_MAX 4
+#define ST_RANGE 5
+#define ST_MEAN 6
+#define ST_MEDIAN 7
+#define ST_MODE 8
+#define ST_GEOMEAN 9
+#define ST_VARIANCE 10
+#define ST_STDDEV 11
+#define ST_STDERR 12
+#define ST_SKEW 13
+#define ST_KURTOSIS 14
+#define ST_BASE 15
+#define ST_SUM 16
+#define ST_SUM2 17
+#define ST_SUM3 18
+#define ST_SUM4 19
+#define ST_MINPOS 21
+#define ST_HIST_MAXCOUNT 100
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_ST This method creates a statistics object which is used to
+//           accumulate statistics.
+//
+// Returns   ST Object
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] ST Create_ST();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateExact_ST This method creates a statistics object which stores
+//                all values.
+//
+// Returns        ST Object
+//
+// Available      5.1.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] ST CreateExact_ST();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Data_ST Add this value to the statistics object.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Data_ST(ST,     // ST Handle
+                         real);  // Value to Add
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// DataVV_ST Add all the values in this VV to the statistics object.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void DataVV_ST(ST,   // ST object
+                           VV);  // VV object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_ST Destroys the statistics object.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_ST(ST);  // ST Handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetHistogramBins_ST Retrieve number of items in each hostogram bin
+//
+// Notes               The length of the returned VV is set to the total
+//                     number of bins. If a histogram is not defined in
+//                     the ST, then the returned length is zero.
+//
+// Available           6.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetHistogramBins_ST(ST,   // ST Handle
+                                     VV);  // VV for numbers of items
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetHistogramInfo_ST Retrieve number of bins, min and max value in histogram
+//
+// Notes               The items correspond to those in Histogram2_ST.
+//                     If a histogram is not defined in
+//                     the ST, then the returned number of bins is zero, and
+//                     the min and max values will be dummies.
+//
+// Available           6.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetHistogramInfo_ST(ST,         // ST Handle
+                                     var int,    // # of bins
+                                     var real,   // Min (value at start of 2nd bin)
+                                     var real);  // Max (value at end of 2nd last bin)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Histogram_ST This method prepares ST for recording histogram.
+//
+// Notes        The Number of bins includes the one before the minimum
+//              and the one after the maximum, so it must be a value >2.
+//              
+//              IMPORTANT: This function gets the histogram minimum and
+//              maximum from the current min and max values stored in the ST,
+//              so this is equivalent to calling Histogram2_ST with
+//              
+//              #bins, Min, (Max-Min)/(# bins -2))
+//              
+//              You should already have the data loaded in order to call this
+//              function.
+//              
+//              See histogram_ranges_
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Histogram_ST(ST,    // ST Handle
+                              int);  // # of bins
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Histogram2_ST This method prepares ST for recording histogram.
+//
+// Notes         The Number of bins includes the one before the minimum
+//               and the one after the maximum, so it must be a value >2.
+//               The width of the individual bins will be (Min-Max)/(# - 2)
+//               
+//               See histogram_ranges_
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Histogram2_ST(ST,     // ST Handle
+                               int,    // # of bins
+                               real,   // Min
+                               real);  // Max
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rEquivalentPercentile_ST Return corresponding Percentile for a Value.
+//
+// Returns                  The percentile at the given value (0 - 100)
+//
+// Notes                    Statistics and histogram must have been calculated prior to
+//                          calling this method
+//
+// Available                5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rEquivalentPercentile_ST(ST,     //
+                                          real);  // Input value
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rEquivalentValue_ST Return corresponding Value for a Percentile
+//
+// Returns             The value at the given percentile.
+//
+// Notes               Statistics and histogram must have been calculated prior to
+//                     calling this method
+//
+// Available           5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rEquivalentValue_ST(ST,     //
+                                     real);  // Input percentile (0 - 100)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Reset_ST Resets the Statistics.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Reset_ST(ST);  // ST Handle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetInfo_ST This method allows you to retrieve (and compute) the
+//             information from the ST object.
+//
+// Returns     Data you asked for
+//             GS_R8DM for none
+//
+// Notes       The following can only be determined if the ST has recorded
+//             a histogram: ST_MEDIAN, ST_MODE
+//             
+//             ST_MINPOS can be used to retrieve the smallest value greater
+//             than zero, but not from ST objects recovered from serialized object.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rGetInfo_ST(ST,    // ST Handle
+                             int);  // ST_INFO
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetNormProb_ST Return percent value
+//
+// Returns         real
+//                 
+//                 
+//                 Notes			this function is based on Normal Cumulative distribution function
+//                 mit to about 5 standard deviations
+//
+// Available       7.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rGetNormProb_ST(real);  // Real
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetNormProbX_ST Return number of sigmas from 50% a given percent is
+//
+// Returns          real
+//                  
+//                  
+//                  Notes			this function is based on Normal Cumulative distribution function
+//                  mit to about 5 standard deviations
+//
+// Available        7.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rGetNormProbX_ST(real);  // Real
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rNormalTest_ST Test the "normality" of the histogram distribution
+//
+// Returns        The normality statistic.
+//                Terminates if no histogram in the ST object.
+//
+// Notes          This function compares the histogram to a normal curve with the
+//                same mean and standard deviation. The individual counts are normalized
+//                by the total counts, the bin width and the standard deviation.
+//                For each bin, the rms difference between the expected probability and
+//                the normalized count is summed, and the final result is normalized by
+//                the total number of bins. In this way histograms with different means,
+//                standard deviations, number of bins and counts can be compared.
+//                If the histogram were perfectly normal, then a value of 0 would be returned.
+//                The more "non-normal", the higher the statistic.
+//
+// Available      5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rNormalTest_ST(ST);  // ST Handle
+
+
+
+
+
+//*** endblock Generated
+
+#endif

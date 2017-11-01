@@ -1,0 +1,308 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HLAYOUT_GXH_DEFINED
+#define HLAYOUT_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class LAYOUT
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// Layout class for generic relative layout calculation
+// 
+// The relative layout algorithm allows a logical organization of layout rectangles.
+// You can set constraints with English-like semantics. For example:
+// 
+// "Set the left side of rectangle 1 equal to the right side of rectangle 2 plus 10 pixels."
+// "Set the bottom of rectangle 1 to 25 percent of the height of rectangle 2."
+// "Move node 1 such that its bottom is equal to the top of rectangle 2 minus 10 pixels."
+// 
+// The last constraint set would enjoy priority over any others as it would be
+// the last one that would influence the rectangle calculations. See the notes for iSetConstraint
+// for more details.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define LAYOUT_CONSTR
+//
+// Layout constraint specifiers
+//
+// LAYOUT_CONSTR_LEFT
+// Adjust rectangle's left side
+//
+// LAYOUT_CONSTR_RIGHT
+// Adjust rectangle's right side
+//
+// LAYOUT_CONSTR_TOP
+// Adjust rectangle's top side
+//
+// LAYOUT_CONSTR_BOTTOM
+// Adjust rectangle's bottom side
+//
+// LAYOUT_CONSTR_WIDTH
+// Adjust rectangle's width
+//
+// LAYOUT_CONSTR_HEIGHT
+// Adjust rectangle's height
+//
+// LAYOUT_CONSTR_HCENTER
+// Center rectangle with respect to width
+//
+// LAYOUT_CONSTR_VCENTER
+// Center rectangle with respect to height
+//
+// LAYOUT_CONSTR_MOVEL
+// Move rectangle, with respect to left
+//
+// LAYOUT_CONSTR_MOVER
+// Move rectangle, with respect to right
+//
+// LAYOUT_CONSTR_MOVET
+// Move rectangle, with respect to top
+//
+// LAYOUT_CONSTR_MOVEB
+// Move rectangle, with respect to bottom
+//
+//===========================================================================================================
+
+#define LAYOUT_CONSTR_LEFT 0
+#define LAYOUT_CONSTR_RIGHT 1
+#define LAYOUT_CONSTR_TOP 2
+#define LAYOUT_CONSTR_BOTTOM 3
+#define LAYOUT_CONSTR_WIDTH 4
+#define LAYOUT_CONSTR_HEIGHT 5
+#define LAYOUT_CONSTR_HCENTER 6
+#define LAYOUT_CONSTR_VCENTER 7
+#define LAYOUT_CONSTR_MOVEL 8
+#define LAYOUT_CONSTR_MOVER 9
+#define LAYOUT_CONSTR_MOVET 10
+#define LAYOUT_CONSTR_MOVEB 11
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CalculateRects_LAYOUT Calculate new positions based on initial conditions and constraints
+//
+// Notes                 Use iGetRectangle to obtain the results for the other rectangles. Depending
+//                       on the constraints set the parent rectangle may also change
+//                       after the calculation (returned here for convenience).
+//
+// Available             6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void CalculateRects_LAYOUT(LAYOUT,     // LAYOUT Object
+                                       var real,   // Parent Rectangle Min X after calculation
+                                       var real,   // Parent Rectangle Min Y after calculation
+                                       var real,   // Parent Rectangle Max X after calculation
+                                       var real);  // Parent Rectangle Max Y after calculation
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ClearAll_LAYOUT Remove all children and constraints from layout
+//
+// Available       6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void ClearAll_LAYOUT(LAYOUT);  // LAYOUT Object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ClearConstraints_LAYOUT Remove all constraints from layout
+//
+// Available               6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void ClearConstraints_LAYOUT(LAYOUT);  // LAYOUT Object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_LAYOUT Creates a layout calculation object
+//
+// Returns       LAYOUT object.
+//
+// Available     6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] LAYOUT Create_LAYOUT(int,      // Initial number of objects (may be 0)
+                                 string);  // Optional name of parent layout (may be empty)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_LAYOUT Destroys the layout calculation object
+//
+// Available      6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_LAYOUT(LAYOUT);  // LAYOUT object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetRectangle_LAYOUT Gets the current bounds for a rectangle or the parent layout
+//
+// Available           6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetRectangle_LAYOUT(LAYOUT,     // LAYOUT Object
+                                     int,        // Rectangle to get info for (-1 for parent)
+                                     var real,   // Rectangle Min X
+                                     var real,   // Rectangle Min Y
+                                     var real,   // Rectangle Max X
+                                     var real);  // Rectangle Max Y
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetRectName_LAYOUT Gets an optional name the current info for a rectangle or the parent layout
+//
+// Available          6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetRectName_LAYOUT(LAYOUT,       // LAYOUT Object
+                                    int,          // Rectangle to get info for (-1 for parent)
+                                    var string,   // Buffer for name of the rectangle
+                                    int);         // Size of the Buffer
+#define _GetRectName_LAYOUT(layout, rect, name) GetRectName_LAYOUT(layout, rect, name, sizeof(name))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iAddConstraint_LAYOUT Add a constraint between any two rectangles or to one with absolute positioning
+//
+// Returns               0 - OK
+//                       1 - Error
+//
+// Notes                 Constraints can be applied between 2 rectangles in the layout, or to 1 rectangle with
+//                       absolute positioning. Use the constraints to control left, right, bottom, top,
+//                       width, height, or centering configurations. Examples:
+//                       
+//                       (ordered as rectangle from, constraint from, rectangle to, constraint to, offset modifier, multiplicative modifier)
+//                       
+//                       A, LAYOUT_CONSTR_LEFT, B, LAYOUT_CONSTR_LEFT, 0, 0, 1.0 		               Set left position of A equal to left pos of B
+//                       A, LAYOUT_CONSTR_LEFT, B, LAYOUT_CONSTR_RIGHT, 0, 0, 1.0		               Set left pos of A equal to right of B
+//                       
+//                       The offset modifier is used for additive manipulation of constraints
+//                       A, LAYOUT_CONSTR_LEFT, B, LAYOUT_CONSTR_LEFT, 10, 0, 1.0		               Set left pos of A equal to left of B, plus 10
+//                       A, LAYOUT_CONSTR_BOTTOM, B, LAYOUT_CONSTR_TOP, -20, 0, 1.0	               Set bottom of A equal to top of B, minus 20
+//                       
+//                       Multiplicative manipulation of constraints
+//                       A, LAYOUT_CONSTR_WIDTH, B, LAYOUT_CONSTR_WIDTH, 0, 0.5	                  Set the width of A equal to 0.5 times the width of B
+//                       A, LAYOUT_CONSTR_HEIGHT, B, LAYOUT_CONSTR_WIDTH, 0, 1.2	                  Set the height of A equal to 1.2 times the width of B
+//                       
+//                       You can use BOTH the multiplicative and offset modifiers in conjunction (multiplicative gets precedence)
+//                       A, LAYOUT_CONSTR_WIDTH, B, LAYOUT_CONSTR_WIDTH, 10, 0.5 	                  A(width) = (0.5 * B(width)) + 10
+//                       A, LAYOUT_CONSTR_LEFT, B, LAYOUT_CONSTR_WIDTH, -20, 0.1	                  A(left) = (0.1 * B(width)) + (-20)
+//                       
+//                       If second node is -2, use absolute positioning
+//                       A,LAYOUT_CONSTR_LEFT,-2,<ignored>,25,<ignored>,<ignored> 	               Position left of A at position 25
+//                       A,LAYOUT_CONSTR_WIDTH,-2,<ignored>,30,<ignored>,<ignored>	               Set width of A to 30
+//                       
+//                       Use the MOVE constraints to move an entire window without resizing
+//                       A, LAYOUT_CONSTR_MOVEL, B, LAYOUT_CONSTR_LEFT, 0, 0, 1.0	                  Move node A, align left with left side of B
+//                       A, LAYOUT_CONSTR_MOVEL, B, LAYOUT_CONSTR_RIGHT, 0, 0, 1.0	               Move node A, align left with right side of B
+//                       A, LAYOUT_CONSTR_MOVET, B, LAYOUT_CONSTR_WIDTH, 0, 0, 1.0	               Move node A, align bottom to position equal to width of B
+//                       A, LAYOUT_CONSTR_MOVER, B, LAYOUT_CONSTR_RIGHT, 10, 1.1	                  Move node A, align right to 1.1*right of B, plus 10
+//                       A, LAYOUT_CONSTR_MOVEL, NULL, 10, 0, 1.0	                                 Move node A, align left at position 10
+//
+// Available             6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int iAddConstraint_LAYOUT(LAYOUT,   // LAYOUT Object
+                                      int,      // From rectangle (Or -1 for parent)
+                                      int,      // LAYOUT_CONSTR From constraint flag
+                                      int,      // To rectangle (Or -1 for parent Or -2 for absolute positioning)
+                                      int,      // LAYOUT_CONSTR To constraint flag
+                                      real,     // Offset modifier
+                                      real);    // Multiplicative modifier
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iAddRectangle_LAYOUT Adds a rectangle as one of the layout's children (Higer.
+//
+// Returns              Rectangle number, -1 on error
+//
+// Available            6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int iAddRectangle_LAYOUT(LAYOUT,   // LAYOUT Object
+                                     real,     // Rectangle Min X   (All 0's for undefined allowed)
+                                     real,     // Rectangle Min Y
+                                     real,     // Rectangle Max X
+                                     real);    // Rectangle Max Y
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iNumRectangles_LAYOUT Returns the number of children in the list.
+//
+// Returns               Number of rectangles not counting the parent
+//
+// Available             6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int iNumRectangles_LAYOUT(LAYOUT);  // LAYOUT Object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetRectangle_LAYOUT Sets the current bounds for a rectangle previously added to the layout
+//
+// Available           6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SetRectangle_LAYOUT(LAYOUT,   // LAYOUT Object
+                                     int,      // Rectangle to set info for (-1 for parent)
+                                     real,     // Rectangle Min X
+                                     real,     // Rectangle Min Y
+                                     real,     // Rectangle Max X
+                                     real);    // Rectangle Max Y
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetRectangleName_LAYOUT Sets an optional name the current info for a rectangle or the parent layout
+//
+// Available               6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SetRectangleName_LAYOUT(LAYOUT,   // LAYOUT Object
+                                         int,      // Rectangle to set info for (-1 for parent)
+                                         string);  // Name
+
+
+
+
+
+//*** endblock Generated
+
+#endif

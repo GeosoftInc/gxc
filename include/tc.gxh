@@ -1,0 +1,236 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HTC_GXH_DEFINED
+#define HTC_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class TC
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// The TC object is used in gravitational modelling to create
+// a terrain correction grid from a topography grid. This is
+// accomplished with a call first to Grregter_TC, which determines
+// the terrain correction from an input topography grid, then
+// to Grterain_TC, which calculates the actual corrections at
+// the input positions.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define TC_OPT
+//
+// Optimization
+//
+// TC_OPT_NONE
+// (slow)    no optimization
+//
+// TC_OPT_MAX
+// (faster)  desampling and using qspline (4x4 points) interpolation
+// on coarser averaged grid
+//
+//===========================================================================================================
+
+#define TC_OPT_NONE 0
+#define TC_OPT_MAX 1
+
+
+//===========================================================================================================
+//
+// Define TC_SURVEYTYPE
+//
+// Survey Type
+//
+// TC_SURVEYTYPE_GROUND
+// Ground
+//
+// TC_SURVEYTYPE_SHIPBORNE
+// Shipborne
+//
+// TC_SURVEYTYPE_AIRBORNE
+// Airborne
+//
+//===========================================================================================================
+
+#define TC_SURVEYTYPE_GROUND 0
+#define TC_SURVEYTYPE_SHIPBORNE 1
+#define TC_SURVEYTYPE_AIRBORNE 2
+
+
+//===========================================================================================================
+//
+// Define GG_ELEMENT
+//
+// GG element
+//
+// GG_ELEMENT_XX
+// Gxx
+//
+// GG_ELEMENT_YY
+// Gyy
+//
+// GG_ELEMENT_XY
+// Gxy
+//
+// GG_ELEMENT_XZ
+// Gxz
+//
+// GG_ELEMENT_YZ
+// Gyz
+//
+//===========================================================================================================
+
+#define GG_ELEMENT_XX 0
+#define GG_ELEMENT_YY 1
+#define GG_ELEMENT_XY 2
+#define GG_ELEMENT_XZ 3
+#define GG_ELEMENT_YZ 4
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_TC Creates a Terrain Correction object
+//
+// Returns   TC Object
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] TC Create_TC(IMG,    // Topo (DEM) grid
+                         real,   // Elevation unit in 1 metre (i.e. 0.3048 for feet)
+                         real,   // Inner distance (in topo grid projection units, default in metres)
+                         real,   // Outer distance (in topo grid projection units, default in metres)
+                         real,   // Terrain density in g/cc
+                         real,   // Water density in g/cc
+                         real,   // Water reference elevation (in elevation unit)
+                         int,    // 1 to calculate an edge correction (compensation), 0 otherwise
+                         real,   // Average elevation beyond max distance (in elevation unit)
+                         int);   // TC_OPT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateEx_TC Creates a Terrain Correction object	with surveytype
+//
+// Returns     TC Object
+//
+// Available   6.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] TC CreateEx_TC(IMG,    // Topo (DEM) grid
+                           real,   // Elevation unit in 1 metre (i.e. 0.3048 for feet)
+                           real,   // Inner distance (in topo grid projection units, default in metres)
+                           real,   // Outer distance (in topo grid projection units, default in metres)
+                           real,   // Terrain density in g/cc
+                           real,   // Water density in g/cc
+                           real,   // Water reference elevation (in elevation unit)
+                           int,    // 1 to calculate an edge correction (compensation), 0 otherwise
+                           real,   // Average elevation beyond max distance (in elevation unit)
+                           int,    // TC_OPT
+                           int);   // TC_SURVEYTYPE
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_TC This method destroys a table resource.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_TC(TC);  // TC Object to Destroy
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Grregter_TC Create a terrain correction grid for a topo grid.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void Grregter_TC(TC,    // TC handle
+                             IMG,   // Input IMG (local DEM topo grid used for station elevation)
+                             IMG);  // Image of output grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Grterain_TC Calculate terrain corrections.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void Grterain_TC(TC,     // TC handle
+                             VV,     // Input X channel data (in topo grid projection units, default in metres)
+                             VV,     // Input Y channel data (in topo grid projection units, default in metres)
+                             VV,     // Input Elevation channel data (in elevation unit)
+                             VV,     // Input slope channel data
+                             VV,     // Output Terrain Corrected channel data
+                             IMG,    // Image of input correction grid
+                             real);  // Terrain density (default 2.67)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Grterain2_TC Calculate terrain corrections (work for marine gravity too).
+//
+// Available    6.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void Grterain2_TC(TC,     // TC handle
+                              VV,     // Input X channel data (in topo grid projection units, default in metres)
+                              VV,     // Input Y channel data (in topo grid projection units, default in metres)
+                              VV,     // Input Elevation channel data (in elevation unit)
+                              VV,     // Input slope channel data
+                              VV,     // Input Water depth channel data (in metres)
+                              VV,     // Output Terrain Corrected channel data
+                              IMG,    // Image of input correction grid
+                              real);  // Terrain density (default 2.67)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GGterain_TC Calculate GG terrain corrections
+//
+// Available   6.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void GGterain_TC(TC,     // TC handle
+                             VV,     // Input X channel data (in topo grid projection units, default in metres)
+                             VV,     // Input Y channel data (in topo grid projection units, default in metres)
+                             VV,     // Input Elevation channel data (in elevation unit)
+                             VV,     // Output Terrain Corrected channel data
+                             real,   // Terrain density (default 2.67)
+                             real,   // Terrain reference level (default 0.0)
+                             int);   // GG_ELEMENT
+
+
+
+
+
+//*** endblock Generated
+
+#endif

@@ -1,0 +1,1566 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HVV_GXH_DEFINED
+#define HVV_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class VV
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// The VV class stores very long vector (array) data (such
+// as channel data from an OASIS database) in memory and
+// performs specific actions on the data. This set of
+// functions is similar to the VM functions except that
+// you cannot access data directly and therefore you cannot
+// use a VV to pass data to an external (non-Geosoft)
+// Dynamic Link Library (DLL) object function.
+// 
+// If you want to pass data to a DLL, you must move a subset
+// of the data stored in memory to a small vector object and
+// then use the GetPtrVM_GEO function to pass a pointer to the
+// data on to the external function.
+// 
+// See VVU for more utility methods.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+//===========================================================================================================
+//
+// Define VV_DOUBLE_CRC_BITS
+//
+// Number of bits to use in double CRC's
+//
+// VV_DOUBLE_CRC_BITS_EXACT
+// Exact CRC
+//
+// VV_DOUBLE_CRC_BITS_DEFAULT
+// Default inaccuracy in double (10 Bits)
+//
+// VV_DOUBLE_CRC_BITS_MAX
+// Maximum number of inaccuracy bits
+//
+//===========================================================================================================
+
+#define VV_DOUBLE_CRC_BITS_EXACT 0
+#define VV_DOUBLE_CRC_BITS_DEFAULT 10
+#define VV_DOUBLE_CRC_BITS_MAX 51
+
+
+//===========================================================================================================
+//
+// Define VV_FLOAT_CRC_BITS
+//
+// Number of bits to use in float CRC's
+//
+// VV_FLOAT_CRC_BITS_EXACT
+// Exact CRC
+//
+// VV_FLOAT_CRC_BITS_DEFAULT
+// Default inaccuracy in floats (7 Bits)
+//
+// VV_FLOAT_CRC_BITS_MAX
+// Maximum number of inaccuracy bits
+//
+//===========================================================================================================
+
+#define VV_FLOAT_CRC_BITS_EXACT 0
+#define VV_FLOAT_CRC_BITS_DEFAULT 7
+#define VV_FLOAT_CRC_BITS_MAX 22
+
+
+//===========================================================================================================
+//
+// Define VV_LOG_BASE
+//
+// Type of log to use
+//
+// VV_LOG_BASE_10
+// Base 10
+//
+// VV_LOG_BASE_E
+// Base e
+//
+//===========================================================================================================
+
+#define VV_LOG_BASE_10 0
+#define VV_LOG_BASE_E 1
+
+
+//===========================================================================================================
+//
+// Define VV_LOG_NEGATIVE
+//
+// Ways to handle negatives
+//
+// VV_LOG_NEGATIVE_NO
+// Dummies out value less than the minimum.
+//
+// VV_LOG_NEGATIVE_YES
+// if the data is in the range +/- minimum,
+// it is left alone.  Otherwise, the data
+// is divided by the minimum, the log is
+// applied, the minimum is added and the
+// sign is reapplied. Use _LogLinear_VV function
+// if decades in results are required.
+//
+//===========================================================================================================
+
+#define VV_LOG_NEGATIVE_NO 0
+#define VV_LOG_NEGATIVE_YES 1
+
+
+//===========================================================================================================
+//
+// Define VV_LOOKUP
+//
+// Lookup style
+//
+// VV_LOOKUP_EXACT
+// Only exact matches are used
+//
+// VV_LOOKUP_NEAREST
+// Nearest match is used (regardless of sampling range)
+//
+// VV_LOOKUP_INTERPOLATE
+// Interpolate between values (regardless of sampling range)
+//
+// VV_LOOKUP_NEARESTCLOSE
+// Use nearest match only if within sampling range
+//
+// VV_LOOKUP_INTERPCLOSE
+// Interpolate only if within sampling range
+//
+//===========================================================================================================
+
+#define VV_LOOKUP_EXACT 0
+#define VV_LOOKUP_NEAREST 1
+#define VV_LOOKUP_INTERPOLATE 2
+#define VV_LOOKUP_NEARESTCLOSE 3
+#define VV_LOOKUP_INTERPCLOSE 4
+
+
+//===========================================================================================================
+//
+// Define VV_MASK
+//
+// Where to mask
+//
+// VV_MASK_INSIDE
+// 
+//
+// VV_MASK_OUTSIDE
+// 
+//
+//===========================================================================================================
+
+#define VV_MASK_INSIDE 0
+#define VV_MASK_OUTSIDE 1
+
+
+//===========================================================================================================
+//
+// Define VV_ORDER
+//
+// Specify if the data is montonically increasing or decreasing.
+//
+// VV_ORDER_NONE
+// There is no specific data size ordering in the VV.
+//
+// VV_ORDER_INCREASING
+// Every value is greater than or equal to the previous value.
+//
+// VV_ORDER_DECREASING
+// Every value is less than or equal to the previous value.
+//
+//===========================================================================================================
+
+#define VV_ORDER_NONE 0
+#define VV_ORDER_INCREASING 1
+#define VV_ORDER_DECREASING 2
+
+
+//===========================================================================================================
+//
+// Define VV_SORT
+//
+// Sort order
+//
+// VV_SORT_ASCENDING
+// 
+//
+// VV_SORT_DESCENDING
+// 
+//
+//===========================================================================================================
+
+#define VV_SORT_ASCENDING 0
+#define VV_SORT_DESCENDING 1
+
+
+//===========================================================================================================
+//
+// Define VV_WINDOW
+//
+// How to handle VV limits
+//
+// VV_WINDOW_DUMMY
+// Dummy values outside the limits
+//
+// VV_WINDOW_LIMIT
+// Set values outside the limits to the limits
+//
+//===========================================================================================================
+
+#define VV_WINDOW_DUMMY 0
+#define VV_WINDOW_LIMIT 1
+
+
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _Copy_VV Copy one VV to another.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void _Copy_VV(VV,   // Destination
+                        VV);  // Source
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _Copy2_VV Copy part of a vector into part of another vector.
+//
+// Notes     1. Unlike Copy_VV destination VV is not reallocated, nor is
+//           the length changed. The caller must make any desired changes.
+//           
+//           2. All VV types are supported and will be converted using
+//           Convert_GS if necessary.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void _Copy2_VV(VV,    // Destination VV
+                         int,   // Destination start element
+                         VV,    // Source VV (can be the same as Destination)
+                         int,   // Source start element
+                         int);  // Number of points
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _Log_VV Apply log to the vv.
+//
+// Notes   Minimum value will be defaulted to 1.0 if it is 0.0 or
+//         less than 0.0
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void _Log_VV(VV,     // VV handle
+                       int,    // VV_LOG_BASE
+                       int,    // VV_LOG_NEGATIVE
+                       real);  // Minimum value for VV_LOG_NEGATIVE
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _LogLinear_VV Take the log10 or original value of a VV.
+//
+// Notes         If the data is in the range +/- minimum value,
+//               it is left alone. Otherwise, the result is calculated as
+//               
+//               ::
+//               
+//                    d = dMin * (log10(fabs(d)/dMin)+1.0)
+//               
+//               Sign is reapplied to d.
+//               
+//               Minimum value will be defaulted to 1.0 if it is negative
+//               or 0.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void _LogLinear_VV(VV,     // VV handle
+                             real);  // Minimum value
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _Mask_VV Mask one VV against another.
+//
+// Notes    All elements in the mask VV that are dummies will replace
+//          the value in the original VV with a dummy.
+//          
+//          The modified VV will always be the same length as the mask
+//          VV after this call.  If the mask is longer than the target,
+//          the target will be lengthenned with dummies.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void _Mask_VV(VV,   // Data VV to be masked
+                          VV);  // Mask VV
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _Reverse_VV Reverses the order of the data in a VV.
+//
+// Available   5.1.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void _Reverse_VV(VV);  // Data VV
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _Serial_VV Serialize
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void _Serial_VV(VV,   //
+                          BF);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// _Trans_VV Translate (VV + base ) * mult
+//
+// Notes     All VV types now supported.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void _Trans_VV(VV,     // VV handle
+                         real,   // Base value
+                         real);  // Mult value
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Abs_VV Take the absolute value of values in a VV.
+//
+// Available 7.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Abs_VV(VV);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Add_VV Add two VVs: VV_A + VV_B = VV_C
+//
+// Available 5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Add_VV(VV,   // VV A
+                      VV,   // VV B
+                      VV);  // VV C (returned), C = A + B
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Add2_VV Add two VVs with linear factors: VV_A*f1 + VV_B*f2 = VV_C
+//
+// Notes   The multipliers must be defined and within the GS_R8MN GS_R8MX range.
+//
+// Available 5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Add2_VV(VV,     // VV A
+                       real,   // Multiplier f1 for A
+                       VV,     // VV B
+                       real,   // Multiplier f2 for B
+                       VV);    // VV C (returned), C = A*f1 + B*f2
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Append_VV Appends VV's
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Append_VV(VV,   //
+                         VV);  // VV to append
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CopyVMtoVV_VV Copy VM data to a VV.
+//
+// Notes         The VV will be resized to the length of the VM.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void CopyVMtoVV_VV(VV,   // Destination VV, will be resized to length of the VM
+                             VM);  // Source VM
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CopyVVtoVM_VV Copy VV data to a VM.
+//
+// Notes         The VM will be resized to the length of the VV.
+//               The pointer to data in the VM may move.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void CopyVVtoVM_VV(VM,   // Destination VM, will be resized to length of the VV
+                             VV);  // Source VV
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CRC_VV Compute the CRC value of a VV.
+//
+// Returns CRC Value
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] CRC CRC_VV(VV,    //
+                     CRC);  // Previous CRC CRC_INIT_VALUE
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CRCInexact_VV Compute the CRC value of a VV and allows you to specify
+//               number of bits of floats/doubles to drop so that the CRC
+//               will be same even of this are changed.
+//
+// Returns       CRC Value
+//
+// Notes         Very useful for testing where the last bits of accuracy
+//               are not as important.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] CRC CRCInexact_VV(VV,    //
+                            CRC,   // Previous CRC CRC_INIT_VALUE
+                            int,   // VV_FLOAT_CRC_BITS
+                            int);  // VV_DOUBLE_CRC_BITS
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_VV Create a VV.
+//
+// Returns   VV Object
+//
+// Notes     To set the fiducial start and increment for the data in the VV
+//           you need to call SetFidStart_VV and SetFidIncr_VV.
+//           
+//           If you are basing the VV data on fiducial information from a
+//           different VV, call GetFidStart_VV and GetFidIncr_VV to obtain
+//           that VV's fiducial information. Do this prior to setting the
+//           new VV's fiducial start and increment.
+//           
+//           If you do not know the required length for a VV, use 0
+//           and the VV length will be adjusted as needed.  This is
+//           a bit less efficient than setting the length when you
+//           know it.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VV Create_VV(int,   // GEO_VAR
+                       int);  // Maximum number of elements in the VV, >= 0
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateExt_VV Create a VV, using one of the GS_TYPES special data types.
+//
+// Returns      VV Object
+//
+// Notes        See Create_VV
+//              
+//              Do not use data type flags: GS_INT or GS_REAL,
+//              this will result in a respective data type of unsigned byte or
+//              short for the VV.
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VV CreateExt_VV(int,   // GS_TYPES
+                          int);  // Maximum number of elements in the VV, >= 0
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateS_VV Create a VV  from serialized source.
+//
+// Returns    VV Object
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] VV CreateS_VV(BF);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_VV Destroy a VV.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_VV(VV);  // VV to destroy.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Diff_VV Calculate differences.
+//
+// Notes   Differences with dummies result in dummies.
+//         An even number of differences locates data accurately.
+//         An odd number of differences locates result 1/2 element lower
+//         in the VV.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Diff_VV(VV,    // VV to be processed
+                         int);  // Number of differences
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Divide_VV Divide one VV by another: VV_A / VV_B = VV_C
+//
+// Available 5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Divide_VV(VV,   // VV A
+                         VV,   // VV B
+                         VV);  // VV C (returned), C = A / B
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// FidNorm_VV Re-sample a pair of VV's to match each other.
+//
+// Notes      Both VV's will return with the same start
+//            fid and fid increment.  The smaller start fid
+//            and fid increment will be used.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void FidNorm_VV(VV,   // VV to resample
+                            VV);  // VV to resample
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// FillInt_VV Fill a VV with an int value.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void FillInt_VV(VV,    // Data VV
+                          int);  // Value to fill with
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// FillReal_VV Fill a VV with a real value.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void FillReal_VV(VV,     // Data VV
+                           real);  // Value to fill with
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// FillString_VV Fill a VV with a string value.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void FillString_VV(VV,       // Data VV
+                             string);  // String
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetVM_VV Get VV data and place it in a VM. (OBSOLETE)
+//
+// Notes    See CopyVVtoVM_VV, which is a prefered method to move VV data
+//          into a VM.  This method is mainly provided for old compatibility.
+//          
+//          The VM will be lengthened if required.
+//          
+//          If the VM is longer than required, extra data past the end
+//          of the VV will be set to dummy in the VM.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetVM_VV(VV,    // VV from which to read data
+                        VM,    // VM in which to place the data
+                        int);  // Start VV location of data to get, 0 is first.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iCountDummies_VV Count the number of dummies in a VV
+//
+// Returns          The count
+//
+// Available        6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iCountDummies_VV(VV,    // VV to search
+                               int,   // Starting point in VV (0 for all)
+                               int);  // Number of elements to process (-1 for all)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iFindDum_VV Finds the first dummy or non-dummy value in a VV
+//
+// Returns     The index of the first dummy or non-dummy value.
+//             -1 if not found, 0 if the length of the VV is 0.
+//
+// Notes       If a decreasing order search is performed, it will start
+//             at the highest element specified. (Conversely, an increasing
+//             order starts at the lowest element specified.)
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iFindDum_VV(VV,    // VV to search
+                          int,   // Lowest element in VV element to search
+                          int,   // Highest element in VV to search
+                          int,   // 0 = find first dummy / 1 = find first non-dummy
+                          int);  // 0 = use increasing order / 1 = use decreasing order
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetFidExpansion_VV Gets the Fiducial expansion from a VV
+//
+// Returns             Number of expanions for this VV (see ReFidVV_VV)
+//
+// Available           6.4
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetFidExpansion_VV(VV);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetInt_VV Get an integer element from a VV.
+//
+// Returns    Element wanted, or iDUMMY
+//            if the value is dummy or outside of the range of data.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetInt_VV(VV,    //
+                         int);  // Element wanted
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// IGetString_VV Get a string element from a VV.
+//
+// Notes         Returns Element wanted, or blank string
+//               if the value is dummy or outside of the range of data.
+//               
+//               Type conversions are performed if necessary.  Dummy values
+//               are converted to "*" string.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void IGetString_VV(VV,           //
+                             int,          // Element wanted
+                             var string,   // String in which to place element
+                             int);         // Maximum length of the string
+#define GetString_VV(vv, element, str_val) IGetString_VV(vv, element, str_val, sizeof(str_val))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iIndexMax_VV Get the index where the maximum value occurs.
+//
+// Returns      Index of the maximum value, iDUMMY if no valid data.
+//
+// Notes        If more than one value has the same maximum value, the index of the
+//              first is returned.
+//
+// Available    6.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int iIndexMax_VV(VV,         // Points VV (must be one of the 4 supported types)
+                             var real);  // Maximum value (rDUMMY if all dummies or no data)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iLength_VV Returns current VV length.
+//
+// Returns    # of elements in the VV.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iLength_VV(VV);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// IndexInsert_VV Insert items into a VV using an index VV.
+//
+// Notes          The items in the input data VV are inserted into
+//                the output VV using the indices in the index VV.
+//                Values not referenced are not altered, so the output
+//                VV should be pre-initialized. The output VV length
+//                will NOT be changed, and index values referencing
+//                beyond the end of the output VV data will return an
+//                error.
+//                
+//                This function is useful when working with channel data that include
+//                dummies, but where the dummies must be removed before processing.
+//                Create and initialize an index (0, 1, 2...) VV, using the InitIndex_VV
+//                function, and when you remove
+//                the dummies, remove the corresponding index values as well.
+//                After processing, init a VV to dummies, then use IndexInsert_VV to
+//                put the processed values at the correct locations in the data VV
+//                before you write it back to the channel.
+//
+// Available      6.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void IndexInsert_VV(VV,   // Output Data VV (modified with inserted data)
+                              VV,   // Data items to insert (must be same type as output data VV)
+                              VV);  // Index VV (must be type INT)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// IndexOrder_VV Reorder a VV.
+//
+// Notes         Given an index VV (of type INT), this method reorders a
+//               VV. Please make sure that the index holds valid information.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void IndexOrder_VV(VV,   // Index VV of type INT
+                               VV);  // VV to order
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// InitIndex_VV Initialize an index VV to values 0, 1, 2, etc...
+//
+// Notes        Populates a VV with the values 0, 1, 2, 3, 4 etc., to be
+//              used for various indexing functions, such as IndexInsert_VV or
+//              IndexOrder_VV.
+//
+// Available    6.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void InitIndex_VV(VV,    // Index VV to initialize (type INT)
+                            int);  // Final length of VV (-1 to use current length).
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// InvLog_VV Inverse of the _Log_VV function.
+//
+// Notes     This is the inverse function for _Log_VV, with the same inputs.
+//           
+//           NEGATIVE_NO    - will not return values smaller than the input minimum
+//           NEGATIVE_YES   - if the data is in the range +/- minimum,
+//           it is left alone.  Otherwise, the sign is removed,
+//           the minimum is subtracted, the log of the minimum is added,
+//           and the exponential (base e or base 10) is taken of the
+//           sum. The sign is then reapplied.
+//           Minimum value will be defaulted to 1.0 if it is 0.0 or
+//           less than 0.0
+//
+// Available 7.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void InvLog_VV(VV,     // VV handle
+                         int,    // VV_LOG_BASE
+                         int,    // VV_LOG_NEGATIVE
+                         real);  // Minimum value for VV_LOG_NEGATIVE
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iOrder_VV Identifies the data size order of the elements.
+//
+// Returns   VV_ORDER
+//
+// Available 6.4
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int iOrder_VV(VV,        // VV to check order
+                          var int);  // Returned: Do any values repeat (0: No, 1: Yes)?
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LinesToXY_VV Convert a 2D Line segment VV into X and Y VVs.
+//
+// Notes        Some GX functions (such as GetVoronoiEdges_TIN) return
+//              a special VV where each element contains the start and end
+//              points of lines, (X_1, Y_1) and (X_2, Y_2).
+//              This GX dumps the individual X and Y values into individual
+//              X and Y VVs of type GS_DOUBLE (REAL). N lines produces 2*N
+//              X and Y values.
+//
+// Available    8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void LinesToXY_VV(VV,   // Input VV of GS_D2LINE type (create with type -32)
+                              VV,   // Output VV with X locations (GS_DOUBLE)
+                              VV);  // Output VV with Y locations (GS_DOUBLE)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LookupIndex_VV Lookup a VV from another VV using an index VV.
+//
+// Notes          This method assigns index values of 0.0, 1.0, 2.0 etc. to the individual
+//                values in the input Data VV, and uses linear interpolation to calculate the values of
+//                Result VV at the input indices contained in the Index VV.
+//                
+//                If the input Data VV is string type, then only values at the integral index values
+//                are returned.
+//                
+//                See also SetupIndex_VV for an example of how this can be implemented.
+//
+// Available      5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void LookupIndex_VV(VV,   // Input Data VV (numeric)
+                                VV,   // Index VV of REAL
+                                VV);  // Result VV (same type as Data VV)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// MakeMemBased_VV Make this VV use regular instead of virtual memory.
+//
+// Notes           This function should be called immediately aftter
+//                 Create_VV.
+//                 
+//                 Normal VVs are optimised to prevent thrashing, and to
+//                 efficiently support many extremely large VVs, although
+//                 there is a small performance penalty.
+//                 This function is intended for VV's that you know can be
+//                 handled by the operating system virtual memory manager,
+//                 and will be used heavily.  By using a memory based VV, you
+//                 can achieve some performance improvements provided your
+//                 application does not cause the memory manager to "thrash".
+//                 
+//                 External programs that use the GX API may prefer to use
+//                 memory-based VV's because you can get direct access to
+//                 the VV through the GetPtrVV_GEO function (see gx_extern.h).
+//
+// See also        GetPtrVV_GEO in gx_extern.h
+//
+// Available       5.1.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void MakeMemBased_VV(VV);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// MaskAND_VV Create mask from logical AND of two VVs.
+//
+// Notes      If both values are non-dummies, then result is 1, else dummy.
+//
+// Available  5.1.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void MaskAND_VV(VV,   // VV A
+                            VV,   // VV B
+                            VV);  // VV C (returned)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// MaskOR_VV Create mask from logical OR of two VVs.
+//
+// Notes     If either values is non-dummy, then result is 1, else dummy.
+//
+// Available 5.1.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void MaskOR_VV(VV,   // VV A
+                           VV,   // VV B
+                           VV);  // VV C (returned)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// MaskStr_VV Mask one VV against another using a string.
+//
+// Notes      All elements in the mask VV that are same as string will replace
+//            the original VV with a 1.
+//            
+//            The modified VV will always be expanded to the MaskVV size but
+//            not shortened after this call.  If the mask is longer than the target,
+//            the target will be lengthenned with dummies before applying the mask.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void MaskStr_VV(VV,       // VV to be masked
+                            VV,       // Mask VV
+                            string);  // String to compare
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Multiply_VV Multiply two VVs: VV_A * VV_B = VV_C
+//
+// Available   5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Multiply_VV(VV,   // VV A
+                           VV,   // VV B
+                           VV);  // VV C (returned), C = A * B
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Amplitude3D_VV Calculate the 3D length for XYZ component VVs
+//
+// Available      8.0.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Amplitude3D_VV(VV,   // Amplitude VV (returned)
+                              VV,   // X component VV
+                              VV,   // Y component VV
+                              VV);  // Z component VV
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// PolygonMask_VV Mask a VV using XY data and a polygon
+//
+// Notes          The VVs has to be the same length
+//
+// Available      5.1.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void PolygonMask_VV(VV,    // X VV
+                                VV,    // Y VV
+                                VV,    // VV to be masked
+                                PLY,   // Polygon Object
+                                int);  // VV_MASK
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Project_VV This method projects an X and Y VV.
+//
+// Notes      This function is equivalent to ConvertVV_PJ.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Project_VV(PJ,   //
+                            VV,   // X
+                            VV);  // Y
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Project3D_VV This method projects an X,Y,Z VV.
+//
+// Notes        This function is equivalent to ConvertVV3_PJ.
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Project3D_VV(PJ,   //
+                              VV,   // X
+                              VV,   // Y
+                              VV);  // Z
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// RangeDouble_VV Get the min. and max. values of a VV while ignoring dummies.
+//
+// Notes          Minimum and maximum become GS_R8DM if entire VV is dummy.
+//
+// Available      5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void RangeDouble_VV(VV,         //
+                              var real,   // Minimum value - returned
+                              var real);  // Maximum value - returned
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReFid_VV Re-sample a VV to a new fid start/icrement
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ReFid_VV(VV,     // VV to resample
+                        real,   // New fid start
+                        real,   // New fid increment
+                        int);   // New length
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReFidVV_VV Re-sample a VV to match another VV.
+//
+// Notes      This method will honor the VV FID Expansion and will expand/contract
+//            VV's based on this flag if it is used.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ReFidVV_VV(VV,   // VV to resample
+                          VV);  // VV model (fid increment and start)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReSample_VV Resamples a VV from one fid/incr to another fid/incr.
+//
+// Available   5.1.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ReSample_VV(VV,     // VV to resample
+                           real,   // Current start fid
+                           real,   // Current increment
+                           real,   // New fid start
+                           real,   // New fid increment
+                           int,    // New length
+                           int);   // Extrapolate Endpoints (0 - No, 1 - Yes)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetFidIncr_VV Gets the Fiducial increment from a VV
+//
+// Returns        Fiducial increment of the VV.
+//
+// Available      5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetFidIncr_VV(VV);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetFidStart_VV Gets the Fiducial start from a VV
+//
+// Returns         Fiducial start of the VV.
+//
+// Available       5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetFidStart_VV(VV);  //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetReal_VV Get a real element from a VV.
+//
+// Returns     Element wanted, or rDUMMY
+//             if the value is dummy or outside of the range of data.
+//
+// Notes       Type conversions are performed if necessary.  Dummy values
+//             are converted to "*" string.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetReal_VV(VV,    //
+                           int);  // Element wanted
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rSum_VV Calculate the sum of the values in a VV.
+//
+// Returns The sum of the elements.
+//
+// Notes   Dummy value is treated as Zero(0)
+//
+// Available 7.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rSum_VV(VV);  // VV to be processed
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rWeightedMean_VV Calculate the weighted average of the values.
+//
+// Returns          The weighted average of the values.
+//
+// Notes            Dummy values are ignored.
+//
+// Available        7.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rWeightedMean_VV(VV,   // VV to be processed
+                                  VV);  // VV of weights
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetFidExpansion_VV Sets the Fiducial expansion from a VV
+//
+// Available          6.4
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetFidExpansion_VV(VV,    //
+                                  int);  // Expansion setting (1 or greater)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetFidIncr_VV Sets the Fiducial increment of a VV
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetFidIncr_VV(VV,     // VV to set fiducial increment of
+                             real);  // New increment
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetFidStart_VV Sets the Fiducial start of a VV
+//
+// Available      5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetFidStart_VV(VV,     // VV to set fiducial start of
+                              real);  // New start
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetInt_VV Set an integer element in a VV.
+//
+// Notes     Element being set cannot be < 0.
+//           If the element is > current VV length, the VV length is
+//           increased.
+//           It is good practice to set the length ahead of time to the
+//           expected maximum value, as some VV processes rely on the
+//           current maximum length of the VV when you pass it in as an
+//           argument, and unexpected results may occur if the length is
+//           not what you expect it to be because of dynamic allocation at
+//           an earlier time.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetInt_VV(VV,    //
+                         int,   // Element to set
+                         int);  // Value to set
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetIntN_VV Set N integer elements in a VV.
+//
+// Notes      Element being set cannot be < 0.
+//            If the element is > current VV length, the VV length is
+//            increased.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetIntN_VV(VV,    //
+                          int,   // Start element (>= 0)
+                          int,   // # elements to set (-1 sets all elements to end)
+                          int);  // Value to set
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetLen_VV Set the length of a VV.
+//
+// Notes     If increasing the VV size, new elements are set to dummies.
+//           
+//           It is good practice to set the length ahead of time to the
+//           expected maximum value, as some VV processes rely on the
+//           current maximum length of the VV when you pass it in as an
+//           argument, and unexpected results may occur if the length is
+//           not what you expect it to be because of dynamic allocation at
+//           an earlier time.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetLen_VV(VV,    // VV to set length of
+                         int);  // New length (number of elements)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetReal_VV Set a real element in a VV.
+//
+// Notes      Element being set cannot be < 0.
+//            If the element is > current VV length, the VV length is
+//            increased.
+//            It is good practice to set the length ahead of time to the
+//            expected maximum value, as some VV processes rely on the
+//            current maximum length of the VV when you pass it in as an
+//            argument, and unexpected results may occur if the length is
+//            not what you expect it to be because of dynamic allocation at
+//            an earlier time.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetReal_VV(VV,     //
+                          int,    // Element to set
+                          real);  // Value to set
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetRealN_VV Set N real elements in a VV.
+//
+// Notes       Element being set cannot be < 0.
+//             If the element is > current VV length, the VV length is
+//             increased.
+//
+// Available   5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetRealN_VV(VV,     //
+                           int,    // Start element (>= 0)
+                           int,    // # elements to set (-1 sets all elements to end)
+                           real);  // Value to set
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetString_VV Set a string element in a VV.
+//
+// Notes        Element being set cannot be < 0.
+//              If the element is > current VV length, the VV length is
+//              increased.
+//              It is good practice to set the length ahead of time to the
+//              expected maximum value, as some VV processes rely on the
+//              current maximum length of the VV when you pass it in as an
+//              argument, and unexpected results may occur if the length is
+//              not what you expect it to be because of dynamic allocation at
+//              an earlier time.
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetString_VV(VV,       //
+                            int,      // Element to set
+                            string);  // String to set
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetStringN_VV Set N string elements in a VV.
+//
+// Notes         Element being set cannot be < 0.
+//               If the element is > current VV length, the VV length is
+//               increased.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetStringN_VV(VV,       //
+                             int,      // Start element (>= 0)
+                             int,      // # elements to set (-1 sets all elements to end)
+                             string);  // String to set
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetupIndex_VV Setup an index VV from VV1 to VV2.
+//
+// Notes         The input reference VV must be in ascending numerical order.
+//               If your reference data is NOT ordered, then use the SortIndex1_VV 
+//               function to create an order index, then sort both the reference and data VVs 
+//               using this index VV before you call SetupIndex_VV.
+//               
+//               Example: You have a reference data set taken at specific times, hVVt, hVVy
+//               and you want to calculate/estimate/interpolate the values hVVy2 at a second set
+//               of times hVVt2
+//               
+//               Step 1: Create an index, hVVi, type GS_DOUBLE, and call SetupIndex_VV.
+//               
+//               with: hVVt2, hVVi, VV_LOOKUP_XXX, rSpacing
+//               
+//               Internally, this assigns index values of 0.0, 1.0, 2.0 etc. to the individual
+//               values in hVVt, then, depending on the lookup method chosen, assigns
+//               fractional index values to the input values in hVVt2.
+//               
+//               Step 2: To determine what the lookup values hVVy2 should be at times hVVt2,
+//               call the LookupIndex_VV function for hVVy with hVVi, hVVy2
+//               
+//               Internally, this assigns index values of 0.0, 1.0, 2.0 etc. to the individual
+//               values in hVVy, and uses linear interpolation to calculate the values of
+//               hVVy2 at the input indices contained in hVVi.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SetupIndex_VV(VV,     // Original Data VV
+                               VV,     // Query VV (same type as Data VV)
+                               VV,     // VV index VV of type REAL
+                               int,    // VV_LOOKUP
+                               real);  // Spacing for some modes
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetVM_VV Set VV data from a VM. (OBSOLETE)
+//
+// Notes    See CopyVMtoVV_VV, which is a prefered method to move VM data
+//          into a VV.  This method is mainly provided for old compatibility.
+//          
+//          The VM will be lengthened if required to hold the entire VV.
+//          
+//          If the VM is longer than required, extra data past the end
+//          of the VV will be set to dummy.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetVM_VV(VV,    // VV in which to place data
+                        VM,    // VM from which to read the data
+                        int);  // Start VV location of data to set, 0 is first.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Sort_VV Sort a VV.
+//
+// Available 5.1.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Sort_VV(VV,    // Data VV
+                         int);  // VV_SORT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SortIndex_VV Sort index VV based on a data VV.
+//
+// Notes        Create an Index VV (of type GS_LONG) based on a data VV.
+//              This index vv can then be used by the IndexOrder method
+//              to order a group of VV's.
+//
+// Available    5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SortIndex_VV(VV,   // Data VV
+                              VV);  // Index VV of type INT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SortIndex1_VV Sort index VV based on 1 data VV - set orders.
+//
+// Notes         Create an Index VV (of type GS_LONG) based on a data VV.
+//               This index vv can then be used by the IndexOrder method
+//               to order a group of VV's. The individual VVs may be ordered
+//               in ascending or descending order.
+//               If the primary VV values of two indices are the same, then
+//               the secondary VV values are compared. If the secondary values
+//               are the same, the ternary values are compared, etc.
+//
+// Available     5.0.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SortIndex1_VV(VV,    // Primary Data VV
+                               VV,    // Index VV of type INT
+                               int);  // VV_SORT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SortIndex2_VV Sort index VV based on 2 data VVs - set orders.
+//
+// Notes         Create an Index VV (of type GS_LONG) based on a data VV.
+//               This index vv can then be used by the IndexOrder method
+//               to order a group of VV's. The individual VVs may be ordered
+//               in ascending or descending order.
+//               If the primary VV values of two indices are the same, then
+//               the secondary VV values are compared. If the secondary values
+//               are the same, the ternary values are compared, etc
+//
+// Available     5.0.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SortIndex2_VV(VV,    // Primary Data VV
+                               VV,    // Secondary Data VV
+                               VV,    // Index VV of type INT
+                               int,   // Primary Sort order VV_SORT
+                               int);  // Secondary Sort order VV_SORT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SortIndex3_VV Sort index VV based on 3 data VVs - set orders.
+//
+// Notes         Create an Index VV (of type GS_LONG) based on a data VV.
+//               This index vv can then be used by the IndexOrder method
+//               to order a group of VV's. The individual VVs may be ordered
+//               in ascending or descending order.
+//               If the primary VV values of two indices are the same, then
+//               the secondary VV values are compared. If the secondary values
+//               are the same, the third values are compared, etc
+//
+// Available     5.0.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SortIndex3_VV(VV,    // Primary Data VV
+                               VV,    // Secondary Data VV
+                               VV,    // Ternary Data VV
+                               VV,    // Index VV of type INT
+                               int,   // Primary Sort order VV_SORT
+                               int,   // Secondary sort order VV_SORT
+                               int);  // Third Sort order VV_SORT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SortIndex4_VV Sort index VV based on 4 data VVs - set orders.
+//
+// Notes         Create an Index VV (of type GS_LONG) based on a data VV.
+//               This index vv can then be used by the IndexOrder method
+//               to order a group of VV's. The individual VVs may be ordered
+//               in ascending or descending order.
+//               If the primary VV values of two indices are the same, then
+//               the secondary VV values are compared. If the secondary values
+//               are the same, the third values are compared, etc
+//
+// Available     5.0.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void SortIndex4_VV(VV,    // Primary Data VV
+                               VV,    // Secondary Data VV
+                               VV,    // Ternary Data VV
+                               VV,    // Quaternary Data VV
+                               VV,    // Index VV of type INT
+                               int,   // Primary Ssort order VV_SORT
+                               int,   // Secondary Sort order VV_SORT
+                               int,   // Third Sort order VV_SORT
+                               int);  // Fourth Sort order VV_SORT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Statistics_VV Add a VV to a ST.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Statistics_VV(ST,   // ST Handle
+                               VV);  // VV to add to ST
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Subtract_VV Subtract one VV from another: VV_A - VV_B = VV_C
+//
+// Available   5.0.8
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Subtract_VV(VV,   // VV A
+                           VV,   // VV B
+                           VV);  // VV C (returned), C = A - B
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Swap_VV Swaps the bytes of the SHORT, USHORT, LONG, FLOAT and DOUBLE vv's.
+//         Other vv's are not affected by this method. This is used
+//         primarily with changing the order of bytes for other machine
+//         created data.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Swap_VV(VV);  // VV object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Window_VV Limit the elements of a vv to a range.
+//
+// Available 5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Window_VV(VV,     // Data VV (numeric)
+                           real,   // Min Val
+                           real,   // Max Val
+                           int);   // VV_WINDOW
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// WriteXML_VV Write the VV data as an XML object with bytes and formating.
+//
+// Available   8.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void WriteXML_VV(VV,       // VV to save
+                             string,   // XML file to create
+                             int,      // Format
+                             int);     // Significant digits/decimals
+
+
+
+
+
+//*** endblock Generated
+
+#endif
