@@ -1,0 +1,197 @@
+//===========================================================================
+NAME          = "Export to Geosoft SGDF format File(s)"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP/Export"
+
+DESCRIPTION   = "
+   Export to Geosoft SGDF format file(s) from the current database.
+
+    IP.LINES : Line selections:
+               A : All lines
+               S : Selected lines
+               D : Displayed line
+    IP.SGDFTITLE : Title for SGDF files
+"
+// Revision History:
+// v5.1.7: Added test for missing phase channel.
+// v5.1.3: Using "Current" X, Y and Z channels - WinnowChanList2_IP.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPEXPSGDF.gr"
+#include "IPEXPSGDF.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+DB_SELECT   Select;           // current selection mode
+LST         List;
+
+int         i;                // Utility 
+
+string(STR_DB_SYMBOL) sCurLine, sChan, sChan2;
+string(STR_FILE) sFile;
+string(STR_DEFAULT_SHORT) sLines;
+string(STR_DEFAULT_LONG) sMsg;
+int iDone;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();
+   
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+
+   // --- Are we running interactively ? ---
+
+   iDone = 0;
+   while (iInteractive_SYS() && !iDone)
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPEXPSGDF");
+
+      // --- Create VA channel list ---
+
+      List = GetList_DGW(Diag,_IPEXPSGDF_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      WinnowChanList2_IP(List, Data);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_IPEXPSGDF_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      WinnowChanList2_IP(List, Data);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPEXPSGDF_0,DGW_FILEPATH,"IP","SGDFFILE");
+      SetInfoSYS_DGW(Diag,_IPEXPSGDF_1,DGW_LISTALIAS,"IP","LINES");
+      SetInfoSYS_DGW(Diag,_IPEXPSGDF_2,DGW_TEXT,"IP","IPCHAN");
+      SetInfoSYS_DGW(Diag,_IPEXPSGDF_3,DGW_TEXT,"IP","IPCHAN2");
+      
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPEXPSGDF_0,DGW_FILEPATH,"IP","SGDFFILE");
+      GetInfoSYS_DGW(Diag,_IPEXPSGDF_1,DGW_LISTALIAS,"IP","LINES");
+      GetInfoSYS_DGW(Diag,_IPEXPSGDF_2,DGW_TEXT,"IP","IPCHAN");
+      GetInfoSYS_DGW(Diag,_IPEXPSGDF_3,DGW_TEXT,"IP","IPCHAN2");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+      // --- Verify input ---
+
+      GetString_SYS("IP","IPCHAN",sChan);
+      GetString_SYS("IP","IPCHAN2",sChan2);
+
+
+      // --- If the first channel is a frequency-domain channel, then the second
+      //     must be specified as well ---
+
+      if(iStrlen_STR(sChan)) {
+
+         if(iGetChanDomain_IP(Ip, Data, sChan) == IP_DOMAIN_FREQUENCY) {
+
+            if(!iStrlen_STR(sChan2)) {
+
+               Printf_STR(sMsg, sizeof(sMsg), _("The %s channel is registered as a Frequency Domain channel.\r\nYou must specify a corresponding Phase channel."), sChan);
+
+               DisplayMessage_SYS(_("SGDF Export"), sMsg);
+               continue;
+            }
+         }
+      }
+
+ 
+      iDone = 1;
+   } 
+  
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","LINES",sLines);
+   ToUpper_STR(sLines);
+
+   GetString_SYS("IP","SGDFFILE",sFile);
+   GetString_SYS("IP","IPCHAN",sChan);
+   GetString_SYS("IP","IPCHAN2",sChan2);
+
+
+   // --- if
+
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Exporting data in SGDF format"),1);
+
+
+   // --- Do the line selection ---
+
+   Select = GetSelect_DB(Data);
+   if(iCharComp_STR(sLines,"D")) {
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+      Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+   }
+   else if(iCharComp_STR(sLines,"A")) {
+      Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+   // --- export ---
+
+   ExportSGDF_IP(Ip, Data, sFile, sChan, sChan2);
+
+
+   // --- Restore the line selection ---
+
+   SetSelect_DB(Data, Select);
+
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+   
+}

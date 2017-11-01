@@ -1,0 +1,459 @@
+//===========================================================================
+NAME          = "Export new X,Y database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP/Export"
+
+DESCRIPTION   = "
+   Export to a new X,Y database from the current database.
+
+    IPXY.NEWDB : New Database to create.
+    IPXY.CHAN  : Channels to export
+               A : All channels
+               D : Displayed channels
+               S : Selected Channels (make a list)
+               X : Externally defined using IPXY.ONECHAN
+    IPXY.ONECHAN : Single channel to export.
+    IPXY.LINE  : Lines to export
+               A : All lines
+               D : Displayed 
+               S : Selected lines
+    IPXY.MASK  : Mask channel
+    IPXY.N     : N Value to use. (0 for filter, blank for all).
+"
+// Revision History:
+// v5.1.7: Fixed a bug with N value type from int to real.
+// v5.1.5: Single channel definitions added so IPXY can be called from IPGRIDN GX.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPXY.gr"
+#include "IPXY.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+EDB         NewEData;         // Database handle
+DB          NewData;          // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+LST         ChLst;
+VV          ChanVV;
+DB_SELECT   Select;        // current selection mode
+
+int         i, j, ii, iNChan, iTotChan, iRet, iDone;            
+int			iMaxChans, iMaxLines;
+int         iInteractive, iChan, iLine;
+real        rN;
+
+DB_SYMB Symb, Ch;
+
+string(STR_DEFAULT_SHORT) sParm, sParm2, sV;
+string(STR_DB_SYMBOL) sMask, sCurLine, sChan, sLine, sXCh, sYCh, sOneChan;
+string(STR_FILE) sNewDB, sData;
+string(STR_DEFAULT_LONG) sBuff;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();   
+   Data = Lock_EDB(EData);
+
+   ChLst = Create_LST(80);
+   ChanVV = Create_VV(INT, 0);
+
+
+   // --- Get current X, Y channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if(iInteractive)
+   {
+
+      // --- Get a list of the channels ---
+
+      SymbLST_DB(Data, ChLst, DB_SYMB_CHAN);
+
+      // --- Remove X,Y from the list ---
+
+      iChan = iFindItem_LST(ChLst, 1, sXCh);
+      if(iChan!=-1) DelItem_LST(ChLst, iChan);
+
+      iChan = iFindItem_LST(ChLst, 1, sYCh);
+      if(iChan!=-1) DelItem_LST(ChLst, iChan);
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPXY");
+
+      // --- Copy in the channel list ---
+
+      Copy_LST(GetList_DGW(Diag,_IPXY_3),ChLst);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPXY_0,DGW_FILEPATH,"IPXY","NEWDB");
+      SetInfoSYS_DGW(Diag,_IPXY_1,DGW_LISTALIAS,"IPXY","CHAN");
+      SetInfoSYS_DGW(Diag,_IPXY_2,DGW_LISTALIAS,"IPXY","LINE");     
+      SetInfoSYS_DGW(Diag,_IPXY_3,DGW_TEXT,"IPXY","MASK");
+      SetInfoSYS_DGW(Diag,_IPXY_4,DGW_TEXT,"IPXY","N");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPXY_0,DGW_FILEPATH,"IPXY","NEWDB");
+      GetInfoSYS_DGW(Diag,_IPXY_1,DGW_LISTALIAS,"IPXY","CHAN");
+      GetInfoSYS_DGW(Diag,_IPXY_2,DGW_LISTALIAS,"IPXY","LINE");     
+      GetInfoSYS_DGW(Diag,_IPXY_3,DGW_TEXT,"IPXY","MASK");
+      GetInfoSYS_DGW(Diag,_IPXY_4,DGW_TEXT,"IPXY","N");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);   
+   } 
+
+   // --- Get the parameters ---
+
+   GetString_SYS("IPXY","NEWDB",sNewDB);
+   GetString_SYS("IPXY","CHAN", sChan);
+   GetString_SYS("IPXY","LINE", sLine);
+   GetString_SYS("IPXY","MASK", sMask);
+   rN = rGetReal_SYS("IPXY","N");
+
+   // --- Validate them ---
+
+   if(!iStrlen_STR(sNewDB))
+      Abort_SYS(_("Output database name required"));
+
+   if (iChar_STR(sLine) == iChar_STR("D")) 
+      iLine = IP_LINES_DISPLAYED;
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      iLine = IP_LINES_SELECTED;
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      iLine = IP_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+
+   if (iChar_STR(sChan) == iChar_STR("D")) 
+      iChan = IP_CHANNELS_DISPLAYED;
+   else if (iChar_STR(sChan) == iChar_STR("A")) 
+      iChan = IP_CHANNELS_ALL;
+   else if (iChar_STR(sChan) == iChar_STR("S")) 
+      iChan = IP_CHANNELS_SELECTED;
+   else if (iChar_STR(sChan) == iChar_STR("X"))
+      iChan = 999;   // special code for single channel
+   else      
+      Abort_SYS(_("Channel selection invalid"));
+
+   // (sMask may be empty, and rN may be a dummy)
+
+   if(rN!=rDUMMY && rN<0.0)
+      Abort_SYS(_("Invalid N value"));
+
+   
+   if(iChan == IP_CHANNELS_SELECTED) {
+
+      
+      if(iInteractive) {
+
+         // --- Get a list of the channels ---
+
+         ChLst = Create_LST(80);
+
+         // --- Set selected channels with CHAN# "#" greater than
+         //     iTotChan to NULL.
+
+         iTotChan = iGetInt_SYS("IPXY","NCHAN");
+         if(iTotChan==iDUMMY) iTotChan = 0;
+
+         iDone = 0;
+         iNChan = 0;
+         while (!iDone) {
+
+            // --- Count the number of channels
+
+            // --- Create the Dialogue ---
+
+            if(iNChan==0)
+               Diag = Create_DGW("IPXY1");
+            else
+               Diag = Create_DGW("IPXY2");
+
+            // --- Create channel list and remove selected
+            //     channels.
+            
+            SymbLST_DB(Data, ChLst, DB_SYMB_CHAN);
+
+            // --- Remove X,Y from the list ---
+
+            iChan = iFindItem_LST(ChLst, 1, sXCh);
+            if(iChan!=-1) DelItem_LST(ChLst, iChan);
+
+            iChan = iFindItem_LST(ChLst, 1, sYCh);
+            if(iChan!=-1) DelItem_LST(ChLst, iChan);
+
+            // --- Set any Defaults ---
+
+            for(i=1;i<=5;i++) {
+               
+               // --- Copy in the channel list ---
+
+               Copy_LST(GetList_DGW(Diag,(DGW_OBJ)(i-1)),ChLst);
+
+               // --- Set channel ---
+                              
+               Strcpy_STR(sParm,"CHAN");
+               j=iNChan+i;
+               FormatI_STR(j,sV,2);
+               Strcat_STR(sParm,sV);
+               
+               if(j>iTotChan) SetString_SYS("IPXY",sParm,"");
+               SetInfoSYS_DGW(Diag,(DGW_OBJ)(i-1),DGW_TEXT,"IPXY",sParm);
+
+            }
+
+
+            // --- Run the Dialogue ---
+
+            iRet = iRunDialogue_DGW(Diag);
+            if (iRet == -1) Cancel_SYS();    // He hit cancel
+
+
+            // --- Get and count the Strings ---
+
+            ii = 0;
+            for(i=1;i<=5;i++) {
+               Strcpy_STR(sParm,"CHAN");
+               j=iNChan+i;
+               FormatI_STR(j,sV,2);
+               Strcat_STR(sParm,sV);
+
+               GetInfoSYS_DGW(Diag,(DGW_OBJ)(i-1),DGW_TEXT,"IPXY",sParm);
+               GetString_SYS("IPXY",sParm, sBuff);
+               if(iStrlen_STR(sBuff)) ii++;
+            }
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);   
+
+            if(ii+iNChan > iTotChan) iTotChan = iNChan+5;
+
+            if(iRet==1) {     // Add more channels
+
+               if(ii!=5) continue;
+               iNChan+=5;
+               continue;
+            }
+
+            if(iRet==2) {     // Return to previous
+               
+               iNChan-=5;  
+               continue;
+            }
+
+            if(iRet==0) {
+
+               // --- Fill in the blanks ---
+
+               ii=1;
+               for(i=1;i<=iTotChan;i++) {
+                  Strcpy_STR(sParm,"CHAN");
+                  FormatI_STR(i,sV,2);
+                  Strcat_STR(sParm,sV);
+
+                  GetString_SYS("IPXY",sParm, sBuff);
+                  if(iStrlen_STR(sBuff)) {
+                     if(i!=ii) {
+                        Strcpy_STR(sParm2,"CHAN");
+                        FormatI_STR(ii,sV,2);
+                        Strcat_STR(sParm2,sV);
+                        SetString_SYS("IPXY",sParm2,sBuff);
+                        SetString_SYS("IPXY",sParm,"");
+                     }
+                     ii++;                        
+                  }
+               }
+               SetInt_SYS("IPXY","NCHAN",ii-1);
+            }
+
+            iDone = 1;
+         }
+
+      }  // End if interactive
+
+      // --- Create the channel list VV ---
+
+      iNChan = iGetInt_SYS("IPXY","NCHAN");
+      if(iNChan==iDUMMY)
+         Abort_SYS(_("Number of channels not defined"));
+
+      SetLen_VV(ChanVV, iNChan);
+
+      ii = 0;
+      for(i=1;i<=iNChan;i++) {
+         Strcpy_STR(sParm,"CHAN");
+         FormatI_STR(i,sV,2);
+         Strcat_STR(sParm,sV);
+
+         GetString_SYS("IPXY",sParm, sBuff);
+         if(iStrlen_STR(sBuff)) {
+         
+            Symb = FindSymb_DB(Data, sBuff, DB_SYMB_CHAN);
+            SetInt_VV(ChanVV, ii, (int)Symb);         
+            ii++;
+         }
+      }
+      if(ii==iDUMMY)
+         Abort_SYS(_("No channels selected for channel list"));
+
+      SetLen_VV(ChanVV, ii);
+      
+   }
+   else if(iChan == IP_CHANNELS_DISPLAYED) {
+
+      if(!iInteractive) {
+         Abort_SYS(_("The displayed channel option is not valid in batch mode."));
+      }
+
+      UnLock_EDB(EData);
+      iDispChanList_EDB(EData, ChanVV);
+      Data = Lock_EDB(EData);
+
+   }
+   else if(iChan == IP_CHANNELS_ALL) {
+
+      if(!iInteractive) {
+         Abort_SYS(_("The displayed channel option is not valid in batch mode."));
+      }
+
+      iSymbList_DB(Data, ChanVV, DB_SYMB_CHAN);
+   }
+   else if(iChan == 999) {
+
+      GetString_SYS("IPXY","ONECHAN", sOneChan);
+      if(!iStrlen_STR(sOneChan))
+         Abort_SYS(_("Single channel not defined."));
+
+      Ch = FindChan_DB(Data, sOneChan);
+      SetInt_VV(ChanVV, 0, (int)Ch);   
+   }
+
+
+   // --- Get currently selected line ---
+
+   UnLock_EDB(EData);
+   GetCurLine_EDB(EData,sCurLine);
+   Data = Lock_EDB(EData);
+
+   if(iLine != IP_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == IP_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == IP_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+   // --- Create the new database ---
+
+   GetName_DB(Data, DB_NAME_FILE, sData);
+   UnLock_EDB(EData);
+
+	iMaxChans = iGetInt_SYS("IPIMPORT", "MAXCHANS");
+	if(iMaxChans == iDUMMY)
+		iMaxChans = 200;
+		
+	iMaxLines = iGetInt_SYS("IPIMPORT", "MAXLINES");
+	if(iMaxLines == iDUMMY)
+		iMaxLines = 1000;
+
+	SetInt_SYS("CREATE", "CHANNELS", iMaxChans);
+	SetInt_SYS("CREATE", "LINES", iMaxLines);
+
+   SetString_SYS("CREATE","CURDB",sData);
+   SetString_SYS("CREATE","NAME",sNewDB);
+   if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)"))  Cancel_SYS();
+
+	SetInt_SYS("IPIMPORT", "MAXCHANS", iGetInt_SYS("CREATE", "CHANNELS"));
+	SetInt_SYS("IPIMPORT", "MAXLINES", iGetInt_SYS("CREATE", "LINES"));
+
+   if(!iLoaded_EDB(sNewDB))
+      NewEData = Load_EDB(sNewDB);
+   else
+      NewEData = Current_EDB();
+
+   NewData = Lock_EDB(NewEData);
+   Data = Lock_EDB(EData);
+
+   // --- Delete the "L0" channel in the new database ---
+
+   Ch = FindSymb_DB(NewData,"L0",DB_SYMB_LINE);
+   if (Ch != NULLSYMB) {
+      LockSymb_DB(NewData,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(NewData, Ch);
+   }
+
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating new XY database"),1);
+
+
+   // --- export ---
+
+   NewXYDatabase_IP(Ip, Data, NewData, ChanVV, sMask, rN);
+
+   // --- reset starting selections
+
+   if (iLine != DU_LINES_SELECTED)
+      SetSelect_DB(Data,Select);
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);   
+   UnLock_EDB(NewEData);
+   LoadAllChans_EDB(NewEData);
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+   Destroy_LST(ChLst);
+   Destroy_VV(ChanVV);
+   
+}

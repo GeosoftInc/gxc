@@ -1,0 +1,192 @@
+//===========================================================================
+NAME          = "Redisplay assay channels"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis/GeochemUtilities"
+
+DESCRIPTION   = "
+
+   CHREDISPLAY.SELECTION   \"ASSAY\"
+                           \"DISPLAYED_ASSAY\"
+                           \"LIST\"
+              .SORT        Sort alphabetically? 0: No, 1: Yes
+ "
+// Revision History:
+// v5.1.8: Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "chredisplayassay.gr"
+#include "chredisplayassay.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sChan, sLine;
+string(STR_DEFAULT) sChOpt;
+string(32768) sChannels;
+
+EDB      EData;
+DB       Data;
+DGW      Diag;
+LST      AssayLST, ChLST, DispLST;
+DB_SYMB  Chan, Line;
+
+int   i, iItem, iND, iNAssay, iSort, iSelect;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- get current database ---
+
+   EData = Current_EDB();
+   GetCurLine_EDB(EData, sLine);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHREDISPLAY");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CHREDISPLAY_0,DGW_LISTALIAS, "CHREDISPLAYASSAY","SELECTION");
+      SetInfoSYS_DGW(Diag,_CHREDISPLAY_1,DGW_LISTALIAS, "CHREDISPLAYASSAY","SORT");
+     
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CHREDISPLAY_0,DGW_LISTALIAS, "CHREDISPLAYASSAY","SELECTION");
+      GetInfoSYS_DGW(Diag,_CHREDISPLAY_1,DGW_LISTALIAS, "CHREDISPLAYASSAY","SORT");
+      
+    }
+
+
+   // --- Get Parameters ---
+
+   iSelect = iGetInt_SYS("CHREDISPLAYASSAY","SELECTION");
+   GetString_SYS("CHREDISPLAYASSAY","SELECTION",sChOpt);
+   if(!iStrlen_STR(sChOpt)) Strcpy_STR(sChOpt, "ASSAY");  // default to all
+
+   iSort   = iGetInt_SYS("CHREDISPLAYASSAY","SORT");
+   if(iSort != 0) iSort = 1;        // default to sort
+
+
+   // --- Get the list of all currently displayed channels ---
+
+   DispLST = Create_LST(128);
+   if (iInteractive_SYS())
+      iND = iDispChanLST_EDB(EData, DispLST);
+   
+   
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChOpt);
+   SetString_SYS("CHCHANLST","GX","CHREDISPLAYASSAY");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+
+
+   // --- Create a list of all assay type channels ---
+   
+   AssayLST = Create_LST(128);
+   ClassChanLST_DB(Data, AssayLST, "ASSAY");
+
+
+   // --- For group lines, remove all channels not associated with the current line ---
+
+   Line = FindSymb_DB(Data, sLine, DB_SYMB_LINE);
+
+   LOCK_R(Data, Line);
+   if(iLineCategory_DB(Data, Line) == DB_CATEGORY_LINE_GROUP) {
+      
+      iNAssay = iSize_LST(AssayLST);
+      for(i=iNAssay-1; i>-0; i--) {
+
+         Chan = (DB_SYMB)iGetInt_LST(AssayLST, 1, i);
+         if(!iIsAssociated_DB(Data, Line, Chan)) {
+            DelItem_LST(AssayLST, i);
+         }
+      }
+   }
+   UnLockSymb_DB(Data, Line);
+
+
+   // --- Remove all assay channels from the displayed channel list ---
+
+   
+   iNAssay = iSize_LST(AssayLST);
+   for(i=0; i<iNAssay; i++) {
+
+      GetItem_LST(AssayLST, 0, i, sChan);
+      iItem = iFindItem_LST(DispLST, 0, sChan);
+      if(iItem!=-1) {
+         DelItem_LST(DispLST, iItem);
+      }
+   }
+
+
+   // --- Unload all the channels ---
+
+   UnLock_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+
+
+   // --- Reload the non-assay channels ---
+
+   iND = iSize_LST(DispLST);
+   for(i=0; i<iND; i++) {
+
+      GetItem_LST(DispLST, 0, i, sChan);
+      LoadChan_EDB(EData, sChan);
+   }
+
+
+   // --- Sort the assay channels? ---
+
+   if(iSort)
+      Sort_LST(ChLST, 0, 0);
+
+
+   // --- Display the assay channels ---
+
+   iNAssay = iSize_LST(ChLST);
+   for(i=0; i<iNAssay; i++) {
+
+      GetItem_LST(ChLST, 0, i, sChan);
+      LoadChan_EDB(EData, sChan);
+   }
+
+}

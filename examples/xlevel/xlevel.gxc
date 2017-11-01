@@ -1,0 +1,404 @@
+//===========================================================================
+NAME          = "Extract level correction from an intersection table"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/LevTieLine"
+
+DESCRIPTION   = "
+
+Create level information channels from an intersection table.
+An intersection table can be created ising the INTERSCT GX.
+
+PARAMETERS:
+
+ XLEVEL.INTERSECT     - Input intersection table
+       .MAXGRADIENT   - Maximum gradient to allow
+       .TYPE          - \"LINE\" to extract line corrections.
+                        \"TIE\"  to extract tie line corrections.
+       .REF           - Reference channel
+       .LEVEL         - Output level channel (optional)
+       .ERROR         - Output error (difference) channel (optional)
+       .CROSS         - Cross gradient channel (optional)
+       .SUSPEND_PARAM_SETTING - Set to 1 or other GX params will be updated.
+"
+// Revision History
+// v7.1.0: Do not force output channel defaults, except if all are undefined.
+//         Load the output channels.
+//         Add support for intersection databases.
+//         Default for max gradient is now blank (dummy).
+// v5.1.7: Checks for empty XLEVEL.TBL file.
+//===========================================================================
+
+RESOURCE = "xlevel.gr"
+#include "xlevel.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sInTable;                     // Input Intersect Table File Name
+string(STR_FILE) sCurDB;							  // Current database
+string(STR_DEFAULT_SHORT) sRCh;                // Reference channel
+string(STR_DEFAULT_SHORT) sLCh;                // Output level channel
+string(STR_DEFAULT_SHORT) sECh;                // Output level channel
+string(STR_DEFAULT_SHORT) sCCh;                // Output level channel
+string(STR_DEFAULT_SHORT) sType;               // Selection type
+string(STR_DEFAULT_LONG) sMsg, sExt;    // working string
+string(STR_FILE) sDB;
+real        rMaxDZ;              // Max. Gradient
+int         iType;               // Flag: 1 - Tie Line Mean Remove
+
+EDB         EData, EIntData;
+DB          Data, IntData;  
+DGW         Diag;
+DB_SYMB     Ref,Level,Error,Cross;
+DB_SELECT   Select;
+TB          LTBL;               
+TB_FIELD    TBLL;
+TB_FIELD    TBLE;
+TB_FIELD    TBLC;
+LST         List; 
+RA          Ra;              
+
+int         i, iInGDB, iLoaded;                   
+int         iSetParams;
+
+//===========================================================================
+//                             XLEVEL CODE
+//===========================================================================
+
+{
+
+	// --- Set other GX parameters?  Can suspend this, but
+	//    must be done each time ---
+	
+	iSetParams = 1;
+	if(iGetInt_SYS("XLEVEL", "SUSPEND_PARAM_SETTING") == 1)
+	{
+		iSetParams = 0;
+		SetInt_SYS("XLEVEL", "SUSPEND_PARAM_SETTING", 0);	// must set every time
+	}
+	
+	
+	
+   // --- get the database ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sCurDB);
+   Data = Lock_EDB(EData);
+   
+   
+	// --- See if this is an intersection database and make the original database current. ---
+
+	GetRegSymbSetting_DB(Data, NULLSYMB, "Levelling.Database", sDB, sizeof(sDB)); 
+	if(iStrlen_STR(sDB) > 0)
+	{
+		UnLock_EDB(EData);
+		
+		EData = Load_EDB(sDB);		
+		Data = Lock_EDB(EData);
+	   GetName_EDB(EData, sCurDB);
+	}		
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("XLEVELForm");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_XLEVELFORM_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_XLEVELFORM_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_XLEVELFORM_5);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_XLEVELFORM_6);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_XLEVELFORM_0,DGW_FILEPATH,"XLEVEL","INTERSECT");
+      SetInfoSYS_DGW(Diag,_XLEVELFORM_1,DGW_TEXT,"XLEVEL","MAXGRADIENT");
+      SetInfoSYS_DGW(Diag,_XLEVELFORM_2,DGW_TEXT,"XLEVEL","TYPE"); 
+      SetInfoSYS_DGW(Diag,_XLEVELFORM_3,DGW_TEXT,"XLEVEL","REF");
+      SetInfoSYS_DGW(Diag,_XLEVELFORM_4,DGW_TEXT,"XLEVEL","LEVEL");
+      SetInfoSYS_DGW(Diag,_XLEVELFORM_5,DGW_TEXT,"XLEVEL","ERROR");
+      SetInfoSYS_DGW(Diag,_XLEVELFORM_6,DGW_TEXT,"XLEVEL","CROSS");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_XLEVELFORM_0,DGW_FILEPATH,"XLEVEL","INTERSECT"); 
+      GetInfoSYS_DGW(Diag,_XLEVELFORM_1,DGW_TEXT,"XLEVEL","MAXGRADIENT");
+      GetInfoSYS_DGW(Diag,_XLEVELFORM_2,DGW_TEXT,"XLEVEL","TYPE"); 
+      GetInfoSYS_DGW(Diag,_XLEVELFORM_3,DGW_TEXT,"XLEVEL","REF");
+      GetInfoSYS_DGW(Diag,_XLEVELFORM_4,DGW_TEXT,"XLEVEL","LEVEL");
+      GetInfoSYS_DGW(Diag,_XLEVELFORM_5,DGW_TEXT,"XLEVEL","ERROR");
+      GetInfoSYS_DGW(Diag,_XLEVELFORM_6,DGW_TEXT,"XLEVEL","CROSS");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("XLEVEL","INTERSECT",sInTable);
+   
+   
+	// --- Get the absolute file names so the names can be compared. ---
+	
+	AbsoluteFileName_SYS(sInTable, sInTable);
+	AbsoluteFileName_SYS(sCurDB, sCurDB);
+   
+   if(0==iStrcmp_STR(sInTable, sCurDB, STR_CASE_TOLERANT)) 
+       Abort_SYS(_("The current database cannot be the input intersection database."));
+   
+   
+   // --- Is the input a table or database? ---
+   
+   FileNamePart_STR(sInTable, sExt, STR_FILE_PART_EXTENSION);
+   iInGDB = 0;
+   if(iStrcmp_STR(sExt, "GDB", STR_CASE_TOLERANT)==0)
+   {
+      iInGDB = 1;
+		iLoaded = 0;
+		if(iLoaded_EDB(sInTable))
+		{
+			iLoaded = 1;
+			EIntData = Load_EDB(sInTable);
+			IntData = Lock_EDB(EIntData);
+		}
+		else
+			IntData = Open_DB(sInTable, "SUPER", "");
+	}
+
+   
+   // --- Get the max gradient ---
+   
+   rMaxDZ = rGetReal_SYS("XLEVEL","MAXGRADIENT");
+
+	
+	// --- Force defaults for output channel if ALL are undefined. This
+	//     then permits choosing only one for output ---
+	
+	GetString_SYS("XLEVEL","LEVEL",sLCh);	
+   GetString_SYS("XLEVEL","ERROR",sECh);
+   GetString_SYS("XLEVEL","CROSS",sCCh);
+   if(iStrlen_STR(sLCh)==0 && iStrlen_STR(sECh)==0 && iStrlen_STR(sCCh)==0)
+   {
+		Strcpy_STR(sLCh, "CROSS_LEVEL");
+		Strcpy_STR(sECh, "CROSS_DIFF");
+		Strcpy_STR(sCCh, "CROSS_GRAD");
+	}
+	
+
+   // --- get process line type and set other defaults ---
+
+   GetString_SYS("XLEVEL","TYPE",sType);
+   if(iSetParams)
+   {
+		SetString_SYS("LVSHIFT","TYPE",sType);
+		SetString_SYS("LVTILT","TYPE",sType);
+		SetString_SYS("LVSPLN","TYPE",sType);
+		SetString_SYS("LVTSPLN","TYPE",sType);
+	}
+
+
+   // --- save current selection ---
+   ToUpper_STR(sType);
+   if (iCharComp_STR(sType,"S"))
+      iType = DU_LEVEL_ALL;
+   else {
+
+      Select = GetSelect_DB(Data);
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+
+      if (iCharComp_STR(sType,"L")) {
+
+         iType = DU_LEVEL_LINES;
+         Select_DB(Data,"L",DB_LINE_SELECT_INCLUDE);
+
+      } else if (iCharComp_STR(sType,"T")) {
+
+         iType = DU_LEVEL_TIES;
+         Select_DB(Data,"T",DB_LINE_SELECT_INCLUDE);
+
+      }
+
+   }
+
+
+   // --- Prepare to do the work ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Create XLEVEL.TBL"),1);
+
+
+   // --- Create level table ---
+   
+   if(iInGDB)
+		GenLevDB_DU(IntData,"XLEVEL.TBL",rMaxDZ,iType);
+	else
+		GenLev_DU(Data,sInTable,"XLEVEL.TBL",rMaxDZ,iType);
+
+
+   // --- See if any entries are in the level table ---
+
+   Ra = Create_RA("XLEVEL.TBL");
+   if(iLen_RA(Ra)<=8) {
+
+      // --- reset starting selections
+
+      if (iType != DU_LEVEL_ALL)
+         SetSelect_DB(Data,Select);
+
+      Strcpy_STR(sMsg, _("No intersections were found using the specified intersection table."));
+      Strcat_STR(sMsg, _("Check to ensure that this is the correct intersection table,\r\nand that at least one intersection has valid data."));
+
+      Abort_SYS(sMsg);
+      
+   }
+   Destroy_RA(Ra);
+
+   // --- Load the Table into Memory ---
+
+   ProgName_SYS(_("Load XLEVEL.TBL"),1);
+   LTBL = Create_TB("XLEVEL.TBL");
+
+
+   // --- Does the reference channel exist ? ---
+
+   GetString_SYS("XLEVEL","REF",sRCh);
+   if (!iExistSymb_DB(Data,sRCh,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Reference channel does not exist."));
+   Ref = FindSymb_DB(Data,sRCh,DB_SYMB_CHAN);
+
+
+   // --- sort out required output channels ---
+   
+   if (iStrlen_STR(sLCh)) 
+   {
+      TBLL = Field_TB(LTBL,"Level");
+      if (!iExistSymb_DB(Data,sLCh,DB_SYMB_CHAN))
+         DupSymbNoLock_DB(Data,Ref,sLCh);        // Create it 
+      Level = FindSymb_DB(Data,sLCh,DB_SYMB_CHAN);
+   }
+
+   if (iStrlen_STR(sECh))
+   {
+      TBLE = Field_TB(LTBL,"Error");
+      if (!iExistSymb_DB(Data,sECh,DB_SYMB_CHAN))
+         DupSymbNoLock_DB(Data,Ref,sECh);        // Create it 
+      Error = FindSymb_DB(Data,sECh,DB_SYMB_CHAN);
+
+		if(iSetParams)
+		{
+			SetString_SYS("LVSHIFT","ERROR",sECh);
+			SetString_SYS("LVTILT","ERROR",sECh);
+			SetString_SYS("LVSPLN","ERROR",sECh);
+			SetString_SYS("LVTSPLN","ERROR",sECh);
+		}
+   }
+
+   if (iStrlen_STR(sCCh))
+   {
+      TBLC = Field_TB(LTBL,"Cross");
+      if (!iExistSymb_DB(Data,sCCh,DB_SYMB_CHAN))
+         DupSymbNoLock_DB(Data,Ref,sCCh);        // Create it 
+      Cross = FindSymb_DB(Data,sCCh,DB_SYMB_CHAN);
+   }
+
+
+   // --- Extract level corrections for each line ---
+
+   LockSymb_DB(Data,Ref,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   if (iStrlen_STR(sLCh)) 
+   {
+      ProgName_SYS(_("Load levels"),1);
+      LockSymb_DB(Data,Level,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+	  TableSelectedLinesFid_DU(Data,Level,Ref,LTBL,TBLL);
+      EasyMakerSymb_DB(Data,Level,_("Level correction"),"XLEVEL;");
+      UnLockSymb_DB(Data,Level);
+   }
+   if (iStrlen_STR(sECh)) 
+   {
+      ProgName_SYS(_("Load differences"),1);
+      LockSymb_DB(Data,Error,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+	  TableSelectedLinesFid_DU(Data,Error,Ref,LTBL,TBLE);
+      EasyMakerSymb_DB(Data,Error,_("Level correction"),"XLEVEL;");
+      UnLockSymb_DB(Data,Error);
+      }
+   if (iStrlen_STR(sCCh)) 
+   {
+      ProgName_SYS(_("Load cross gradients"),1);
+      LockSymb_DB(Data,Cross,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      TableSelectedLinesFid_DU(Data,Cross,Ref,LTBL,TBLC);
+      EasyMakerSymb_DB(Data,Cross,_("Level correction"),"XLEVEL;");
+      UnLockSymb_DB(Data,Cross);
+   }
+   UnLockSymb_DB(Data,Ref);
+
+
+   // --- reset starting selections
+
+   if (iType != DU_LEVEL_ALL)
+      SetSelect_DB(Data,Select);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   
+   // --- Release the intersection databases ---
+   
+   if(iInGDB)
+   { 
+		if(iLoaded)
+			UnLock_EDB(EIntData);
+		else
+			Destroy_DB(IntData);
+	}
+      
+
+   // --- Release the flight database ---
+
+   UnLock_EDB(EData);
+   MakeCurrent_EDB(EData);		// bring back to front
+   
+   
+   // --- Load channels ---
+   
+   if (iStrlen_STR(sLCh)) LoadChan_EDB(EData, sLCh);
+   if (iStrlen_STR(sECh)) LoadChan_EDB(EData, sECh);
+   if (iStrlen_STR(sCCh)) LoadChan_EDB(EData, sCCh);
+   
+}

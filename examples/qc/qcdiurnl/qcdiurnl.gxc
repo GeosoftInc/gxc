@@ -1,0 +1,589 @@
+//===========================================================================
+NAME          = "Quality control on diurnal variations"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/QC Utility"
+
+DESCRIPTION   = "\
+
+Use of this GX to carry out quality control on diurnal variations.
+
+Parameters: 
+
+  QCDIURNL.DCHAN     -  Diurnal readings channel
+          .TCHAN     -  Time channel
+          .ALLDEV    -  Allowed diurnal deviation (nT)
+          .TIME      -  over a time period of (in minutes)
+          .MAP       -  New map (1) or current map (0)
+  
+"
+// Revision History	 
+// v8.5:   Enabled for batch operation.
+// v6.3.0: Added output of maximum deviation to Diurnal_Dev channel.
+// v6.0:   Fixed that map has to be unlocked when call iGetPoint_EMAP(). 
+// v6.0.0: Modified algorithm to determine time gaps to avoid day changes.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "QCDIURNL.gr"
+#include "QCDIURNL.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DB          Data;             // Database handle
+EDB         EData;             // Database handle
+DB_SYMB     ChFlag,ChT,ChD,ChDev;
+DB_SYMB     Line;             // Line Handle
+VV          VVFlag,VVTime,VVDiurnal,VVDev;
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+MVIEW       View;
+MAP         Map;
+EMAP        EMap;
+
+string(STR_FILE)       sFont,sGroup,sName, sMap;
+string(STR_DB_SYMBOL) sDChan,sTChan,sChFlag,sChDev,sLine;
+string(STR_DEFAULT) sLabel;
+string(STR_GROUP) sGrpName;
+
+real        rAllDev,rTime;
+real        rSum, rT1, rT2, rD, rAvgInt;
+real        rMinX,rMinY,rMaxX,rMaxY;
+real        rScaleMM,rXo,rYo,rTxtSize;
+real        rXLegend, rYLegend;
+
+int         i,k,iNew,iNPos;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+int         iStart,iEnd;
+int         iLenVV,iNumPoints;
+
+int         iInteract, iShowDialog, iPlotToMap, iPlotPath;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	// ---- Batch control ---
+	
+	iShowDialog = 1;
+	if (iExistInt_SYS("QC", "SHOW_DIALOG"))
+	{
+		iShowDialog = iGetInt_SYS("QC", "SHOW_DIALOG");
+		if(iShowDialog != iDUMMY)
+			SetString_SYS("QC", "SHOW_DIALOG", "");		// force reset each time
+		if(iShowDialog != 0) iShowDialog = 1;				// show by default in interactive mode
+	}
+
+	iPlotToMap = 1;
+	if (iExistInt_SYS("QC", "OUTPUT_MAP"))
+	{
+		iPlotToMap = iGetInt_SYS("QC", "OUTPUT_MAP");
+		if(iPlotToMap != iDUMMY)
+			SetString_SYS("QC", "OUTPUT_MAP", "");			// force reset each time
+		if(iPlotToMap != 0) iPlotToMap = 1;					// plot by default
+	}
+
+	iPlotPath = 1;
+	if (iExistInt_SYS("QC", "PLOT_PATH"))
+	{
+		iPlotPath = iGetInt_SYS("QC", "PLOT_PATH");
+		if(iPlotPath != iDUMMY)
+			SetString_SYS("QC", "PLOT_PATH", "");			// force reset each time
+		if(iPlotPath != 0) iPlotPath = 1;					// plot by default
+	}
+
+	if (iPlotToMap == 0)
+		iPlotPath = 0;			                        // override
+
+
+   iInteract = iInteractive_SYS();    
+   rMinX = rMinY = rMaxX = rMaxY =rDUMMY;
+
+   // --- Get database ---
+   
+   EData = Current_EDB();   
+
+   // --- Are we running interactively ? ---
+
+   i = 2;
+   while (iInteractive_SYS() && (i == 2) && iShowDialog)
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("QCDIURNL");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_QCDIURNL_0);
+      
+      Data = Lock_EDB(EData);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_QCDIURNL_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      UnLock_EDB(EData);
+      
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_QCDIURNL_0,DGW_TEXT,"QCDIURNL","DCHAN");     
+      SetInfoSYS_DGW(Diag,_QCDIURNL_1,DGW_TEXT,"QCDIURNL","TCHAN");     
+      SetInfoSYS_DGW(Diag,_QCDIURNL_2,DGW_TEXT,"QCDIURNL","ALLDEV");     
+      SetInfoSYS_DGW(Diag,_QCDIURNL_3,DGW_TEXT,"QCDIURNL","TIME");     
+      SetInfoSYS_DGW(Diag,_QCDIURNL_4,DGW_LISTALIAS,"QCDIURNL","MAP");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_QCDIURNL_0,DGW_TEXT,"QCDIURNL","DCHAN");     
+      GetInfoSYS_DGW(Diag,_QCDIURNL_1,DGW_TEXT,"QCDIURNL","TCHAN");     
+      GetInfoSYS_DGW(Diag,_QCDIURNL_2,DGW_TEXT,"QCDIURNL","ALLDEV");     
+      GetInfoSYS_DGW(Diag,_QCDIURNL_3,DGW_TEXT,"QCDIURNL","TIME");     
+      GetInfoSYS_DGW(Diag,_QCDIURNL_4,DGW_LISTALIAS,"QCDIURNL","MAP");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+
+      iNew    = iGetInt_SYS("QCDIURNL","MAP");
+      
+      if (iNew && iPlotToMap) {
+         
+         // --- Run NEWMAP wizard ---
+   
+         iNew = iRunGX_SYS("newmap.gx");
+              
+         if (iNew == -1) 
+			{
+			   i = 2;
+				continue;
+			}
+         else if (iNew == 1)    
+				Cancel_SYS();
+      }        
+   }
+
+	if (iPlotToMap)
+	{
+		if (!iInteractive_SYS() || iShowDialog == 0) 
+		{
+			iNew    = iGetInt_SYS("QCDIURNL","MAP");
+      
+			if (iNew) {
+         
+				// --- Run NEWMAP wizard ---
+   
+				iNew = iRunGX_SYS("newmap.gx");
+				GetString_SYS("NEWMAP","MAP",sMap);
+				Load_EMAP(sMap);      
+			}
+		}
+	}
+
+
+
+   // --- Get Parameters ---
+
+   rAllDev  = rGetReal_SYS("QCDIURNL","ALLDEV");
+   rTime    = rGetReal_SYS("QCDIURNL","TIME");
+
+   GetString_SYS("QCDIURNL","DCHAN",sDChan);
+   GetString_SYS("QCDIURNL","TCHAN",sTChan);
+
+   
+   // --- Verify parameters ---
+   
+   if (rTime <= 0.0) Abort_SYS(_("The specified time period is unacceptable (must be greater than 0.0)."));
+   if (rAllDev == rDUMMY) Abort_SYS(_("Allowed Deviation in diurnal readings not specified."));
+   if (rAllDev == 0.0) 
+      Abort_SYS(_("No actions are taken as the specified Allowed Deviation in diurnal readings is 0.0."));
+
+   // --- Convert time to decimal hours ---
+   
+   rTime /= 60.0;
+   
+
+   // --- Lock Database ---
+
+   Data = Lock_EDB(EData);
+	GetName_DB(Data,DB_NAME_FILE,sName);
+   
+
+   // --- Get Diurnal and time channel ---
+   
+   if (!iExistSymb_DB(Data,sDChan,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Diurnal channel does not exist."));
+   ChD = FindSymb_DB(Data,sDChan,DB_SYMB_CHAN);
+   LockSymb_DB(Data,ChD,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   if (!iExistSymb_DB(Data,sTChan,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Time channel does not exist."));
+   ChT = FindSymb_DB(Data,sTChan,DB_SYMB_CHAN);
+   LockSymb_DB(Data,ChT,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Does the Flag channel exist ? ---
+
+   Strcpy_STR(sChFlag,"Flag_Diurnal");
+   if (iExistSymb_DB(Data,sChFlag,DB_SYMB_CHAN)) {
+      ChFlag = FindSymb_DB(Data,sChFlag,DB_SYMB_CHAN);
+      LockSymb_DB(Data,ChFlag,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(Data,ChFlag);
+   }   
+   ChFlag = CreateSymb_DB(Data,sChFlag,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_BYTE);
+   LockSymb_DB(Data,ChFlag,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+
+   // --- Does the Deviation channel exist ? ---
+
+   Strcpy_STR(sChDev,"Diurnal_Dev");
+   if (!iExistSymb_DB(Data,sChDev,DB_SYMB_CHAN)) {
+      ChDev = CreateSymb_DB(Data,sChDev,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LockSymb_DB(Data,ChDev,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      SetChanDecimal_DB(Data, ChDev, 2);
+   }
+   else {
+      ChDev = FindSymb_DB(Data,sChDev,DB_SYMB_CHAN);
+      LockSymb_DB(Data,ChDev,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   }
+
+
+   // --- VVs ---
+   
+   VVFlag = CreateExt_VV(GS_BYTE,0);
+   VVTime = Create_VV(REAL,0);
+   VVDiurnal = Create_VV(REAL,0);
+   VVDev = Create_VV(REAL,0);
+    
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS(_("Diurnal variations"),1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sLine);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Diurnal QC on line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+      
+      // --- Get data from VVs ---
+      
+      GetChanVV_DB(Data,Line,ChT,VVTime);
+      GetChanVV_DB(Data,Line,ChD,VVDiurnal);
+      ReFidVV_VV(VVTime,VVDiurnal);
+      ReFidVV_VV(VVFlag,VVDiurnal);
+
+      
+      // --- Define number of points for the time period. Do this by getting the
+      //     average change between each pair of points. This value should be 
+      //     positive - ignore negative differences, which could be caused by
+      //     jumps past 24.00 (midnight) or 12.00 (on a 12-hour clock) ---
+
+      iLenVV = iLength_VV(VVTime);
+      if (iLenVV == 0) {
+       
+         // --- Next line ---
+         
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+         continue;
+      }   
+      
+      
+      // --- Find first and last non-dummies ---
+      
+      iStart = iFindDummy_VVU(VVTime, 0, 1, 0, -1);
+      if(iStart==-1) {
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+         continue;      
+      }
+      iEnd   = iFindDummy_VVU(VVTime, 1, 1, 0, -1);
+      if(iStart==iEnd) {
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+         continue;      
+      }
+
+
+      // --- Get average positive interval ---
+      
+      iNPos = 0;
+      rSum = 0.0;
+      rT2 = rGetReal_VV(VVTime, iStart);
+      for(i=iStart+1;i<=iEnd;i++) {
+         
+         rT1 = rT2;
+         rT2 = rGetReal_VV(VVTime, i);
+         if(rT1!=rDUMMY && rT2!=rDUMMY) {
+            rD = rT2 - rT1;
+            if(rD>0.0) {
+               rSum += rD;
+               iNPos++;
+            }
+         }
+      }
+      
+      rAvgInt = rSum / (real)iNPos;
+      iNumPoints = (int)(rTime / rAvgInt);
+            
+      if (iNumPoints < 0) iNumPoints *= -1;
+      if (iNumPoints <= 1)
+         Abort_SYS(_("QC on diurnal variations failed because the specified chord of time is too short or the time channel is not in decimal hours."));
+         
+      
+      
+
+      // --- Apply the QC on diurnal variations ---
+      
+      NoiseCheck2_VVU(VVDiurnal,VVFlag, VVDev, rAllDev,iNumPoints);
+
+
+      // --- Put QC result back to channel ---
+      
+      PutChanVV_DB(Data,Line,ChFlag,VVFlag);
+
+
+      // --- Output the variation value to a channel ---
+      
+      PutChanVV_DB(Data,Line,ChDev,VVDev);
+                  
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,ChFlag,_("Quality control on diurnal readings"),"QCDIURNL;");
+   EasyMakerSymb_DB(Data,ChDev,_("Quality control on diurnal readings"),"QCDIURNL;");
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,ChT);
+   UnLockSymb_DB(Data,ChD);
+   UnLockSymb_DB(Data,ChFlag);
+   UnLockSymb_DB(Data,ChDev);
+
+   UnLock_EDB(EData);
+   
+   
+   // --- Load the deviation channel ---
+   
+   LoadChan_EDB(EData, sChDev);
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+
+
+	if (iPlotToMap)
+	{
+		// --- Plot line path and flag ---
+   
+		if (iInteract)
+			SetInteractive_SYS(0);
+
+		if (iPlotPath)
+		{
+			SetString_SYS("PATH","LINE_THICKNESS","0.15");
+			SetString_SYS("PATH","LINE_COLOR","k");
+			SetString_SYS("PATH","TICKFLAG","0");
+			SetString_SYS("PATH","LABEL_FORMAT","TL");
+			SetString_SYS("PATH","LABEL_LOCATION","1");
+			SetString_SYS("PATH","LABEL_SIZE","2.5");
+			SetString_SYS("PATH","LABEL_COLOR","k");
+			SetString_SYS("PATH","LABEL_WEIGHT","0");
+			SetString_SYS("PATH","H_OFFSET","2.0");
+			SetString_SYS("PATH","V_OFFSET","0");
+			SetString_SYS("PATH","GAP","0");
+
+			if (iRunGX_SYS("path.gx"))     
+				Cancel_SYS(); 
+		}
+
+		SetString_SYS("QCDEVMAP","MAP","0");
+		SetString_SYS("QCDEVMAP","RESULT","Flag_Diurnal");
+		SetString_SYS("QCDEVMAP","THICK","0.2");
+		SetString_SYS("QCDEVMAP","COLOR","b");
+		SetString_SYS("QCDEVMAP","OFFSET","0.5");
+
+		if (iRunGX_SYS("qcdevmap.gx")) Cancel_SYS(); 
+
+		SetInteractive_SYS(iInteract);   
+
+
+		// ---------------------------------------
+		// --- Plot legend ---
+   
+		// --- check for base view ---
+
+		EMap = Current_EMAP();
+		Map = Lock_EMAP(EMap);
+		if (!iExistView_MAP(Map,"*Base"))
+			Abort_SYS(_("Legend cannot be drawn because a base view does not exist in this map."));
+		UnLock_EMAP(EMap);   
+
+		if (iInteractive_SYS())
+			iSetCurrentView_EMAP(EMap,"*Base");
+		Map = Lock_EMAP(EMap);
+		View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+ 
+ 
+		// --- Where to plot ---
+ 
+		rXLegend = rGetReal_SYS("QC", "LEGEND_X_IN");
+		rYLegend = rGetReal_SYS("QC", "LEGEND_Y_IN");
+		if(rXLegend != rDUMMY && rYLegend != rDUMMY)
+		{
+			rXo = rXLegend;
+			rYo = rYLegend;
+			SetString_SYS("QC", "LEGEND_X_IN", "");	// force reset each call
+			SetString_SYS("QC", "LEGEND_Y_IN", "");
+		}
+		else if (iInteractive_SYS()) 
+		{
+			// --- Get the coordinates of a user selected box ---
+
+			DisplayMessage_SYS(_("Locate legend"),_("Locate the lower left corner of the legend..."));
+
+			UnLock_EMAP(EMap);   
+			EMap = Current_EMAP();
+			iSetCurrentView_EMAP(EMap,"*Base");
+      
+			if (iGetPoint_EMAP(EMap,_("Locate legend..."),rXo,rYo)) Cancel_SYS(); 
+      
+			Map = Lock_EMAP(EMap);
+			View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+		} else {
+
+			// --- Get box area ---
+
+			Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
+			rXo = 0.2*rMinX + 0.8*rMaxX;
+			rYo = 0.2*rMinY + 0.8*rMaxY;
+		}
+
+		rXLegend = rXo;
+		rYLegend = rYo;
+
+
+		// --- Scale parameters ---
+
+		rScaleMM = rScaleMM_MVIEW(View);
+		rTxtSize = rScaleMM*2.5;
+		rXo *= rScaleMM;
+		rYo *= rScaleMM;
+
+
+		// --- Start a group ---
+
+		FileNamePart_STR(sName,sName,STR_FILE_PART_NAME);
+		GenGroupName_STR("LEGEND_QC",sName,_n("Diurnal"),sGrpName);
+		Strcpy_STR(sGroup,sGrpName);
+		StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+		// --- Line path ---
+ 
+		if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+			Strcpy_STR(sFont,_n("default"));
+		TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+		TextSize_MVIEW(View,rTxtSize);
+		TextAngle_MVIEW(View,0.0);
+		TextColor_MVIEW(View,iColor_MVIEW("k"));
+   
+		LineThick_MVIEW(View,0.15*rScaleMM);
+		LineStyle_MVIEW(View,0,0.0);
+		LineColor_MVIEW(View,iColor_MVIEW("k"));
+   
+		if (iPlotPath)
+		{
+			Text_MVIEW(View,_("Line path"),rXo+15.0*rScaleMM,rYo);
+			Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
+			rYo+=5.0*rScaleMM;
+		}
+
+ 
+		// --- QC results ---
+   
+		TextColor_MVIEW(View,iColor_MVIEW("b"));
+		Text_MVIEW(View,_("Flag_Diurnal"),rXo+15.0*rScaleMM,rYo);
+
+		if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+			Strcpy_STR(sFont,_n("symbols"));
+		SymbFont_MVIEW(View,sFont,TRUE,MVIEW_FONT_WEIGHT_MEDIUM,FALSE);
+		SymbColor_MVIEW(View,iColor_MVIEW("b"));
+		SymbFillColor_MVIEW(View,iColor_MVIEW("b"));
+		SymbNumber_MVIEW(View,20);  // solid circle
+		SymbSize_MVIEW(View,0.2*rScaleMM);
+		SymbAngle_MVIEW(View,0.0);
+
+		k = (int)(30.0/0.2) + 1;
+		for (i = 0; i < k; i++)
+			Symbol_MVIEW(View, rXo + 0.33*(real)i*0.2*rScaleMM, rYo + 1.25*rScaleMM);
+
+ 
+		// --- Save group location and extents ---
+
+		SetReal_SYS("QC", "LEGEND_X_OUT", rXLegend);
+		SetReal_SYS("QC", "LEGEND_Y_OUT", rYLegend);
+
+		GetGroupExtent_MVIEW (View, sGroup, rMinX, rMinY, rMaxX, rMaxY, MVIEW_UNIT_MM);
+		SetReal_SYS("QC", "LEGEND_WIDTH", rMaxX - rMinX);
+		SetReal_SYS("QC", "LEGEND_HEIGHT", rMaxY - rMinY);
+
+
+		// --- Done with legend ---
+
+		Destroy_MVIEW(View);
+		UnLock_EMAP(EMap);
+	}
+
+   // --- Set default plotting channel ---
+
+   SetString_SYS("QCDEVMAP","RESULT","Flag_Diurnal");     
+}

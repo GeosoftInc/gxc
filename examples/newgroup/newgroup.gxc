@@ -1,0 +1,143 @@
+//===========================================================================
+
+NAME          = "Create a new empty group in a view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot"
+
+DESCRIPTION   = "
+
+   NEWGROUP.VIEW  existing view name
+           .GROUP new group name 
+"
+// Revision History:
+//
+// v6.0.0   Warn user about overwriting existing groups and limit group names to 31 characters (32 with terminator)
+// v6.3.    No longer generate empty group now that app has been upgraded to handle empty groups nicely (QA 4648)
+//
+//===========================================================================
+
+RESOURCE = "newgroup.gr"
+#include "newgroup.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_VIEW) sView;
+string(STR_GROUP) sGroup;
+string(STR_VIEW_GROUP) sViewGroup;
+string(STR_GROUP) sGroupTest;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+LST   ViewList;
+int   i, iDone;
+
+//===========================================================================
+//                             MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   EMap = Current_EMAP();
+   Map  = Lock_EMAP(EMap);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+      iDone = 0;
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("newgroup");
+
+
+      // --- Set up lists ---
+
+      ViewList = GetList_DGW(Diag,_NEWGROUP_0);
+      ViewListEx_MAP(Map,ViewList,MAP_LIST_MODE_NOT3D);
+      Sort_LST(ViewList,0,0);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_NEWGROUP_0,DGW_TEXT,"NEWGROUP","VIEW");
+      SetInfoSYS_DGW(Diag,_NEWGROUP_1,DGW_TEXT,"NEWGROUP","GROUP");
+
+      while (!iDone) {
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == 1)
+            Cancel_SYS();
+
+         GetInfo_DGW(Diag, _NEWGROUP_1, DGW_TEXT, sGroupTest);
+         GetInfo_DGW(Diag, _NEWGROUP_0, DGW_TEXT, sView);
+
+         if (iStrlen_STR(sGroupTest) > STR_GROUP - 1)
+            DisplayMessage_SYS(_("NEWGROUP GX"), _("The name of the group is too long. The maximum name length is 1039 characters."));
+         else {
+            // --- open the view and see if the group already exists. ---
+            View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+            
+            if (!iExistGroup_MVIEW(View, sGroupTest) || (iExistGroup_MVIEW(View, sGroupTest) &&
+                iDisplayQuestion_SYS(_("NEWGROUP GX"), _("The group already exists, do you want to overwrite it?")))) {
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_NEWGROUP_0,DGW_TEXT,"NEWGROUP","VIEW");
+               GetInfoSYS_DGW(Diag,_NEWGROUP_1,DGW_TEXT,"NEWGROUP","GROUP");
+
+               iDone = 1;
+            }
+            Destroy_MVIEW(View);
+         }
+      }
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- get parameters ---
+
+   GetString_SYS("NEWGROUP","VIEW",sView);
+   GetString_SYS("NEWGROUP","GROUP",sGroup);
+
+   
+   // --- open the view ---
+
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+
+
+   // --- create new empty group ---
+
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+ 
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+      
+
+   // --- activate the group ---
+   
+   if (iInteractive_SYS()) {
+      Strcpy_STR(sViewGroup,sView);
+      Strcat_STR(sViewGroup,"/");
+      Strcat_STR(sViewGroup,sGroup);
+      ActivateGroup_EMAP(EMap,sViewGroup);
+   }
+
+}

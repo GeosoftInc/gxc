@@ -1,0 +1,186 @@
+//===========================================================================
+NAME          = "Gravity earth-tide corrections"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   Applies tide corrections to current gravity database.
+
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3 New GX
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "agtidecor.gr"
+#include "agtidecor.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;                     // database handle
+DB          Data;                      // database handle
+
+DB_SYMB     Line,LatCh,LonCh,DateCh,TimeCh,OutCh;
+DGW         Diag;                      // Dialogue handle
+LST         List;
+
+real        rGMT;                      // GMT tide difference
+
+string(STR_DB_SYMBOL) sOutCh;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get gravity database ---
+
+   EData  = Current_EDB();
+   Data   = Lock_EDB(EData);
+      
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGTIDECOR");
+
+
+      // --- Set up channel list ---
+
+      List = GetList_DGW(Diag,_AGTIDECOR_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      SetInfoSYS_DGW(Diag,_AGTIDECOR_0,DGW_TEXT,"AGTIDECOR","GMT");
+      SetInfoSYS_DGW(Diag,_AGTIDECOR_1,DGW_TEXT,"AGTIDECOR","OUTCH");
+      
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_AGTIDECOR_0,DGW_TEXT,"AGTIDECOR","GMT");
+      GetInfoSYS_DGW(Diag,_AGTIDECOR_1,DGW_TEXT,"AGTIDECOR","OUTCH");
+      
+      Destroy_DGW(Diag);
+   }
+       
+         
+   // --- Get Parameters ---
+
+   rGMT = rGetReal_SYS("AGTIDECOR","GMT");
+   if(rGMT==rDUMMY)
+      Abort_SYS(_("Invalid GMT value!"));
+   GetString_SYS("AGTIDECOR","OUTCH",sOutCh);
+
+
+   // --- Get channels ---
+
+   if (!iExistSymb_DB(Data,"Date",DB_SYMB_CHAN))  
+      Abort_SYS(_("Date channel does not exist."));
+   DateCh = FindSymb_DB(Data,"Date",DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,"Time",DB_SYMB_CHAN))  
+      Abort_SYS(_("Time channel does not exist."));
+   TimeCh = FindSymb_DB(Data,"Time",DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,"Latitude",DB_SYMB_CHAN))  
+      Abort_SYS(_("Latitude channel does not exist."));
+   LatCh = FindSymb_DB(Data,"Latitude",DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,"Longitude",DB_SYMB_CHAN))  
+      Abort_SYS(_("Longitude channel does not exist."));
+   LonCh = FindSymb_DB(Data,"Longitude",DB_SYMB_CHAN);
+        
+
+   // --- Create output channels and associate with GravData group ---
+   
+   if (iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))
+      OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+   else {
+      OutCh = CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LOCK_RW(Data,OutCh);
+      SetChanDecimal_DB(Data,OutCh,4);
+      SetChanWidth_DB(Data,OutCh,8);
+      UNLOCK(Data,OutCh);
+   }
+
+      
+   // --- Lock the channels ---
+
+   LOCK_R(Data,DateCh);
+   LOCK_R(Data,TimeCh);
+   LOCK_RW(Data,LatCh);
+   LOCK_RW(Data,LonCh);
+   LOCK_RW(Data,OutCh);
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating tide correction"),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, TimeCh) > 0) {
+
+         // --- Tide correction ---
+
+         GravTide_DU(Data,Line,LatCh,LonCh,DateCh,TimeCh,rGMT,OutCh);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+  
+   
+   // --- Add makers ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Earth-tide correction"),"AGTIDECOR;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));
+   SetChanLabel_DB(Data,OutCh,_("Tide Correction"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   UNLOCK(Data,DateCh);
+   UNLOCK(Data,TimeCh);
+   UNLOCK(Data,LatCh);
+   UNLOCK(Data,LonCh);
+   UNLOCK(Data,OutCh);
+   UnLock_EDB(EData);
+
+   // --- Set default for AGFREEAIR GX ---
+
+   SetString_SYS("AGFREEAIR","TIDECORCH", sOutCh);
+
+   // --- Load channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);
+}

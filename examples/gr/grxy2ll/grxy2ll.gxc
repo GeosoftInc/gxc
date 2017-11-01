@@ -1,0 +1,208 @@
+//===========================================================================
+NAME          = "Convert X,Y to Longitude,Latitude"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Locations"
+
+DESCRIPTION   = "
+
+   GRXY2LL.METHOD    \"Projection\" to use a map projection
+                     \"Local\" to use Origin and azimuth
+                     
+"
+// Revision History:
+// v6.1.3: Better default lat/long channel behaviour.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "grxy2ll.gr"
+#include "grxy2ll.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         eData;
+DB          Data;
+DGW         hDGW;                 // Dialogue handle
+DB_SYMB     LonCh,LatCh,XCh,YCh;
+REG         WorkREG;
+LTB         hUNI;
+
+string(STR_DEFAULT_SHORT) sUnit;
+string(STR_DEFAULT_SHORT) sMethod,sLon,sLat,sRot,sXo,sYo;
+string(STR_DB_SYMBOL) sXCh, sYCh, sLonCh, sLatCh;
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      hDGW = Create_DGW("GRXY2LL");
+      SetInfoSYS_DGW(hDGW,_GRXY2LL_0,DGW_LISTALIAS,"GRXY2LL","METHOD");
+      if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+      GetInfoSYS_DGW(hDGW,_GRXY2LL_0,DGW_LISTALIAS,"GRXY2LL","METHOD");
+      Destroy_DGW(hDGW);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRXY2LL","METHOD",sMethod);
+   
+   
+   // --- Get and lock the database ---
+   
+   eData = Current_EDB();
+   Data = Lock_EDB(eData);
+
+
+   // --- Lat and Long channel default names ---
+   
+   Strcpy_STR(sLonCh, _n("Longitude"));
+   Strcpy_STR(sLatCh, _n("Latitude"));   
+         
+   if (iCharComp_STR(sMethod,"P")) 
+   {   
+      
+      UnLock_EDB(eData);
+      
+   
+      // --- projected map, used NEWXY GX. The NEWXY GX
+      //     uses the current X,Y channels by default. ---          
+      
+      SetString_SYS("NEWXY","NEWX",sLonCh);   
+      SetString_SYS("NEWXY","NEWY",sLatCh);   
+      
+      iRunGX_SYS("newxy");
+   
+   } else {
+   
+   
+      // --- get channels ---
+      
+      XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+      if (XCh==NULLSYMB)
+         Abort_SYS(_("The current X channel does not exist."));
+         
+      YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+      if (YCh==NULLSYMB)
+         Abort_SYS(_("The current Y channel does not exist."));
+         
+      // --- get current X, Y channel names ---
+      
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+         
+         
+      LOCK_R(Data,XCh);
+      GetChanUnit_DB(Data,XCh,sUnit);
+      UNLOCK(Data,XCh);
+            
+      LonCh = FindChan_DB(Data,sLonCh);
+      if (LonCh == NULLSYMB) {
+         LonCh = CreateSymb_DB(Data,sLonCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+         LOCK_RW(Data,LonCh);
+         SetChanWidth_DB(Data,LonCh,13);
+         SetChanDecimal_DB(Data,LonCh,2);
+         SetChanUnit_DB(Data,LonCh,_("dega"));
+         SetChanFormat_DB(Data,LonCh,DB_CHAN_FORMAT_GEOGR);
+         UNLOCK(Data,LonCh);
+      }
+         
+      LatCh = FindChan_DB(Data,sLatCh);
+      if (LatCh == NULLSYMB) {
+         LatCh = CreateSymb_DB(Data,sLatCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+         LOCK_RW(Data,LatCh);
+         SetChanWidth_DB(Data,LatCh,13);
+         SetChanDecimal_DB(Data,LatCh,2);
+         SetChanUnit_DB(Data,LatCh,_("dega"));
+         SetChanFormat_DB(Data,LatCh,DB_CHAN_FORMAT_GEOGR);
+         UNLOCK(Data,LonCh);
+      }
+         
+         
+      WorkREG = Create_REG(255);
+      GetWorkspaceREG_SYS(WorkREG);
+      Get_REG(WorkREG,"GRAVRED.LOCAL_LONGITUDE",sLon,sizeof(sLon));
+      Get_REG(WorkREG,"GRAVRED.LOCAL_LATITUDE",sLat,sizeof(sLon));
+      Get_REG(WorkREG,"GRAVRED.LOCAL_X",sXo,sizeof(sXo));
+      Get_REG(WorkREG,"GRAVRED.LOCAL_Y",sYo,sizeof(sYo));
+      Get_REG(WorkREG,"GRAVRED.LOCAL_ROTATION",sRot,sizeof(sLon));
+   
+      if (iInteractive_SYS()) 
+      {
+         hDGW = Create_DGW("GRXY2LL_LOC");
+         
+         hUNI = Create_LTB("units",LTB_TYPE_HEADER,LTB_DELIM_COMMA,"");
+         GetLST_LTB(hUNI,iFindField_LTB(hUNI,"Unit_length"),
+                    GetList_DGW(hDGW,_GRXY2LL_LOC_2));
+         Destroy_SYS(hUNI);                    
+         
+         SetInfo_DGW(hDGW,_GRXY2LL_LOC_0,DGW_TEXT,sXo);
+         SetInfo_DGW(hDGW,_GRXY2LL_LOC_1,DGW_TEXT,sYo);
+         SetInfo_DGW(hDGW,_GRXY2LL_LOC_2,DGW_TEXT,sUnit);
+         SetInfo_DGW(hDGW,_GRXY2LL_LOC_3,DGW_TEXT,sRot);
+         SetInfo_DGW(hDGW,_GRXY2LL_LOC_4,DGW_TEXT,sLon);
+         SetInfo_DGW(hDGW,_GRXY2LL_LOC_5,DGW_TEXT,sLat);
+         
+         if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+         
+         GetInfo_DGW(hDGW,_GRXY2LL_LOC_0,DGW_TEXT,sXo);
+         GetInfo_DGW(hDGW,_GRXY2LL_LOC_1,DGW_TEXT,sYo);
+         GetInfo_DGW(hDGW,_GRXY2LL_LOC_2,DGW_TEXT,sUnit);
+         GetInfo_DGW(hDGW,_GRXY2LL_LOC_3,DGW_TEXT,sRot);
+         GetInfo_DGW(hDGW,_GRXY2LL_LOC_4,DGW_TEXT,sLon);
+         GetInfo_DGW(hDGW,_GRXY2LL_LOC_5,DGW_TEXT,sLat);
+         
+         Destroy_DGW(hDGW);
+         
+         Set_REG(WorkREG,"GRAVRED.LOCAL_LONGITUDE",sLon);
+         Set_REG(WorkREG,"GRAVRED.LOCAL_LATITUDE",sLat);
+         Set_REG(WorkREG,"GRAVRED.LOCAL_X",sXo);
+         Set_REG(WorkREG,"GRAVRED.LOCAL_Y",sYo);
+         Set_REG(WorkREG,"GRAVRED.LOCAL_ROTATION",sRot);
+         SetWorkspaceREG_SYS(WorkREG);
+      }
+      
+      LOCK_RW(Data,XCh);
+      LOCK_RW(Data,YCh);
+      SetChanUnit_DB(Data,XCh,sUnit);
+      SetChanUnit_DB(Data,YCh,sUnit);
+      UNLOCK(Data,XCh);
+      UNLOCK(Data,YCh);
+      UnLock_EDB(eData);
+      
+      
+      // --- call xy2ll ---
+      
+      SetString_SYS("LL2XY","LON",sLonCh);
+      SetString_SYS("LL2XY","LAT",sLatCh);
+      SetString_SYS("LL2XY","X", sXCh);
+      SetString_SYS("LL2XY","Y", sYCh);
+      SetString_SYS("LL2XY","UNITS" ,sUnit);
+      SetString_SYS("LL2XY","LOCLON",sLon);
+      SetString_SYS("LL2XY","LOCLAT",sLat);
+      SetString_SYS("LL2XY","LOCX"  ,sXo);
+      SetString_SYS("LL2XY","LOCY"  ,sYo);
+      SetString_SYS("LL2XY","AZM"   ,sRot);
+      SetString_SYS("XY2LL","CHILD" ,"Yes");
+      iRunGX_SYS("xy2ll");
+         
+   }
+   
+}      

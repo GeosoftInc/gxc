@@ -1,0 +1,251 @@
+//===========================================================================
+NAME          = "WholePlot - Edit Hole"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot/Select Holes"
+
+DESCRIPTION   = "\
+
+Select holes based on values in a collar table channel.
+         DHSELCOLLAR.MODE:  0: Append (update only the holes with matching items for selection)
+			                   1: New (unselect all the holes, then select using the items)
+         DHSELCOLLAR.CHAN  Channel in collar table with values
+         DHSELCOLLAR.ITEMS CSV items for selection.
+"
+// Revision History:
+// v7.3.1: Made the GX scriptable.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhselcollar.gr"
+#include "dhselcollar.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+LST         List,ItemLST,SelLST;
+EDB         EData;
+DH          Drill;
+DB          CollarDB;
+DB_SYMB     Line, Ch, HoleCh;
+VV          VVd, VVd2, VVh;
+
+string(STR_DB_SYMBOL) sChan, sHole,sItem,sSelItem;
+string(STR_FILE) sDB;
+string(STR_DEFAULT_LONG) sMsg, sItems;
+string(STR_DEFAULT) sVal;
+int i,iD,iMode,iType,iN,iND,iNS,j,iSelected;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get DB/DH ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill  = Create_DH(sDB);
+
+   CollarDB = _hCollarDB_DH(Drill);
+   Line = _hCollarSymb_DH(Drill);
+      
+	SelLST = Create_LST(64); 
+   
+   if(iInteractive_SYS()) 
+	{
+		// --- Run the dialog ---
+      
+		Diag = Create_DGW("DHSELCOLLAR");
+
+
+		// --- Create the channel list ---
+         
+		List = GetList_DGW(Diag,_DHSELCOLLAR_0);
+		SymbLST_DB(CollarDB,List,DB_SYMB_CHAN);
+		Sort_LST(List,0,0);
+
+		SetInfoSYS_DGW(Diag,_DHSELCOLLAR_0,DGW_TEXT,"DHSELCOLLAR","CHAN");     
+		SetInfoSYS_DGW(Diag,_DHSELCOLLAR_1,DGW_LISTALIAS,"DHSELCOLLAR","MODE");     
+         
+		iD = iRunDialogue_DGW(Diag);
+		if (iD == -1) Cancel_SYS();
+         
+		GetInfoSYS_DGW(Diag,_DHSELCOLLAR_0,DGW_TEXT,"DHSELCOLLAR","CHAN");     
+		GetInfoSYS_DGW(Diag,_DHSELCOLLAR_1,DGW_LISTALIAS,"DHSELCOLLAR","MODE");     
+		Destroy_DGW(Diag);
+	}
+
+
+	// --- Get the channel ---
+
+	GetString_SYS("DHSELCOLLAR", "CHAN", sChan);
+	if(!iStrlen_STR(sChan))
+		Abort_SYS(_("No collar channel selected."));
+
+
+	iMode = iGetInt_SYS("DHSELCOLLAR","MODE");   
+	if(iMode!=1)   iMode = 0;     // append by default
+   
+
+	// --- Get all the items from the selected channel ---
+   
+	LOCK_R(CollarDB, Line);
+	Ch = FindChan_DB(CollarDB, sChan);
+	if(Ch==NULLSYMB) {
+		Printf_STR(sMsg, sizeof(sMsg), _("Unable to find the %s channel in the collar table."), sChan);
+		Abort_SYS(sMsg);
+	}
+   
+	HoleCh = FindChan_DB(CollarDB, "DH_Hole");
+	if(HoleCh==NULLSYMB) {
+		Strcpy_STR(sMsg, _("Unable to find the DH_HOLE channel in the collar table."));
+		Abort_SYS(sMsg);
+	}
+      
+
+	iType = iGetChanType_DB(CollarDB, Ch);
+   
+	VVd  = CreateExt_VV(iType, 0);
+	VVd2 = CreateExt_VV(iType, 0);
+	VVh = CreateExt_VV(-STR_DB_SYMBOL, 0);
+   
+	LOCK_R(CollarDB, Ch);
+	LOCK_R(CollarDB, HoleCh);
+
+	GetChanVV_DB(CollarDB, Line, Ch, VVd);
+	GetChanVV_DB(CollarDB, Line, HoleCh, VVh);
+	ReFidVV_VV(VVd, VVh);
+   
+	UNLOCK(CollarDB, Ch);
+	UNLOCK(CollarDB, HoleCh);
+	UNLOCK(CollarDB, Line);
+   
+   
+	// --- Check for data ---      
+   
+	iN = iLength_VV(VVd);
+	if(iN==0)
+		Abort_SYS(_("There is no data in the selected collar table channel."));
+      
+   
+	// --- Sort the data and remove duplicates ---
+   
+	Copy_VV(VVd2, VVd);
+	Sort_VV(VVd2, VV_SORT_ASCENDING);
+	DummyRepeat_VVU(VVd2, VVU_DUMMYREPEAT_FIRST);
+	RemoveDummy_VVU(VVd2);
+            
+      
+	// --- Check for valid data ---
+         
+	iND = iLength_VV(VVd2);
+	if(iND==0)
+		Abort_SYS(_("There is no non-dummy data in the selected collar table channel."));
+      
+      
+	// --- Add them to a LST for selection ---
+   
+	ItemLST = Create_LST(64); 
+	for(i=0;i<iND;i++) {
+		GetString_VV(VVd2, i, sItem);
+		AddItem_LST(ItemLST, sItem, "");
+	}
+
+
+   if(iInteractive_SYS()) 
+	{
+		// --- Select the items ---
+   
+		if(iTwoPanelSelection_GUI(ItemLST, SelLST, _("Select items to select the corresponding holes.")))
+			Cancel_SYS();
+
+   
+		// --- Select the holes ---
+   
+		iNS = iSize_LST(SelLST);
+		if(iNS==0)
+			Abort_SYS(_("No items were selected. Hole selection not altered."));
+
+
+		// --- Save the items for script mode ---
+
+		ConvertToCSVString_LST(SelLST, sItems);
+		SetString_SYS("DHSELCOLLAR", "ITEMS", sItems);
+		GetString_SYS("DHSELCOLLAR", "ITEMS", sItems);  // To force output to a script file.
+	}
+	else
+	{
+		GetString_SYS("DHSELCOLLAR", "ITEMS", sItems);  // To force output to a script file.
+		if(iStrlen_STR(sItems)==0)
+			Abort_SYS(_("A list of items must be specified using the DHSELCOLLAR.ITEMS parameter when this GX is used in script mode."));
+		ConvertFromCSVString_LST(SelLST, sItems);
+
+		iNS = iSize_LST(SelLST);
+		if(iNS==0)
+			Abort_SYS(_("No items were selected. Hole selection not altered."));
+	}
+
+   
+	// --- Do the selection ---
+	         
+   if(iMode==1)  // New       
+      UnSelectAllHoles_DH(Drill);
+      
+   iSelected = 0;      
+   Progress_SYS(1);
+   ProgName_SYS(_("Selecting holes"),1);
+   for(i=0;i<iN;i++) 
+	{      
+      ProgUpdateL_SYS(i,iN);
+      
+      GetString_VV(VVd, i, sItem);
+      for(j=0;j<iNS;j++) 
+		{
+         GetItem_LST(SelLST, 0, j, sSelItem);
+         if(iStrcmp_STR(sItem, sSelItem, STR_CASE_TOLERANT)==0) 
+			{
+            GetString_VV(VVh, i, sHole);
+            SelectName_DH(Drill, sHole, 1, 1);  // select in append mode
+            iSelected++;
+            break; 
+         }
+      }
+   }            
+   Progress_SYS(0);
+
+
+	if(iInteractive_SYS())
+	{
+		if(iSelected==0)
+			Strcpy_STR(sMsg, _("No holes were selected."));
+		else if(iSelected==1) 
+		{
+			Printf_STR(sMsg, sizeof(sMsg), _("The hole %s was selected."), sHole);
+		}
+		else 
+		{
+			FormatI_STR(iSelected, sVal, 10);
+			Printf_STR(sMsg, sizeof(sMsg), _("A total of %s holes were selected."), sVal);
+		}
+		DisplayMessage_SYS(_("Select holes from collar table value(s)"), sMsg);
+	}
+
+
+   // --- Clean up ---
+
+   Destroy_DH(Drill);
+
+
+}

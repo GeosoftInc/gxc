@@ -1,0 +1,1076 @@
+//===========================================================================
+NAME          = "Import drill-hole data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Import"
+
+DESCRIPTION   = "
+   
+   Import drill-hole data from an ASCII or DATABASE/XLS file.
+
+   Script Parameters:
+
+DHIMPORT.IMPTYPE     0: ASCII, 1: Database/XLS, 2: ODBC, 3: ESRI
+           .OVERWRITE   Create new database (1) or merge/append to existing (0)
+           .LOG         1: Force log file display (must be set every time)
+   (CALLING GX).FILE        Input data file name
+               .TEMPLATE    Import template file name(s) (*.i3 - ASCII or *.i4 - Database/XLS)
+               .TYPE        Data type (see dh.gxh for DH_DATA_XXXX)
+               .TABLE       Table name for From-To or Point data.
+   DHIMPODBC.CONNECTION     Connection string for ODBC import.                      
+"
+// Revision History:
+// v7.1.1: QA 15756 Increase page size of survey databases to match assay databases (1024).
+// v7.0.1: Added Geodatabase import. No GUI usage here just non-interactive.
+// v7.0.0: Added DHPROJECT.PAGE_SIZE option, and set default for assay databases to 1024, up from 64.
+// v6.4.2: Only store template when creating a new database or overwriting existing one.
+// v6.4.0: Input file name on first dialog should override template value (at least in
+//         interactive mode).
+// v6.3.0: Removed check for obsolete single Wholeplot databases.
+//         Optimized for very large drill projects.
+//         Fix directory location for collar tables.
+//         Fixed for script mode testing.
+// v6.2.0: Automatically increase size for databases based on number of holes imported
+//         into the collar table.
+// v6.1.0: For new collar tables, all channels are loaded.
+// v6.0.1: Checks for pre-existing DH_RL before renaming DH_ELEV in collar table.
+// v6.0.0: Added ODBC database import.
+//         No longer support import to old-style single database projects.
+//         Support for multiple selection on template import.
+//         Channel data parameters now saved in cases of overwrite.
+//         Hole selections preserved during overwrite.
+//         Channels now loaded here if none loaded to begin with.
+//         New database is made the current database on exit.
+//         Update collar table extents only for collar and survey imports.
+//         Store template full path only if it is not in the local directory.
+// v5.1.8: Allow import using templates. Templates saved using file name.
+//         GX is now scriptable.
+//         New GX: Combined DHIMPORT and DHIMPDB functionality.
+//         Save file names for different types in different parameters
+// v5.1.7: Optional setting of projection for new collar tables.
+// v5.1.6: Remove channel limitations for Collar tables.
+//         Replaced collar table creation code with DH function all.
+// v5.1.3: Using "Current" X and Y channels
+//         DH_HOLEID channel deleted after import.
+//         East-North survey "tag" changed from "XYSurvey" to "ENSurvey"
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhimport.gr"
+#include "dhimport.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+DB_SYMB     Line;             // Line Handle
+DB_SYMB     HoleCh;           // Hole Handle
+DB_SYMB     hCh, hCh2, ChX, ChY;
+DB          hDB;
+DH          hDH;
+REG         Reg;
+LST         List, AssayLST, HoleLST, UnHoleLST, ChanLST, TemplateChanLST, DatabaseChanLST;
+IPJ         Ipj;
+VV          VVf, VVi;
+
+int i, j, iType, iImpType, iOverwrite, iOverW, iLines, iNumLines, iBlobs, iChannels, iDefChannels, iPageSize, iNewDB;  
+int iRet, iTemplate, iTemplates, iNewCollarDB, iCollarTemplate, iNTemp, iTemp, iRequiredChannels;
+int iForceLogFile, iInteractive, iSaveINI, iNAssay, iNStartHoles, iHoles;
+int iOverrideTemplateDataFileAdo, iOverrideTemplateDataFile, bMaxwell;
+
+string(1024) sConnect, sMsg;
+string(STR_FILE) sData, sTable, sDB, sCurrentDB, sNewDB, sProject, sFile, sDirINI;
+string(STR_FILE) sVol, sDir, sDir2, sName, sName2, sTemplate, sLog, sExt;
+string(STR_FILE) sLocalPath, sLocalDir, sLocalVol;
+string(STR_MULTI_FILE) sTemplates;
+string(STR_DEFAULT) sGxParam;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the import type ---
+
+   iImpType = iGetInt_SYS("DHIMPORT","IMPTYPE");
+   if(iImpType<0 || iImpType>3)
+      Abort_SYS(_("This GX is intended to be called from other GXs only."));
+
+   if(iImpType==0) {
+      Strcpy_STR(sExt,"i3");
+      Strcpy_STR(sGxParam, "DHIMPASC");
+   }
+   else if(iImpType==1) {
+      Strcpy_STR(sExt,"i4");
+      Strcpy_STR(sGxParam, "DHIMPDB");
+   }
+   else if(iImpType==2) {
+      Strcpy_STR(sExt,"i4");
+      Strcpy_STR(sGxParam, "DHIMPODBC");
+   }
+	else if(iImpType==3) {
+      Strcpy_STR(sExt,"i4");
+      Strcpy_STR(sGxParam, "DHGEOCHEMIMPORT");
+   }
+
+
+   // --- Force log file display? Set every time. ---
+   
+   iForceLogFile = iGetInt_SYS("DHIMPORT", "LOG");
+   if(iForceLogFile!=1) iForceLogFile = 0;
+   SetInt_SYS("DHIMPORT", "LOG", 0);   // default to no.
+   
+   
+   // --- Get Current Database and DH project name ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sCurrentDB);
+   hDH = Create_DH(sCurrentDB);
+   Reg = GetREG_DH(hDH);
+   
+
+   // --- Get information on the location of the collar database. If the
+   //     volume and directory are the same as the workspace volume and 
+   //     directory, then reset the volume and directory to empty strings. ---
+         
+   FileNamePart_STR(sCurrentDB, sVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sCurrentDB, sDir, STR_FILE_PART_DIRECTORY);
+
+   GetDirectory_SYS(SYS_DIR_LOCAL,sLocalPath);
+   FileNamePart_STR(sLocalPath, sLocalVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sLocalPath, sLocalDir, STR_FILE_PART_DIRECTORY);
+   
+   // --- Get the project name ---
+
+   GetProjectName_DH(hDH, sProject);
+
+   
+   // --- Get the projection info ---
+   
+   Ipj = Create_IPJ();
+   GetIPJ_DH(hDH, Ipj);
+   
+   
+   // --- Create a list of the unselected holes, because if overwriting,
+   //     all holes are selected initially. ---
+   
+   HoleLST = Create_LST(2*STR_DB_SYMBOL);
+   UnHoleLST = Create_LST(2*STR_DB_SYMBOL);
+   UnSelectedHoleLST_DH(hDH, UnHoleLST);
+
+   iNStartHoles = iHoles_DH(hDH);
+   
+
+   // --- VV to store the names of overwritten assay databases. This is used
+   //     for restoring channel REG data ---
+   
+   VVf = Create_VV(-STR_FILE, 0);
+   iNAssay = 0;
+   
+
+   // --- Get a list of existing assay tables ---
+   
+   AssayLST = Create_LST(2*STR_DB_SYMBOL);
+   AssayLST_DH(hDH, AssayLST);
+   
+
+   // --- See if the collar table is using DH_ELEV. If yes, change the name to DH_RL ---
+
+   hDB = hCollarDB_DH(hDH);
+   hCh = FindChan_DB(hDB, "DH_ELEV");
+   hCh2 = FindChan_DB(hDB, "DH_RL");
+   if(hCh != NULLSYMB && hCh2==NULLSYMB) {
+      LOCK_RW(hDB,hCh);
+      SetChanName_DB(hDB, hCh, "DH_RL");
+      SetXYZChan_DB(hDB, DB_CHAN_Z, "DH_RL");
+      UNLOCK(hDB,hCh);
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   bMaxwell = FALSE;
+   iOverrideTemplateDataFile = FALSE;     // normally, get the data file from the template.
+   iOverrideTemplateDataFileAdo = FALSE;
+   if(iInteractive_SYS()) {
+		if(iImpType == 3)
+			Abort_SYS(_("This GX is not intended to be called interactively for Geodatabase imports."));
+
+      i = 1;
+      while (i != 0) {
+
+         switch (i) {
+         
+            case 1:
+            
+               // --- file name ---
+
+               if(iImpType==0) {
+            
+                  Diag = Create_DGW(sGxParam);
+                  SetInfoSYS_DGW(Diag,_DHIMPASC_0,DGW_FILEPATH,sGxParam,"FILE");
+                  SetInfoSYS_DGW(Diag,_DHIMPASC_1,DGW_LISTALIAS,"DHIMPORT","OVERWRITE");
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();
+                  GetInfoSYS_DGW(Diag,_DHIMPASC_0,DGW_FILEPATH,sGxParam,"FILE");
+                  GetInfoSYS_DGW(Diag,_DHIMPASC_1,DGW_LISTALIAS,"DHIMPORT","OVERWRITE");
+                  Destroy_DGW(Diag);                                    
+                  break;
+               }
+               else if(iImpType==1) {
+
+                  Diag = Create_DGW(sGxParam);
+                  SetInfoSYS_DGW(Diag,_DHIMPDB_0,DGW_FILEPATH,sGxParam,"FILE");
+                  SetInfoSYS_DGW(Diag,_DHIMPDB_1,DGW_LISTALIAS,"DHIMPORT","OVERWRITE");
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();
+                  GetInfoSYS_DGW(Diag,_DHIMPDB_0,DGW_FILEPATH,sGxParam,"FILE");
+                  GetInfoSYS_DGW(Diag,_DHIMPDB_1,DGW_LISTALIAS,"DHIMPORT","OVERWRITE");
+                  Destroy_DGW(Diag);
+                  break;
+               }
+               else if(iImpType==2) {
+
+                  Diag = Create_DGW(sGxParam);
+                  SetInfoSYS_DGW(Diag,_DHIMPODBC_0,DGW_LISTALIAS,"DHIMPORT","OVERWRITE");
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();
+                  GetInfoSYS_DGW(Diag,_DHIMPODBC_0,DGW_LISTALIAS,"DHIMPORT","OVERWRITE");
+                  Destroy_DGW(Diag);
+                  
+                  
+                  // --- Force ODBC reconnection? ---
+                  
+                  if(i==4) {
+                     SetString_SYS(sGxParam, "CONNECTION", "");  
+                     i=2;  // --- now run the wizard ---             
+                  }
+                  break;
+               }
+               
+               // --- If wizard, require file for ASCII and XLS/database
+               
+               if(iImpType!=2 && i==2) {
+                  GetString_SYS(sGxParam, "FILE", sData);
+                  if(!iStrlen_STR(sData)) {
+                     DisplayMessage_SYS(_("Import using Wizard"), _("The \"File to import\" field is required."));
+                     i = 1;                                        
+                  }
+               }
+
+
+            case 2:     // --- template creation wizard ---
+                           
+
+               // --- For ASCII, save the template using the input file name,
+               //     because each saved table has an individual file. The
+               //     XLS/Database/ODBC imports generally import from a single
+               //     source, so the template name is constructed in the wizard
+               //     from the output Wholeplot table name. ---
+
+               if(iImpType==0) {    // ASCII Import Wizard
+               
+                  GetString_SYS(sGxParam,"FILE",sData);
+
+                  FileNamePart_STR(sData, sName, STR_FILE_PART_NAME);
+                  FileCombineParts_STR(sVol,sDir,sName,sExt,"",sTemplate);
+
+                  
+                  // --- See if the template already exists; it may already contain
+                  //     the import type info ---
+                  
+                  iType = DH_DATA_UNKNOWN;
+                  if(iFileExist_SYS(sTemplate)) {
+                     GetTemplateInfo_DH(sTemplate, iType, sFile, sTable);
+                  }
+
+                  ImportDrillWizard_GUI(sData,sTemplate,sTable,sizeof(sTable),iType,Reg);
+               }
+               else if(iImpType==1) {               // Database/XLS Import Wizard
+
+                  GetString_SYS(sGxParam,"FILE",sData);
+
+                  Strcpy_STR(sConnect, "FILENAME=");
+                  Strcat_STR(sConnect, sData);
+
+                  iType = -1;
+                  if(iImportDrillDatabaseADO2_GUI(sConnect,sTemplate,sTable,iType,Reg)==-1) {
+                     i=1;
+                     break;
+                  }
+               }
+               else if(iImpType==2) {               // ODBC Import Wizard
+
+                  // --- Get any existing connnection ---
+                  
+                  GetString_SYS(sGxParam, "CONNECTION", sConnect);
+                  iType = -1;
+
+                  if (iExistInt_SYS(_n("DHIMPORT"), _n("IMPORT_ODBC_MAXWELL")) && 1 == iGetInt_SYS(_n("DHIMPORT"), _n("IMPORT_ODBC_MAXWELL")))
+                  {
+                     if(iImportDrillDatabaseODBCMaxwell_GUI(sConnect, sTemplate, sTable, iType, Reg) == -1)
+                     {
+                        i = 1;
+						bMaxwell = TRUE;
+                        break;
+                     }
+                  }
+                  else
+                  {
+                     if(iImportDrillDatabaseODBC_GUI(sConnect,sTemplate,sTable,iType,Reg)==-1)
+                     {
+                        i = 1;
+                        break;
+                     }
+                  }
+
+                  SetString_SYS(sGxParam, "CONNECTION", sConnect);
+               }
+               
+               SetString_SYS(sGxParam,"TEMPLATE",sTemplate);
+               
+               i = 0;
+               break;
+      
+   
+            case 3:
+            
+               // --- template import ---
+
+               if(iImpType==0) {
+                  
+                  Diag = Create_DGW("DHIMPTEMPASC");
+
+                  SetInfoSYS_DGW(Diag,_DHIMPTEMPASC_0,DGW_FILEPATH,sGxParam,"TEMPLATE");
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) {
+                     Destroy_DGW(Diag);
+                     i = 1;
+                     break;
+                  }
+                  GetInfoSYS_DGW(Diag,_DHIMPTEMPASC_0,DGW_FILEPATH,sGxParam,"TEMPLATE");
+                  Destroy_DGW(Diag);
+               }
+               else {
+                  
+                  Diag = Create_DGW("DHIMPTEMPDB");
+
+                  SetInfoSYS_DGW(Diag,_DHIMPTEMPDB_0,DGW_FILEPATH,sGxParam,"TEMPLATE");
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) {
+                     Destroy_DGW(Diag);
+                     i = 1;
+                     break;
+                  }
+                  GetInfoSYS_DGW(Diag,_DHIMPTEMPDB_0,DGW_FILEPATH,sGxParam,"TEMPLATE");
+                  Destroy_DGW(Diag); 
+               }
+               
+               // --- Override the data file stored in the template with the data file entered
+               //     in the interactive dialog ---
+               
+               iOverrideTemplateDataFile = TRUE;
+               
+               break;
+         }
+      }
+   }
+   else
+   {
+        GetString_SYS(sGxParam, "FILE", sData);
+        if(iImpType==1)
+        {
+            iOverrideTemplateDataFileAdo = iGetInt_SYS("DHIMPORT", "OVERWRITETEMPDATA_ADO");
+            if (iOverrideTemplateDataFileAdo != 1)
+                iOverrideTemplateDataFileAdo = 0;
+        }
+        else
+        {
+            iOverrideTemplateDataFile = iGetInt_SYS("DHIMPORT", "OVERWRITETEMPDATA");
+            if (iOverrideTemplateDataFile != 1)
+                iOverrideTemplateDataFile = 0;
+        }
+   }
+   Destroy_DH(hDH);
+
+
+   // --- Get and validate parameters ---
+
+   GetString_SYS(sGxParam,"TEMPLATE",sTemplates);
+   iOverwrite = iGetInt_SYS("DHIMPORT", "OVERWRITE");
+   
+   if(iOverwrite!=0) iOverwrite = 1;   // overwrite by default
+   if(!iStrlen_STR(sTemplates))
+      Abort_SYS(_("No input template file defined."));
+
+
+   // --- How many templates to import? ---
+
+   iTemplates = iCountTokens_STR(sTemplates,"|");
+   if(iTemplates==0)
+      Abort_SYS(_("No templates defined for import."));
+
+
+   // --- If there is a collar table in the list of templates, import
+   //     it first ---
+   
+   iCollarTemplate = -1;
+   iNTemp = 0;
+   iSaveINI = 0;
+   for(iTemplate=0; iTemplate<iTemplates; iTemplate++) {
+   
+     
+      // --- get the template file ---
+      
+      GetMFile_STR(sTemplates,sTemplate,iTemplate);
+	  if (bMaxwell) {
+		  iType = iScanI_STR(sTemplate);
+	  }
+      GetTemplateInfo_DH(sTemplate, iType, sFile, sTable);
+      
+      if(iType==DH_DATA_COLLAR) {
+         iCollarTemplate = iTemplate;
+         iNTemp++;
+      }
+   }
+      
+   if(iNTemp>1) 
+      Abort_SYS(_("You may not import using more than one collar table template file at a time."));   
+
+   
+   // --- Set number of lines, channels ---
+
+   iLines = iGetInt_SYS("DHPROJECT", "HOLES");
+   iDefChannels = iGetInt_SYS("DHPROJECT", "CHANNELS");
+   iPageSize = iGetInt_SYS("DHPROJECT", "PAGE_SIZE");
+
+   if(iLines == iDUMMY) iLines = 1000;
+   if(iDefChannels == iDUMMY) iDefChannels = 100;
+   if(iPageSize == iDUMMY) 
+   {
+      if(iType==DH_DATA_FROMTO ||
+         iType==DH_DATA_POINT ||
+         iType==DH_DATA_DIPAZIMUTH ||
+         iType==DH_DATA_EASTNORTH)
+         iPageSize = 1024;
+      else
+         iPageSize = 64;
+   }
+   
+   
+   // --- Validate page size ---
+   
+   if(iPageSize!=64 &&
+      iPageSize!=128 &&
+      iPageSize!=256 &&
+      iPageSize!=512 &&
+      iPageSize!=1024 &&
+      iPageSize!=2048 &&
+      iPageSize!=4096)
+      Abort_SYS(_("Invalid page size parameter passed in DHPROJECT.PAGE_SIZE. Valid values are 64,128,256,512,1024,2048, and 4096."));
+
+
+   // --- import ---
+   
+   Progress_SYS(1);
+
+
+   // --- New Wholeplot writes to different databases for different data sets ---
+
+	TemplateChanLST = Create_LST(2*STR_DB_SYMBOL);
+	DatabaseChanLST = Create_LST(2*STR_DB_SYMBOL);
+	ChanLST = Create_LST(2*STR_DB_SYMBOL);
+   iNewCollarDB = 0;
+   iTemp = 0;
+   for(iTemplate=0; iTemplate<iTemplates; iTemplate++) {
+   
+      
+      // --- Collar template first ---
+      
+      if(iTemplate==0 && iCollarTemplate!=-1)
+         iTemp = iCollarTemplate;
+      else if(iTemp==iCollarTemplate)  // skip collar template
+         iTemp++;
+      
+      
+      // --- get the template file ---
+      
+      GetMFile_STR(sTemplates,sTemplate,iTemp);
+      
+      
+      // --- Set the next template ---
+      
+      if(iTemplate==0 && iCollarTemplate!=-1)
+         iTemp = 0;     // start at the beginning again.
+      else 
+         iTemp++;       // go to the next one
+      
+      
+      // --- get the data type and table name for this template ---
+      
+      GetTemplateInfoEx_DH(sTemplate, iType, sData, sTable, TemplateChanLST);
+      
+
+      
+      // --- Or, if in interactive mode, and the data file has been specified in the
+      //     first dialog, use it instead ---
+      
+      if ((iTemplates==1 &&
+         iOverrideTemplateDataFile) ||
+         iOverrideTemplateDataFileAdo)
+      {
+         GetString_SYS(sGxParam, "FILE", sData);      
+      }
+      
+
+      
+      // --- if any of the required info is not found, need to get it from the user ---
+      
+      if(iImpType==2) 
+		{ // ODBC Import
+      
+         if(iType == DH_DATA_UNKNOWN ||
+            !iStrlen_STR(sTable))
+         {
+
+            if(iInteractive_SYS()) {      
+                  
+               Diag = Create_DGW("DHIMPINFOODBC");
+      
+               List = GetList_DGW(Diag,_DHIMPINFOODBC_2);
+               Copy_LST(List, AssayLST);               
+      
+               FileNamePart_STR(sTemplate,sName,STR_FILE_PART_NAME_EXTENSION);
+      
+               SetInfo_DGW(Diag,_DHIMPINFOODBC_0,DGW_TEXT,sName);
+               SetInfoSYS_DGW(Diag,_DHIMPINFOODBC_1,DGW_LISTALIAS,sGxParam,"TYPE");
+               SetInfoSYS_DGW(Diag,_DHIMPINFOODBC_2,DGW_TEXT,sGxParam,"TABLE");
+                  
+               iRet = iRunDialogue_DGW(Diag);
+               if(iRet == -1) {     // if user cancels, exit everything
+                  Cancel_SYS();
+               }
+      
+               GetInfoSYS_DGW(Diag,_DHIMPINFOODBC_1,DGW_LISTALIAS,sGxParam,"TYPE");
+               GetInfoSYS_DGW(Diag,_DHIMPINFOODBC_2,DGW_TEXT,sGxParam,"TABLE");
+            }
+
+            if(iType==DH_DATA_UNKNOWN)
+            {
+               iType = iGetInt_SYS(sGxParam,"TYPE");
+               if(iType<DH_DATA_DIPAZIMUTH ||
+                  iType>DH_DATA_COLLAR) 
+               {
+                  Printf_STR(sMsg, sizeof(sMsg), _("Input data type not defined for import of template %s."), sName);
+                  Abort_SYS(sMsg);
+               }
+            }
+            
+            if(!iStrlen_STR(sTable) &&
+                (iType==DH_DATA_POINT ||
+                 iType==DH_DATA_FROMTO))
+            {
+               GetString_SYS(sGxParam,"TABLE",sTable);
+               if(!iStrlen_STR(sTable))
+               {
+                  Printf_STR(sMsg, sizeof(sMsg), _("Wholeplot table name not defined for import of template %s."), sName);
+                  Abort_SYS(sMsg);
+               }
+            }            
+         }
+      }
+      else if(iImpType!=3) 
+		{   // ASCII / XLS / Database Import
+      
+         if(iType == DH_DATA_UNKNOWN ||
+            !iStrlen_STR(sFile) ||
+            !iStrlen_STR(sTable))
+         {
+
+            if(iInteractive_SYS()) {      
+                  
+               Diag = Create_DGW("DHIMPINFO");
+
+               List = GetList_DGW(Diag,_DHIMPINFO_3);
+               Copy_LST(List, AssayLST);               
+
+               FileNamePart_STR(sTemplate,sName,STR_FILE_PART_NAME_EXTENSION);
+      
+               SetInfo_DGW(Diag,_DHIMPINFO_0,DGW_TEXT,sName);
+               SetInfoSYS_DGW(Diag,_DHIMPINFO_1,DGW_FILEPATH,sGxParam,"FILE");
+               SetInfoSYS_DGW(Diag,_DHIMPINFO_2,DGW_LISTALIAS,sGxParam,"TYPE");
+               SetInfoSYS_DGW(Diag,_DHIMPINFO_3,DGW_TEXT,sGxParam,"TABLE");
+                  
+               iRet = iRunDialogue_DGW(Diag);
+               if(iRet == -1) {     // if user cancels, exit everything
+                  Cancel_SYS();
+               }
+      
+               GetInfoSYS_DGW(Diag,_DHIMPINFO_1,DGW_FILEPATH,sGxParam,"FILE");
+               GetInfoSYS_DGW(Diag,_DHIMPINFO_2,DGW_LISTALIAS,sGxParam,"TYPE");
+               GetInfoSYS_DGW(Diag,_DHIMPINFO_3,DGW_TEXT,sGxParam,"TABLE");
+            }
+
+            if(!iStrlen_STR(sData)) 
+            {            
+               GetString_SYS(sGxParam,"FILE",sData);
+               if(!iStrlen_STR(sData)) 
+               {
+                  Printf_STR(sMsg, sizeof(sMsg), _("Input data file not defined for import of template %s."), sName);
+                  Abort_SYS(sMsg);
+               }
+            }
+               
+            if(iType==DH_DATA_UNKNOWN)
+            {
+               iType = iGetInt_SYS(sGxParam,"TYPE");
+               if(iType<DH_DATA_DIPAZIMUTH ||
+                  iType>DH_DATA_COLLAR) 
+               {
+                  Printf_STR(sMsg, sizeof(sMsg), _("Input data type not defined for import of template %s."), sName);
+                  Abort_SYS(sMsg);
+               }
+            }
+            
+            if(!iStrlen_STR(sTable) &&
+                (iType==DH_DATA_POINT ||
+                 iType==DH_DATA_FROMTO))
+            {
+               GetString_SYS(sGxParam,"TABLE",sTable);
+               if(!iStrlen_STR(sTable))
+               {
+                  Printf_STR(sMsg, sizeof(sMsg), _("Wholeplot table name not defined for import of template %s."), sName);                  
+                  Abort_SYS(sMsg);
+               }
+            }            
+         }
+      }
+            
+
+      // --- Table to Assay LST? ---
+         
+      if(iType==DH_DATA_POINT ||
+         iType==DH_DATA_FROMTO)
+         AddUniqueItem_LST(AssayLST, sTable, "");            
+
+   
+      // --- Do the import ---
+      
+      iNewDB = 0;          // need to set projection if new DB
+      iNumLines = iLines;
+
+
+      // --- Set output DB name ---
+
+      Strcpy_STR(sName, sProject);
+      Strcat_STR(sName, "_");
+      if(iType == DH_DATA_COLLAR) {
+         Strcat_STR(sName, _n("Collar"));
+         iNumLines = 2;
+      }
+      else if(iType == DH_DATA_DIPAZIMUTH)
+         Strcat_STR(sName, _n("Survey"));
+      else if(iType == DH_DATA_EASTNORTH)
+         Strcat_STR(sName, _n("ENSurvey"));
+      else if(iType == DH_DATA_FROMTO)
+         Strcat_STR(sName, sTable);
+      else if(iType == DH_DATA_POINT)
+         Strcat_STR(sName, sTable);
+      
+      FileCombineParts_STR(sVol,sDir,sName,"gdb","",sNewDB);
+      
+      
+      // --- Make this the current DB on exit ---
+      
+      Strcpy_STR(sCurrentDB, sNewDB);
+
+
+      // --- Delete and re-create? ---
+
+      iOverW = iOverwrite;
+      if (iFileExist_SYS(sNewDB)) {
+
+         if(iType==DH_DATA_COLLAR) {
+
+            
+            // --- If the original collar table has no holes in it, it is not
+            //     necessary to delete it ---
+
+            if(iNStartHoles==0) 
+               iOverW = 0;            
+
+
+            // --- Delete any existing "L0" or "TempData" lines which may hang around if there was an error
+            //     on a previous import ---
+
+            EData = Load_EDB(sNewDB);
+            Data = Lock_EDB(EData);
+
+            Line = FindSymb_DB(Data,"L0",DB_SYMB_LINE);
+            if(Line!=NULLSYMB) {
+               LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+               DeleteSymb_DB(Data, Line);
+            }
+            Line = FindSymb_DB(Data,"TempData",DB_SYMB_LINE);
+            if(Line!=NULLSYMB) {
+               LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+               DeleteSymb_DB(Data, Line);
+            }
+
+            UnLock_EDB(EData);        
+         }
+         else if(iOverW &&
+                 (iType==DH_DATA_FROMTO ||
+                  iType==DH_DATA_POINT)) {
+
+            
+            // --- Save the current database channel REG data ---
+       
+            EData = Load_EDB(sNewDB);
+            Data = Lock_EDB(EData);
+
+            FileNamePart_STR(sNewDB,sName,STR_FILE_PART_NAME);
+            
+            
+            //--- Create directory for this database. Make it in the
+            //    INI directory off the database directory ---
+               
+            Strcpy_STR(sDirINI, "");                  
+            if(iStrlen_STR(sVol)) {                  
+               Strcat_STR(sDirINI, sVol);
+               Strcat_STR(sDirINI, ":");
+            }
+            if(iStrlen_STR(sDir)) {
+               Strcat_STR(sDirINI, sDir);
+               Strcat_STR(sDirINI, "\\");                  
+            }
+            Strcat_STR(sDirINI, "INI");
+            if(!iDirExist_SYS(sDirINI))
+               iMakeDir_SYS(sDirINI);
+            Strcat_STR(sDirINI, "\\");
+            Strcat_STR(sDirINI, sName);
+            if(!iDirExist_SYS(sDirINI))
+               iMakeDir_SYS(sDirINI);
+
+         
+            // --- Save the data paramters ---
+         
+            SaveDataParametersINI_DH((DH)0, Data, sDirINI);    // DH is ignored as of 6.3.
+            UnLock_EDB(EData);
+                        
+                        
+            // --- Remember the names of the overwritten assay databases ---
+                                    
+            SetString_VV(VVf, iNAssay, sName);
+            iNAssay++;
+         }
+
+         if(iOverW) {
+            if(iLoaded_EDB(sNewDB))
+               UnLoad_EDB(sNewDB);
+
+            iDeleteFile_SYS(sNewDB);
+         }
+      }
+      else         
+         iOverW = TRUE;    // Create by default
+
+      
+		// --- If overwriting, or creating a new database, ensure that enough channels are
+		//     being created. Round up to the nearest multiple of 20 at least 10 bigger.
+
+		Copy_LST(ChanLST, TemplateChanLST);
+		GetTableDefaultChanLST_DH(DatabaseChanLST, iType);
+		Append_LST(ChanLST, DatabaseChanLST);
+
+		iChannels = iDefChannels;
+		iRequiredChannels = iSize_LST(ChanLST);
+		if(iChannels < iRequiredChannels + 10)
+			iChannels = 20 * ((int)rCeil_MATH((real)(iRequiredChannels - 10)/ 20.0) + 1);
+
+      iBlobs = iNumLines+iChannels+50;
+
+      if(iOverW) {
+
+         if(iType == DH_DATA_COLLAR) {
+         
+            
+            // --- Ensure it is in the correct directory ---
+            
+            FileCombineParts_STR(sVol,sDir,"","","",sDir2);
+         
+            CreateCollarTableDir_DH(sProject, sDir2, iChannels, sNewDB);
+            iNewCollarDB = 1;
+         }
+         else
+            CreateEx_DB(sNewDB, iNumLines, iChannels, iBlobs, 10, 200, "SUPER", "", iPageSize);         
+         iNewDB = 1;
+      }
+      
+
+
+      // --- Open the database and make it current ---
+
+      EData = Load_EDB(sNewDB);
+      Data = Lock_EDB(EData);
+           
+
+      // --- Get rid of existing temporary lines, in case a previous import failed ---
+
+      if(iExistSymb_DB(Data, "TempData", DB_SYMB_LINE)) {
+         Line = FindSymb_DB(Data,"TempData",DB_SYMB_LINE);
+         LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data, Line);
+      }
+      if(iExistSymb_DB(Data, "L0", DB_SYMB_LINE)) {
+         Line = FindSymb_DB(Data,"L0",DB_SYMB_LINE);
+         LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data, Line);
+      }
+
+
+      // --- Import the data ---
+
+      ProgName_SYS(_("Importing data to temporary table."),1);
+      if(iImpType==0)
+         ImportBIN_DU(Data,sData,sTemplate,"TempData",iDUMMY,rDUMMY);
+		else if(iImpType==3)
+			ImportESRI_DU(Data,"",sTemplate,"TempData");
+      else
+      {
+            if(iOverrideTemplateDataFileAdo)
+            {
+                Strcpy_STR(sConnect, "FILENAME=");
+                Strcat_STR(sConnect, sData);
+                ImportADO_DU(Data,sConnect,"",sTemplate,"TempData");
+            }
+            else
+                ImportADO_DU(Data,"","",sTemplate,"TempData");
+      }
+
+      
+      // --- Import data ---
+      
+      Line = FindSymb_DB(Data,"TempData",DB_SYMB_LINE);
+      
+      if (iType==DH_DATA_COLLAR)
+      {
+         HoleCh = FindChan_DB(Data,"DH_HOLE");
+         ProgName_SYS(_("Setting up collar table"),1);
+         
+            
+      } else {
+         HoleCh = FindChan_DB(Data,"DH_HOLEID");
+         if(HoleCh==NULLSYMB)
+            HoleCh = FindChan_DB(Data,"DH_HOLE");
+         ProgName_SYS(_("Splitting data to holes"),1);
+      }
+      
+
+      // --- Create a log file name from the imported file name ---
+
+      Strcpy_STR(sLog, "dhimp_");
+      Strcat_STR(sLog, sTable);
+      Strcat_STR(sLog, ".log");
+
+      Import2_DH(sProject,Data,Line,HoleCh,sTable,iType,sLog);
+      ProgName_SYS(_("Import complete"),1);
+
+
+      // --- Delete the HOLEID channel except for collar data ---
+
+      if(iType!=DH_DATA_COLLAR) {
+         LockSymb_DB(Data, HoleCh, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data, HoleCh);      
+      }
+      
+
+      // --- Set the template into the database for refresh, but only if 
+      //     overwriting ---
+      
+      if(iOverwrite || iOverW)
+         SetTemplateBlob_DH(Data, sTemplate, iImpType); 
+      
+      
+      // --- Set the projection ---
+      
+      ChX = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+      ChY = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+      if(ChX!=NULLSYMB && ChY!=NULLSYMB)
+         SetIPJ_DB(Data, ChX, ChY, Ipj);
+      
+      
+      // --- Unprotect all channels ---
+      
+      SetAllChanProtect_DB(Data, DB_CHAN_UNPROTECTED);
+      
+      
+      // --- Delete any empty L0 ---
+            
+      DelLine0_DB(Data);
+
+
+      // --- Commit the database ---
+      
+      Commit_DB(Data);      
+
+
+      // --- Release the database ---      
+              
+      UnLock_EDB(EData);   
+         
+         
+      
+
+      
+      // --- If no channels are loaded, or importing a new collar table, load them all ---
+      
+      if(!iScript_SYS())
+      {
+         if(iDispChanLST_EDB(EData, ChanLST)==0 ||
+            (iType==DH_DATA_COLLAR && (iNewCollarDB || iNStartHoles==0))) {
+            LoadAllChans_EDB(EData);
+         }         
+      }
+
+
+      // --- Update collar table ---
+      
+      if(iType==DH_DATA_COLLAR || 
+         iType==DH_DATA_DIPAZIMUTH ||
+         iType==DH_DATA_EASTNORTH) 
+      {
+         hDH = Create_DH(sNewDB);  
+         
+         ProgName_SYS(_("Updating collar table extents"),1);
+         UpdateCollarTable_DH(hDH);
+         ProgName_SYS(_("Update complete"),1);
+      
+      
+         // --- For collar tables, if the number of imported holes exceeds the pre-defined
+         //     maximum number of holes in the project, increase the amount here to at least
+         //     20% above the declared size ---
+         
+         if(iType==DH_DATA_COLLAR) {
+            iHoles = iHoles_DH(hDH);
+            if((int)((real)iHoles*1.2)>iLines) {
+               iHoles = (int)(1.2*(real)iHoles);
+               SetInt_SYS("DHPROJECT", "HOLES", iHoles);         
+            }
+         }
+         Destroy_DH(hDH);         
+      }
+   }
+
+
+   // --- If overwriting, reload any assay database channel data parameters stored
+   //     in the channel REGs ---
+   
+   if(iOverwrite) {
+           
+      ProgName_SYS(_("Reloading assay metadata."),1);
+      hDH = Create_DH(sCurrentDB);
+      
+                 
+      // --- Restore selection. This amounts to unselecting holes which
+      //     were previously selected, because there may be new holes
+      //     imported. UnHoleLST contains a list of all holes
+      //     NOT selected at the start.
+      
+      HoleLST2_DH(hDH, HoleLST);     // Get all holes
+   
+      VVi = Create_VV(INT, 0);
+      FindItems_LST(HoleLST, 0, UnHoleLST, VVi);
+      SelectHoles_DH(hDH, VVi, 0);
+      
+      
+      // --- Reload any assay database channel data parameters stored
+      //     in the channel REGs ---
+      
+      for(i=0;i<iNumAssays_DH(hDH);i++) {
+   
+   
+         //--- Get the database name ---
+         
+         hDB = hAssayDB_DH(hDH, i);
+         GetName_DB(hDB,DB_NAME_FILE,sDB);
+         FileNamePart_STR(sDB,sName,STR_FILE_PART_NAME);
+         
+         
+         // --- Reload only if it was overwritten ---
+         
+         iNAssay = iLength_VV(VVf);
+         for(j=0;j<iNAssay;j++) {
+            GetString_VV(VVf, j, sName2);
+            if(!iStrcmp_STR(sName, sName2, STR_CASE_TOLERANT)) 
+               break;
+         }
+         if(j==iNAssay) continue;      // not found
+         
+         
+         //--- Look for directory for this database. Make it in the
+         //    INI directory off the database directory ---
+                  
+         Strcpy_STR(sDirINI, "");                  
+         if(iStrlen_STR(sVol)) {                  
+            Strcat_STR(sDirINI, sVol);
+            Strcat_STR(sDirINI, ":");
+         }
+         if(iStrlen_STR(sDir)) {
+            Strcat_STR(sDirINI, sDir);
+            Strcat_STR(sDirINI, "\\");                  
+         }
+         Strcat_STR(sDirINI, "INI");
+         if(!iDirExist_SYS(sDirINI)) continue;
+         Strcat_STR(sDirINI, "\\");
+         Strcat_STR(sDirINI, sName);
+         if(!iDirExist_SYS(sDirINI)) continue;
+
+         
+         // --- Save the data paramters ---
+         
+         LoadDataParametersINI_DH(hDH, hDB, sDirINI);
+      }     
+      
+      Destroy_DH(hDH);             
+      ProgName_SYS(_("Reloading completed."),1);
+   }
+
+
+   // --- Restore the current database (Create_DH can mix them up) ---
+   
+   EData = Load_EDB(sCurrentDB);
+   
+   
+   // --- Anything to display ---
+
+   iInteractive = iInteractive_SYS();
+   if(iForceLogFile && iScript_SYS() != 1) SetInteractive_SYS(1);
+   if(iInteractive_SYS()) {
+      if (iFileSize_SYS(sLog)>3) // 3 characters could be UTF-8 BOM only
+      {
+          
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE",sLog);
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }      
+   }
+   if(iForceLogFile) SetInteractive_SYS(iInteractive);
+
+   Progress_SYS(0);
+}

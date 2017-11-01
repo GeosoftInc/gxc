@@ -1,0 +1,266 @@
+//===========================================================================
+
+NAME          = "Trend Line path line plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Gridding/Trend Enforcement"
+
+DESCRIPTION   = "
+
+        TRNDPATH.MINCOLOR            line color for minima lines
+                .MAXCOLOR            line color for maxima lines
+                .THICKNESS           line thickness
+                .MINSECT             minimum sections in path
+                ,MINDIST             minimum length in path
+"
+// Revision History:
+// v5.1.5: All even trends are minima, all odd trends are maxima
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+
+RESOURCE = "trndpath.gr"
+#include "trndpath.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sLine, sLine1, sMsg;
+string(STR_DEFAULT_SHORT) sMinColor,sMaxColor;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh; // Channel handles
+DB_SYMB    Line;        // Line handle
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+REG   MapReg;
+VV    VVx,VVy;
+LST   LineLST;
+IPJ   DataIPJ;
+int   i,iMinSect;
+int   iNoPlot, iMinColor, iMaxColor;
+real  rScale;
+real  rThickness, rMinDist;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   EData  = Current_EDB();
+   Data   = Lock_EDB(EData);
+   
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TRNDPATH");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TRNDPATH_0,DGW_TEXT,"TRNDPATH","MINCOLOR");
+      SetInfoSYS_DGW(Diag,_TRNDPATH_1,DGW_TEXT,"TRNDPATH","MAXCOLOR");
+      SetInfoSYS_DGW(Diag,_TRNDPATH_2,DGW_TEXT,"TRNDPATH","THICKNESS");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TRNDPATH_0,DGW_TEXT,"TRNDPATH","MINCOLOR");
+      GetInfoSYS_DGW(Diag,_TRNDPATH_1,DGW_TEXT,"TRNDPATH","MAXCOLOR");
+      GetInfoSYS_DGW(Diag,_TRNDPATH_2,DGW_TEXT,"TRNDPATH","THICKNESS");
+
+      Destroy_DGW(Diag);
+      
+   }      
+
+   // --- get database and map ---
+   
+   EMap   = Current_EMAP();
+   Map    = Lock_EMAP(EMap);
+   MapReg = GetREG_MAP(Map);
+   
+
+   // --- get parameters ---
+
+   rThickness = rGetReal_SYS("TRNDPATH","THICKNESS");
+
+   GetString_SYS("TRNDPATH","MINCOLOR",sMinColor);    
+   if(!iStrlen_STR(sMinColor))
+      Abort_SYS(_("No Minimum color specified"));   
+
+   GetString_SYS("TRNDPATH","MAXCOLOR",sMaxColor);    
+   if(!iStrlen_STR(sMaxColor))
+      Abort_SYS(_("No Maximum color specified"));   
+
+   rMinDist = rGetReal_SYS("TRNDPATH","MINDIST");
+   if(rMinDist==rDUMMY) rMinDist = 0.0;
+
+   iMinSect = iGetInt_SYS("TRNDPATH","MINSECT");
+   if(iMinSect==iDUMMY) iMinSect = 0;
+   
+   
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+   
+   // --- open the data view and group ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   StartGroup_MVIEW(View,"Trend lines",MVIEW_GROUP_NEW);
+   SetThinRes_MVIEW(View,0.02);
+   rScale = rScaleMM_MVIEW(View);
+   LineThick_MVIEW(View,rThickness*rScale);
+   LineStyle_MVIEW(View,0,0.0);
+   
+
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   SetWorkingIPJ_MVIEW(View,DataIPJ);
+   
+
+   // --- Get LST of selected lines ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, LineLST);
+
+
+   // --- Create link to database ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+   
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+
+
+   iNoPlot   = iColor_MVIEW("X");
+   iMinColor = iColor_MVIEW(sMinColor);
+   iMaxColor = iColor_MVIEW(sMaxColor);
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Plot trend lines"),2);
+   
+   for(i=0;i<1000;i++) {
+   
+
+      // --- Create line name ---
+
+      SetLineName_DB(i,DB_LINE_TYPE_TREND,0,sLine);
+
+      Line = FindSymb_DB(Data, sLine, DB_SYMB_LINE);
+      if (Line==NULLSYMB) continue;
+
+      
+      // --- Is the line selected? ---
+
+      if(-1==iFindItem_LST(LineLST, 0, sLine)) continue;
+
+
+      // --- Select colour ---
+            
+      if (i%2 == 0)  {  // --- minimum lines ---      
+         
+         if(iMinColor == iNoPlot) continue;
+         LineColor_MVIEW(View,iMinColor);               
+      }
+      else if(iMaxColor != iNoPlot) {      // --- max colour ---      
+         
+         if(iMaxColor == iNoPlot) continue;
+         LineColor_MVIEW(View,iMaxColor);
+      }
+                     
+
+      // --- Get X and Y ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+         
+
+      // --- add line link ---
+
+      LineLabel_DB(Data,Line,sLine1,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine1);
+         
+
+      // --- Draw the lines ---
+
+      Strcpy_STR(sMsg, _("Drawing line: "));
+      Strcpy_STR(sMsg, sLine);
+      
+      ProgName_SYS(sMsg,2);
+      TrndPath_MVU(View,VVx,VVy,0,0.0);
+
+   }
+   
+   Progress_SYS(0);
+   
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   
+
+   // --- Add maker object ---
+
+   EasyMaker_MVIEW(View,_("Trend Line path plot"),"TRNDPATH;");
+   
+   
+   // --- done ---
+
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_MVIEW(View);
+   Destroy_IPJ(DataIPJ);
+   Destroy_LST(LineLST);
+   UnLock_EDB(EData);
+   UnLock_EMAP(EMap);
+   
+   
+}

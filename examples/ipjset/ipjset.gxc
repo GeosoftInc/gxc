@@ -1,0 +1,142 @@
+//===========================================================================
+NAME          = "Create a map projection"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "Create a map projection"
+
+// Revision History
+// v7.0.0: Replaced most code with call into new Coordinate System dialog.
+// v6.4.0: Remove "Back" button in Define projected coordsys dialog when preset.
+// v5.1.7: Allow suppression of geographic choice.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+IPJ      hIPJ;
+SBF      hSBF;
+BF       hBF;
+
+int         iNoGeographic, iModify, iCoordSysMode;
+
+string(STR_DEFAULT) sLabel;
+string(STR_FILE) sSource;
+string(STR_DEFAULT_LONG) s1,s2,s3,s4,s5;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) 
+   {
+      
+      // --- Suppress geographic projection? ---
+
+      iNoGeographic = iGetInt_SYS("IPJSET", "NOGEOGRAPHIC");
+      if(iNoGeographic!=1) iNoGeographic = 0;
+      SetInt_SYS("IPJSET","NOGEOGRAPHIC", 0);  // must set every time
+
+
+      // --- Can we modify this IPJ? ---
+      
+      iModify = 1;
+      if (iExistInt_SYS("IPJSET","EDITABLE") == 1)
+         iModify = iGetInt_SYS("IPJSET","EDITABLE");
+
+    
+      // --- Set operating mode ---
+      
+      iCoordSysMode = COORDSYS_MODE_ALL;
+      if(iNoGeographic)
+         iCoordSysMode = COORDSYS_MODE_PCS_UNKNOWN;
+         
+      
+      // --- get IPJ ---
+   
+      hSBF = hGetSYS_SBF();
+      if (iExistFile_SBF(hSBF,"_ipjset.ipj")) {
+   
+   
+         // --- get IPJ from file ---
+      
+         hBF = CreateSBF_BF(hSBF,"_ipjset.ipj",BF_READ);
+         hIPJ = CreateS_IPJ(hBF);
+         DestroyEx_BF(hBF);
+   
+      } else   
+         hIPJ = Create_IPJ();
+
+   
+      // --- get dialog label and source strings ---
+         
+      GetString_SYS("IPJSET","LABEL",sLabel);
+      SetString_SYS("IPJSET","LABEL","");
+      if (iStrMin2_STR(sLabel)==0)
+         Strcpy_STR(sLabel,_("Coordinate source"));
+      GetString_SYS("IPJSET","SOURCE",sSource);
+      SetString_SYS("IPJSET","SOURCE","");
+      if (iStrMin2_STR(sSource)==0)
+         Strcpy_STR(sSource,_("unknown"));
+
+   
+      // --- Call the Coordinate System dialog ---
+   
+      if(iCoordSysWizard_GUI(hIPJ, iModify, iCoordSysMode, sLabel, sSource))
+         Cancel_SYS();
+      
+   } 
+   else {
+   
+      // --- script mode, just set using IPJ settings ---
+      
+      GetString_SYS("IPJ","NAME",s1);
+      GetString_SYS("IPJ","DATUM",s2);
+      GetString_SYS("IPJ","METHOD",s3);
+      GetString_SYS("IPJ","UNITS",s4);
+      GetString_SYS("IPJ","LOCALDATUM",s5);
+      
+      hIPJ = Create_IPJ();
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);   
+   }
+            
+   
+   // --- serialize IPJ ---
+   
+   hSBF = hGetSYS_SBF();
+   hBF = CreateSBF_BF(hSBF,"_ipjset.ipj",BF_READWRITE_NEW);
+   Serial_IPJ(hIPJ,hBF);
+   
+   
+   // --- set parameters ---
+   
+   GetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   SetString_SYS("IPJ","NAME",s1);
+   SetString_SYS("IPJ","DATUM",s2);
+   SetString_SYS("IPJ","METHOD",s3);
+   SetString_SYS("IPJ","UNITS",s4);
+   SetString_SYS("IPJ","LOCALDATUM",s5);
+
+
+   // --- destroy ---
+   
+   DestroyEx_BF(hBF);
+   Destroy_SBF(hSBF);
+   Destroy_IPJ(hIPJ);
+   
+}

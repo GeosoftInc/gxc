@@ -1,0 +1,146 @@
+//===========================================================================
+NAME          = "GRIDBASE"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = " Remove a constant value from a grid.
+
+Parameters:
+
+      GRIDBASE.IN    File name of input grid.
+              .OUT   File name of output grid.                          
+              .BASE  Base constant value to remove.
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+
+RESOURCE = "gridbase.gr"
+#include "gridbase.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+
+string(STR_FILE)  sIn;             // Name of input grid 
+string(STR_FILE)  sOut;            // Name of output grid 
+
+string(STR_DEFAULT_LONG) sBase;           // Base level to remove 
+real         rBase;           
+
+IMG         IMGIN;            // Image for the input grid
+IMG         IMGOUT;           // Image for the output grid
+IEXP        IEXP0;            // Image expression to subtract rBase from grid
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDBASEForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDBASEFORM_0,DGW_FILEPATH,"GRIDBASE","IN");     
+      SetInfoSYS_DGW(Diag,_GRIDBASEFORM_1,DGW_FILEPATH,"GRIDBASE","OUT");     
+      SetInfoSYS_DGW(Diag,_GRIDBASEFORM_2,DGW_TEXT,"GRIDBASE","BASE");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // User hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDBASEFORM_0,DGW_FILEPATH,"GRIDBASE","IN");     
+      GetInfoSYS_DGW(Diag,_GRIDBASEFORM_1,DGW_FILEPATH,"GRIDBASE","OUT");     
+      GetInfoSYS_DGW(Diag,_GRIDBASEFORM_2,DGW_TEXT,"GRIDBASE","BASE");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDBASE","IN",sIn);
+   GetString_SYS("GRIDBASE","OUT",sOut);
+   GetString_SYS("GRIDBASE","BASE",sBase);
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sIn))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   if (!iStrlen_STR(sOut))
+      Abort_SYS(_("Output Grid Name Not Specified!"));
+      
+   if (!iStrlen_STR(sBase))
+      Abort_SYS(_("Base Value Not Specified!"));   
+   rBase=rScanR_STR(sBase);
+    
+   
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   IMGIN = CreateFile_IMG(GS_DOUBLE,sIn,IMG_FILE_READONLY);
+   IMGOUT = CreateOutFile_IMG(GS_DOUBLE,sOut,IMGIN); 
+
+   ProgName_SYS(_("Subtracting base level..."),1);
+
+   // --- Subtract base level ---
+
+   IEXP0 = Create_IEXP();
+   AddGrid_IEXP(IEXP0,IMGIN,"In");
+   AddGrid_IEXP(IEXP0,IMGOUT,"Out");
+
+   DoFormula_IEXP(IEXP0,"Out = In - $rBase;",1024);
+
+
+   // --- Destroy the Images ---
+   
+   Destroy_IEXP(IEXP0);
+   Destroy_IMG(IMGIN);
+   Destroy_IMG(IMGOUT);
+        
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sOut,"Grid",1);
+   
+}

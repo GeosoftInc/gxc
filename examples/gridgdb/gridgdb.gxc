@@ -1,0 +1,374 @@
+//===========================================================================
+NAME          = "Import grid data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+
+		GRIDGDB.GRD       Input grid file name
+				 .GDB       Database file name
+				 .XDEC      X Direction Decimation Factor (integer)
+				 .YDEC      Y Direction Decimation Factor (integer)
+				 .TRIMDUM   0 trim leading/trailing dummies (default), 
+								1 trim all dummies,
+								2 leave all dummies.
+				 .INDEXCH   flag for creating index channel: 0 no (default), 1 yes.
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "gridgdb.gr"
+#include "gridgdb.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrd;             // Name of input grid file
+string(STR_FILE) sGdb;             // Name of output database file
+string(STR_DEFAULT_LONG) sTemp, sAliasFlag;
+string(STR_DB_SYMBOL) sDataCh, sXCh, sYCh, sZCh;
+
+DB_SYMB		XCh;		 //X Channel	
+DB_SYMB		YCh;		 //Y Channel
+DB_SYMB		ZCh;		 //Z Channel
+DB_SYMB		DataCh;		 //Data Channel
+
+int   iXdec,iYdec;       // X and Y Decimation factors
+int   iTrimDum;          // Flag for trim dummies
+int   iIndexCh;          // Flag for creating index channel
+int   iLoadExternalDB;   // Load external DB instead of locking EDB?
+int   iLockedEDB;        // Do we need we need to call UnLock_EDB?
+
+EDB   EData;            // Database handle
+DB    Data;             // Database handle
+DGW   Diag;             // Dialogue handle
+IMG   IMGi;             // Image tied to the input grid
+
+int   iLine;
+int   iType,iX,iY,iKX;
+int   iProgState;
+real  rXsep,rYsep,rXoff,rYoff,rRot,rBase,rMult;
+LST	  List;
+int   iHasZChannel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	iType = 0;
+	iX = 0;
+	iY = 0;
+	iKX = 1;
+	rXsep = 0.0;
+	rYsep = 0.0;
+	rXoff = 0.0;
+	rYoff = 0.0;
+	rRot  = 0.0;
+	rBase = 0.0;
+	rMult = 1.0;
+	iHasZChannel = 0;
+
+	// --- Load new GDB as external DB instead of loading and locking it as the current EDB? ---
+
+	iLoadExternalDB = iGetInt_SYS("GRIDGDB","LOAD_EXTERNAL_GDB");
+	if(iLoadExternalDB!=1) iLoadExternalDB = 0;
+
+	
+	// --- Load external mode must be reset for every call --
+
+	SetInt_SYS("GRIDGDB","LOAD_EXTERNAL_GDB",0);
+
+	if (iLoadExternalDB == 1)
+	{
+		GetString_SYS("GRIDGDB","GRD",sGrd);
+		GetString_SYS("GRIDGDB","GDB",sGdb);
+		GetString_SYS("GRIDGDB","DATACH",sDataCh);
+		
+		if(iLoaded_EDB(sGdb))
+		{
+			EData = Load_EDB(sGdb);
+			Data = Lock_EDB(EData);
+			iLockedEDB = 1;
+		}
+		else
+		{
+			Data = Open_DB(sGdb, "SUPER", "");
+			iLockedEDB = 0;
+		}
+
+		// --- Do the reference channels exist ? ---
+		XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+		if (XCh==NULLSYMB)
+			Abort_SYS(_("The current X channel does not exist."));
+
+		YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+		if (YCh==NULLSYMB)
+			Abort_SYS(_("The current Y channel does not exist."));
+
+		ZCh = GetXYZChanSymb_DB(Data, DB_CHAN_Z);
+		if (ZCh!=NULLSYMB)
+			iHasZChannel = 1;
+
+		// --- Are we running interactively ? ---
+
+		if (iInteractive_SYS())
+		{
+			// --- Create the Dialogue ---
+			Diag = Create_DGW("gridgdbform");
+
+			// --- Set up lists ---
+
+			List = GetList_DGW(Diag,_GRIDGDBFORM_2);
+			SymbLST_DB(Data,List,DB_SYMB_CHAN);
+			Sort_LST(List,0,0);
+
+			// --- Set any Defaults ---
+
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_0,DGW_FILEPATH,"GRIDGDB","GRD");     
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_1,DGW_FILEPATH,"GRIDGDB","GDB");
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_2,DGW_TEXT,"GRIDGDB","DATACH");
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_3,DGW_TEXT,"GRIDGDB","XDEC");    
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_4,DGW_TEXT,"GRIDGDB","YDEC");    
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_5,DGW_LISTALIAS,"GRIDGDB","TRIMDUM");    
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_6,DGW_TEXT,"GRIDGDB","INDEXCH"); 
+
+			// --- Run the Dialogue ---
+
+			if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+			// --- Get the Strings ---
+
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_0,DGW_FILEPATH,"GRIDGDB","GRD");     
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_1,DGW_FILEPATH,"GRIDGDB","GDB");
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_2,DGW_TEXT,"GRIDGDB","DATACH");
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_3,DGW_TEXT,"GRIDGDB","XDEC");    
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_4,DGW_TEXT,"GRIDGDB","YDEC");    
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_5,DGW_LISTALIAS,"GRIDGDB","TRIMDUM");    
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_6,DGW_TEXT,"GRIDGDB","INDEXCH");      
+
+			GetInfo_DGW(Diag,_GRIDGDBFORM_5,DGW_LISTALIAS,sAliasFlag);
+
+			// --- Destroy the Dialogue ---
+
+			Destroy_DGW(Diag);
+		}
+	}
+	else
+	{
+		if (iInteractive_SYS())
+		{
+			// --- Create the Dialogue ---
+			Diag = Create_DGW("gridgdbform2");
+
+			// --- Set any Defaults ---
+
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_0,DGW_FILEPATH,"GRIDGDB","GRD");     
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_1,DGW_FILEPATH,"GRIDGDB","GDB");
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_2,DGW_TEXT,"GRIDGDB","DATACH");
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_3,DGW_TEXT,"GRIDGDB","XDEC");    
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_4,DGW_TEXT,"GRIDGDB","YDEC");    
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_5,DGW_LISTALIAS,"GRIDGDB","TRIMDUM");    
+			SetInfoSYS_DGW(Diag,_GRIDGDBFORM_6,DGW_TEXT,"GRIDGDB","INDEXCH"); 
+
+			// --- Run the Dialogue ---
+
+			if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+			// --- Get the Strings ---
+
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_0,DGW_FILEPATH,"GRIDGDB","GRD");     
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_1,DGW_FILEPATH,"GRIDGDB","GDB");
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_2,DGW_TEXT,"GRIDGDB","DATACH");
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_3,DGW_TEXT,"GRIDGDB","XDEC");    
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_4,DGW_TEXT,"GRIDGDB","YDEC");    
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_5,DGW_LISTALIAS,"GRIDGDB","TRIMDUM");    
+			GetInfoSYS_DGW(Diag,_GRIDGDBFORM_6,DGW_TEXT,"GRIDGDB","INDEXCH");      
+
+			GetInfo_DGW(Diag,_GRIDGDBFORM_5,DGW_LISTALIAS,sAliasFlag);
+
+			// --- Destroy the Dialogue ---
+
+			Destroy_DGW(Diag);
+		}
+	}
+
+
+	// --- Get Parameters ---
+
+	GetString_SYS("GRIDGDB","GRD",sGrd);
+	GetString_SYS("GRIDGDB","GDB",sGdb);
+	GetString_SYS("GRIDGDB","DATACH",sDataCh);
+
+	if (!iStrlen_STR(sDataCh))
+		Abort_SYS(_("Data Channel name is required"));
+	
+	iXdec = 1;
+	GetString_SYS("GRIDGDB","XDEC",sTemp);
+	if (iStrlen_STR(sTemp))
+		iXdec = iGetInt_SYS("GRIDGDB","XDEC");
+	if (iXdec < 1)
+		Abort_SYS(_("X Decimation factor is invalid - must be a positive integer"));
+
+	iYdec = 1;
+	GetString_SYS("GRIDGDB","YDEC",sTemp);
+	if (iStrlen_STR(sTemp))
+		iYdec = iGetInt_SYS("GRIDGDB","YDEC");
+	if (iXdec < 1)
+		Abort_SYS(_("Y Decimation factor is invalid - must be a positive integer"));
+
+	iTrimDum = 0;
+	 GetString_SYS("GRIDGDB","TRIMDUM",sTemp);
+	 if (iStrlen_STR(sTemp))
+	 {
+		  if(!iStrcmp_STR(sTemp,_n("Trim all dummies"),STR_CASE_TOLERANT))
+				iTrimDum = 1;
+		  if(!iStrcmp_STR(sTemp,_n("Leave all dummies"),STR_CASE_TOLERANT))
+				iTrimDum = 2;
+	 }
+																								 
+	 iIndexCh = 0;
+	 GetString_SYS("GRIDGDB","INDEXCH",sTemp);
+	 if (iStrlen_STR(sTemp))
+	 {
+		  if(!iStrcmp_STR(sTemp,_n("Yes"),STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))
+				iIndexCh = 1;
+	 }
+																								 
+	 // --- Check for null input and output file name strings ---
+
+	 if (!iStrlen_STR(sGrd))
+		  Abort_SYS(_("Input Grid Name Not Specified!"));
+	 if (!iStrlen_STR(sGdb))
+		  Abort_SYS(_("Output Database Name Not Specified!"));
+
+
+	 // --- turn on progress ---
+
+	 iProgState = iProgState_SYS();
+	 if(iProgState != 1)
+		Progress_SYS(1);
+
+	 ProgName_SYS(_("Import grid data"),1);
+
+
+	 // --- Create Images tied to the grid ---  
+	
+	 IMGi = CreateFile_IMG(GS_FLOAT,sGrd,IMG_FILE_READONLY);
+
+	 GridStat_IMU(sGrd,iType,iX,iY,rXsep,rYsep,iKX,rXoff,rYoff,rRot,rBase,rMult);
+	 if(iKX==1)
+		  iLine = iY;
+	 else   
+		  iLine = iX;
+	 iLine++;   
+	
+	
+	if (iLoadExternalDB == 1)
+	{
+		// --- Lock the channel symbols ---
+		LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+		LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+		LockSymb_DB(Data,ZCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+	}
+	else
+	{
+		// --- create/load the new database ---
+
+		if (iLoaded_EDB(sGdb)) 
+			UnLoad_EDB(sGdb);
+		iDeleteFile_SYS(sGdb);
+		Create_DB(sGdb,iLine,50,iLine+50+20,10,100,"SUPER","");
+
+		EData = Load_EDB(sGdb);
+		Data = Lock_EDB(EData);
+		iLockedEDB = 1;
+	
+		XCh = CreateSymb_DB(Data,"X",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+		LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+		SetChanDecimal_DB(Data,XCh,2);
+		SetChanWidth_DB(Data,XCh,10);
+
+		YCh = CreateSymb_DB(Data,"Y",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+		LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+		SetChanDecimal_DB(Data,YCh,2);
+		SetChanWidth_DB(Data,YCh,10);
+
+		ZCh = CreateSymb_DB(Data,"Z",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+		LockSymb_DB(Data,ZCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+		SetChanDecimal_DB(Data,ZCh,2);
+		SetChanWidth_DB(Data,ZCh,10);
+	}
+	
+
+	// --- Does the Data Channel Exist ? ---
+	if (!iExistChan_DB(Data,sDataCh)) 
+	{
+		DataCh = DupSymb_DB(Data,XCh,sDataCh);       // Create it 
+		LockSymb_DB(Data,DataCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+		SetChanDecimal_DB(Data,DataCh,2);
+		SetChanWidth_DB(Data,DataCh,10);
+		UnLockSymb_DB(Data,DataCh);
+	} 
+	else  
+	{ 
+		DataCh = FindChan_DB(Data,sDataCh);
+		LockSymb_DB(Data,DataCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+	}
+
+
+	// --- Do the process ---
+
+	GridLoadXYZ_DU(Data,IMGi,XCh,YCh,ZCh,DataCh,iXdec,iYdec,iTrimDum,iIndexCh);
+	
+	// --- Destroy the Images ---
+	
+	Destroy_IMG(IMGi);
+
+	// --- release database to DBE ---
+	
+	if (iLockedEDB)
+	{
+		GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+		GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+		GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+		UnLock_EDB(EData);
+
+	 
+		// --- display channels ---
+	
+		if (iInteractive_SYS())
+		{
+			DelLine0_EDB(EData);
+			LoadChan_EDB(EData, sXCh);
+			LoadChan_EDB(EData, sYCh);
+			LoadChan_EDB(EData, sZCh);
+			LoadChan_EDB(EData, sDataCh);
+		}
+	}
+	else
+	{
+		if (iLoadExternalDB == 1)
+		{
+			DelLine0_DB(Data);
+			Destroy_DB(Data);
+		}
+	}
+	
+
+	 // --- restore progress to original state ---
+
+	 if(iProgState != iProgState_SYS())
+		Progress_SYS(iProgState);
+}

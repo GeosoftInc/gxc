@@ -1,0 +1,305 @@
+
+//===========================================================================
+NAME          = "Fill X/Y Channels by Interpolating Dummies"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Replaces all dummies in a channel by interpolation between valid values.
+
+    XYFILL2.XCH   : Name of X channel to fill
+           .YCH   : Name of Y channel to fill
+        .METHOD   : \"Linear\", \"Min. Curvature\", \"Akima\" or \"Prediction\"
+          .EDGE   : \"Yes\" or \"No\" to interpolate dummy edges.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
+
+// Revision History:
+// v6.4.0: Set default X and Y to the current X, Y.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "xyfill2.gr"
+#include "xyfill2.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sXCh,sYCh;         // Channel Name
+string(STR_DEFAULT_SHORT) sMethod;           // Method
+string(STR_DEFAULT_SHORT) sEdge;             // Edge
+
+
+EDB        EData;
+DB         Data;
+DB_SELECT  Sel;               // selection
+DB_SYMB    XCh,YCh;           // Channel handle
+DB_SYMB    __XCh,__YCh;       // Channel handle
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        iEdge;             // Edge interpolation
+int        iMethod;           // Inside interpolation
+int        i;                 // utility int
+int        iLines;            // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp, sAliasFlag;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Set default new X, Y channels to the existing current X, Y ---
+   
+   GetString_SYS("XYFILL2", "XCH", sXCh);
+   if(!iStrlen_STR(sXCh) || !iExistChan_DB(Data, sXCh))
+   {
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      SetString_SYS("XYFILL2", "XCH", sXCh);
+   }
+
+   GetString_SYS("XYFILL2", "YCH", sYCh);
+   if(!iStrlen_STR(sYCh) || !iExistChan_DB(Data, sYCh))
+   {
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+      SetString_SYS("XYFILL2", "YCH", sYCh);
+   }
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("xyfill2Form");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_XYFILL2FORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_XYFILL2FORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_XYFILL2FORM_0,DGW_TEXT,"xyfill2","xch");     
+      SetInfoSYS_DGW(Diag,_XYFILL2FORM_1,DGW_TEXT,"xyfill2","ych");     
+      SetInfoSYS_DGW(Diag,_XYFILL2FORM_2,DGW_LISTALIAS,"xyfill2","method");     
+      SetInfoSYS_DGW(Diag,_XYFILL2FORM_3,DGW_TEXT,"xyfill2","edge");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_XYFILL2FORM_0,DGW_TEXT,"xyfill2","xch");
+      GetInfoSYS_DGW(Diag,_XYFILL2FORM_1,DGW_TEXT,"xyfill2","ych");
+      GetInfoSYS_DGW(Diag,_XYFILL2FORM_2,DGW_LISTALIAS,"xyfill2","method");
+      GetInfoSYS_DGW(Diag,_XYFILL2FORM_3,DGW_TEXT,"xyfill2","edge");
+
+      GetInfo_DGW(Diag,_XYFILL2FORM_3,DGW_LISTALIAS,sAliasFlag);
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("xyfill2","xch",sXCh);
+   GetString_SYS("xyfill2","ych",sYCh);
+   GetString_SYS("xyfill2","method",sMethod);
+   GetString_SYS("xyfill2","edge",sEdge);
+
+   // --- Do the X/Y Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sXCh))  
+      Abort_SYS(_("X channel does not exist."));
+   XCh = FindChan_DB(Data,sXCh);
+   
+   if (!iExistChan_DB(Data,sYCh))  
+      Abort_SYS(_("Y channel does not exist."));
+   YCh = FindChan_DB(Data,sYCh);
+
+   // --- method ---
+   
+   iMethod = DU_INTERP_LINEAR;
+   if (iStrcmp_STR(sMethod,_n("Nearest"),0) == 0)
+      iMethod = DU_INTERP_NEAREST;
+   else if (iStrcmp_STR(sMethod,_n("Linear"),0) == 0)
+      iMethod = DU_INTERP_LINEAR;
+   else if (iStrcmp_STR(sMethod,_n("Minimum Curvature"),0) == 0)
+      iMethod = DU_INTERP_CUBIC;
+   else if (iStrcmp_STR(sMethod,_n("Akima"),0) == 0)
+      iMethod = DU_INTERP_AKIMA;
+   else if (iStrcmp_STR(sMethod,_n("Prediction"),0) == 0)
+      iMethod = DU_INTERP_PREDICT;
+   else 
+      Abort_SYS(_("Invalid levelling mode."));
+
+   // --- edge ---
+   
+   iEdge = 0;
+   if (iStrcmp_STR(sEdge,_n("Yes"),0) == 0 || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))
+      iEdge = 1;
+   else
+      iEdge = 0;
+
+   // --- make a backup copy of X and Y if either master does not exist ---
+
+   if (!iExistChan_DB(Data,"__X") ||
+       !iExistChan_DB(Data,"__Y")) {
+
+      // --- save selection ---
+
+      Sel = GetSelect_DB(Data);
+      Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+
+      // --- re-create master channels ---
+
+      if (iExistChan_DB(Data,"__X")) {
+         __XCh = FindChan_DB(Data,"__X");
+         LockSymb_DB(Data,__XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         DeleteSymb_DB(Data,__XCh);
+      }
+      __XCh = DupSymbNoLock_DB(Data,XCh,"__X");
+
+      if (iExistChan_DB(Data,"__Y")) {
+         __YCh = FindChan_DB(Data,"__Y");
+         LockSymb_DB(Data,__YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         DeleteSymb_DB(Data,__YCh);
+      }
+      __YCh = DupSymbNoLock_DB(Data,YCh,"__Y");
+
+      // --- copy ---
+
+      LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+      LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+      LockSymb_DB(Data,__XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(Data,__YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+      ProgName_SYS(_("Make backup __X and __Y"),1);
+
+      // --- Prepare to do the work ---
+
+      iLines = 0;
+      iTotLines = iCountSelLines_DB(Data);
+
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+         // --- Update the Progress Bar ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+
+         Strcpy_STR(sLabel,_("Line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLines,iTotLines);
+
+         // --- Copy ---
+
+         Decimate_DU(Data,Line,XCh,__XCh,1);
+         Decimate_DU(Data,Line,YCh,__YCh,1);
+
+         // --- Advance to Next Line ---        
+
+         Line = NextSelLine_DB(Data,Line);
+         iLines++;
+      }
+
+      UnLockSymb_DB(Data,XCh);
+      UnLockSymb_DB(Data,YCh);
+      UnLockSymb_DB(Data,__XCh);
+      UnLockSymb_DB(Data,__YCh);
+
+      // --- put back selection ---
+
+      SetSelect_DB(Data,Sel);
+   }
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+   // --- set protect X and Y ---
+   
+   SetChanProtect_DB(Data,XCh,DB_CHAN_UNPROTECTED);
+   SetChanProtect_DB(Data,YCh,DB_CHAN_UNPROTECTED);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+      
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Interpolate line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS("",0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+      // --- interpolate data ---
+
+      Interp_DU(Data,Line,XCh,XCh,iMethod,iEdge);
+      Interp_DU(Data,Line,YCh,YCh,iMethod,iEdge);
+      
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+   }
+
+
+   // --- Add makers ---
+
+   EasyMakerSymb_DB(Data,XCh,_("Fill X/Y dummies"),"XYFILL2;");
+   EasyMakerSymb_DB(Data,YCh,_("Fill X/Y dummies"),"XYFILL2;");
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}
+ 

@@ -1,0 +1,162 @@
+//===========================================================================
+NAME          = "Set Current XYZ coodinate channels"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Changes the master coordinate channels to new channels. 
+    
+    Previous to v5.1.3, only the 'X' and 'Y' channels could be used as master 
+    coordinate channels, so this GX would backup the current data in 'X' and 
+    'Y' to '_X' and '_Y, then copy the specified channels to 'X' and 'Y'.
+    
+    In v5.1.3, the concept of the 'Current' X and Y channels was introduced,
+    and now any two channels can be specified as the 'current' X and Y channels,
+    and no backup or copy operation is required.
+    
+    XYSET.X   - X (Easting) channel
+         .Y   - Y (Northing) channel
+         .Z   - Z (Elevation) channel (optional)
+          
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
+
+// Revision History:
+// v6.2.0: Add support for Z channel
+// v6.0.0: FIX - Should have used iExistChan_DB to see if the new channels existed.
+// v5.1.4: Starting X and Y set to current X and Y only for interactive mode.
+// v5.1.3: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "XYSET.gr"
+#include "XYSET.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sXCh, sYCh, sZCh;   // Channel Names
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+
+int         i;                // Utility 
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("XYSET");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_XYSET_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      
+      List = GetList_DGW(Diag,_XYSET_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      
+      List = GetList_DGW(Diag,_XYSET_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      AddItem_LST(List,"(none)","(none)");
+      Sort_LST(List,0,0);
+
+
+      // --- Set defaults to current values ---
+
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+      GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+
+      SetString_SYS("XYSET","X",sXCh);
+      SetString_SYS("XYSET","Y",sYCh);
+      if (iExistChan_DB(Data,sZCh))
+         SetString_SYS("XYSET","Z",sZCh);
+      else
+         SetString_SYS("XYSET","Z","(none)");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_XYSET_0,DGW_TEXT,"XYSET","X");     
+      SetInfoSYS_DGW(Diag,_XYSET_1,DGW_TEXT,"XYSET","Y");
+      SetInfoSYS_DGW(Diag,_XYSET_2,DGW_TEXT,"XYSET","Z");
+          
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_XYSET_0,DGW_TEXT,"XYSET","X");    
+      GetInfoSYS_DGW(Diag,_XYSET_1,DGW_TEXT,"XYSET","Y");
+      GetInfoSYS_DGW(Diag,_XYSET_2,DGW_TEXT,"XYSET","Z");
+      
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("XYSET","X",sXCh);
+   GetString_SYS("XYSET","Y",sYCh);
+   GetString_SYS("XYSET","Z",sZCh);
+   
+   // --- Was the Z Channel Set ? ---
+   
+   if (iStrcmp_STR(sZCh,"(none)",STR_CASE_TOLERANT)==0) Strcpy_STR(sZCh," ");
+   
+   
+   // --- Do the Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sXCh) ||
+       !iExistChan_DB(Data,sYCh))
+      Abort_SYS(_("New X or Y channel does not exist."));
+      
+      
+   // --- Set the new current X, Y channels ---      
+
+   SetXYZChan_DB(Data, DB_CHAN_X, sXCh);   
+   SetXYZChan_DB(Data, DB_CHAN_Y, sYCh);   
+   SetXYZChan_DB(Data, DB_CHAN_Z, sZCh);   
+
+
+   // --- done ---
+
+   UnLock_EDB(EData);   
+}

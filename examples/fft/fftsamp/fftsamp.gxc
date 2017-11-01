@@ -1,0 +1,68 @@
+//===========================================================================
+NAME          = "Apply chan data sampling before FFT filter"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D"
+
+DESCRIPTION   = "\
+\r\n\
+Apply chan data sampling before FFT filter.\r\n\
+\r\n\
+Parameters: \r\n\
+\r\n\
+     FFTSAMP.SAMPINCR - Required sampling distance increment.
+            .METHOD   - \"Linear\", \"Min. Curvature\", \"Akima\"
+\r\n"
+
+//===========================================================================
+
+RESOURCE = "fftsamp.gr"
+#include "fftsamp.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;                          // Dialogue handle
+int        i;                             // utility int
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFTSAMP");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFTSAMP_0,DGW_TEXT,"FFTSAMP","SAMPINCR");     
+      SetInfoSYS_DGW(Diag,_FFTSAMP_1,DGW_LISTALIAS,"FFTSAMP","METHOD");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS(); 
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFTSAMP_0,DGW_TEXT,"FFTSAMP","SAMPINCR");     
+      GetInfoSYS_DGW(Diag,_FFTSAMP_1,DGW_LISTALIAS,"FFTSAMP","METHOD");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   } // end if
+
+}

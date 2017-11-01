@@ -1,0 +1,71 @@
+//===========================================================================
+NAME          = "Proportional Symbol Plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Point Plots"
+
+DESCRIPTION   = "
+
+   This GX now calls the PROPSYMB GX, but uses the default
+   CHIMERA mask channel.
+
+"
+// Revision History:
+// v5.1.5: This GX now calls `the upgraded PROPSYMB GX.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sTemp;
+string(STR_DB_SYMBOL) sMask;
+
+EDB        EData;
+DB         Data;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Get Default Mask Channel if required, and if it exists or is "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+
+
+         EData = Current_EDB();
+         Data = Lock_EDB(EData);
+
+         if(iScanI_STR(sTemp)==1 &&
+            (iExistChan_DB(Data,sMask) || 
+             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+            SetString_SYS("PROPSYMB","MASK",sMask);
+         }
+
+         UnLock_EDB(EData);
+      }
+   }
+   
+
+   // --- Use CHIMERA mask channel list in PROPSYMB GX. ---
+
+   SetInt_SYS("PROPSYMB","CHIMERA",1);  // Must set every time.
+
+
+   // --- Call the PROPSYMB GX to do classified symbols ---
+
+   iRunGX_SYS("propsymb.gx");
+
+
+}

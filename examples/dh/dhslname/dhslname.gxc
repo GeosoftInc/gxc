@@ -1,0 +1,87 @@
+//===========================================================================
+
+NAME          = "Drill Hole - Select holes by name"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot/Select Holes"
+
+DESCRIPTION   = "
+Select drill holes by name using maks characters '*' and '.'.
+   
+      DHSLNAME.NAME     Hole name or mask
+      DHSLNAME.SELECT   0 - de-select
+                        1 - select
+      DHSLNAME.MODE     0 - overwrite
+                        1 - append
+"
+
+//===========================================================================
+
+RESOURCE = "dhslname.gr"
+#include "dhslname.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;
+DH          Drill;
+DGW         Diag;
+LST         List;
+
+string(STR_DEFAULT) sName;
+string(STR_FILE) sDB;
+int         iSel, iMode;
+
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   GetName_EDB(EData,sDB);
+   Drill = Create_DH(sDB);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      Diag = Create_DGW("DHSLNAME");
+
+      // --- Set up hole list ---
+
+      List = GetList_DGW(Diag,_DHSLNAME_0);
+		HoleLST2_DH(Drill, List);
+      InsertItem_LST(List, 0, "", "");		// blank at start to edit
+
+
+      SetInfoSYS_DGW(Diag,_DHSLNAME_0,DGW_TEXT,     "DHSLNAME","NAME");
+      SetInfoSYS_DGW(Diag,_DHSLNAME_1,DGW_LISTALIAS,"DHSLNAME","SELECT");
+      SetInfoSYS_DGW(Diag,_DHSLNAME_2,DGW_LISTALIAS,"DHSLNAME","MODE");
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_DHSLNAME_0,DGW_TEXT     ,"DHSLNAME","NAME");
+      GetInfoSYS_DGW(Diag,_DHSLNAME_1,DGW_LISTALIAS,"DHSLNAME","SELECT");
+      GetInfoSYS_DGW(Diag,_DHSLNAME_2,DGW_LISTALIAS,"DHSLNAME","MODE");
+
+      Destroy_SYS(Diag);
+   }
+   
+   
+   GetString_SYS("DHSLNAME","NAME",sName);
+   iSel = iGetInt_SYS("DHSLNAME","SELECT");
+   iMode = iGetInt_SYS("DHSLNAME","MODE");
+   
+   SelectName_DH(Drill,sName,iSel,iMode);
+   
+
+   // --- Clean up ---
+
+   Destroy_DH(Drill);
+}

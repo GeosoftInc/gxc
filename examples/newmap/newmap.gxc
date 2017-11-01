@@ -1,0 +1,986 @@
+//===========================================================================
+NAME          = "Create a new map"
+#include <version.gxh>
+
+DESCRIPTION   = "
+
+   NEWMAP.MAP        map name
+			.MIN_X,		ranges
+			.MIN_Y, 
+			.MAX_X, 
+			.MAX_Y  
+			.IPJ_NAME	Projection information in GXF format.
+			.IPJ_DATUM
+			.IPJ_METHOD        See GXF documentation for details
+			.IPJ_UNITS         on formatting these parameters.
+			.IPJ_LOCALDATUM
+         .TEMPLATE   template name from MAPTMPL.INI
+         .SCALE      map scale, blank for default
+         .UNITS      user units per metre
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+// Revision History:
+// v9.1.0: Refactor - CORE-4552
+// v8.5.0: Added ability to suppress overwrite warnings in batch mode. 
+//         Reduced overwrite warnings to one from two every time.
+// v7.1.0: Added "Interactive" button so user can define extents from the current map.
+//         AOI check only if current view has PCS.
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+
+RESOURCE = "newmap.gr"
+#include "newmap.grh"
+#include <all.gxh>
+
+//===========================================================================
+
+string(STR_FILE)  sMap, sFile, sMdf;
+string(STR_DEFAULT_LONG) sSize;
+string(STR_DEFAULT) sTmpl,sSet;
+string(STR_DEFAULT) sUnits;
+string(STR_DEFAULT_SHORT) sMinX, sMinY, sMaxX, sMaxY;
+
+EDB   EData;
+MAP   Map;
+EMAP  EMap;
+MVIEW View;
+DGW   Diag;
+LST   List;
+REG   MapReg, ParmReg;
+SBF   hSBF;
+BF    hBF;
+IMG   hIMG;
+IPJ   hIPJ, hIPJ2, hIPJgrid;
+LTB   hUNI;
+LTB   hMED;
+LTB   hTMP;
+int   i, iRet, iRet2;
+
+real  r;
+real  rMinX;     // Minimum X of map area (ground units)
+real  rMaxX;     // Maximum X of map area (ground units)
+real  rMinY;     // Minimum Y of map area (ground units)
+real  rMaxY;     // Maximum Y of map area (ground units) 
+
+int   iPort;     // Portrait map? (or landscape) (FALSE by default)
+int   iExact;    // Map is exactly sized to area? 
+                 // (or trimmed to data and margins) (FALSE by default)
+
+real  rScale;    // Map scale (rDummy for default)
+real  rConv;     // Conversion factor (to meters/unit) (rDummy for default)
+real  rMargXmin; // Minimum X of margin area 
+real  rMargXmax; // Maximum X of margin area 
+real  rMargYmin; // Minimum Y of margin area 
+real  rMargYmax; // Maximum Y of margin area                  
+real  rInside;   // Inside edge
+
+int  iRotated;
+real rXo, rYo, rZo, rRot;
+real rPitch, rYaw, rRoll, rXS, rYS, rZS;
+
+string(STR_DEFAULT_SHORT) sTemp;
+string(STR_DEFAULT_LONG)  s1, s2, s3, s4, s5, sMsg;
+string(STR_FILE) sGrid, sDB;
+real rX, rY, rZ, rAz, rSwing;
+int iDescr,iFactor, iOrient;
+int iSizeXF;
+int iSizeYF;
+int iNameF;
+int iLayoutF;
+int iMediaF;
+int iTypeF;
+int iFixedF;
+int iMargin_InsideF;
+int iMargin_BottomF;
+int iMargin_RightF;
+int iMargin_TopF;
+int iMargin_LeftF;
+int iUpDirF;
+int iUpAngF;
+int iTmp,iMed;
+int iUnits;
+int iIsGridMap;
+
+#define NEWMAP "NEWMAP"
+
+#define RANGE_DIALOG 0
+#define SCAN_DATABASE 2
+#define SCAN_MAP      5
+#define SCAN_GRID     3
+#define COORD_SYS     4
+#define NEWMAP_DIALOG 1
+#define DONE         99
+#define SCALE_BUTTON  6
+#define TEMPLATES     7
+
+#define SETUP_FROM_XYRANGE_PARAMETERS \
+			rMinX = rGetReal_SYS("XYRANGE","MIN_X");\
+			rMinY = rGetReal_SYS("XYRANGE","MIN_Y");\
+			rMaxX = rGetReal_SYS("XYRANGE","MAX_X");\
+			rMaxY = rGetReal_SYS("XYRANGE","MAX_Y");\
+			if (rMinX > rMaxX) {r = rMinX; rMinX = rMaxX; rMaxX = r;}\
+			if (rMinY > rMaxY) {r = rMinY; rMinY = rMaxY; rMaxY = r;}\
+			FormatR_STR(rMinX, sMinX, 20, 10);\
+			FormatR_STR(rMinY, sMinY, 20, 10);\
+			FormatR_STR(rMaxX, sMaxX, 20, 10);\
+			FormatR_STR(rMaxY, sMaxY, 20, 10);\
+			SetString_SYS(NEWMAP,"MIN_X", sMinX);\
+			SetString_SYS(NEWMAP,"MIN_Y", sMinY);\
+			SetString_SYS(NEWMAP,"MAX_X", sMaxX);\
+			SetString_SYS(NEWMAP,"MAX_Y", sMaxY);
+	 
+//===========================================================================
+
+{
+
+   // --- get SBF for projection info ---
+   
+   hSBF = hGetSYS_SBF();
+   
+   
+   // --- Load Tables ---
+      
+   hTMP = CreateCSV_LTB("maptmpl");
+   iNameF = iFindField_LTB(hTMP,"Name");
+   iLayoutF = iFindField_LTB(hTMP,"Layout");
+   iMediaF = iFindField_LTB(hTMP,"Media");
+   iTypeF = iFindField_LTB(hTMP,"Type");
+   iFixedF = iFindField_LTB(hTMP,"Fixed");
+   iMargin_InsideF = iFindField_LTB(hTMP,"Margin_Inside");
+   iMargin_BottomF = iFindField_LTB(hTMP,"Margin_Bottom");
+   iMargin_RightF = iFindField_LTB(hTMP,"Margin_Right");
+   iMargin_TopF = iFindField_LTB(hTMP,"Margin_Top");
+   iMargin_LeftF = iFindField_LTB(hTMP,"Margin_Left");
+   iUpDirF = iFindField_LTB(hTMP,"Up_Dir");
+   iUpAngF = iFindField_LTB(hTMP,"Up_Ang");
+   
+   if (iNameF         ==-1) Abort_SYS(_("The [Name] not found in maptmpl table."));
+   if (iLayoutF       ==-1) Abort_SYS(_("The [Layout] not found in maptmpl table."));
+   if (iMediaF        ==-1) Abort_SYS(_("The [Media] not found in maptmpl table."));
+   if (iTypeF         ==-1) Abort_SYS(_("The [Type] not found in maptmpl table."));
+   if (iFixedF        ==-1) Abort_SYS(_("The [Fixed] not found in maptmpl table."));
+   if (iMargin_InsideF==-1) Abort_SYS(_("The [Margin_Inside] not found in maptmpl table."));
+   if (iMargin_BottomF==-1) Abort_SYS(_("The [Margin_Bottom] not found in maptmpl table."));
+   if (iMargin_RightF ==-1) Abort_SYS(_("The [Margin_Right] not found in maptmpl table."));
+   if (iMargin_TopF   ==-1) Abort_SYS(_("The [Margin_Top] not found in maptmpl table."));
+   if (iMargin_LeftF  ==-1) Abort_SYS(_("The [Margin_Left] not found in maptmpl table."));
+   if (iUpDirF        ==-1) Abort_SYS(_("The [Up_Dir] not found in maptmpl table."));
+   if (iUpAngF        ==-1) Abort_SYS(_("The [Up_Ang] not found in maptmpl table."));
+      
+   hUNI = CreateCSV_LTB("units");
+   iDescr  = iFindField_LTB(hUNI,"Description");
+   iFactor = iFindField_LTB(hUNI,"Factor");
+   if (iDescr==-1) Abort_SYS(_("The [Description] not found in units table."));
+   if (iFactor==-1) Abort_SYS(_("The [Factor] not found in units table."));
+   
+   hMED = Create_LTB("media",LTB_TYPE_HEADER,LTB_DELIM_COMMA,"");
+   iSizeXF = iFindField_LTB(hMED,"Size_X");
+   iSizeYF = iFindField_LTB(hMED,"Size_Y");
+   if (iSizeXF==-1) Abort_SYS(_("The [Size_X] not found in media table."));
+   if (iSizeYF==-1) Abort_SYS(_("The [Size_Y] not found in media table."));
+   
+	hIPJ = Create_IPJ();
+
+	
+	// --- Save initial parameters ---
+
+	ParmReg = Create_REG(64);
+	GetREG_SYS(ParmReg, NEWMAP);
+
+
+   // --- Interactive Mode ---   
+ 
+   if (iInteractive_SYS()) 
+	{
+      i = RANGE_DIALOG;
+      while (i != DONE) 
+		{      
+         switch (i) 
+			{         
+            case RANGE_DIALOG:
+            
+			      // --- get projection ---
+
+					GetString_SYS(NEWMAP, "IPJ_NAME", s1);
+					if (iStrlen_STR(s1) > 0)
+					{
+						GetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+						GetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+						GetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+						GetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);
+						SetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+					}
+
+
+               // --- length units ---
+               
+               GetUnits_IPJ(hIPJ,rScale,sUnits);
+               iUnits = iFindKey_LTB(hUNI,sUnits);
+               if (iUnits < 0) iUnits = 0;
+               SetInt_SYS(NEWMAP,"UNITS",iUnits);
+            
+               Diag = Create_DGW("NEWMAP_RANGE");
+               List = GetList_DGW(Diag,_NEWMAP_RANGE_4);
+               GetLST_LTB(hUNI,iDescr,List);
+               
+               SetInfoSYS_DGW(Diag,_NEWMAP_RANGE_0,DGW_TEXT,NEWMAP,"MIN_X");     
+               SetInfoSYS_DGW(Diag,_NEWMAP_RANGE_1,DGW_TEXT,NEWMAP,"MIN_Y");     
+               SetInfoSYS_DGW(Diag,_NEWMAP_RANGE_2,DGW_TEXT,NEWMAP,"MAX_X");    
+               SetInfoSYS_DGW(Diag,_NEWMAP_RANGE_3,DGW_TEXT,NEWMAP,"MAX_Y");    
+               SetInfoSYS_DGW(Diag,_NEWMAP_RANGE_4,DGW_LISTALIAS,NEWMAP,"UNITS");  
+               GetName_IPJ(hIPJ,IPJ_NAME_PCS,s1);    
+               SetInfo_DGW(Diag,_NEWMAP_RANGE_5,DGW_TEXT,s1);  
+            
+               iRet = iRunDialogue_DGW(Diag);
+					if (iRet == -1) 
+					{
+						ClearGroupParm_SYS(NEWMAP);	// Restore original parameters
+						SetREG_SYS(ParmReg);	
+						Cancel_SYS();
+					}
+
+               GetInfoSYS_DGW(Diag,_NEWMAP_RANGE_0,DGW_TEXT,NEWMAP,"MIN_X");     
+               GetInfoSYS_DGW(Diag,_NEWMAP_RANGE_1,DGW_TEXT,NEWMAP,"MIN_Y");     
+               GetInfoSYS_DGW(Diag,_NEWMAP_RANGE_2,DGW_TEXT,NEWMAP,"MAX_X");    
+               GetInfoSYS_DGW(Diag,_NEWMAP_RANGE_3,DGW_TEXT,NEWMAP,"MAX_Y");    
+               GetInfoSYS_DGW(Diag,_NEWMAP_RANGE_4,DGW_TEXT,NEWMAP,"UNITS");    
+               Destroy_DGW(Diag);
+                             
+               if (iRet == SCAN_DATABASE)
+					{ 
+						while(TRUE)
+						{
+							// --- If no database is defined, use the current database ---
+
+							if(iHaveCurrent_EDB() == 1)
+							{
+								EData = Current_EDB();
+								GetName_EDB(EData, sDB);
+							}
+							else
+							{
+								GetString_SYS(NEWMAP,"DATABASE", sDB);
+
+								if (iFileOpen_GUI(_("Select database"), FILE_FILTER_GDB, sDB, sDB) == 1)
+									break;	// return to main dialog
+
+								EData = Load_EDB(sDB);
+							}
+							
+							if (iRunGX_SYS("rangedb"))
+							{
+								DisplayMessage_SYS(_("rangedb GX"),_("Failed to calculate range from database."));
+								UnLoad_EDB(sDB);		// unload the database so you can scan for another next time.
+								continue;
+							}
+                    
+
+							// --- get projection ---
+                                       
+							if (iExistFile_SBF(hSBF,"_xyrange.ipj")) 
+							{
+								hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READ);
+								Destroy_IPJ(hIPJ);
+								hIPJ = CreateS_IPJ(hBF);
+								DestroyEx_BF(hBF);
+
+								GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+								SetString_SYS(NEWMAP, "IPJ_NAME", s1);
+								SetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+								SetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+								SetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+								SetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);  
+							}
+
+							SETUP_FROM_XYRANGE_PARAMETERS                                  
+									
+							SetString_SYS(NEWMAP,"DATABASE", sDB);																																				
+							break;
+						}
+               } 
+					else if (iRet == SCAN_GRID) 
+					{
+						while(TRUE)
+						{
+							GetString_SYS(NEWMAP, "GRID", sGrid);
+							if (iDatFileForm_GUI(_("Select grid"), sGrid, sGrid, DAT_TYPE_GRID, FILE_FORM_OPEN, FALSE) == 1)
+								break;  // return to main dialog
+
+							
+							// --- See if the grid has a rotated coordinate system ---
+
+							hIMG = CreateFile_IMG(GS_FLOAT,sGrid,IMG_FILE_READONLY);
+							hIPJgrid = Create_IPJ();
+							GetIPJ_IMG(hIMG,hIPJgrid);
+							Destroy_IMG(hIMG);
+
+							iRotated = 0;
+							iOrient = iGetOrientation_IPJ(hIPJgrid);
+							if(iOrient == IPJ_ORIENT_PLAN)
+							{
+								GetOrientationInfo_IPJ (hIPJgrid, rXo, rYo, rZo, rRot, rSwing);
+								if(rRot != 0.0)
+									iRotated = 1;
+							}
+							else if(iOrient == IPJ_ORIENT_3D)
+							{
+								GetPlaneEquation_IPJ(hIPJgrid, 0.0, 0.0, 1.0, 1.0, rPitch, rYaw, rRoll, rXo, rYo, rZo, rXS, rYS, rZS);
+								if(rPitch == 0.0 && rYaw == 0.0 && rRoll != 0.0)
+									iRotated = 1;
+							}
+							Destroy_IPJ(hIPJgrid);
+
+							if (iRotated == 1)
+							{
+								Strcpy_STR(sMsg, _("The input grid has a rotated (local) coordinate system.\n\r"));
+								Strcat_STR(sMsg, _("Do you wish to create a map in the local coordinates (YES),\n\r"));
+								Strcat_STR(sMsg, _("Or in true Eastings and Northings, and show the grid rotated (NO)?"));
+								if (iDisplayQuestion_SYS(_("Create a new map"), sMsg) == 0)
+									SetInt_SYS("IMGRANGE", "REMOVE_ORIENTATION", 1);
+							}
+
+							SetString_SYS("IMGRANGE", "FILE", sGrid);
+							if (iRunGX_SYS("imgrange.gx"))
+							{
+								DisplayMessage_SYS(_("imgrange GX"), _("Failed to calculate range from grid."));
+								continue;
+							}						                     
+                     
+							// --- get projection ---
+                                       
+							if (iExistFile_SBF(hSBF,"_xyrange.ipj")) 
+							{
+								hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READ);
+								Destroy_IPJ(hIPJ);
+								hIPJ = CreateS_IPJ(hBF);
+								DestroyEx_BF(hBF);
+							}     
+
+							SETUP_FROM_XYRANGE_PARAMETERS
+							SetString_SYS(NEWMAP, "GRID", sGrid);
+
+							GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+							SetString_SYS(NEWMAP, "IPJ_NAME", s1);
+							SetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+							SetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+							SetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+							SetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);  
+
+							break;
+						}                                 
+               } 
+					else if (iRet == SCAN_MAP)
+					{
+						while (TRUE)
+						{
+							// --- If no map is defined, use the current map ---
+
+							iIsGridMap = 0;
+							if(iHaveCurrent_EMAP() == 1)
+							{
+								EMap = Current_EMAP();
+								iIsGridMap = iIsGrid_EMAP(EMap);
+							}
+
+							if(iHaveCurrent_EMAP() == 1 && iIsGridMap == 0)
+							{
+								GetName_EMAP(EMap, sMap);
+							}
+							else
+							{
+								GetString_SYS(NEWMAP,"MAP", sMap);
+
+								if (iFileOpen_GUI(_("Select map"), FILE_FILTER_MAP, sMap, sMap) == 1)
+									break;	// return to main dialog
+
+								EMap = Load_EMAP(sMap);
+							}
+
+							if(iSetCurrentView_EMAP(EMap, "*Data")!=0)
+							{
+								DisplayMessage_SYS(_("Define extents from map"), _("The selected map has no current data view."));
+								UnLoad_EMAP(sMap);		// unload so you can scan for another
+								continue;
+							}
+
+
+							// --- Get the current view's IPJ ---
+						
+							hIPJ2 = Create_IPJ();
+						
+							Map = Lock_EMAP(EMap);
+							View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+							GetIPJ_MVIEW(View,hIPJ2);
+							Destroy_MVIEW(View);
+							UnLock_EMAP(EMap);
+						
+						
+							// --- Can't be oriented with a rotation, or warped with a rotation ---
+						
+							if(iWarped_IPJ(hIPJ2))
+							{
+								DisplayMessage_SYS(_("Interactive"), _("The current data view has a warp applied to it;\r\nyou cannot interactively select an area from a map view with a rotated coordinate system."));
+								Destroy_IPJ(hIPJ2);
+								UnLoad_EMAP(sMap);		// unload so you can scan for another
+								continue;
+							}
+							else 
+							{
+								iOrient = iGetOrientation_IPJ(hIPJ2);
+								if(iOrient == IPJ_ORIENT_PLAN)
+								{
+									GetOrientationInfo_IPJ(hIPJ2, rX, rY, rZ, rAz, rSwing);
+									if(rAz!=0.0)
+									{
+										DisplayMessage_SYS(_("Interactive"), _("The current data view is rotated;\r\nyou cannot interactively select an area from a map view with a rotated coordinate system."));
+										Destroy_IPJ(hIPJ2);
+										UnLoad_EMAP(sMap);		// unload so you can scan for another
+										continue;
+									}
+								}
+								else if(iOrient == IPJ_ORIENT_SECTION)
+								{
+									DisplayMessage_SYS(_("Interactive"), _("The current data view is a section view;\r\nyou cannot interactively select an area from a section view."));
+									Destroy_IPJ(hIPJ2);
+									UnLoad_EMAP(sMap);		// unload so you can scan for another
+									continue;
+								}
+								else if(iOrient != IPJ_ORIENT_DEFAULT)
+								{
+									DisplayMessage_SYS(_("Interactive"), _("The current data view is a strip log or 3D view;\r\nyou cannot interactively select an area from these special view types."));
+									Destroy_IPJ(hIPJ2);
+									UnLoad_EMAP(sMap);		// unload so you can scan for another
+									continue;
+								}
+							}
+						
+												
+							// --- Window should not be minimized ---
+
+							if (iGetWindowState_EMAP(EMap) == EMAP_WINDOW_MINIMIZE)
+								SetWindowState_EMAP(EMap, EMAP_WINDOW_RESTORE);
+					
+							if (iGetBox_EMAP(EMap, _("Define extents from map"), rMinX, rMinY, rMaxX, rMaxY)==0)
+							{
+								// --- Round to 10 significant digits first, like rangedb does ---
+
+								FormatR_STR(rMinX, sMinX, 20, 10);
+								FormatR_STR(rMinY, sMinY, 20, 10);
+								FormatR_STR(rMaxX, sMaxX, 20, 10);
+								FormatR_STR(rMaxY, sMaxY, 20, 10);
+
+								SetString_SYS(NEWMAP,"MIN_X", sMinX);
+								SetString_SYS(NEWMAP,"MIN_Y", sMinY);
+								SetString_SYS(NEWMAP,"MAX_X", sMaxX);
+								SetString_SYS(NEWMAP,"MAX_Y", sMaxY);
+							
+							
+								// --- Retrieve the view's projection info ---
+
+								Map = Lock_EMAP(EMap);
+								View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+								GetIPJ_MVIEW(View,hIPJ);
+								Destroy_MVIEW(View);
+								UnLock_EMAP(EMap);
+							
+								ClearWarp_IPJ(hIPJ2);
+								ClearOrientation_IPJ(hIPJ2);
+							
+								Copy_IPJ(hIPJ2, hIPJ);
+								Destroy_IPJ(hIPJ2);
+
+								GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+								SetString_SYS(NEWMAP, "IPJ_NAME", s1);
+								SetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+								SetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+								SetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+								SetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);  
+							}
+
+							SetString_SYS(NEWMAP,"MAP", sMap);
+							break;						
+						}
+					}
+					else if (iRet == COORD_SYS) 
+					{
+	               if (iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Map view"), "*Data") == 0)      
+						{
+							GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+							SetString_SYS(NEWMAP, "IPJ_NAME", s1);
+							SetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+							SetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+							SetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+							SetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);                       
+						}
+					}                                
+               else if (iRet == NEWMAP_DIALOG) 
+					{                                       
+                  // --- check range ---
+
+                  rMinX = rGetReal_SYS(NEWMAP,"MIN_X");
+                  rMinY = rGetReal_SYS(NEWMAP,"MIN_Y");
+                  rMaxX = rGetReal_SYS(NEWMAP,"MAX_X");
+                  rMaxY = rGetReal_SYS(NEWMAP,"MAX_Y");
+                  
+                  if ((rMinX == rDUMMY) || (rMinX >= rMaxX)) {
+                     DisplayMessage_SYS(_("Invalid range"),_("Invalid X range."));
+                  } else if ((rMinY == rDUMMY) || (rMinY >= rMaxY)) {
+                     DisplayMessage_SYS(_("Invalid range"),_("Invalid Y range."));
+                  } else
+                     i = NEWMAP_DIALOG;                   
+               }
+               break;
+               
+            case NEWMAP_DIALOG:
+            
+               Diag = Create_DGW("NEWMAP_CREATE");
+               List = GetList_DGW(Diag,_NEWMAP_CREATE_1);
+               GetLST_LTB(hTMP,0,List);
+
+					// TODO - WHY?
+               Strcpy_STR(sTmpl, _("landscape letter"));
+               iTmp = iFindItem_LST(List, LST_ITEM_NAME, sTmpl); 
+               if (iTmp != -1)
+               {
+                  DelItem_LST(List, iTmp);
+                  iTmp = iFindKey_LTB(hTMP, sTmpl);
+                  if (iTmp < 0)
+                  {
+                     GetString_LTB(hTMP, 0, 0, sTmpl);
+                     SetString_SYS(NEWMAP, "TEMPLATE", sTmpl);
+                  }
+               }
+               Sort_LST(List,0,0);
+                     
+               SetInfoSYS_DGW(Diag,_NEWMAP_CREATE_0,DGW_FILEPATH,NEWMAP,"MAP");     
+               SetInfoSYS_DGW(Diag,_NEWMAP_CREATE_1,DGW_TEXT,NEWMAP,"TEMPLATE");     
+               SetInfoSYS_DGW(Diag,_NEWMAP_CREATE_2,DGW_TEXT,NEWMAP,"SCALE");     
+					GetName_IPJ(hIPJ,IPJ_NAME_PCS,s1);    
+					SetInfo_DGW(Diag,_NEWMAP_CREATE_3,DGW_TEXT,s1);    
+					GetName_IPJ(hIPJ,IPJ_NAME_UNIT_FULL,s1);    
+					SetInfo_DGW(Diag,_NEWMAP_CREATE_4,DGW_TEXT,s1);    
+               
+					iRet = iRunDialogue_DGW(Diag);
+					if (iRet == -1) 
+					{
+						ClearGroupParm_SYS(NEWMAP);	// Restore original parameters
+						SetREG_SYS(ParmReg);	
+						Cancel_SYS();
+					}
+
+               GetInfoSYS_DGW(Diag,_NEWMAP_CREATE_0,DGW_FILEPATH,NEWMAP,"MAP");     
+               GetInfoSYS_DGW(Diag,_NEWMAP_CREATE_1,DGW_TEXT,NEWMAP,"TEMPLATE");     
+               GetInfoSYS_DGW(Diag,_NEWMAP_CREATE_2,DGW_TEXT,NEWMAP,"SCALE");     
+               Destroy_DGW(Diag);
+
+               
+					// --- Go back? ---
+
+               if (iRet == RANGE_DIALOG)  
+					{
+                  i = RANGE_DIALOG;
+                  break;
+               }
+                  
+               if (iRet == TEMPLATES) 
+					{               
+                  // --- edit templates ---
+               
+                  GetString_SYS(NEWMAP,"TEMPLATE",sTmpl);
+                  SetString_SYS("MAPTMPL","NAME",sTmpl);
+                  Destroy_SYS(hTMP);
+                  
+                  iRet2 = iRunGX_SYS("maptmpl.gx");
+                  if (iRet2 == 0) 
+						{                                   
+                     GetString_SYS("MAPTMPL","NAME",sTmpl);
+                     SetString_SYS(NEWMAP,"TEMPLATE",sTmpl);                     
+                  }
+                  hTMP = CreateCSV_LTB("maptmpl");
+						iRet = SCALE_BUTTON;
+               }
+               
+            
+               // --- get unit factor ---
+            
+               rConv = 1.0;                     
+               GetUnits_IPJ(hIPJ,rConv,sUnits);
+               if (rConv <= 0.0) 
+                  Abort_SYS(_("Invalid unit conversion factor in UNITS table."));
+
+              
+               // --- get template parameters ---
+               
+               GetString_SYS(NEWMAP,"TEMPLATE",sTmpl);
+               iTmp = iFindKey_LTB(hTMP,sTmpl);
+               if (iTmp < 0) {
+                  DisplayMessage_SYS(_("No template"), _("Template not found"));
+                  break;
+               }
+               
+               
+               // --- layout ---
+               
+               GetString_LTB(hTMP,iTmp,iLayoutF,sSet);
+               if (iStrStr_STR(sSet, _("portrait"), STR_CASE_TOLERANT) != -1)
+                  iPort = TRUE;
+               else         
+                  iPort = FALSE;
+               
+               
+               // --- exact size ---
+               
+               GetString_LTB(hTMP,iTmp,iFixedF,sSet);
+               if (iStrStr_STR(sSet, _("fixed"), STR_CASE_TOLERANT) != -1)
+                  iExact = TRUE;
+               else         
+                  iExact = FALSE;
+                     
+               
+               // --- margins ---
+               
+               rMargXmin = rGetReal_LTB(hTMP,iTmp,iMargin_LeftF);
+               rMargXmax = rGetReal_LTB(hTMP,iTmp,iMargin_RightF);
+               rMargYmin = rGetReal_LTB(hTMP,iTmp,iMargin_BottomF);
+               rMargYmax = rGetReal_LTB(hTMP,iTmp,iMargin_TopF);
+               rInside   = rGetReal_LTB(hTMP,iTmp,iMargin_InsideF);
+                     
+               
+               // --- media string ---
+
+               GetString_LTB(hTMP,iTmp,iMediaF,sSet);
+               iMed = iFindKey_LTB(hMED,sSet);
+               if (iMed < 0) {
+                  DisplayMessage_SYS(_("Media not found"), _("Media not defined"));
+                  break;
+               }
+               GetString_LTB(hMED,iMed,iSizeXF,sSet);
+               Strcpy_STR(sSize,sSet);
+               Strcat_STR(sSize,",");
+               GetString_LTB(hMED,iMed,iSizeYF,sSet);
+               Strcat_STR(sSize,sSet);
+               
+              
+               // --- calculate a size for unlimited size ---
+               
+               rScale = rDUMMY;
+               if (iRet != SCALE_BUTTON && iExistReal_SYS(NEWMAP,"SCALE"))
+                  rScale = rGetReal_SYS(NEWMAP,"SCALE");
+               
+               if (iStrMin_STR(sSize) == 1) 
+					{               
+                  if ((rScale==rDUMMY) || (rScale <= 0.0)) {
+                     DisplayMessage_SYS(_("Scale error"), _("Unlimited media size requires a valid scale."));
+                     break;
+                  }
+
+
+                  // --- Calculate the required paper size ---
+                  
+                  rX = 100.0 * rConv * (rMaxX - rMinX) / rScale + 2.0*rInside + rMargXmax + rMargXmin + 0.25;
+                  rY = 100.0 * rConv * (rMaxY - rMinY) / rScale + 2.0*rInside + rMargYmax + rMargYmin + 0.25;
+                  FormatR2_STR(rX, sTemp, 10, 2);
+                  Strcpy_STR(sSize, sTemp);
+                  Strcat_STR(sSize, ",");
+                  FormatR2_STR(rY, sTemp, 10, 2);
+                  Strcat_STR(sSize, sTemp);                   
+
+                  
+						// --- Set Portrait parameter depending on relative X and Y sizes ---
+
+                  if(rMaxY-rMinY > rMaxX-rMinX)
+                     iPort = 1;
+                  else
+                     iPort = 0;
+               }                 
+
+					if (iRet == SCALE_BUTTON) 
+               {
+                  iMapsetTest_MVU(rMinX,rMaxX,rMinY,rMaxY,sSize,iPort,iExact,
+                             rScale,1.0/rConv,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside);
+                  SetReal_SYS(NEWMAP,"SCALE",rScale);
+                  break;
+               } 
+               else 
+               { 
+                  if (!iMapsetTest_MVU(rMinX,rMaxX,rMinY,rMaxY,sSize,iPort,iExact,rScale,1.0/rConv,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside))
+                  {
+                     ShowError_SYS();
+                     break;
+                  }
+               }
+
+
+               // --- check that map does not exist ---
+
+               GetString_SYS(NEWMAP,"MAP",sMap);
+               if (iStrlen_STR(sMap)==0) 
+					{
+                  DisplayMessage_SYS(_("Map name required"), _("A map name is required."));
+                  break;
+               }
+					UnLoad_EMAP(sMap);	// harmless if map is not loaded
+               
+                              
+               // --- done ---
+               
+               i = DONE;
+               break;
+
+            default:
+            
+               DisplayInt_SYS(_("I'm lost"), i);            
+               i = RANGE_DIALOG;
+               break;             
+         }            
+      }
+
+		// --- Save projection parameters for scripting ---
+
+		GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+		SetString_SYS(NEWMAP, "IPJ_NAME", s1);
+		SetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+		SetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+		SetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+		SetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);      
+   } 
+	else 
+	{
+   
+      // --- Batch setup. This allows you to use the current database in script mode ---
+      
+      GetString_SYS(NEWMAP,"SCAN",sSet);
+		if (iStrlen_STR(sSet))
+		{
+			SetString_SYS(NEWMAP, "SCAN", "");	// force reset each time
+
+			if (iStrcmp_STR(sSet,"DATA",STR_CASE_TOLERANT) == 0) 
+			{
+				if (iRunGX_SYS("rangedb.gx"))
+					DisplayMessage_SYS(_("rangedb GX"), _("Failed to calculate range from database."));
+			} 
+			else if (iStrcmp_STR(sSet,"GRID",STR_CASE_TOLERANT) == 0) 
+			{
+				if (iRunGX_SYS("imgrange.gx"))
+					DisplayMessage_SYS(_("imgrange GX"), _("Failed to calculate range from grid."));
+			}
+			else
+				Abort_SYS(_("Valid parameters for \"NEWMAP.SCAN\" are \"DATA\" and \"GRID\"."));
+
+			SETUP_FROM_XYRANGE_PARAMETERS
+		}
+
+
+      
+      
+      // --- get range ---
+
+      rMinX = rGetReal_SYS(NEWMAP,"MIN_X");
+      rMinY = rGetReal_SYS(NEWMAP,"MIN_Y");
+      rMaxX = rGetReal_SYS(NEWMAP,"MAX_X");
+      rMaxY = rGetReal_SYS(NEWMAP,"MAX_Y");
+
+
+		// --- Support for legacy scripts which use XYRANGE for the XY ranges ---
+
+		if(iInteractive_SYS() == 0 && rMinX == rDUMMY && rMinY == rDUMMY && rMaxX == rDUMMY && rMaxY == rDUMMY)
+		{
+			rMinX = rGetReal_SYS("XYRANGE","MIN_X");
+			rMinY = rGetReal_SYS("XYRANGE","MIN_Y");
+			rMaxX = rGetReal_SYS("XYRANGE","MAX_X");
+			rMaxY = rGetReal_SYS("XYRANGE","MAX_Y");
+		}
+      
+      if ((rMinX == rDUMMY) || (rMinX >= rMaxX))
+         Abort_SYS(_("Invalid X range."));
+      else if ((rMinY == rDUMMY) || (rMinY >= rMaxY))
+         Abort_SYS(_("Invalid Y range."));         
+   }
+   
+
+	// --- get projection ---
+
+	Destroy_IPJ(hIPJ);
+	hIPJ = Create_IPJ();
+	GetString_SYS(NEWMAP, "IPJ_NAME", s1);
+	if (iStrlen_STR(s1) > 0)
+	{
+		GetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+		GetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+		GetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+		GetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);
+		SetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+	}
+	else
+	{
+		if (iExistFile_SBF(hSBF,"_xyrange.ipj")) {
+			hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READ);
+			Destroy_IPJ(hIPJ);
+			hIPJ = CreateS_IPJ(hBF);
+			DestroyEx_BF(hBF);
+		}
+	}
+			
+			              
+   // --- get unit factor and scale ---
+
+   rConv = 1.0;                     
+   GetUnits_IPJ(hIPJ,rConv,sUnits);
+   if (rConv <= 0.0) Abort_SYS(_("Invalid unit conversion factor in UNITS table."));
+   rScale = rGetReal_SYS(NEWMAP,"SCALE");
+   
+   
+   // --- get template parameters ---
+   
+   GetString_SYS(NEWMAP,"TEMPLATE",sTmpl);
+   iTmp = iFindKey_LTB(hTMP,sTmpl);
+   if (iTmp < 0) {
+      Strcpy_STR(sFile, _("Template not found:"));
+      Strcat_STR(sFile,sTmpl);
+      Abort_SYS(sFile);
+   }
+   
+   
+   // --- layout ---
+   
+   GetString_LTB(hTMP,iTmp,iLayoutF,sSet);
+   if (iStrStr_STR(sSet, _("portrait"), STR_CASE_TOLERANT) != -1)
+      iPort = TRUE;
+   else         
+      iPort = FALSE;
+   
+   
+   // --- exact size ---
+   
+   GetString_LTB(hTMP,iTmp,iFixedF,sSet);
+   if (iStrStr_STR(sSet, _("fixed"), STR_CASE_TOLERANT) != -1)
+      iExact = TRUE;
+   else         
+      iExact = FALSE;
+         
+   
+   // --- margins ---
+   
+   rMargXmin = rGetReal_LTB(hTMP,iTmp,iMargin_LeftF);
+   rMargXmax = rGetReal_LTB(hTMP,iTmp,iMargin_RightF);
+   rMargYmin = rGetReal_LTB(hTMP,iTmp,iMargin_BottomF);
+   rMargYmax = rGetReal_LTB(hTMP,iTmp,iMargin_TopF);
+   rInside   = rGetReal_LTB(hTMP,iTmp,iMargin_InsideF);
+         
+   
+   // --- media string ---
+
+   GetString_LTB(hTMP,iTmp,iMediaF,sSet);
+   iMed = iFindKey_LTB(hMED,sSet);
+   if (iMed < 0) {
+      Strcpy_STR(sFile, _("Media not found:"));
+      Strcat_STR(sFile,sSet);
+      Abort_SYS(sFile);
+   }
+   GetString_LTB(hMED,iMed,iSizeXF,sSet);
+   Strcpy_STR(sSize,sSet);
+   Strcat_STR(sSize,",");
+   GetString_LTB(hMED,iMed,iSizeYF,sSet);
+   Strcat_STR(sSize,sSet);
+   
+  
+   // --- calculate a size for unlimited size ---
+              
+   if (iStrMin_STR(sSize) == 1) {
+      if ((rScale==rDUMMY) || (rScale <= 0.0)) {
+         Abort_SYS(_("Unlimited media size requires a scale."));
+      }
+      rX = 100.0 * rConv * (rMaxX - rMinX) / rScale + 2.0*rInside + rMargXmax + rMargXmin + 0.25;
+      rY = 100.0 * rConv * (rMaxY - rMinY) / rScale + 2.0*rInside + rMargYmax + rMargYmin + 0.25;
+      FormatR2_STR(rX, sTemp, 10, 2);
+      Strcpy_STR(sSize, sTemp);
+      Strcat_STR(sSize, ",");
+      FormatR2_STR(rY, sTemp, 10, 2);
+      Strcat_STR(sSize, sTemp);                   
+
+      // --- Set Portrait parameter depending on relative X and Y sizes ---
+
+      if(rMaxY-rMinY > rMaxX-rMinX)
+         iPort = 1;
+      else
+         iPort = 0;
+ 
+   }
+                 
+
+   // --- open the map and set up views ---
+
+   GetString_SYS(NEWMAP,"MAP",sMap);
+   if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+   Mapset_MVU(Map,"*Base","*Data",rMinX,rMaxX,rMinY,rMaxY,sSize,iPort,iExact,
+              rScale,1.0/rConv,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside);
+              
+              
+                    
+   // --- create the map REG ---
+   
+   MapReg = Create_REG(128);
+   GetString_LTB(hTMP,iTmp,iTypeF,sSet);
+   Set_REG(MapReg,"MAP.STYLE",sSet);
+   
+   
+   // --- inside margin ---
+   
+   GetString_LTB(hTMP,iTmp,iMargin_InsideF,sSet);
+   Set_REG(MapReg,"MAP.MARGIN_INSIDE",sSet);
+   
+   
+   // --- up ---
+   
+   GetString_LTB(hTMP,iTmp,iUpDirF,sSet);
+   Set_REG(MapReg,"MAP.UP_DIRECTION",sSet);
+   GetString_LTB(hTMP,iTmp,iUpAngF,sSet);
+   Set_REG(MapReg,"MAP.UP_ANGLE",sSet);
+   
+   
+   // --- put REG in the map ---
+   
+   SetREG_MAP(Map,MapReg);
+
+
+   // --- create an MDF ---
+
+   FileExt_STR(sMap,"mdf",sMdf,FILE_EXT_FORCE);
+   MapMDF_MVU(Map,sMdf,"*Data");
+   
+   
+   // --- Save projection parameters for scripting ---
+
+   GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+   SetString_SYS(NEWMAP, "IPJ_NAME", s1);
+   SetString_SYS(NEWMAP, "IPJ_DATUM", s2);
+   SetString_SYS(NEWMAP, "IPJ_METHOD", s3);
+   SetString_SYS(NEWMAP, "IPJ_UNITS", s4);
+   SetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);
+
+   
+   // --- set view projection ---
+      
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   SetIPJ_MVIEW(View,hIPJ);
+	ClearOrientation_IPJ(hIPJ);
+   SetUserIPJ_MVIEW(View,hIPJ);
+   Destroy_MVIEW(View);
+
+
+   // --- done ---
+
+   Destroy_SYS(Map);
+   Destroy_SYS(MapReg);
+   Destroy_SBF(hSBF);
+
+
+   // --- Display Map ---
+
+   Load_EMAP(sMap);
+}

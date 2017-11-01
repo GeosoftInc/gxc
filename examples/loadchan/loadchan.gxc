@@ -1,0 +1,102 @@
+//===========================================================================
+NAME          = "Load a channel into the open database editor"
+#include <version.gxh>
+DESCRIPTION   = "
+   Loads a channel into the displayed database editor.
+   
+      LOADCHAN.CHANNEL  channel to load
+      LOADCHAN.COLUMN   column number:
+                           -1 for first available empty column
+                           -2 for currently selected column
+      
+"
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+RESOURCE = "loadchan.gr"
+#include "loadchan.grh"
+
+#include <all.gxh>
+EDB eDB;
+DB  hDB;
+int i;
+DGW hDGW;
+LST hLST;
+string(DB_SYMB_NAME_SIZE) sChan,sCurChan;
+{
+	// --- This GX is not scriptable ---
+   
+   if (iScript_SYS()) 
+      Abort_SYS(_("The LOADCHAN GX cannot be run in Scripting mode (OMS)."));
+    
+
+   if (iHaveCurrent_EDB()) {
+   
+      eDB = Current_EDB();
+      
+      // --- Are we running interactively ? ---
+
+      if (iInteractive_SYS()) {
+
+         hDB = Lock_EDB(eDB);
+
+         hDGW = Create_DGW("loadchan");
+         hLST = GetList_DGW(hDGW,_LOADCHAN_0);
+         SymbLST_DB(hDB,hLST,DB_SYMB_CHAN);
+         Sort_LST(hLST,0,0);   
+         SetInfoSYS_DGW(hDGW,_LOADCHAN_0,DGW_TEXT,"LOADCHAN","CHANNEL");         
+         
+         i = iRunDialogue_DGW(hDGW);
+         if (i != 0) Cancel_SYS();
+
+         GetInfoSYS_DGW(hDGW,_LOADCHAN_0,DGW_TEXT,"LOADCHAN","CHANNEL");     
+
+         Destroy_DGW(hDGW);
+         
+         
+         // --- interactive, first available column
+         
+         SetString_SYS("LOADCHAN","COLUMN","-1");
+         
+         UnLock_EDB(eDB);
+         
+      }
+      
+      
+      // --- get parameters ---
+      
+      GetString_SYS("LOADCHAN","CHANNEL",sChan);
+      i = iGetInt_SYS("LOADCHAN","COLUMN");
+      
+      // --- have a column ---
+      
+      if (i != iDUMMY) {
+      
+      
+         // --- if not -2, goto the requested column ---
+         
+         if (i != -2)
+            GotoColumn_EDB(eDB,iGetInt_SYS("LOADCHAN","COLUMN"));
+            
+            
+         // --- if want to load in a specific channel, clear column, unload channel ---
+         
+         if (i != -1) {
+            
+            GetCurChan_EDB(eDB,sCurChan);
+            if (iStrlen_STR(sCurChan))
+               UnLoadChan_EDB(eDB,sCurChan);
+            UnLoadChan_EDB(eDB,sChan);
+         }
+               
+      }
+      
+      // --- load the channel ---
+      
+      LoadChan_EDB(eDB,sChan);
+      i = iFindChannelColumn_EDB(eDB,sChan);
+      if (i != iDUMMY)
+         GotoColumn_EDB(eDB,i);
+      
+   }
+}

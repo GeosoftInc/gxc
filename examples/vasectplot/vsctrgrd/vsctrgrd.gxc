@@ -1,0 +1,234 @@
+
+//===========================================================================
+NAME          = "RANGRID Gridding Program"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "\
+
+Creates a Grid file using minimum curvature gridding.
+
+Parameters: 
+
+Channel to grid                 RANGRID.CHAN                (required)
+Name of new grid file                  .GRID                (required)
+Grid cell size                         .CS                  (required)
+Xmin,Ymin,Xmax,Ymax                    .XY                  (optional)
+Log option                             .LOGOPT              (optional)
+Log minimum                            .LOGMIN              (optional)
+Low-pass desampling factor             .DSF                 (optional)
+Blanking distance                      .BKD                 (optional)
+Tolerance                              .TOL                 (optional)
+% pass tolerance                       .PASTOL              (optional)
+Max. iterations                        .ITRMAX              (optional)
+Internal tension (0-1)                 .TENS                (optional)
+Z base                                 .BASE                (optional)
+Z multiplier                           .MULT                (optional)
+"
+// Revision History:
+// v6.0:   No grc needed for this GX, and refixed LOGoption setting.
+// v6.0.0: Fixed error in setting LOGZ parameter in Rangrid.
+// v5.1.8: New GX.
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(GS_MAX_PATH) sGrid,sGDB;
+string(50)  sChan;        // Z channel
+string(50)  sCS;          // grid cell size       
+string(100) sXY;          //    . 
+string(50)  sLogOpt;      //    .
+string(50)  sLogMin;      //    .
+string(50)  sDSF;         //    . 
+string(50)  sBKD;         //    .
+string(50)  sEdgClp;      //    .
+string(50)  sTol;         //    .
+string(50)  sPasTol;      //   optional parameters
+string(50)  sItrMax;      //    .
+string(50)  sTens;        //    .  
+
+WA          WA_con;       // Handle to write control file
+string(100) sText;        // Line of text to write to control file
+                                           
+RGRD        Rangrid;      // Handle to Rangrid object
+DAT         InDat;        // Handle to Input DAT data object 
+                          // associated with database
+DAT         OutDat;       // Handle to Output DAT data object
+                          // associated with output grid file
+DB          Data;         // Database handle
+
+DB_SYMB     XCh;          // parameters for IPJ transfer
+IPJ         hIPJ;
+IMG         hIMG;
+                      
+string(8)   sHints;
+
+
+//===========================================================================
+//                           RANGRID CODE
+//===========================================================================
+
+{
+   // --- Make a RANGRID object ---
+
+   Rangrid = Create_RGRD();
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("RANGRID","CHAN",sChan); 
+   GetString_SYS("RANGRID","GRID",sGrid);
+   GetString_SYS("RANGRID","CS",sCS);     
+   GetString_SYS("RANGRID","XY",sXY);
+   GetString_SYS("RANGRID","LOGOPT",sLogOpt);     
+   GetString_SYS("RANGRID","LOGMIN",sLogMin);
+   GetString_SYS("RANGRID","DSF",sDSF);     
+   GetString_SYS("RANGRID","BKD",sBKD);
+   GetString_SYS("RANGRID","EDGCLP",sEdgClp);
+   GetString_SYS("RANGRID","TOL",sTol);     
+   GetString_SYS("RANGRID","PASTOL",sPasTol);
+   GetString_SYS("RANGRID","ITRMAX",sItrMax);     
+   GetString_SYS("RANGRID","TENS",sTens);
+   GetString_SYS("RANGRID","GDB",sGDB);
+
+   // --- Validate all parameters ---
+   
+   if (iStrlen_STR(sChan) <=0)
+      Abort_SYS(_("Z channel name is invalid"));
+
+   if (iStrlen_STR(sGrid) <=0)
+      Abort_SYS(_("New grid file name is invalid"));
+
+   if (iStrlen_STR(sGDB) <=0)
+      Abort_SYS(_("Geosoft database file name is invalid"));
+
+   
+   // --- Get the Database ---
+
+   Data = Open_DB(sGDB,"SUPER","");
+   
+   
+   // --- See if grid channels exist ---
+
+   if (!iExistSymb_DB(Data,"X",DB_SYMB_CHAN))
+      Abort_SYS(_("X Channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,"Y",DB_SYMB_CHAN))
+      Abort_SYS(_("Y Channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,sChan,DB_SYMB_CHAN))
+      Abort_SYS(_("Z Channel does not exist in database"));
+
+   
+   // --- write control file ---
+
+   WA_con=Create_WA("_rangrid.con",0);
+
+   Puts_WA(WA_con,sCS);
+   NewLine_WA(WA_con);
+
+   Puts_WA(WA_con,sXY);
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,",");
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLogOpt);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLogMin);
+   Strcat_STR(sText,",");
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,sDSF);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sBKD);
+   Strcat_STR(sText,",,,");
+   Strcat_STR(sText,sEdgClp);
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+   
+   Strcpy_STR(sText,sTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sPasTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sItrMax);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sTens);
+   Strcat_STR(sText,",");
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Destroy_WA(WA_con);
+
+
+   // --- get the input DAT using the database and channel handles ---
+
+   InDat = CreateDB_DAT(Data,"X","Y",sChan);
+
+
+   // --- get the output DAT using the output grid name ---
+
+   OutDat = CreateXGD_DAT(sGrid,DAT_XGD_NEW);
+
+
+   // --- Load up the Rangrid control parameters ---
+
+   if (iLoadParms_RGRD(Rangrid,"_rangrid.con"))
+      Abort_SYS(_("Could not read the Control file - Please check the format and parameters")); 
+
+
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- Set the default ---
+
+   if(iDefault_RGRD(Rangrid,sChan,InDat))
+      Abort_SYS(_("Error setting the parameter defaults.")); 
+
+
+   // --- Execute Rangrid program ---
+
+   if(iRun_RGRD(Rangrid,InDat,OutDat))
+      Abort_SYS(_("Error executing rangrid.")); 
+
+   Progress_SYS(0);
+   
+   
+   // --- put IPJ into image ---
+   
+   XCh = FindSymb_DB(Data,"X",DB_SYMB_CHAN);
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,hIPJ);
+   UnLockSymb_DB(Data,XCh);
+   hIMG = CreateFile_IMG(GS_FLOAT,sGrid,IMG_FILE_READORWRITE);
+   SetIPJ_IMG(hIMG,hIPJ);
+   Destroy_IMG(hIMG);
+   Destroy_IPJ(hIPJ);
+   
+   
+   // --- Destroy the DATs and Rangrid object ---
+   
+   Destroy_RGRD(Rangrid);
+   Destroy_DAT(InDat);
+   Destroy_DAT(OutDat);   
+
+   if (iInteractive_SYS())  {
+      if(iGlobal_SYS("montaj.hints",sHints)==0 && iStrcmp_STR(sHints,_n("Yes"),0)==0)
+         DisplayMessage_SYS(_("Rangrid Completed"),_("Rangrid.log file has been generated"));
+   }
+}
+
+//-----------------------------------------------------------------------

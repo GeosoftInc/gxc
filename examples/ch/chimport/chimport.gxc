@@ -1,0 +1,409 @@
+//==========================================================================
+NAME          = "CHIMERA survey data import"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport"
+
+DESCRIPTION   = "
+   Import a CHIMERA survey data.
+
+    CHIMPORT.SOURCE     \"ASCII\" from an ASCII file
+                        \"CLIPBOARD\" from text on the clipboard
+                        \"DATABASE\" from a supported database file
+            .FILE       File name for ASCII and DATABASE.
+            .TEMPLATE   Template (*.i3) name, will be created if new
+            .MAXLINES   Number of lines/groups in the new database.
+            .MAXCHANS   Number of channels/fields in the new database.
+    
+    CHIMERA.SURVEY      Survey database name
+    
+"
+// Revision History:
+// v7.1.1: QA 15185 Don't run wizard if the template is specified and it already exists.
+// v6.0.0: Was not saving database name for CHMERGE.
+// v5.1.8: Ensure _chsurvey.i* templates are newly created if no template
+//         is specified on import.
+// v5.1.7: ADO connection string buffer size increased to 1024.
+// v5.1.4: Database creation functions now use CHCREATE GX.
+//         Import was resetting channels with classes other than "Assay" to ""
+//         Create sample, standard, dup channels only if not made on import,
+//         and do it after import (so sample channels can be any width).
+// v5.1.3: Using "Current" X and Y channels
+//         Using ADO instead of DAO calls to access databases.
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chimport.gr"
+#include "chimport.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+DB_SYMB     Ch;
+VV          ChVV;
+REG         hREG;
+
+int         i;
+
+string(1024) sConnect;
+string(STR_FILE) sData, sDataBase, sTemplate, sLine;
+string(STR_DEFAULT_SHORT) sSource;
+string(STR_DEFAULT_LONG) sLabel;
+string(STR_DEFAULT) sClass;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+int iChans, iTemplateSpecified;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+   
+      // --- Clear default name for new database ---
+
+      SetString_SYS("CHCREATE","NAME","");
+
+
+      i = 0;
+      
+      while (i != 2) {
+      
+         switch (i) {
+         
+            case 0:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("CHIMPORT");
+
+
+               // --- Set any Defaults ---
+
+               SetInfoSYS_DGW(Diag,_CHIMPORT_0,DGW_LISTALIAS,"CHIMPORT","SOURCE");
+               SetInfoSYS_DGW(Diag,_CHIMPORT_1,DGW_FILEPATH,"CHIMPORT","FILE");
+               SetInfoSYS_DGW(Diag,_CHIMPORT_2,DGW_FILEPATH,"CHIMPORT","TEMPLATE");
+
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_CHIMPORT_0,DGW_LISTALIAS,"CHIMPORT","SOURCE");
+               GetInfoSYS_DGW(Diag,_CHIMPORT_1,DGW_FILEPATH,"CHIMPORT","FILE");
+               GetInfoSYS_DGW(Diag,_CHIMPORT_2,DGW_FILEPATH,"CHIMPORT","TEMPLATE");
+
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+               
+               
+               // --- determine type
+               
+               GetString_SYS("CHIMPORT","SOURCE",sSource);
+               if (iCharComp_STR(sSource,"C") || iCharComp_STR(sSource,"O")) {
+               
+                  SetString_SYS("CHIMPORT","FILE","");
+                  
+               } else {
+               
+                  GetString_SYS("CHIMPORT","FILE",sData);
+                  if (!iFileExist_SYS(sData)) {
+                     DisplayMessage_SYS(_("Error"),_("Data file not specified or file does not exist.  Please check the file name."));
+                     i = 0;
+                  }                     
+               }
+                              
+               break;
+               
+            case 1:
+            
+                           
+               // --- Create a new database. ---
+
+               if(iRunGX_SYS("chcreate.gx")) Cancel_SYS();
+
+               i = iGetInt_SYS("CHCREATE","RETURN");
+
+               break;
+               
+            default:
+            
+               DisplayMessage_SYS(_("Error"),_("I'm lost!"));
+               i = 0;               
+               
+         }               
+      }
+   }
+   
+   
+   // --- get parameters ---
+   
+   GetString_SYS("CHIMPORT","SOURCE",sSource);
+   GetString_SYS("CHIMPORT","FILE",sData);
+   GetString_SYS("CHIMPORT","TEMPLATE",sTemplate);
+   
+   iTemplateSpecified = (iStrlen_STR(sTemplate) > 0);
+   
+   
+   // --- objects ---
+
+   ChVV = Create_VV(INT,0);
+   hREG = Create_REG(128);
+   
+
+   // --- load database ---
+
+   GetString_SYS("CHCREATE","NAME",sDataBase);
+   Load_EDB(sDataBase);
+   
+
+   // --- Save database name for CHMERGE ---
+      
+   SetString_SYS("CHIMERA","SURVEY",sDataBase);
+      
+   
+   // --- create/load standard channels ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Use EAST and NORTH as X and Y channels to avoid possible confusion with
+   //     Yttrium (Y) ---
+
+   Strcpy_STR(sXCh, _n("East"));
+   Strcpy_STR(sYCh, _n("North"));
+   CreateSymb_DB(Data,sXCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   CreateSymb_DB(Data,sYCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   SetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   SetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   UnLock_EDB(EData);
+   
+   
+   // --- determine the data source ---
+    
+   if (iCharComp_STR(sSource,"D") || iCharComp_STR(sSource,"O")) {
+   
+      if (!iCharComp_STR(sSource,"O"))
+      {
+         // --- template name ---
+
+         Strcpy_STR(sConnect, "FILENAME=");
+         Strcat_STR(sConnect, sData);
+      }
+   
+      if (iStrlen_STR(sTemplate) > 0)
+         FileExt_STR(sTemplate,"i4",sTemplate,FILE_EXT_ADD_IF_NONE);
+      else {     
+
+         // --- If no template is specified, ensure that the default template
+         //     does not already exist. This has been the cause of much unexpected
+         //     behaviour by the import wizard, because it uses values from the
+         //     input template file, if it exists ---
+
+         Strcpy_STR(sTemplate,"_chsurvey.i4");
+         if(iFileExist_SYS(sTemplate))
+            iDeleteFile_SYS(sTemplate);
+      }
+
+         
+      // --- template creation wizard ---
+      
+      if (iInteractive_SYS() && (iTemplateSpecified == 0 || iFileExist_SYS(sTemplate)==0))         
+         ImportChemDatabaseADO_GUI(sConnect,sTemplate,sLine,IMPCH_TYPE_DATA)
+      
+      
+      // --- import ---
+
+      Progress_SYS(1);
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+      ProgName_SYS(_("Importing Data"),1);
+      ImportADO_DU(Data,"","",sTemplate,"D0");
+      UnLock_EDB(EData);
+      Progress_SYS(0);
+
+      
+   } else {
+   
+   
+      // --- import ASCII from a file or the clipboard ---
+      
+      if (iStrlen_STR(sTemplate) > 0)
+         FileExt_STR(sTemplate,"i3",sTemplate,FILE_EXT_ADD_IF_NONE);
+      else  {    
+
+         // --- If no template is specified, ensure that the default template
+         //     does not already exist. This has been the cause of much unexpected
+         //     behaviour by the import wizard, because it uses values from the
+         //     input template file, if it exists ---
+
+         Strcpy_STR(sTemplate,"_chsurvey.i3");
+         if(iFileExist_SYS(sTemplate))
+            iDeleteFile_SYS(sTemplate);
+      }
+   
+   
+      if (iCharComp_STR(sSource,"C")) {
+      
+      
+         // --- copy clipboard to a temporary file ---
+         
+         Strcpy_STR(sData,"_clip.txt");
+         ClipboardToFile_SYS(sData);
+         
+         
+      }
+      
+      
+      // --- Make Template ---
+
+      if (iInteractive_SYS() && (iTemplateSpecified == 0 || iFileExist_SYS(sTemplate)==0))         
+         ImportChemWizard_GUI(sData,sTemplate,IMPCH_TYPE_DATA);
+      
+      
+      // --- get current database ---
+      
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+      
+      
+      // --- import ---
+
+      
+      iDeleteFile_SYS("import.log");
+      Progress_SYS(1);
+      ProgName_SYS(_("Importing Data"),1);
+      ImportBIN_DU(Data,sData,sTemplate,"",iDUMMY,rDUMMY);
+      Progress_SYS(0);
+      UnLock_EDB(EData);
+      
+      
+      // --- delete temporary clipboard file ---
+      
+      if (iCharComp_STR(sSource,"C"))
+         iDeleteFile_SYS(sData);
+         
+         
+      // --- Display Errors ---
+
+      if (iInteractive_SYS()) {
+      
+      
+         // --- Anything to display ---
+
+         if (iFileSize_SYS("import_error.log")>3) // 3 characters could be UTF-8 BOM only
+         {
+
+
+             // --- edit ---
+
+             SetString_SYS("EDIT","FILE","import_error.log");
+             SetString_SYS("EDIT","WAIT","");
+             SetString_SYS("EDIT","CHILD","YES");
+             iRunGX_SYS("EDIT");
+
+         }
+         
+      }
+      
+   }
+
+
+   // --- set all channel assay and label if not already set ---
+   
+   Data = Lock_EDB(EData);
+   iChans = iSymbList_DB(Data,ChVV,DB_SYMB_CHAN);
+   for (i=0;i<iChans;i++) {
+   
+      // --- get the reg ---
+      
+      Ch = (DB_SYMB)iGetInt_VV(ChVV,i);
+      GetRegSymb_DB(Data,Ch,hREG);
+      
+      // --- set LOG attribute for ASSAY class channels ---
+      
+      Get_REG(hREG,"CLASS",sClass,sizeof(sClass));
+      if (iStrcmp_STR(sClass,"ASSAY",STR_CASE_TOLERANT)==0)
+         Set_REG(hREG,"LOG","Yes");
+      else
+         Set_REG(hREG,"LOG","No");
+
+      // --- set the label ---
+      
+      Get_REG(hREG,"LABEL",sLabel,sizeof(sLabel));
+      if (iStrMin2_STR(sLabel) == 0) {
+         GetChanName_DB(Data,Ch,sLabel);
+         Set_REG(hREG,"LABEL",sLabel);
+      } 
+         
+      // --- put the reg back ---
+               
+      SetRegSymb_DB(Data,Ch,hREG);
+   }   
+
+
+   // --- Create channels if not made already ---
+
+   if(!iExistChan_DB(Data, "Sample")) {
+      Ch = CreateSymb_DB(Data,"Sample",DB_SYMB_CHAN,DB_OWN_SHARED,-16);
+      SetRegSymbSetting_DB(Data, Ch, "CLASS", "Sample");
+   }
+   if(!iExistChan_DB(Data, "Standard")) {
+      Ch = CreateSymb_DB(Data,"Standard",DB_SYMB_CHAN,DB_OWN_SHARED,-16);
+      SetRegSymbSetting_DB(Data, Ch, "CLASS", "Standard");
+   }
+   if(!iExistChan_DB(Data, "Duplicate")) {
+      Ch = CreateSymb_DB(Data,"Duplicate",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_SHORT);
+      SetRegSymbSetting_DB(Data, Ch, "CLASS", "Duplicate");
+   }
+
+
+   UnLock_EDB(EData);
+   
+   
+   // --- turn off protection and load all lines ---
+   
+   iRunGX_SYS("chanpoff");
+   DelLine0_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+   LoadChan_EDB(EData,"Sample");
+   LoadChan_EDB(EData,sXCh);
+   LoadChan_EDB(EData,sYCh);
+   LoadChan_EDB(EData,"Standard");
+   LoadChan_EDB(EData,"Duplicate");
+   LoadAllChans_EDB(EData);
+   DelLine0_EDB(EData);
+   
+   Destroy_SYS(ChVV);
+   Destroy_SYS(hREG);
+
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+}

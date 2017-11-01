@@ -1,0 +1,75 @@
+//===========================================================================
+
+NAME          = "Print files"
+#include <version.gxh>
+DESCRIPTION   = "
+
+      FILEPRNT.Files
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/File"
+
+//===========================================================================
+
+RESOURCE="fileprnt.gr"
+#include "fileprnt.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+DGW   Diag;
+string(STR_FILE)   sFile;
+string(STR_MULTI_FILE) sFiles;
+int  iFiles;
+int  i;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FILEPRNT");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FILEPRNT_0, DGW_FILEPATH,"FILEPRNT","Files");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if(i==-1)   Cancel_SYS(); 
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_FILEPRNT_0, DGW_FILEPATH,"FILEPRNT","Files");
+   }
+
+   GetString_SYS("FILEPRNT","Files",sFiles);
+      
+   
+   // --- Get Path ---
+   
+   iFiles = iCountTokens_STR(sFiles,"|");
+   
+   Progress_SYS(1);
+   for(i=0; i<iFiles; i++)  {
+      GetMFile_STR(sFiles,sFile,i);  
+      PrintFile_GUI(sFile);
+   }
+   Progress_SYS(0);
+}

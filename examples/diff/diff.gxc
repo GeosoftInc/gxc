@@ -1,0 +1,256 @@
+//===========================================================================
+NAME          = "Calculate differences between points"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "
+Calculate differences between values in a channel.  Differences with a dummy
+result in a dummy.  Even numbers of differences produce properly located
+results.  Odd numbers of differences will locate the result 1/2 element
+below the actual location.
+
+    DIFFERENCE.IN       : Input channel
+              .OUT      : Output channel
+              .NUMBER   : Number of differences
+              .NORM     : Normalize differences \"Yes\" or \"No\".
+                          If \"Yes\", divide results by 2^NUMBER.
+"
+// Revision History:
+// v6.4.2: Fix check on normalization Y/N, added notes to Description.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "diff.gr"
+#include "diff.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;     // Channel Names
+
+EDB         EData;
+DB          Data;             // Database handle
+DB_SYMB     InCh,OutCh;       // Channel Handles
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+EXP         Exp;              // Expression
+
+int         i;                // Utility
+int         iN;               // Decimation factor
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+real        rNorm;            // normalization factor
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT_SHORT) sNorm, sAliasFlag;            // Normalization
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DIFFForm");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_DIFFFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_DIFFFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DIFFFORM_0,DGW_TEXT,"DIFF","IN");     
+      SetInfoSYS_DGW(Diag,_DIFFFORM_1,DGW_TEXT,"DIFF","OUT");     
+      SetInfoSYS_DGW(Diag,_DIFFFORM_2,DGW_TEXT,"DIFF","NUMBER");    
+      SetInfoSYS_DGW(Diag,_DIFFFORM_3,DGW_TEXT,"DIFF","NORM");    
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag)) 
+         Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DIFFFORM_0,DGW_TEXT,"DIFF","IN");    
+      GetInfoSYS_DGW(Diag,_DIFFFORM_1,DGW_TEXT,"DIFF","OUT");    
+      GetInfoSYS_DGW(Diag,_DIFFFORM_2,DGW_TEXT,"DIFF","NUMBER");    
+      GetInfoSYS_DGW(Diag,_DIFFFORM_3,DGW_TEXT,"DIFF","NORM");    
+
+      GetInfo_DGW(Diag,_DIFFFORM_3,DGW_LISTALIAS,sAliasFlag);
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DIFF","IN",sInCh);
+   GetString_SYS("DIFF","OUT",sOutCh);
+   iN = iGetInt_SYS("DIFF","NUMBER");
+   if (!(iN >= 1))  Abort_SYS(_("Number of differences must be >= 1."));
+
+
+   // --- normalize ---
+
+   GetString_SYS("DIFF","NORM",sNorm);
+   if (iCharComp_STR(sNorm,"Y") ||
+       !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT)) {
+      rNorm = 1.0;
+      for (i=0;i<iN;i++) rNorm *= 2.0;
+   } else
+      rNorm = 0.0;
+
+
+   // --- Do the channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sInCh))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindChan_DB(Data,sInCh);
+
+   if (!iExistChan_DB(Data,sOutCh)) { 
+      OutCh = DupSymb_DB(Data,InCh,sOutCh);       // Create it 
+      UnLockSymb_DB(Data,OutCh);
+   } else   
+      OutCh = FindChan_DB(Data,sOutCh);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Difference line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- DIFF ---
+
+      Diff_DU(Data,Line,InCh,OutCh,iN);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Difference"),"DIFF;");
+
+
+   // --- unlock ---
+
+   if (InCh != OutCh)
+      UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- Normalize ---
+
+
+   if (rNorm != 0.0) {
+
+
+      // --- create expression ---
+
+      Exp = Create_EXP(Data,"$sOutCh=$sOutCh/$rNorm;",128);
+
+
+      ProgName_SYS("",1);
+      Line = FirstSelLine_DB(Data);
+      iLines = 0;
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+         // --- Update the Progress Bar ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Normalize: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLines,iTotLines);
+
+
+         Math_DU(Data,Line,Exp);
+
+
+         // --- Advance to Next Line ---        
+
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+
+      }
+
+   }
+
+
+   // --- done ---
+
+   if (rNorm != 0.0)
+      Destroy_SYS(Exp);
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

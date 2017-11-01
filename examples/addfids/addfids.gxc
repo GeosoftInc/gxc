@@ -1,0 +1,113 @@
+//===========================================================================
+NAME          = "Add a range of fids from a line/group"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Add a range of fids from a line/group.  
+
+Parameters: 
+
+     ADDFIDS.LINE       - Line/Group name
+            .FID_START  - start fid
+            .FID_INCR   - fid increment
+            .START      - start index
+            .NUMBER     - number of fids
+            
+Note that channels with different fid start/intervals will not be
+changed.
+     
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Selected Data"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+LST         ChLST;       // Channel list
+
+string(STR_DB_SYMBOL) sLine;
+
+EDB      eDB;
+DB       hDB;
+DB_SYMB  hLine;
+real     rStart,rIncr,rFirst,rLast;
+int      iStart,iNum;
+
+//===========================================================================
+//                        CHANNEL DELETION CODE
+//===========================================================================
+
+{
+
+   // --- Get the database ---
+
+   if (!iHaveCurrent_EDB()) Cancel_SYS();
+   eDB = Current_EDB();
+   
+   if (iInteractive_SYS())
+      if (iChannels_EDB(eDB) == 0) Cancel_SYS();
+   else {   // count the number of channels
+      ChLST = Create_LST(2*STR_DB_SYMBOL);
+      hDB = Lock_EDB(eDB);
+      SymbLST_DB(hDB, ChLST, DB_SYMB_CHAN);
+      UnLock_EDB(eDB);
+      
+      if (iSize_LST(ChLST) == 0)
+         Cancel_SYS();
+   }   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+
+      // --- Get fid start/end from the currently opened database ---
+
+      iNum = 0;      
+      rStart = rFirst = rLast = rIncr = 0.0;
+      if (iGetCurMark_EDB(eDB,rFirst,rLast,rIncr) == 1) Cancel_SYS();
+      GetFidRange_EDB(eDB,rStart,rIncr,iNum);
+      
+   
+   
+      // --- get the line name and set parameters ---
+      
+      GetCurLine_EDB(eDB,sLine);
+      SetString_SYS("ADDFIDS","LINE",sLine);     
+      SetReal_SYS("ADDFIDS","FID_START",rStart);     
+      SetReal_SYS("ADDFIDS","FID_INCR",rIncr);     
+      
+      iStart = iRound_MATH((rFirst - rStart)/rIncr);     
+      iNum   = iRound_MATH((rLast - rStart)/rIncr) - iStart + 1;     
+      SetInt_SYS("ADDFIDS","START",iStart);     
+      SetInt_SYS("ADDFIDS","NUMBER",iNum);     
+   
+
+   }
+
+   // --- get parameters ---
+
+   GetString_SYS("ADDFIDS","LINE",sLine); 
+   rStart = rGetReal_SYS("ADDFIDS","FID_START");
+   rIncr  = rGetReal_SYS("ADDFIDS","FID_INCR");
+   iStart = iGetInt_SYS("ADDFIDS","START");
+   iNum   = iGetInt_SYS("ADDFIDS","NUMBER");
+   
+   
+   // --- get the line symbol ---
+   
+   hDB = Lock_EDB(eDB);
+   
+   hLine = FindSymb_DB(hDB,sLine,DB_SYMB_LINE);
+   if (hLine == NULLSYMB) Cancel_SYS();
+
+   ModFidRange_DU(hDB,hLine,rStart,rIncr,iStart,iNum,DU_MODFID_INSERT);
+   
+   UnLock_EDB(eDB);
+   
+}

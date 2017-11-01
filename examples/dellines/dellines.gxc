@@ -1,0 +1,210 @@
+//===========================================================================
+NAME          = "Delete lines/groups"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/PopupSelLine"
+
+DESCRIPTION   = "
+
+Delete a Channel from a database.
+
+Parameters: 
+
+     DELLINES.OPTION    0 - delete the displayed line
+                        1 - delete all lines
+                        2 - delete a specific line
+             .LINE      line to delete for option 0 and 1                        
+"
+// Revision History
+// v7.1:   QA 13668: Unload all channels after deleting the last line.
+// v5.1.5: Removed sort of line LST - not required, and mixed up line order!
+//===========================================================================
+
+RESOURCE = "dellines.gr"
+#include "dellines.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sLine;             // line name
+string(STR_DEFAULT_LONG) sTemp;          // Temporary string
+
+EDB        EData;
+DB         Data;
+DB_SYMB    Line,NextLine;
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+
+int        i,iOpt,iLine,iTotLines,iLines;
+
+//===========================================================================
+//                        CHANNEL DELETION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   if (iInteractive_SYS()){
+      GetCurLine_EDB(EData,sLine);
+      SetString_SYS("DELLINES","LINE",sLine);
+   }      
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      i = 0;
+      while (i != 99) switch (i) {
+      
+         case 0:
+
+            // --- delete option ---
+
+            Diag = Create_DGW("DELLINES0");
+            SetInfoSYS_DGW(Diag,_DELLINES0_0,DGW_LISTALIAS,"DELLINES","OPTION");
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
+            GetInfoSYS_DGW(Diag,_DELLINES0_0,DGW_LISTALIAS,"DELLINES","OPTION");
+            Destroy_DGW(Diag);
+            
+            iOpt = iGetInt_SYS("DELLINES","OPTION");
+            if (iOpt == 1) {
+               if (iDisplayQuestion_SYS(_("Delete all selected lines/groups."),_("Confirm that you want to delete ALL selected lines and groups.")))
+                  i = 99;
+               else
+                  i = 0;
+            } else if (iOpt == 0)
+               i = 99;
+            else if (iOpt == 2)
+               i = 1;
+            else {
+               DisplayMessage_SYS(_("Lost"),_("I'm lost"));
+               i = 0;
+            }
+            
+            break;
+      
+         case 1:
+
+            // --- select a line to delete ---
+
+            Diag = Create_DGW("DELLINES1");
+            List = GetList_DGW(Diag,_DELLINES1_0);
+            SymbLST_DB(Data,List,DB_SYMB_LINE);
+      
+            SetInfoSYS_DGW(Diag,_DELLINES1_0,DGW_TEXT,"DELLINES","LINE");
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_DELLINES1_0,DGW_TEXT,"DELLINES","LINE");
+            Destroy_DGW(Diag);
+            
+            break;
+      
+      }
+      
+   }
+   
+   
+   // --- see if we will delete the last line ---
+   
+   iLines = iGetInfo_DB(Data, DB_INFO_LINES_USED);
+   
+   
+   // --- get parameters ---
+   
+   iOpt = iGetInt_SYS("DELLINES","option");
+   
+
+   // --- Verify deletion ---
+   
+   if (iOpt != 1) {
+   
+   
+      // --- delete a single line ---
+      
+      GetString_SYS("DELLINES","LINE",sLine);
+      
+      
+      // --- Does the line Exist ? ---
+
+      if (iExistSymb_DB(Data,sLine,DB_SYMB_LINE))
+         Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);       // Get the channel handle 
+      else
+         Abort_SYS(_("Line could not be deleted. The line does not exist in database."));
+
+      if (iInteractive_SYS() && iOpt != 1) {
+         GetString_SYS("DELLINES","LINE",sLine); 
+         Printf_STR(sTemp, sizeof(sTemp), _("Delete line/group <%s> from database?"), sLine);
+         if (!iDisplayQuestion_SYS(_("Verify Deletion"),sTemp))
+            Cancel_SYS();         
+      }
+      
+    
+      // --- Lock line and delete it ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      DeleteSymb_DB(Data,Line);
+      iLines--;
+      
+      
+   } else {
+   
+   
+      // --- delete all selected lines ---   
+
+      iTotLines = iCountSelLines_DB(Data);
+      iLine = 0;
+      ProgName_SYS("",1);
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line)) {
+      
+      
+         // --- Update the Progress Bar ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sLine);
+         Strcpy_STR(sTemp,_("Delete line: "));
+         Strcat_STR(sTemp,sLine);
+         ProgName_SYS(sTemp,0);
+         ProgUpdateL_SYS(iLine,iTotLines);
+
+
+         // --- Lock line and delete it ---
+
+         NextLine = NextSelLine_DB(Data, Line);
+         DeleteSymb_DB(Data,Line);
+         iLines--;
+         Line = NextLine;
+         iLine++;
+
+      }
+      
+   }
+   
+         
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+   
+   
+   // --- If we deleted the last line, then unload all the channels to ensure that
+   //     the GDB view is updated. ---
+   
+   if(iLines==0 && !iScript_SYS())
+   {
+		UnLoadAllChans_EDB(EData);
+   }
+   
+}

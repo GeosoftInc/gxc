@@ -1,0 +1,444 @@
+//===========================================================================
+NAME          = "Import drill-hole data from LAS file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Import"
+
+DESCRIPTION   = "
+   Import drill-hole data from a LAS file.
+
+   DHIMPORTLAS.FILE     Input LAS data file name
+   DHIMPORTLAS.DB       Assay Database to import data to
+   DHIMPORTLAS.INTERVAL Averaging or Desampling interval.
+   DHIMPORTLAS.INTERP   Interpolation method
+    
+"
+// Revision History:
+// v7.1:   Make the averaging interval in the project units.
+// v6.4.0: Allow undefined averaging/sample interval to import data as is.
+// v6.3.0: Removed check for obsolete single Wholeplot databases.
+//         Small modifications for channel creation, loading.
+// v6.0.1: Don't allow user to specify collar table.
+// v5.1.6: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhimportlas.gr"
+#include "dhimportlas.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+#define MOVETOEND(A) \
+      i = iFindItem_LST(ChLST, 0, A);  \
+      if(i!=-1) { DelItem_LST(ChLST, i);  \
+      AddItem_LST(ChLST, A, A); }
+
+#define MOVETOSTART(A) \
+      i = iFindItem_LST(ChLST, 0, A);  \
+      if(i!=-1) { DelItem_LST(ChLST, i);  \
+      InsertItem_LST(ChLST, 0, A, A); }
+
+EDB         EData;            // Database handle
+DB          Data;
+DB          hAssayDB;         // Database handle
+DGW         Diag;             // Dialogue handle
+DH          hDH;
+LST         Lst, List, ChLST;
+WA          hWA, hTestWA;
+
+int i, iN;
+int iLines, iBlobs, iChannels, iLen, iNAssay, iFiles, iDB;  
+int iErr, iWarn, iInteractive, iInterp, iNewDB;
+real rInterval, rConv;
+
+string(STR_MULTI_FILE) sFiles;
+string(STR_FILE) sFile, sDB, sProject, sLog, sTestLog;
+string(STR_FILE) sVol, sDir, sName, sExt, sShortName;
+string(STR_DB_SYMBOL) sAssay, sAssay2, sCh;
+string(STR_DEFAULT_LONG) sMsg, sTitle;
+string(STR_DEFAULT) sUnits;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+
+   iInteractive = iInteractive_SYS();
+
+
+   // --- Get Current Database and DH project name ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   hDH = Create_DH(sDB);
+
+
+	// --- Get project units ---
+	
+	GetUnits_DH(hDH, sUnits, rConv);
+	
+	
+   // --- Make a LST of the assay types in this project ---
+
+   GetProjectName_DH(hDH, sProject);
+   iLen = iStrlen_STR(sProject);
+
+   iNAssay = iNumAssays_DH(hDH);
+   Lst = Create_LST(64);
+
+   for(i=0;i<iNAssay;i++) {
+
+      hAssayDB = hAssayDB_DH(hDH, i);
+
+
+      // --- Skip From-To databases ---
+      
+      if(FindChan_DB(hAssayDB, "DH_FROM")!=NULLSYMB ||
+         FindChan_DB(hAssayDB, "DH_TO")!=NULLSYMB) continue;
+
+
+      // --- Get the database name ---
+
+      GetName_DB(hAssayDB,DB_NAME_FILE,sDB);
+      FileNamePart_STR(sDB, sName, STR_FILE_PART_NAME);
+
+
+      // --- Get just the assay name part. Get the part
+      //     after the project name and underscore ---
+
+      Substr_STR(sAssay, sName, iLen+1, iStrlen_STR(sName)-iLen-1);
+
+      AddItem_LST(Lst, sAssay, sAssay);
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DHIMPORTLAS");
+
+
+      // --- Get list of current Assay databases ---
+
+      List = GetList_DGW(Diag,_DHIMPORTLAS_1);
+      Copy_LST(List, Lst);
+
+		
+		// --- Set interval units to inches if project units is ft ---
+		
+		if(iStrcmp_STR(sUnits, _n("ft"), STR_CASE_TOLERANT)==0)
+			SetInfo_DGW(Diag, _DHIMPORTLAS_2, DGW_LABEL, _("Desampling/Averaging interval (in)"));
+			
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DHIMPORTLAS_0,DGW_FILEPATH,"DHIMPORTLAS","FILE");
+      SetInfoSYS_DGW(Diag,_DHIMPORTLAS_1,DGW_TEXT,"DHIMPORTLAS","DB");            
+      SetInfoSYS_DGW(Diag,_DHIMPORTLAS_2,DGW_TEXT,"DHIMPORTLAS","INTERVAL");
+      SetInfoSYS_DGW(Diag,_DHIMPORTLAS_3,DGW_LISTALIAS,"DHIMPORTLAS","INTERP");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DHIMPORTLAS_0,DGW_FILEPATH,"DHIMPORTLAS","FILE");
+      GetInfoSYS_DGW(Diag,_DHIMPORTLAS_1,DGW_TEXT,"DHIMPORTLAS","DB");
+      GetInfoSYS_DGW(Diag,_DHIMPORTLAS_2,DGW_TEXT,"DHIMPORTLAS","INTERVAL");
+      GetInfoSYS_DGW(Diag,_DHIMPORTLAS_3,DGW_LISTALIAS,"DHIMPORTLAS","INTERP");
+
+   
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DHIMPORTLAS","FILE",sFiles);
+   GetString_SYS("DHIMPORTLAS","DB",sAssay);
+   rInterval = rGetReal_SYS("DHIMPORTLAS","INTERVAL");
+   iInterp = iGetInt_SYS("DHIMPORTLAS","INTERP");
+
+   if(rInterval!=rDUMMY && rInterval<=0.0) 
+		Abort_SYS(_("The interval must be left undefined or set greater than zero."));
+   
+   if(iInterp<1 || iInterp>5) iInterp = VVU_INTERP_AKIMA;
+
+   if(!iStrlen_STR(sFiles))
+      Abort_SYS(_("Input LAS file not defined."));
+
+   if(!iStrlen_STR(sAssay))
+      Abort_SYS(_("Output assay database not defined."));
+      
+   if(!iStrcmp_STR(sAssay, _n("Collar"), STR_CASE_TOLERANT))
+      Abort_SYS(_("You may not import LAS data to the collar database."));      
+
+   if(!iStrcmp_STR(sAssay, _n("Survey"), STR_CASE_TOLERANT))
+      Abort_SYS(_("You may not import LAS data to the survey database."));      
+
+   if(!iStrcmp_STR(sAssay, _n("ENSurvey"), STR_CASE_TOLERANT))
+      Abort_SYS(_("You may not import LAS data to the EN survey database."));   
+         
+
+   // --- Set output DB name ---
+
+   FileNamePart_STR(sDB, sVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sDB, sDir, STR_FILE_PART_DIRECTORY);
+
+   Strcpy_STR(sName, sProject);
+   Strcat_STR(sName, "_");
+   Strcat_STR(sName, sAssay);
+         
+   FileCombineParts_STR(sVol,sDir,sName,"gdb","",sDB);
+
+
+   // --- If the requested Assay name is not in the list of Assay databases, and it does not
+   //     exist, then create a new database ---
+
+   iWarn = iInteractive;      // Warn only in interactive mode
+
+   iNewDB = 0;
+   iDB = iFindItem_LST(Lst, 0, sAssay);
+   if(iDB==-1 && !iFileExist_SYS(sDB)) {
+
+
+      // --- Set number of lines, channels ---
+
+      iLines = iGetInt_SYS("DHPROJECT", "HOLES");
+      iChannels = iGetInt_SYS("DHPROJECT", "CHANNELS");
+
+      if(iLines == iDUMMY) iLines = 250;
+      if(iChannels == iDUMMY) iChannels = 100;
+  
+
+      // --- 6 channels in assays for DH_FROM, DH_TO, X, Y, Z and Mask ---
+
+      iChannels += 6;
+
+
+      // --- Usually we allocate 1 blob per line, but here allocate 6, so we have
+      //     at least 5 blobs per line to store LAS data in ---
+
+      iBlobs = 6*iLines+iChannels+50;
+
+      CreateEx_DB(sDB, iLines, iChannels, iBlobs, 10, 200, "SUPER", "", 64);
+
+      iWarn = FALSE;    // No chance of overwriting etc. with a new database
+      
+      
+      //--- Add the DH_DEPTH channel ---
+      
+      EData = Load_EDB(sDB);
+      hAssayDB = Lock_EDB(EData);
+      
+      
+      CreateSymb_DB(hAssayDB, "DH_Depth", DB_SYMB_CHAN, DB_OWN_USER, DB_CATEGORY_CHAN_DOUBLE); 
+      Commit_DB(hAssayDB);
+      
+      UnLock_EDB(EData);
+      UnLoad_EDB(sDB);
+      iNewDB = 1;
+   }
+
+
+   // --- If the database is not currently loaded, then load it ---
+
+   if(!iLoaded_EDB(sDB)) {
+
+      // --- Load the database into the workspace ---
+
+      Load_EDB(sDB);
+
+
+      // --- Destroy and re-open the Wholeplot project so the new database gets loaded ---
+
+      Destroy_DH(hDH);
+      hDH = Create_DH(sDB);
+   }
+
+
+   // --- Ensure that the selected database is a not a FROM-TO type database ---
+
+   iNAssay = iNumAssays_DH(hDH);
+   for(i=0;i<iNAssay;i++) {
+
+      hAssayDB = hAssayDB_DH(hDH, i);
+
+      
+      // --- Get the database name ---
+
+      GetName_DB(hAssayDB,DB_NAME_FILE,sDB);
+      FileNamePart_STR(sDB, sName, STR_FILE_PART_NAME);
+
+
+      // --- Get just the assay name part. Get the part
+      //     after the project name and underscore ---
+
+      Substr_STR(sAssay2, sName, iLen+1, iStrlen_STR(sName)-iLen-1);
+
+      if(iStrcmp_STR(sAssay, sAssay2, STR_CASE_TOLERANT)==0) {
+
+         if(FindChan_DB(hAssayDB, "DH_FROM")!=NULLSYMB ||
+            FindChan_DB(hAssayDB, "DH_TO")!=NULLSYMB) {
+
+            Strcpy_STR(sMsg, _("The selected drill-hole database is being used for FROM-TO data."));
+            Strcat_STR(sMsg, _("\r\nYou must create a new database, or select an existing drill-hole POINT data database."));
+            Abort_SYS(sMsg);
+         }
+      }
+   }
+
+
+   // --- Create an import log file ---
+
+   Strcpy_STR(sLog,"LASImport.log");
+   hWA = Create_WA (sLog,WA_NEW);
+
+   Strcpy_STR(sTestLog,"LASImportTest.log");  // Test import log file
+
+   iFiles = iCountTokens_STR(sFiles,"|");
+   
+   Progress_SYS(1);
+   for(i=0; i<iFiles; i++)  {
+
+      GetMFile_STR(sFiles,sFile,i);  
+
+      FileNamePart_STR(sFile, sName, STR_FILE_PART_NAME);
+      FileNamePart_STR(sFile, sExt, STR_FILE_PART_EXTENSION);
+
+      FileCombineParts_STR("", "", sName, sExt, "", sShortName);
+
+      Printf_STR(sMsg, sizeof(sMsg), _("Importing %s"), sShortName);
+      
+      ProgName_SYS(sMsg, 0);
+      ProgUpdateL_SYS(i, iFiles);
+
+      Puts_WA(hWA, sMsg);
+      NewLine_WA(hWA);
+
+      if(iWarn) {
+
+         hTestWA = Create_WA (sTestLog,WA_NEW);
+
+         TestImportLAS_DH(hDH, sAssay, sFile, rInterval, hTestWA, iErr);
+
+         Destroy_WA(hTestWA);
+
+         if(iErr) {
+
+            // --- edit ---
+
+//            SetString_SYS("EDIT","FILE",sTestLog);
+//            SetString_SYS("EDIT","CHILD","Yes");
+//            iRunGX_SYS("edit");    
+            
+            
+            // --- Ask user if they want to proceed despite the warnings ---
+            
+            Printf_STR(sTitle, sizeof(sTitle), _("Importing %s"), sShortName);
+            Strcpy_STR(sMsg, _("Importation of this file would result in the overwriting\r\n or resampling of existing data in the database,\r\n or resampling of the imported data.\r\n Do you still wish to import this file?"));
+
+            if(!iDisplayQuestion_SYS(sTitle, sMsg)) {
+
+               Strcpy_STR(sMsg, _("Importation of this file would have resulted in the overwriting\r\nor resampling of existing data in the database,\r\nor resampling of the imported data. The LAS file was not imported at discretion of user."));
+               Puts_WA(hWA, sMsg);
+
+               if(i<iFiles-1) {
+               
+                  if(!iDisplayQuestion_SYS(sTitle, _("Do you wish to continue with the next LAS file?")))
+                     break;
+               }               
+               continue;
+            }                 
+         }
+      }
+
+      ImportLAS_DH(hDH, sAssay, sFile, rInterval, iInterp, hWA);
+
+      NewLine_WA(hWA);
+
+   }
+
+
+   // --- Recompute the XYZ values ---
+   
+   ComputeXYZ_DH(hDH);
+ 
+
+   // --- Destroy the Wholeplot project and close the log file ---
+        
+   Destroy_DH(hDH);
+   Destroy_WA(hWA);
+
+
+   // --- Display data. ---
+
+   EData = Load_EDB(sDB);
+   DelLine0_EDB(EData);
+   
+   
+   if(iNewDB)
+   {
+      // --- Load channels, with XYZ last ---
+      
+      Data = Lock_EDB(EData);
+      ChLST = Create_LST(2*STR_DB_SYMBOL);
+      SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+      UnLock_EDB(EData);
+      
+      MOVETOSTART(_n("DH_Depth"))
+      MOVETOEND(_n("Mask"))
+      MOVETOEND(_n("DH_East"))
+      MOVETOEND(_n("DH_North"))
+      MOVETOEND(_n("DH_RL"))
+      
+      iN = iSize_LST(ChLST);
+      for(i=0;i<iN;i++)
+      {
+         GetItem_LST(ChLST, 0, i, sCh);     
+         LoadChan_EDB(EData, sCh);
+      }
+   }
+   Progress_SYS(0);
+
+
+   // --- Error data to display ---
+
+   if (iInteractive_SYS()) {
+      if (iFileSize_SYS(sLog) > 3) // 3 characters could be UTF-8 BOM only
+      {
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE",sLog);
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+
+      }
+   }
+
+}

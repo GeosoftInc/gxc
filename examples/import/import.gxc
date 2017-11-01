@@ -1,0 +1,337 @@
+//===========================================================================
+NAME          = "Import XYZ data file"
+#include <version.gxh>
+DESCRIPTION   = "
+   Import a Geosoft XYZ file into the database.
+
+    IMPORT.FILE     : Input data file name
+          .TEMPLATE : Import template file name (.I0 assumed)
+          .MODE     : \"Append\", \"Replace\" or \"Merge\"
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v7.0.0: Moved turning on progress to before template creation.
+// v6.3.0: Allow creation of new database prior to import.
+// v5.1.6: Load and reload only if current X and Y are not already first.
+//         Added ImportQa.log file to collect import data errors upto maximum of 100.
+// v5.1.3: Using "Current" X and Y channels
+//         Unload all channels before loading, X, Y then all channels
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "import.gr"
+#include "import.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+LST         Lst;
+WA          hWA;
+
+int         i;                // Utility 
+int         iMode;            // mode
+int iNChan, iUnLoad;
+int         iFile, iNFiles, iNFieldsMaster, iNFields, iAutoLaunchTemplateEditor;
+
+string(STR_FILE) sImportQaLog;
+string(STR_FILE) sData;
+string(STR_FILE) sTemplate;
+string(STR_DEFAULT_SHORT) sMode;
+string(STR_DB_SYMBOL) sXCh, sYCh, sCh1, sCh2;
+string(STR_MULTI_FILE) sFiles;
+string(STR_FILE) sExtMaster, sExt, sMsg, sDrive, sDirectory, sName;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Allow creation of new database first ---
+
+   if (iHaveCurrent_EDB())
+   {
+      if (iInteractive_SYS())
+      {
+         if (iDisplayQuestion_SYS(_("Import Geosoft XYZ"),_("Import data into the current database ?")) == 0)
+         {
+            if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) 
+               Cancel_SYS();    
+         }
+      }  
+   }
+   else
+   {
+     if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) 
+         Cancel_SYS();    
+   }  
+   
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IMPORTForm");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IMPORTFORM_0,DGW_FILEPATH,"IMPORT","FILE");
+      SetInfoSYS_DGW(Diag,_IMPORTFORM_1,DGW_FILEPATH,"IMPORT","TEMPLATE");
+      SetInfoSYS_DGW(Diag,_IMPORTFORM_2,DGW_LISTALIAS,"IMPORT","MODE");
+
+
+      // --- Run the Dialogue ---
+
+      do {
+
+         i = iRunDialogue_DGW(Diag);
+
+         iAutoLaunchTemplateEditor = 0;
+
+         if (i == 0)
+         {
+            GetInfo_DGW(Diag, _IMPORTFORM_1, DGW_FILEPATH, sTemplate);
+            if (iFileExist_SYS(sTemplate) == 0)
+            {
+               i = 2;
+               iAutoLaunchTemplateEditor = 1;
+            }
+         }
+
+         if (i==2)
+         {
+            // --- Bring up the Template Editor ---
+
+            GetInfo_DGW(Diag,_IMPORTFORM_0,DGW_FILEPATH,sFiles);
+            GetMFile_STR(sFiles, sData, 0);
+            GetInfo_DGW(Diag,_IMPORTFORM_1,DGW_FILEPATH,sTemplate);
+
+            if (iStrlen_STR(sTemplate) == 0 && iFileExist_SYS(sData) == 1)
+            {
+               FileNamePart_STR(sData, sDrive, STR_FILE_PART_VOLUME);
+               FileNamePart_STR(sData, sDirectory, STR_FILE_PART_DIRECTORY);
+               FileNamePart_STR(sData, sName, STR_FILE_PART_NAME);
+               FileCombineParts_STR(sDrive, sDirectory, sName, "i0", "", sTemplate);
+            }
+
+            // --- Run the Template Editor ---
+
+            if (iImportXYZTemplateEditor_GUI(Data,sTemplate,sizeof(sTemplate),sData) == 0)
+            {
+
+               // --- Copy the Information Back to the Dialog ---
+
+               SetInfo_DGW(Diag,_IMPORTFORM_1,DGW_FILEPATH,sTemplate);
+
+            } else Cancel_SYS();
+
+         }
+
+         if (iAutoLaunchTemplateEditor)
+         {
+            i = 0;
+            break;
+         }
+
+      } while (i == 2);
+
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IMPORTFORM_0,DGW_FILEPATH,"IMPORT","FILE");
+      GetInfoSYS_DGW(Diag,_IMPORTFORM_1,DGW_FILEPATH,"IMPORT","TEMPLATE");
+      GetInfoSYS_DGW(Diag,_IMPORTFORM_2,DGW_LISTALIAS,"IMPORT","MODE");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   } 
+      
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IMPORT","FILE",sFiles);
+   GetMFile_STR(sFiles, sData, 0);
+   GetString_SYS("IMPORT","TEMPLATE",sTemplate);
+   GetString_SYS("IMPORT","MODE",sMode);
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import XYZ"),1);
+
+
+   // --- Locate the Template ---
+
+   if (iStrlen_STR(sTemplate) == 0) 
+   {
+      Strcpy_STR(sTemplate,"_imxyz.i0");
+      GenXYZTemp_DU(sData,sTemplate);
+   }
+
+   iNFiles = iCountTokens_STR(sFiles,"|");
+   if (iNFiles > 1)
+   {
+      FileNamePart_STR(sData, sExtMaster, STR_FILE_PART_EXTENSION);
+      iNFieldsMaster = 0;
+      GetXYZNumFields_DU(sData, iNFieldsMaster);
+
+      for (iFile = 1; iFile < iNFiles; iFile++)
+      {
+         GetMFile_STR(sFiles, sData, iFile);
+         FileNamePart_STR(sData, sExt, STR_FILE_PART_EXTENSION);
+         if (0 != iStrcmp_STR(sExt, sExtMaster, STR_CASE_TOLERANT))
+         {
+            Abort_SYS(_("The selected files are not of the same type and/or format.\r\rTry again and verify that the input files are of the same type and format."));
+         }
+         iNFields = 0;
+         GetXYZNumFields_DU(sData, iNFields);
+         if (iNFields < iNFieldsMaster)
+         {
+            Printf_STR(sMsg, sizeof(sMsg), _("Inconsistent number of fields in %s.\r\rVerify that all files have the same fields in the order specified in the template then try again."), sData);
+            Abort_SYS(sMsg);
+         }
+      }
+   }
+
+   // --- establish mode ---
+
+   if (iStrcmp_STR(sMode,"APPEND",STR_CASE_TOLERANT)==0)
+      iMode = DU_IMPORT_APPEND;
+   else if (iStrcmp_STR(sMode,"REPLACE",STR_CASE_TOLERANT)==0)
+      iMode = DU_IMPORT_REPLACE;
+   else if (iStrcmp_STR(sMode,"MERGE",STR_CASE_TOLERANT)==0)
+      iMode = DU_IMPORT_MERGE;
+   else if (iStrcmp_STR(sMode,_n("MERGE APPEND"),STR_CASE_TOLERANT)==0)
+      iMode = DU_IMPORT_MERGE_APPEND;
+   else
+      Abort_SYS(_("Invalid import mode"));
+
+
+   // --- QAQC ---
+
+   Strcpy_STR(sImportQaLog,"ImportQa.log");
+   hWA = Create_WA (sImportQaLog,WA_NEW);
+
+
+   // --- import ---
+
+   iNFiles = iCountTokens_STR(sFiles,"|");
+   if(iNFiles > 0)
+   {
+      for(iFile = 0; iFile < iNFiles; iFile++)
+      {
+         GetMFile_STR(sFiles, sData, iFile);
+         ImportXYZ2_DU(Data,iMode,sData,sTemplate,hWA);
+      }
+   }
+   else
+      ImportXYZ2_DU(Data,iMode,sData,sTemplate,hWA);
+
+   if(hWA)  Destroy_WA(hWA);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("IMPORT GX (XYZ file import)"), FALSE);
+   GetString_SYS("IMPORT", "FILE", sFiles);
+   AddComment_DB(Data, "Imported", sFiles, TRUE);
+   AddComment_DB(Data, "Import Mode", sMode, TRUE);
+   AddComment_DB(Data, "Import Template", sTemplate, TRUE);
+
+
+   // --- get current X, Y channels ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+   // --- release database ---
+   
+	UnLockAllSymb_DB(Data);
+   UnLock_EDB(EData);
+   
+   
+   if (!iScript_SYS())
+   {
+      // --- display data ---
+   
+      DelLine0_EDB(EData);
+
+
+      // --- Unload all channels if X and Y are not first ---
+
+      iUnLoad = 1;      // reload by default
+      Lst = Create_LST(2*STR_DB_SYMBOL);
+      iNChan = iDispChanLST_EDB(EData, Lst);
+      if(iNChan>=2) {
+         GetItem_LST(Lst, 0, 0, sCh1);    // First loaded channel
+         GetItem_LST(Lst, 0, 1, sCh2);    // Second loaded channel
+
+         if(!iStrcmp_STR(sXCh, sCh1, STR_CASE_TOLERANT) &&
+            !iStrcmp_STR(sYCh, sCh2, STR_CASE_TOLERANT)) iUnLoad = 0;
+      }
+
+      if(iUnLoad) {
+         UnLoadAllChans_EDB(EData);
+         LoadChan_EDB(EData,sXCh);
+         LoadChan_EDB(EData,sYCh);
+      }
+      LoadAllChans_EDB(EData);
+      DelLine0_EDB(EData);
+   }
+   
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+   
+
+   // --- Error data to display ---
+
+   if (iInteractive_SYS()) {
+      if (iFileSize_SYS(sImportQaLog) > 3) // 3 characters could be UTF-8 BOM only
+      {
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE",sImportQaLog);
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+
+      }
+   }
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+   
+}

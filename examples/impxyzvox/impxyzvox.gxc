@@ -1,0 +1,215 @@
+//===========================================================================
+NAME          = "XYZ file import into VOX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Imports an XYZ File into a VOX.
+
+   IMPXYZVOX.XYZ:  XYZ File
+   IMPXYZVOX.VOX:  VOX File
+   IMPXYZVOX.TYPE: Data Type
+            .IPJ_NAME        projection name
+            .IPJ_DATUM       datum (name, major axis, ellipticity)
+            .IPJ_METHOD      projection method (name,p1,p2,... see GXF)
+            .IPJ_UNITS       distance units (name,m/unit)
+            .IPJ_LOCALDATUM  local datum (name,dx,dy,dz,rx,ry,rz,scale)
+
+"
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v6.3.0: Enabled ArcGIS specific functionality
+// v6.3.0: First version
+//===========================================================================
+
+RESOURCE = "impxyzvox.gr"
+#include "impxyzvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         hDGW;   
+IPJ         hIPJ;
+RA          hRA;
+
+string(STR_FILE) sVox,sXYZ,sType;
+string(STR_DEFAULT_LONG)   s1,s2,s3,s4,s5,sTemp;
+int i,iType;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Create IPJ ---
+
+   hIPJ = Create_IPJ();
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+     // --- Start ---
+     
+     i = 0;
+   
+
+     // --- Read Previous Projection ---
+    
+     GetString_SYS("IMPXYZVOX","IPJ_NAME",s1);
+     if (iStrlen_STR(s1)) {
+        GetString_SYS("IMPXYZVOX","IPJ_DATUM",s2);
+        GetString_SYS("IMPXYZVOX","IPJ_METHOD",s3);
+        GetString_SYS("IMPXYZVOX","IPJ_UNITS",s4);
+        GetString_SYS("IMPXYZVOX","IPJ_LOCALDATUM",s5);
+        SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+     }
+   
+
+     // --- Start Loop ---
+
+     do {
+     
+        switch(i)
+        {
+           case 0 : 
+        
+              // --- Create the Dialogue ---
+
+              hDGW = Create_DGW("IMPXYZVOX");
+
+        
+              // --- Set any Defaults ---
+
+              SetInfoSYS_DGW(hDGW,_IMPXYZVOX_0,DGW_FILEPATH,"IMPXYZVOX","XYZ");     
+              SetInfoSYS_DGW(hDGW,_IMPXYZVOX_1,DGW_FILEPATH,"IMPXYZVOX","VOX");     
+              SetInfoSYS_DGW(hDGW,_IMPXYZVOX_2,DGW_LISTALIAS,"IMPXYZVOX","TYPE");     
+
+        
+              // --- Run the Dialogue ---
+
+              i = iRunDialogue_DGW(hDGW);
+              if (i == -1) Cancel_SYS();    // The user hit cancel
+
+        
+              // --- Get the Strings ---
+
+              GetInfoSYS_DGW(hDGW,_IMPXYZVOX_0,DGW_FILEPATH,"IMPXYZVOX","XYZ");    
+              GetInfoSYS_DGW(hDGW,_IMPXYZVOX_1,DGW_FILEPATH,"IMPXYZVOX","VOX");    
+              GetInfoSYS_DGW(hDGW,_IMPXYZVOX_2,DGW_LISTALIAS,"IMPXYZVOX","TYPE");     
+        
+        
+              // --- Destroy the Dialogue ---
+
+              Destroy_DGW(hDGW);
+              break;
+       
+       
+           case 1 : 
+        
+              // --- Get the 
+       
+              hDGW = Create_DGW("IMPXYZVOX1");
+              GetName_IPJ(hIPJ,IPJ_NAME_PCS,sTemp);         
+              SetInfo_DGW(hDGW,_IMPXYZVOX1_0,DGW_TEXT,sTemp);
+              GetName_IPJ(hIPJ,IPJ_NAME_UNIT_FULL,sTemp);         
+              SetInfo_DGW(hDGW,_IMPXYZVOX1_1,DGW_TEXT,sTemp);
+              i = iRunDialogue_DGW(hDGW);
+              if (i == -1)  Cancel_SYS();
+              Destroy_DGW(hDGW);
+              break;
+           
+           case 2 : 
+       
+              // --- Edit/modify the IPJ ---
+              
+              GetString_SYS("IMPXYZVOX","XYZ",sXYZ);
+              iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("XYZ file"), sXYZ);
+              i = 1;
+              break;
+          }
+        
+      } while (i != 3);
+      
+      
+      // --- Save Projection ---
+      
+      GetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+      SetString_SYS("IMPXYZVOX","IPJ_NAME",s1);
+      SetString_SYS("IMPXYZVOX","IPJ_DATUM",s2);
+      SetString_SYS("IMPXYZVOX","IPJ_METHOD",s3);
+      SetString_SYS("IMPXYZVOX","IPJ_UNITS",s4);
+      SetString_SYS("IMPXYZVOX","IPJ_LOCALDATUM",s5);
+   }
+   
+   
+   
+   // --- Get and verify parameters ---
+
+   GetString_SYS("IMPXYZVOX","VOX",sVox);
+   GetString_SYS("IMPXYZVOX","XYZ",sXYZ);
+   GetString_SYS("IMPXYZVOX","TYPE",sType);
+
+
+   // --- Get the Type ---
+
+   if (iStrcmp_STR(sType,_n("Byte"),0) == 0)
+      iType = DB_CATEGORY_CHAN_BYTE;
+   else if (iStrcmp_STR(sType,_n("UShort"),0) == 0)
+      iType = DB_CATEGORY_CHAN_USHORT;
+   else if (iStrcmp_STR(sType,_n("Short"),0) == 0)
+      iType = DB_CATEGORY_CHAN_SHORT;
+   else if (iStrcmp_STR(sType,_n("Long"),0) == 0)
+      iType = DB_CATEGORY_CHAN_LONG;
+   else if (iStrcmp_STR(sType,_n("Float"),0) == 0)
+      iType = DB_CATEGORY_CHAN_FLOAT;
+   else if (iStrcmp_STR(sType,_n("Double"),0) == 0)
+      iType = DB_CATEGORY_CHAN_DOUBLE;
+   else 
+      Abort_SYS(_("Invalid Voxel Data Type"));
+
+
+   // --- Read Projection ---
+
+   GetString_SYS("IMPXYZVOX","IPJ_NAME",s1);
+   if (iStrlen_STR(s1)) {
+      GetString_SYS("IMPXYZVOX","IPJ_DATUM",s2);
+      GetString_SYS("IMPXYZVOX","IPJ_METHOD",s3);
+      GetString_SYS("IMPXYZVOX","IPJ_UNITS",s4);
+      GetString_SYS("IMPXYZVOX","IPJ_LOCALDATUM",s5);
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   }
+   
+   // --- Open File ---
+   
+   hRA = Create_RA(sXYZ);
+
+   
+   // --- Create the VOX ---
+   
+   Progress_SYS(1);
+   GenerateXYZ_VOX(sVox,hRA,iType,hIPJ); 
+   Progress_SYS(0);
+   
+   
+   // --- Destroy File ---
+   
+   Destroy_RA(hRA);
+   
+   
+   // --- Display the Voxel ? ---
+   if (!iScript_SYS()) 
+	{
+		SetString_SYS("VOXEL_UTILS","DISPLAY_VOXEL",sVox);
+		iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.VoxelGxUtils;DisplayNewVoxel)");
+	}	
+}

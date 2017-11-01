@@ -1,0 +1,518 @@
+//===========================================================================
+NAME          = "Create a calibrations file from a calibration survey."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+
+   GRCALIB.DATABASE - calibration survey file
+          .FILE     - output calibration file
+
+"
+// Revision History
+// v6.3.0: Don't delete existing output channels first.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grcalib.gr"
+#include "grcalib.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         eDB;                      // database handle
+DB          hDB;                      // database handle
+
+DB_SYMB     LatCh,LonCh,DateCh,TimeCh,TideCorrCh;
+DB_SYMB     BaseCh,DialCh,InstCh,StnCh,HeightCh;
+DB_SYMB     Survey;
+DGW         hDGW;                      // Dialogue handle
+REG         hDataREG;                  // gravity reg
+REG         hWorkREG;                  // gravity reg
+EXP         Exp;
+
+VV          StnVV,InstVV,BaseVV;
+WA          CalFile;
+
+real        rGMT,rDial,rMgal,rDialL,rMgalL,rHm,rSum,rScl;
+int         i,iLen;
+string(STR_FILE) sSource,sBase,sCalib,sBuff;
+string(STR_DEFAULT_SHORT) sGMT,sInst,sUnits;
+string(STR_DB_SYMBOL) sSurvey;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- get current line ---
+
+   eDB = Current_EDB();
+   if (iInteractive_SYS())  {
+		Survey = GetCurLineSymb_EDB(eDB);
+   }
+   hDB = Lock_EDB(eDB);
+   if (!iInteractive_SYS())  {
+		GetString_SYS("GRCALIB","SURVEY",sSurvey);
+   		Survey = FindSymb_DB(hDB, sSurvey, DB_SYMB_LINE);
+   }
+
+
+   // --- get gravity REG ---
+
+   hDataREG = Create_REG(256);
+   GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+   
+   Get_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sBase,sizeof(sBase));
+   Get_REG(hDataREG,"GRAVRED.FILE",sSource,sizeof(sSource));
+   Get_REG(hDataREG,"GRAVRED.INSTRUMENT",sInst,sizeof(sInst));
+   Get_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",sCalib,sizeof(sCalib));
+   Get_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",sGMT,sizeof(sGMT));
+   
+   
+   // --- clear the calibration if it is a number ---
+   
+   if (rScanR_STR(sCalib) != rDUMMY)
+      Strcpy_STR(sCalib,"");
+      
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())  {
+
+
+      // --- Create the Dialogue ---
+
+      hDGW = Create_DGW("GRCALIB");
+      SetInfo_DGW(hDGW,_GRCALIB_0,DGW_TEXT,sSource);     
+      SetInfo_DGW(hDGW,_GRCALIB_1,DGW_FILEPATH,sCalib);
+      SetInfo_DGW(hDGW,_GRCALIB_2,DGW_FILEPATH,sBase);     
+      SetInfo_DGW(hDGW,_GRCALIB_3,DGW_TEXT,sGMT);
+      SetInfo_DGW(hDGW,_GRCALIB_4,DGW_TEXT,sInst);     
+
+      if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+
+      GetInfo_DGW(hDGW,_GRCALIB_1,DGW_FILEPATH,sCalib);
+      GetInfo_DGW(hDGW,_GRCALIB_2,DGW_FILEPATH,sBase);
+      GetInfo_DGW(hDGW,_GRCALIB_3,DGW_TEXT,sGMT);
+      GetInfo_DGW(hDGW,_GRCALIB_4,DGW_TEXT,sInst);     
+      
+      
+      FileExt_STR(sCalib,"csv",sCalib,FILE_EXT_ADD_IF_NONE);
+      Set_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",sCalib);
+      Set_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",sGMT);
+      Set_REG(hDataREG,"GRAVRED.INSTRUMENT",sInst);
+      SetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+      
+      Set_REG(hWorkREG,"GRAVRED.INSTRUMENT_SCALE",sCalib);
+      Set_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sBase);
+      SetWorkspaceREG_SYS(hWorkREG);
+      
+      Destroy_DGW(hDGW);
+
+   }
+   
+
+   // --- create Gravity channel to hold working reading ---
+
+   if (iExistSymb_DB(hDB,"Gravity",DB_SYMB_CHAN)) {
+      BaseCh = FindSymb_DB(hDB,"Gravity",DB_SYMB_CHAN);
+   }
+   else {
+      BaseCh = CreateSymb_DB(hDB,"Gravity",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LOCK_RW(hDB,BaseCh);
+      SetChanDecimal_DB(hDB,BaseCh,3);
+      SetChanWidth_DB(hDB,BaseCh,12);
+      Associate_DB(hDB,Survey,BaseCh);
+      UNLOCK(hDB,BaseCh);
+   }
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+
+
+   // --- load base station data ---
+
+   ProgName_SYS(_("Load base data"),1);
+   UnLock_EDB(eDB);
+   if (iRunGX_SYS("grbase")) Cancel_SYS();
+   hDB = Lock_EDB(eDB);
+
+
+   // --- tide correction ---
+
+   ProgName_SYS(_("Tide correction"),1);
+
+
+   // --- get channels ---
+
+   if (!iExistSymb_DB(hDB,"Date",DB_SYMB_CHAN))  Abort_SYS(_("Date channel does not exist."));
+   DateCh = FindSymb_DB(hDB,"Date",DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(hDB,"Time",DB_SYMB_CHAN))  Abort_SYS(_("Time channel does not exist."));
+   TimeCh = FindSymb_DB(hDB,"Time",DB_SYMB_CHAN);
+   
+
+   // --- create a TideCorr channel ---
+      
+   if (iExistSymb_DB(hDB,"TideCorr",DB_SYMB_CHAN))
+      TideCorrCh = FindSymb_DB(hDB,"TideCorr",DB_SYMB_CHAN);
+   else {
+      TideCorrCh = CreateSymb_DB(hDB,"TideCorr",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_FLOAT);
+      LOCK_RW(hDB,TideCorrCh);
+      SetChanDecimal_DB(hDB,TideCorrCh,4);
+      SetChanWidth_DB(hDB,TideCorrCh,8);
+      Associate_DB(hDB,Survey,TideCorrCh);
+      UNLOCK(hDB,TideCorrCh);
+   }
+
+
+   // --- Lock the Symbols ---
+
+   LockSymb_DB(hDB,DateCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(hDB,TimeCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(hDB,TideCorrCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- only do a tide correction if have a GMT time ---
+   
+   rGMT = rDUMMY;
+   GetReal_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",rGMT);
+   if (rGMT != rDUMMY) {
+
+
+      // --- Get Parameters ---
+
+      if (!iExistSymb_DB(hDB,"Latitude",DB_SYMB_CHAN))  
+         Abort_SYS(_("Latitude channel does not exist."));
+      LatCh = FindSymb_DB(hDB,"Latitude",DB_SYMB_CHAN);
+
+      if (!iExistSymb_DB(hDB,"Longitude",DB_SYMB_CHAN))  
+         Abort_SYS(_("Longitude channel does not exist."));
+      LonCh = FindSymb_DB(hDB,"Longitude",DB_SYMB_CHAN);
+
+      LockSymb_DB(hDB,LatCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(hDB,LonCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+      // --- interpolate lat and long ---
+
+      Interp_DU(hDB,Survey,LatCh,LatCh,DU_INTERP_LINEAR,DU_INTERP_EDGE_NONE);
+      Interp_DU(hDB,Survey,LatCh,LatCh,DU_INTERP_NEAREST,DU_INTERP_EDGE_SAME);
+      Interp_DU(hDB,Survey,LonCh,LonCh,DU_INTERP_LINEAR,DU_INTERP_EDGE_NONE);
+      Interp_DU(hDB,Survey,LonCh,LonCh,DU_INTERP_NEAREST,DU_INTERP_EDGE_SAME);
+
+
+      // --- tide correction ---
+
+      GravTide_DU(hDB,Survey,LatCh,LonCh,DateCh,TimeCh,rGMT,TideCorrCh);
+
+      UnLockSymb_DB(hDB,LatCh);
+      UnLockSymb_DB(hDB,LonCh);
+
+
+   } else {    // --- no tide correction ---
+
+      // --- get a working VV ---
+
+      BaseVV = Create_VV(REAL,0);
+      GetChanVV_DB(hDB,Survey,TimeCh,BaseVV);
+
+
+      // --- set TideCorr to 0.0 ---
+
+      SetRealN_VV(BaseVV,0,-1,0.0);
+      PutChanVV_DB(hDB,Survey,TideCorrCh,BaseVV);
+      Mask_DU(hDB,Survey,TideCorrCh,TimeCh);
+
+      Destroy_VV(BaseVV);
+   }
+
+
+   // --- Unlock the Symbols ---
+
+   UnLockSymb_DB(hDB,DateCh);
+   UnLockSymb_DB(hDB,TimeCh);
+   UnLockSymb_DB(hDB,TideCorrCh);
+
+
+   // --- create work channels ---
+
+   if (iExistSymb_DB(hDB,"Milligal",DB_SYMB_CHAN)) {
+      BaseCh = FindSymb_DB(hDB,"Milligal",DB_SYMB_CHAN);
+   }
+   else {
+      BaseCh = CreateSymb_DB(hDB,"Milligal",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LOCK_RW(hDB,BaseCh);
+      SetChanDecimal_DB(hDB,BaseCh,4);
+      SetChanWidth_DB(hDB,BaseCh,13);
+      Associate_DB(hDB,Survey,BaseCh);
+      UNLOCK(hDB,BaseCh);
+   }
+
+   if (iExistSymb_DB(hDB,"Instrument",DB_SYMB_CHAN)) {
+      InstCh = FindSymb_DB(hDB,"Instrument",DB_SYMB_CHAN);
+   }
+   else {
+      InstCh = CreateSymb_DB(hDB,"Instrument",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LOCK_RW(hDB,InstCh);
+      SetChanDecimal_DB(hDB,InstCh,4);
+      SetChanWidth_DB(hDB,InstCh,13);
+      Associate_DB(hDB,Survey,InstCh);
+      UNLOCK(hDB,InstCh);
+   }
+
+
+   // --- apply tide correction ---
+
+   Exp = Create_EXP(hDB,"Milligal=Gravity-TideCorr;",255);
+   Math_DU(hDB,Survey,Exp);
+   Destroy_EXP(Exp);
+
+
+   // --- height units ---
+   
+   HeightCh = FindSymb_DB(hDB,"Height",DB_SYMB_CHAN);
+   LOCK_R(hDB,HeightCh);
+   GetChanUnit_DB(hDB,HeightCh,sUnits);
+   UNLOCK(hDB,HeightCh);
+   rHm = rUnitScale_IPJ(sUnits,1.0);
+   
+
+   // --- instrument height ---
+
+   Exp = Create_EXP(hDB,"Height=(Height==dummy)?0.0:Height;Milligal=Milligal-0.308596*$rHm*Height;",200);
+   Math_DU(hDB,Survey,Exp);
+   Destroy_EXP(Exp);
+
+
+   // --- sort on station ---
+
+   SetString_SYS("SORTALL","CHANNEL","Station");
+   SetString_SYS("SORTALL","ORDER","Ascending");
+   SetString_SYS("SORTALL","READONLY","Yes");
+
+   UnLock_EDB(eDB);
+   if (iRunGX_SYS("sortal")) Cancel_SYS();
+   hDB = Lock_EDB(eDB);
+
+
+   // --- get VVs ---
+
+   StnVV  = Create_VV(REAL,0);
+   InstVV = Create_VV(REAL,0);
+   BaseVV = Create_VV(REAL,0);
+
+
+   // --- get channels ---
+
+   StnCh  = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
+   DialCh = FindSymb_DB(hDB,"Reading",DB_SYMB_CHAN);
+   InstCh = FindSymb_DB(hDB,"Instrument",DB_SYMB_CHAN);
+   BaseCh = FindSymb_DB(hDB,"Milligal",DB_SYMB_CHAN);
+
+
+   // --- average repeats ---
+
+   LockSymb_DB(hDB,StnCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDB,DialCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDB,InstCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(hDB,BaseCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   GetChanVV_DB(hDB,Survey,StnCh,StnVV);
+   GetChanVV_DB(hDB,Survey,DialCh,InstVV);
+   AverageRepeat_VVU(StnVV,InstVV);
+   PutChanVV_DB(hDB,Survey,InstCh,InstVV);
+
+   GetChanVV_DB(hDB,Survey,BaseCh,InstVV);
+   AverageRepeat_VVU(StnVV,InstVV);
+   PutChanVV_DB(hDB,Survey,BaseCh,InstVV);
+
+   UnLockSymb_DB(hDB,StnCh);
+   UnLockSymb_DB(hDB,DialCh);
+   UnLockSymb_DB(hDB,InstCh);
+   UnLockSymb_DB(hDB,BaseCh);
+
+
+   // --- sort on dial reading ---
+
+   SetString_SYS("SORTALL","CHANNEL","Reading");
+   UnLock_EDB(eDB);
+   if (iRunGX_SYS("sortal")) Cancel_SYS();
+   hDB = Lock_EDB(eDB);
+
+
+   // --- get instrument and milligal and remove dummies ---
+
+   LockSymb_DB(hDB,InstCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDB,BaseCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   GetChanVV_DB(hDB,Survey,InstCh,InstVV);
+   GetChanVV_DB(hDB,Survey,BaseCh,BaseVV);
+
+   UnLockSymb_DB(hDB,InstCh);
+   UnLockSymb_DB(hDB,BaseCh);
+
+   RemoveDummy_VVU(InstVV);
+   RemoveDummy_VVU(BaseVV);
+
+   if (iLength_VV(InstVV) != iLength_VV(BaseVV))
+      Abort_SYS(_("Missing readings or base station values."));
+
+   // --- write calibration table ---
+
+   CalFile = Create_WA(sCalib,0);
+   Puts_WA(CalFile,_n("/ Gravity calibration file: "));
+   Puts_WA(CalFile,sCalib); NewLine_WA(CalFile);
+
+   Puts_WA(CalFile,_n("/              Survey date: "));
+   Get_REG(hDataREG,"GRAVRED.DATE",sBuff,sizeof(sBuff));
+   Puts_WA(CalFile,sBuff); NewLine_WA(CalFile);
+   
+   Puts_WA(CalFile,_n("/               Instrument: "));
+   Puts_WA(CalFile,sInst); NewLine_WA(CalFile);
+
+   Puts_WA(CalFile,_n("/          Survey database: "));
+   GetName_DB(hDB,DB_NAME_FILE,sBuff);
+   Puts_WA(CalFile,sBuff); NewLine_WA(CalFile);
+
+   Puts_WA(CalFile,_n("/    Base station database: "));
+   Puts_WA(CalFile,sBase); NewLine_WA(CalFile);
+
+   Puts_WA(CalFile,"/"); NewLine_WA(CalFile);
+   Puts_WA(CalFile,_n("/ Note:")); NewLine_WA(CalFile);
+   Puts_WA(CalFile,"/"); NewLine_WA(CalFile);
+   Puts_WA(CalFile,_n("/  The \"Scale\" data is for your verification purposes only.  The")); NewLine_WA(CalFile);
+   Puts_WA(CalFile,_n("/  \"Milligal\" data is used to look-up milligal-equivalent values")); NewLine_WA(CalFile);
+   Puts_WA(CalFile,_n("/  using piece-wise linear interpolation.")); NewLine_WA(CalFile);
+   Puts_WA(CalFile,"/"); NewLine_WA(CalFile);
+   Puts_WA(CalFile,_n("/  The last \"Scale\" is the average scale over the range.")); NewLine_WA(CalFile);
+
+   Puts_WA(CalFile,"/"); NewLine_WA(CalFile);
+   Puts_WA(CalFile,_n("   Instrument,     Milligal,      Scale")); NewLine_WA(CalFile);
+
+   rDialL = rGetReal_VV(InstVV,0);
+   rMgalL = rGetReal_VV(BaseVV,0);
+   rSum = 0.0;
+   iLen = iLength_VV(InstVV);
+   for (i=1;i<iLen;i++) {
+   
+
+      // --- dial reading ---
+      
+      FormatR2_STR(rDialL,sBuff,12,4);
+      Justify_STR(sBuff,sBuff,13,STR_JUSTIFY_RIGHT);
+      Puts_WA(CalFile,sBuff);
+      Puts_WA(CalFile,",");
+
+
+      // --- milligal equivalent ---
+      
+      FormatR2_STR(rMgalL,sBuff,12,4);
+      Justify_STR(sBuff,sBuff,13,STR_JUSTIFY_RIGHT);
+      Puts_WA(CalFile,sBuff);
+      Puts_WA(CalFile,",");
+      
+      
+      // --- scale factor ---
+      
+      rMgal = rGetReal_VV(BaseVV,i);
+      rDial = rGetReal_VV(InstVV,i);
+      rScl = (rMgal - rMgalL)/(rDial-rDialL);
+      rSum += rScl;
+      FormatR2_STR(rScl,sBuff,10,4);
+      Justify_STR(sBuff,sBuff,11,STR_JUSTIFY_RIGHT);
+      Puts_WA(CalFile,sBuff);
+
+      NewLine_WA(CalFile);
+      
+      rDialL = rDial;
+      rMgalL = rMgal;
+
+   }
+   
+   
+   if (iLen > 0) {
+   
+      // --- final reading ---
+
+      FormatR2_STR(rDialL,sBuff,12,4);
+      Justify_STR(sBuff,sBuff,13,STR_JUSTIFY_RIGHT);
+      Puts_WA(CalFile,sBuff);
+      Puts_WA(CalFile,",");
+
+
+      // --- milligal equivalent ---
+   
+      FormatR2_STR(rMgalL,sBuff,12,4);
+      Justify_STR(sBuff,sBuff,13,STR_JUSTIFY_RIGHT);
+      Puts_WA(CalFile,sBuff);
+      Puts_WA(CalFile,",");
+      
+   
+      if (iLen > 1) {
+         
+         // --- scale factor ---
+      
+         FormatR2_STR(rSum/(real)(iLen-1),sBuff,10,4);
+         Justify_STR(sBuff,sBuff,11,STR_JUSTIFY_RIGHT);
+         Puts_WA(CalFile,sBuff);
+         
+      } else         
+         Puts_WA(CalFile,"          *");
+
+      NewLine_WA(CalFile);
+      
+   }
+   
+   
+   // --- Done ---
+
+   Destroy_REG(hDataREG);
+   Destroy_REG(hWorkREG);
+   Destroy_VV(StnVV);
+   Destroy_VV(InstVV);
+   Destroy_VV(BaseVV);
+   Destroy_WA(CalFile);
+   Progress_SYS(0);
+   
+
+   // --- unlock ---
+   
+   UnLock_EDB(eDB);
+   
+
+   // --- re-sort on date and time ---
+
+   SetString_SYS("SORTALL2","CHANNEL1","Date");
+   SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+   SetString_SYS("SORTALL2","CHANNEL2","Time");
+   SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+   iRunGX_SYS("sortal2");
+   
+   
+   // --- display the calibration file ---
+
+   if (iInteractive_SYS()) {
+      SetString_SYS("EDIT","FILE",sCalib);
+      SetString_SYS("EDIT","WAIT","");
+      SetString_SYS("EDIT","CHILD","YES");
+      iRunGX_SYS("edit");
+   }
+
+}

@@ -1,0 +1,244 @@
+//===========================================================================
+NAME          = "Set channel colours"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+
+   Set channel colours based on cumulative percent breaks.
+
+   CHCHANCOLOUR.DATA \"ASSAY\"
+                     \"DISPLAYED_ASSAY\"
+                     \"LIST\"
+                     \"ALL\"
+                     \"DISPLAYED\"
+"
+// Revision History:
+// v6.3.0: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chchancolor.gr"
+#include "chchancolor.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+string(STR_DB_SYMBOL) sCh;      // Symbol Names
+
+EDB         EData;                     // database handle
+DB          Data;
+
+DGW         Diag;
+DB_SYMB     Line, Ch;                  // DB Symbol Handles
+LST         ChLST, LineLST;            // List handle
+ITR         hITR, hITRo;
+ST          hST;
+BF          hBF;
+
+int         i, j, iNChans, iNLines, iNZones;
+int         iProg, iNProg;
+real        rVal;
+real(512)   rPct;
+string(STR_FILE) sITR, sDir;
+string(STR_DEFAULT_LONG) sData;
+string(32768) sChannels;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      Diag = Create_DGW("CHCHANCOLOR");
+   
+
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_CHCHANCOLOR_0,DGW_LISTALIAS,"CHCHANCOLOR","DATA");
+   
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    
+
+      GetInfoSYS_DGW(Diag,_CHCHANCOLOR_0,DGW_LISTALIAS,"CHCHANCOLOR","DATA");
+
+      Destroy_DGW(Diag);
+      
+   }
+
+
+   // --- Get channels ---
+  
+   GetString_SYS("CHCHANCOLOR","DATA",sData);
+   GetString_SYS("CHCHANCOLOR","DIRECTORY",sDir);
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sData);
+   SetString_SYS("CHCHANLST","GX","CHCHANCOLOR");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- Define/retrieve the cumulative percent ITR ---
+      
+   GetString_SYS("CHCHANCOLOR","ITR",sITR);
+   
+   if(iInteractive_SYS())
+   {
+      if(!iStrlen_STR(sITR))
+         Strcpy_STR(sITR, "CumPercent.itr");
+
+      hITR = Create_ITR();
+      if(iCumulativePercent_GUI(sITR, hITR)) 
+         Cancel_SYS();
+         
+      SetString_SYS("CHCHANCOLOR","ITR",sITR);  
+      
+   }
+   else {
+      if(!iStrlen_STR(sITR))
+         Abort_SYS(_("No ITR file has been defined."));
+      hITR = CreateFile_ITR(sITR);      
+   }
+   
+   
+   // --- Get the zones ---
+   
+   iNZones = iGetSize_ITR(hITR);
+   for(j=0;j<iNZones-1;j++)
+      rPct[j] = rGetZoneValue_ITR(hITR, j);
+      
+
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+
+   // --- nothing to do ---
+
+   iNChans = iSize_LST(ChLST);   
+   if (iNChans <= 0) Abort_SYS(_("No channels to plot."));
+
+
+   // --- Exact stats ---
+   
+   hST = CreateExact_ST();
+   
+   
+   // --- Create the output ITR ---
+   
+   hITRo = Create_ITR();
+   
+
+   // --- Get selected lines ---
+   
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, LineLST);
+   iNLines = iSize_LST(LineLST);
+   if(iNLines==0)
+      Abort_SYS(_("No lines were selected for processing"));
+      
+   
+   // --- Loop over the channels ---
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Colouring channels"), 1);
+   
+   iNProg = iNLines*iNChans;
+   iProg = 0;
+   for(i=0;i<iNChans;i++)
+   {
+      GetSymbItem_LST(ChLST, i, sCh, Ch);
+      LOCK_R(Data, Ch);
+         
+      
+      // --- Reset the stats for each line ---
+            
+      Reset_ST(hST);
+
+      for(j=0;j<iNLines;j++)
+      {      
+         // --- Update progress ---
+         
+         ProgUpdateL_SYS(iProg, iNProg);
+         if(iCheckStop_SYS()) Cancel_SYS();
+         
+         Line = (DB_SYMB)iGetInt_LST(LineLST, 1, j);
+         LOCK_R(Data, Line);
+      
+         // --- Get the stats ---
+      
+         Stat_DU(Data, Line, Ch, hST);
+         UNLOCK(Data, Line);
+      }
+      UNLOCK(Data, Ch);
+      
+      
+      // --- Skip channels with no data  ---
+      
+      if(rGetInfo_ST(hST, ST_ITEMS)==0.0) 
+         continue;
+            
+
+      // --- Skip channels with no data range ---
+      
+      if(rGetInfo_ST(hST, ST_MIN)==rGetInfo_ST(hST, ST_MAX)) 
+         continue;
+
+      
+      // --- Create the output ITR ---
+      
+      Copy_ITR(hITRo, hITR);     // for the colours
+      for(j=0;j<iNZones-1;j++)
+      {         
+         rVal = rEquivalentValue_ST(hST, rPct[j]);
+         SetZoneValue_ITR(hITRo, j, rVal);
+      }
+      
+      
+      // --- Write the ITR to the channel ---
+      
+      LOCK_R(Data, Ch);
+      SetITR_DB(Data, Ch, hITRo);
+      UNLOCK(Data, Ch);
+
+      
+      // --- Get the default file name for the channel ITR ---
+
+		FileCombineParts_STR("", sDir, sCh, "itr", "", sITR);
+      
+      hBF = Create_BF(sITR, BF_READWRITE_NEW);
+      Serial_ITR(hITRo, hBF);
+      Destroy_BF(hBF, BF_KEEP);
+   }
+      
+   //Destroy_ITR(hITR);
+   Destroy_ITR(hITRo);
+   Destroy_ST(hST);
+   
+   UnLock_EDB(EData);
+   
+}

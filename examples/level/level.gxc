@@ -1,0 +1,210 @@
+//===========================================================================
+NAME          = "Level a channel to a reference channel"
+#include <version.gxh>
+DESCRIPTION   = "\
+\r\n\
+The values of an input channel will be adjusted so that they match the\r\n\
+values of a given control channel wherever the control channel values are\r\n\
+defined and not dummy.\r\n\
+\r\n\
+   LEVEL.IN      - Input channel\r\n\
+         CONTROL - Control channel\r\n\
+         OUT     - Output levelled Channel\r\n\
+         MODE    - \"Match\" moves to match values in the control channel\r\n\
+                   \"Minus\" subtracts values in the control channel\r\n\
+                   \"Plus\"  adds values in the control channel\r\n\
+\r\n"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "level.gr"
+#include "level.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh, sConCh, sOutCh; // Channel Name
+string(STR_DEFAULT_SHORT) sMode;                 // Mode
+int         iLines, iTotLines;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     InCh, ConCh, OutCh;    // Channel Handles
+DB_SYMB     Line;
+DGW         Diag;
+LST         List;              // list handle
+int         iMode;             // level mode
+int         i;                 // utility int
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("LevelForm");
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_LEVELFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_LEVELFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_LEVELFORM_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_LEVELFORM_0,DGW_TEXT,"Level","IN");
+     SetInfoSYS_DGW(Diag,_LEVELFORM_1,DGW_TEXT,"Level","CONTROL");  
+     SetInfoSYS_DGW(Diag,_LEVELFORM_2,DGW_TEXT,"Level","OUT");
+     SetInfoSYS_DGW(Diag,_LEVELFORM_3,DGW_TEXT,"Level","MODE");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_LEVELFORM_0,DGW_TEXT,"Level","IN");     
+     GetInfoSYS_DGW(Diag,_LEVELFORM_1,DGW_TEXT,"Level","CONTROL");
+     GetInfoSYS_DGW(Diag,_LEVELFORM_2,DGW_TEXT,"Level","OUT");
+     GetInfoSYS_DGW(Diag,_LEVELFORM_3,DGW_TEXT,"Level","MODE");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("Level","IN",sInCh);
+   GetString_SYS("Level","CONTROL",sConCh);
+   GetString_SYS("Level","OUT",sOutCh);
+   GetString_SYS("Level","MODE",sMode);
+
+   // --- Work out the mode ---
+
+   if (iStrcmp_STR(sMode,"MATCH",0) == 0)
+      iMode = DU_MOVE_ABSOLUTE;
+   else if (iStrcmp_STR(sMode,"MINUS",0) == 0)
+      iMode = DU_MOVE_MINUS;
+   else if (iStrcmp_STR(sMode,"PLUS",0) == 0)
+      iMode = DU_MOVE_PLUS;
+   else 
+      Abort_SYS(_("Invalid levelling mode."));
+
+
+   // --- Do the Input & Level Channels Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Input Z channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+         
+   if (!iExistSymb_DB(Data,sConCh,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Input Level Control channel does not exist."));
+   ConCh = FindSymb_DB(Data,sConCh,DB_SYMB_CHAN);
+
+
+   // --- Create and output channel if it does not exist ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data, InCh, sOutCh);
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+      
+   
+   // --- Prepare to do the work ---
+                           
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   ProgName_SYS(_("Leveling"),1);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,ConCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+
+   while (iIsLineValid_DB(Data,Line))  {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Level line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Apply the Level Correction ---
+
+      Move_DU(Data, Line, InCh, ConCh, OutCh, iMode );
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLines++;
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh, _("Level channel"),"LEVEL;");
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,ConCh);
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

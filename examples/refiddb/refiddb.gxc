@@ -1,0 +1,224 @@
+//===========================================================================
+NAME          = "Re-Fid a database based on a reference channel"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Change the fid sampling of a database to be based on a reference channel.
+
+PARAMETERS:
+
+ REFIDDB.REF      - reference channel.
+        .METHOD   - \"Linear\", \"Min. Curvature\", \"Akima\"
+        .START    - required new start fiducial, blank for default
+        .INCR     - required new data increment.
+        .GAP      - gaps in the data larger than this will not be
+                    interpolated.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Database Utilities"
+
+// Revision History
+// v6.1.0: New GX.
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "refiddb.gr"
+#include "refiddb.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sRefCh, sLine;
+string(STR_DEFAULT) sLabel, sTemp;
+
+EDB         EData;
+DB          Data;                  // Database
+DGW         Diag;                  // Dialogue handle
+DB_SYMB     RefCh, Ch;             // Channel Handles
+DB_SYMB     Line;                  // Line Handle
+LST         List, LineLST;         // List handle
+LST         ChLST;
+
+real        rStart,rIncr,rGap;  
+int         iMethod, i, iNChan, iProtect, iLine, iNLines, iProg, iNProg;    
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("REFIDDB");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_REFIDDB_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_REFIDDB_0,DGW_TEXT,"REFIDDB","REF");     
+      SetInfoSYS_DGW(Diag,_REFIDDB_1,DGW_TEXT,"REFIDDB","START");
+      SetInfoSYS_DGW(Diag,_REFIDDB_2,DGW_TEXT,"REFIDDB","INCR");
+      SetInfoSYS_DGW(Diag,_REFIDDB_3,DGW_TEXT,"REFIDDB","GAP");
+      SetInfoSYS_DGW(Diag,_REFIDDB_4,DGW_LISTALIAS,"REFIDDB","METHOD");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // she hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_REFIDDB_0,DGW_TEXT,"REFIDDB","REF");     
+      GetInfoSYS_DGW(Diag,_REFIDDB_1,DGW_TEXT,"REFIDDB","START");
+      GetInfoSYS_DGW(Diag,_REFIDDB_2,DGW_TEXT,"REFIDDB","INCR");
+      GetInfoSYS_DGW(Diag,_REFIDDB_3,DGW_TEXT,"REFIDDB","GAP");
+      GetInfoSYS_DGW(Diag,_REFIDDB_4,DGW_LISTALIAS,"REFIDDB","METHOD");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("REFIDDB","REF",sRefCh);
+   rStart = rGetReal_SYS("REFIDDB","START");
+   rIncr  = rGetReal_SYS("REFIDDB","INCR");
+   rGap   = rGetReal_SYS("REFIDDB","GAP");
+   
+
+   // --- method ---
+   
+   GetString_SYS("REFIDDB","METHOD",sTemp);
+   if (iStrcmp_STR(sTemp,_n("Linear"),0) == 0)
+      iMethod = DU_REFID_LINEAR;
+   else if (iStrcmp_STR(sTemp,_n("Minimum Curvature"),0) == 0)
+      iMethod = DU_REFID_MINCUR;
+   else if (iStrcmp_STR(sTemp,_n("Akima"),0) == 0)
+      iMethod = DU_REFID_AKIMA;
+   else if (iStrcmp_STR(sTemp,_n("Nearest"),0) == 0)
+      iMethod = DU_REFID_NEAREST;
+   else 
+      Abort_SYS(_("Invalid interpolation method."));
+
+
+   // --- Does the reference channel exist ? ---
+
+   if (!iExistChan_DB(Data,sRefCh))
+      Abort_SYS(_("Reference channel does not exist."));
+   RefCh = FindChan_DB(Data,sRefCh);
+
+
+   // --- Lock the reference channel ---
+
+   LOCK_RW(Data, RefCh);
+
+
+   // --- Get a LST of channels ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   iNChan = iSize_LST(ChLST);
+   
+
+   // --- Get a LST of lines ---
+   
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, LineLST);
+   iNLines = iSize_LST(LineLST);
+   iNProg = iNChan*iNLines;
+   
+
+   // --- Go through all selected Lines ---
+
+   Progress_SYS(1);
+   iProg = 0;
+   for(iLine=0;iLine<iNLines;iLine++)
+   {
+
+
+      // --- Update the Progress Bar ---
+
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, iLine);
+      GetItem_LST(LineLST, 0, iLine, sLine);
+
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+
+
+      for(i=0;i<iNChan;i++) {
+      
+         ProgUpdateL_SYS(iProg,iNProg);
+         iProg++;
+
+         Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, i);
+         if(Ch==RefCh) continue;
+         
+
+         // --- Lock the channel and remove protection ---
+         
+         LOCK_RW(Data, Ch);
+         iProtect = iGetChanProtect_DB(Data, Ch);
+         SetChanProtect_DB(Data, Ch, DB_CHAN_UNPROTECTED);
+         
+         
+         // --- Refid the data ---
+
+         ReFid_DU(Data,Line,Ch,RefCh,Ch,iMethod,rStart,rIncr,rGap);
+         
+         
+         // --- Reset protection and unlock ---
+         
+         SetChanProtect_DB(Data, Ch, iProtect);
+         UNLOCK(Data, Ch);
+      }
+      
+      // --- Refid the reference channel against itself ---
+      
+      ReFid_DU(Data,Line,RefCh,RefCh,RefCh,iMethod,rStart,rIncr,rGap);
+      
+   }
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   
+   // --- Release the Database ---
+
+   UNLOCK(Data, RefCh);
+   UnLock_EDB(EData);
+}

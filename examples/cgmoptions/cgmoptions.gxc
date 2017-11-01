@@ -1,0 +1,196 @@
+//===========================================================================
+NAME          = "CGM plot options"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Plotting"
+
+DESCRIPTION   = "
+
+      CGMOPTIONS.WIDTH			Width of plotter paper
+      		     HEIGHT			Height of plotter paper
+      		     UNITS			Plotter units per inch
+      		     DEFAULTFONT	Font default: sr, ss, cr, ci, cs, tr, dr or fast
+                 COLORFLAG		Color Flag: color, direct, gray or mono
+      		     
+      		     NCOLORS		Number of colors or gray scales
+      		     FADE			Fade fill colors (%)
+      		     INKFILTER		Ink filter to match screen colors: off, on, no or yes
+      		     IMAGEDPI		Image resolution dpi
+      		     PLOTDPI		Plot resolution dpi
+      		     IMAGEPOSITION	Image position: background or foreground
+      		     BROKENIMAGE	Broken CGM images: off, on, no or yes
+      
+"
+
+//===========================================================================
+
+RESOURCE = "cgmoptions.gr"
+#include "cgmoptions.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sText;       
+string(1000) sCgmOptions;
+
+DGW         Diag;       // Dialogue handle
+int         i;
+
+
+//===========================================================================
+//                           CGMOPTIONS CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) 
+   {
+      i = 1;
+      while (i != 0) {
+      
+         switch (i) {
+            
+            case 1:
+                     
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("CGMOPTIONS1");
+
+               // --- Set any Defaults from INI ---
+
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS1_0 ,DGW_TEXT,"CGMOPTIONS","WIDTH");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS1_1 ,DGW_TEXT,"CGMOPTIONS","HEIGHT");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS1_2 ,DGW_TEXT,"CGMOPTIONS","UNITS");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS1_3 ,DGW_TEXT,"CGMOPTIONS","DEFAULTFONT");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS1_4 ,DGW_TEXT,"CGMOPTIONS","COLORFLAG");     
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS1_0 ,DGW_TEXT,"CGMOPTIONS","WIDTH");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS1_1 ,DGW_TEXT,"CGMOPTIONS","HEIGHT");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS1_2 ,DGW_TEXT,"CGMOPTIONS","UNITS");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS1_3 ,DGW_TEXT,"CGMOPTIONS","DEFAULTFONT");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS1_4 ,DGW_TEXT,"CGMOPTIONS","COLORFLAG");     
+
+               Destroy_DGW(Diag);
+
+               break;
+               
+            case 2:
+                     
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("CGMOPTIONS2");
+
+               // --- Set any Defaults from INI ---
+
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS2_0,DGW_TEXT,"CGMOPTIONS","NCOLORS");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS2_1,DGW_TEXT,"CGMOPTIONS","FADE");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS2_2,DGW_TEXT,"CGMOPTIONS","INKFILTER");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS2_3,DGW_TEXT,"CGMOPTIONS","IMAGEDPI");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS2_4,DGW_TEXT,"CGMOPTIONS","PLOTDPI");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS2_5,DGW_TEXT,"CGMOPTIONS","IMAGEPOSITION");     
+               SetInfoSYS_DGW(Diag,_CGMOPTIONS2_6,DGW_TEXT,"CGMOPTIONS","BROKENIMAGE");     
+
+               // --- Run the Dialogue ---								 
+																		 
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS2_0,DGW_TEXT,"CGMOPTIONS","NCOLORS");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS2_1,DGW_TEXT,"CGMOPTIONS","FADE");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS2_2,DGW_TEXT,"CGMOPTIONS","INKFILTER");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS2_3,DGW_TEXT,"CGMOPTIONS","IMAGEDPI");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS2_4,DGW_TEXT,"CGMOPTIONS","PLOTDPI");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS2_5,DGW_TEXT,"CGMOPTIONS","IMAGEPOSITION");     
+               GetInfoSYS_DGW(Diag,_CGMOPTIONS2_6,DGW_TEXT,"CGMOPTIONS","BROKENIMAGE");     
+
+               Destroy_DGW(Diag);
+     
+               break;
+         } 
+      } 
+   } 
+   
+   // --- Get Parameters ---
+
+   Strcpy_STR(sCgmOptions,"");
+   
+   GetString_SYS("CGMOPTIONS","WIDTH"        ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -width "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","HEIGHT"       ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -height "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","UNITS"        ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -units "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","DEFAULTFONT"  ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -defaultfont "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","COLORFLAG"    ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -colorflag "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","NCOLORS"      ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -ncolors "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","FADE"         ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -fade "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","INKFILTER"    ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -inkfilter "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","IMAGEDPI"     ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -imagedpi "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","PLOTDPI"      ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -plotdpi "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","IMAGEPOSITION",sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -imageposition "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+   GetString_SYS("CGMOPTIONS","BROKENIMAGE"  ,sText); 
+   if(iStrMin_STR(sText)) {
+      Strcat_STR(sCgmOptions,_n(" -brokenimage "));
+      Strcat_STR(sCgmOptions,sText);
+   }
+
+   SetString_SYS("EXPORT_GX_RUN","OPTION_STR",sCgmOptions); 
+   
+}

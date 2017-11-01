@@ -1,0 +1,856 @@
+//===========================================================================
+NAME          = "Plot a Rose, Pie or Bar Plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Point Plots"
+
+DESCRIPTION   = "
+
+Plot a Rose Plot, Pie Symbol Plot, or Bar Symbol Plot.
+
+Parameters:
+
+CHROSE.TYPE    : 0: Rose Plot, 1: Pie Plot, 2: Bar Plot
+CHROSE.NUMCHAN : Number of channels to plot, up to 8
+CHROSE.SCALE   : Default scaling in units/mm or units/seg
+CHROSE.COLOR   : Edge colour of sectors
+CHROSE.MASK    : Mask channel (can be blank).
+CHROSE.OFFSET  : Offset symbols? (0:No, 1:Yes)
+CHROSE.LEGEND  : Plot legend? (0:No, 1:Yes)
+CHROSE.CHANX   : Channels to plot (X is a value from 1 to 8)
+CHROSE.COLX    : Colours to plot (X is a value from 1 to 8)
+CHROSE.PIESIZE : Radius, in mm, for pie plots
+CHROSE.BARWIDTH: Width, in mm, for single bar in bar plots
+CHROSE.STARTANG: Degrees CCW from horizontal (3 o'clock) to start first pie 
+Scaling values are stored in the channel attributes.
+CHROSE.BARSTACK: For bar plots; stack bars one on top of each other?
+
+"
+// Revision History:
+// v6.4.0: Fixed glitch when setting channel scaling to the default value from a previous
+//         value; it wouldn't "take".
+// v6.3.0: Scaling set back into channels, but only if value different from default.
+// v5.1.8: Added stacked bar option.
+// v5.1.5: Added starting angle to rose and pie plots.
+// v5.1.3: Using "Current" X and Y channels
+//         Lists of channels now just "ASSAY" class
+//         Checks for existence of data view.
+//         Runs SCLMAP GX to ensure base view is created.
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "CHROSE.gr"
+#include "CHROSE.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define MAX_CHAN 8
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,Ch,MCh;    // Channel handles
+DB_SYMB    Line;              // Line handle
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   DiagMain, DiagSub;
+IPJ   DataIPJ;
+LST   List;
+VV    XVV,YVV,ColVV,DVV,MVV,ChVV,DataVV;
+VM    sCol_VM;
+
+string(STR_DB_SYMBOL) sChan, sMask, sLine;
+string(STR_GROUP) sDataGroup, sOffsetGroup;
+string(STR_DEFAULT) sLabel,sParm, sDefScale;
+string(STR_DEFAULT_LONG) sMsg;
+string(STR_DEFAULT_SHORT) sDiag, sEdgeCol, sCol, sVal, sTemp;
+string(STR_FILE) sName;
+
+int iType,iLines,iTotLines;
+int i;
+int iDone, iValue, iStack;
+int iNumChan;
+int iMask;
+int iLegend;
+int iOffset;
+
+real(MAX_CHAN) rScale;
+real rScaleMM, rDefScale, rPieSize, rBarWidth, rOffSize, rOutlier, rStartAng, rV, rV2;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Get the type for this plot ---
+
+   iType = iGetInt_SYS("CHROSE","TYPE");
+   if(iType<CHIMERA_PLOT_ROSE || iType>CHIMERA_PLOT_BAR) 
+      iType=CHIMERA_PLOT_ROSE;
+   SetInt_SYS("CHROSE","TYPE",CHIMERA_PLOT_ROSE);    // set as default
+
+
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+	  
+   EMap = Current_EMAP();
+
+
+   // --- Map must have a data view ---
+
+   Map = Lock_EMAP(EMap);
+   if (!iExistView_MAP(Map,"*Data"))
+      Abort_SYS(_("A data view is required to use this GX."));
+   UnLock_EMAP(EMap);
+
+
+   // --- Set Base view ----
+
+   if (iInteractive_SYS())
+      iSetCurrentView_EMAP(EMap,"*Base");
+
+
+   // --- Get current database and map ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Allocate colour VM ---
+
+   sCol_VM = Create_VM(-32, MAX_CHAN);
+
+
+   // --- Load the starting variables with defaults ---
+
+   SetString_VM(sCol_VM, 0, "K");
+   SetString_VM(sCol_VM, 1, "R");
+   SetString_VM(sCol_VM, 2, "G");
+   SetString_VM(sCol_VM, 3, "B");
+   SetString_VM(sCol_VM, 4, "GB");
+   SetString_VM(sCol_VM, 5, "RB");
+   SetString_VM(sCol_VM, 6, "RG");
+   SetString_VM(sCol_VM, 7, "R128G128B128");
+
+   iNumChan = MAX_CHAN;
+      
+
+   // --- Get Default Mask Channel if required, and if the default exists or is "None" ---
+
+	GetString_SYS("CHROSE","MASK",sMask);
+	if(iStrlen_STR(sMask)==0)
+	{
+		if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+			if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+				if(iScanI_STR(sTemp)==1 &&
+					(iExistChan_DB(Data,sMask) || 
+					 !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+					SetString_SYS("CHROSE","MASK",sMask);
+				}
+			}
+		}
+	}
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      if(iType==CHIMERA_PLOT_ROSE) {
+         DiagMain   = Create_DGW("CHROSEMAIN");
+         List = GetList_DGW(DiagMain,_CHROSEMAIN_3);
+      }
+      else if(iType==CHIMERA_PLOT_PIE) {
+         DiagMain   = Create_DGW("CHPIEMAIN");
+         List = GetList_DGW(DiagMain,_CHPIEMAIN_4);
+      }
+      else if(iType==CHIMERA_PLOT_BAR) {
+         DiagMain   = Create_DGW("CHBARMAIN");
+         List = GetList_DGW(DiagMain,_CHBARMAIN_5);
+      }
+
+      // --- Set up mask channel list ---
+
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+
+      // --- Initial action is to run the main dialogue...
+         
+      iValue = 1;
+         
+      iDone = 0;
+      while(!iDone) {
+
+         if(iValue == 1) {   // --- Run Main dialogue ---
+
+            if(iType==CHIMERA_PLOT_ROSE) {
+
+               SetInfoSYS_DGW(DiagMain,_CHROSEMAIN_0, DGW_TEXT,      "CHROSE", "NUMCHAN");
+               SetInfoSYS_DGW(DiagMain,_CHROSEMAIN_1, DGW_TEXT,      "CHROSE", "SCALE");
+               SetInfoSYS_DGW(DiagMain,_CHROSEMAIN_2, DGW_TEXT,      "CHROSE", "COLOR");
+               SetInfoSYS_DGW(DiagMain,_CHROSEMAIN_3, DGW_TEXT,      "CHROSE", "MASK");
+               SetInfoSYS_DGW(DiagMain,_CHROSEMAIN_4, DGW_LISTALIAS, "CHROSE", "OFFSET");
+               SetInfoSYS_DGW(DiagMain,_CHROSEMAIN_5, DGW_LISTALIAS, "CHROSE", "LEGEND");
+               SetInfoSYS_DGW(DiagMain,_CHROSEMAIN_6, DGW_TEXT,      "CHROSE", "STARTANG");
+
+               iValue = iRunDialogue_DGW(DiagMain);
+               if(iValue==-1) Cancel_SYS();
+
+               GetInfoSYS_DGW(DiagMain,_CHROSEMAIN_0, DGW_TEXT,      "CHROSE", "NUMCHAN");
+               GetInfoSYS_DGW(DiagMain,_CHROSEMAIN_1, DGW_TEXT,      "CHROSE", "SCALE");
+               GetInfoSYS_DGW(DiagMain,_CHROSEMAIN_2, DGW_TEXT,      "CHROSE", "COLOR");
+               GetInfoSYS_DGW(DiagMain,_CHROSEMAIN_3, DGW_TEXT,      "CHROSE", "MASK");
+               GetInfoSYS_DGW(DiagMain,_CHROSEMAIN_4, DGW_LISTALIAS, "CHROSE", "OFFSET");
+               GetInfoSYS_DGW(DiagMain,_CHROSEMAIN_5, DGW_LISTALIAS, "CHROSE", "LEGEND");
+               GetInfoSYS_DGW(DiagMain,_CHROSEMAIN_6, DGW_TEXT,      "CHROSE", "STARTANG");
+
+            }
+            else if(iType==CHIMERA_PLOT_PIE) {
+
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_0, DGW_TEXT,      "CHROSE", "NUMCHAN");
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_1, DGW_TEXT,      "CHROSE", "SCALE");
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_2, DGW_TEXT,      "CHROSE", "PIESIZE");
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_3, DGW_TEXT,      "CHROSE", "COLOR");
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_4, DGW_TEXT,      "CHROSE", "MASK");
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_5, DGW_LISTALIAS, "CHROSE", "OFFSET");
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_6, DGW_LISTALIAS, "CHROSE", "LEGEND");
+               SetInfoSYS_DGW(DiagMain,_CHPIEMAIN_7, DGW_TEXT,      "CHROSE", "STARTANG");
+
+               iValue = iRunDialogue_DGW(DiagMain);
+               if(iValue==-1) Cancel_SYS();
+
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_0, DGW_TEXT,      "CHROSE", "NUMCHAN");
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_1, DGW_TEXT,      "CHROSE", "SCALE");
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_2, DGW_TEXT,      "CHROSE", "PIESIZE");
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_3, DGW_TEXT,      "CHROSE", "COLOR");
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_4, DGW_TEXT,      "CHROSE", "MASK");
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_5, DGW_LISTALIAS, "CHROSE", "OFFSET");
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_6, DGW_LISTALIAS, "CHROSE", "LEGEND");
+               GetInfoSYS_DGW(DiagMain,_CHPIEMAIN_7, DGW_TEXT,      "CHROSE", "STARTANG");
+
+            }
+            else if(iType==CHIMERA_PLOT_BAR) {
+
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_0, DGW_TEXT,      "CHROSE", "NUMCHAN");
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_1, DGW_TEXT,      "CHROSE", "SCALE");
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_2, DGW_TEXT,      "CHROSE", "BARWIDTH");
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_3, DGW_TEXT,      "CHROSE", "COLOR");
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_4, DGW_LISTALIAS, "CHROSE", "BARSTACK");
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_5, DGW_TEXT,      "CHROSE", "MASK");
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_6, DGW_LISTALIAS, "CHROSE", "OFFSET");
+               SetInfoSYS_DGW(DiagMain,_CHBARMAIN_7, DGW_LISTALIAS, "CHROSE", "LEGEND");
+
+               iValue = iRunDialogue_DGW(DiagMain);
+               if(iValue==-1) Cancel_SYS();
+
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_0, DGW_TEXT,      "CHROSE", "NUMCHAN");
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_1, DGW_TEXT,      "CHROSE", "SCALE");
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_2, DGW_TEXT,      "CHROSE", "BARWIDTH");
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_3, DGW_TEXT,      "CHROSE", "COLOR");
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_4, DGW_LISTALIAS, "CHROSE", "BARSTACK");
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_5, DGW_TEXT,      "CHROSE", "MASK");
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_6, DGW_LISTALIAS, "CHROSE", "OFFSET");
+               GetInfoSYS_DGW(DiagMain,_CHBARMAIN_7, DGW_LISTALIAS, "CHROSE", "LEGEND");
+            }
+
+            iNumChan = iGetInt_SYS("CHROSE", "NUMCHAN");
+
+         }
+      
+         else if(iValue == 2) {  // ---  Run Channels dialogue ---  
+
+            // --- get the appropriate dialog ---
+               
+            Strcpy_STR(sDiag,"CHROSECHAN");
+            FormatI_STR(iNumChan, sVal, 10);
+            Strcat_STR(sDiag,sVal);
+
+            DiagSub = Create_DGW(sDiag);                                        
+                       
+            for(i=0; i<iNumChan; i++) {
+
+               // --- Load the channel lists ---
+
+               if(i==0) {
+                  List = GetList_DGW(DiagSub,(DGW_OBJ)i);
+                  ClassChanLST_DB(Data,List,"ASSAY");
+                  Sort_LST(List,0,0);
+               }
+               else {
+                  Copy_LST(GetList_DGW(DiagSub,(DGW_OBJ)i), List);
+               }
+
+               // --- Load from workspace ---
+
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"CHAN");
+               Strcat_STR(sParm,sVal);
+               SetInfoSYS_DGW(DiagSub, (DGW_OBJ)i,  DGW_TEXT, "CHROSE", sParm);
+            }
+
+            iValue = iRunDialogue_DGW(DiagSub);
+            if(iValue==-1) Cancel_SYS();
+
+            for(i=0; i<iNumChan; i++) {
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"CHAN");
+               Strcat_STR(sParm,sVal);
+               GetInfoSYS_DGW(DiagSub, (DGW_OBJ)i,  DGW_TEXT, "CHROSE", sParm);
+            }
+
+            Destroy_DGW(DiagSub);
+
+         }  // End if(iValue == 2)  (Channels Dialogue)
+
+
+         else if(iValue == 3) {  // ---  Run Scaling dialogue ---  
+
+            // --- Get default scaling ---
+
+            GetString_SYS("CHROSE","SCALE", sDefScale);
+
+            // --- get the appropriate dialog ---
+               
+            Strcpy_STR(sDiag,"CHROSESCL");
+            FormatI_STR(iNumChan, sVal, 10);
+            Strcat_STR(sDiag,sVal);
+
+            DiagSub = Create_DGW(sDiag);                                        
+                       
+            for(i=0; i<iNumChan; i++) {
+
+               // --- Load the SYMBOL_SCALING attribute defaults ---
+
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"CHAN");
+               Strcat_STR(sParm,sVal);
+               GetString_SYS("CHROSE", sParm, sChan);
+
+               Ch = FindChan_DB(Data,sChan);
+               if(Ch==NULLSYMB) 
+                  Abort_SYS(_("Unexpected channel not found."));
+               
+               GetRegSymbSetting_DB(Data,Ch,"SYMBOL_SCALING",sParm, sizeof(sParm));
+               if(!iStrlen_STR(sParm))
+                  Strcpy_STR(sParm, sDefScale);
+
+               SetInfo_DGW(DiagSub, (DGW_OBJ)i,  DGW_TEXT, sParm);
+
+               // --- Set the label ---
+
+               Printf_STR(sLabel, sizeof(sLabel), _("%s scaling"), sChan);
+               SetInfo_DGW(DiagSub, (DGW_OBJ)i,  DGW_LABEL, sLabel);
+
+            }
+
+            iValue = iRunDialogue_DGW(DiagSub);
+            if(iValue==-1) Cancel_SYS();
+
+            for(i=0; i<iNumChan; i++) {
+
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"CHAN");
+               Strcat_STR(sParm,sVal);
+               GetString_SYS("CHROSE", sParm, sChan);
+
+               GetInfo_DGW(DiagSub, (DGW_OBJ)i,  DGW_TEXT, sParm);
+
+               // --- Set value back into channel, but only if it is NOT the same
+               //     as the default scaling. If it is the same as the default scaling, then
+               //     set the channel value to DUMMY. ---
+               
+               rV = rScanR_STR(sParm);
+               rV2 = rScanR_STR(sDefScale);
+               Ch = FindChan_DB(Data,sChan);
+               if(rV!=rV2)
+                  SetRegSymbSetting_DB(Data,Ch,"SYMBOL_SCALING",sParm);
+               else
+                  SetRegSymbSetting_DB(Data,Ch,"SYMBOL_SCALING","");
+            }
+
+            Destroy_DGW(DiagSub);
+
+         }  // End if(iValue == 3)  (Scaling Dialogue)
+
+
+         else if(iValue == 4) {  // --- Colours dialogue ---  
+
+            // --- get the appropriate dialog ---
+               
+            Strcpy_STR(sDiag,"CHROSECOL");
+            FormatI_STR(iNumChan, sVal, 10);
+            Strcat_STR(sDiag,sVal);
+
+            DiagSub = Create_DGW(sDiag);                                        
+            
+            for(i=0; i<iNumChan; i++) {
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"COL");
+               Strcat_STR(sParm,sVal);
+
+               // --- If not defined, set defaults ---
+
+               GetString_SYS("CHROSE", sParm, sCol);
+               if(!iStrlen_STR(sCol)) {
+                  GetString_VM(sCol_VM, i, sCol);
+                  SetString_SYS("CHROSE", sParm, sCol);
+               }
+                  
+               SetInfoSYS_DGW(DiagSub, (DGW_OBJ)i, DGW_TEXT, "CHROSE", sParm);
+
+               // --- Set the label ---
+
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"CHAN");
+               Strcat_STR(sParm,sVal);
+               GetString_SYS("CHROSE", sParm, sChan);
+
+               Printf_STR(sLabel, sizeof(sLabel), _("%s Colour"), sChan);
+               SetInfo_DGW(DiagSub, (DGW_OBJ)i,  DGW_LABEL, sLabel);
+
+            }
+
+            iValue = iRunDialogue_DGW(DiagSub);
+            if(iValue==-1) Cancel_SYS();
+
+            for(i=0; i<iNumChan; i++) {
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"COL");
+               Strcat_STR(sParm,sVal);
+               GetInfoSYS_DGW(DiagSub, (DGW_OBJ)i, DGW_TEXT, "CHROSE", sParm);
+            }
+
+            Destroy_DGW(DiagSub);
+
+         }  // End if(iValue == 4)  (Colours Dialogue)
+
+         else if(iValue == 0) {  // --- Validation - in case user hits Finish in first dialog ---  
+
+            // --- Channel validation ---
+
+            for(i=0; i<iNumChan; i++) {
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"CHAN");
+               Strcat_STR(sParm,sVal);
+               GetString_SYS("CHROSE", sParm, sChan);
+               if(!iStrlen_STR(sChan)) {
+                  iValue = 2;    // go to channels dialog
+                  break;
+               }
+            }
+
+            if(iValue!=0) continue;
+
+            // --- Colour validation ---
+
+            for(i=0; i<iNumChan; i++) {
+               FormatI_STR(i, sVal, 3);
+               Strcpy_STR(sParm,"COL");
+               Strcat_STR(sParm,sVal);
+               GetString_SYS("CHROSE", sParm, sCol);
+               if(!iStrlen_STR(sCol)) {
+                  iValue = 3;    // go to colours dialog
+                  break;
+               }
+            }
+
+            if(iValue==0) iDone = 1;  // Ready to plot
+
+         }
+
+      }  // --- End While(!iDone) ---
+
+      // --- Destroy the Main Dialogue ---
+
+      Destroy_DGW(DiagMain);
+
+   }
+   
+   // --- Get and Validate parameters ---
+
+   iNumChan = iGetInt_SYS("CHROSE","NUMCHAN");
+   if(iNumChan==iDUMMY)
+      Abort_SYS(_("Number of ranges is not defined"));
+   if(iNumChan<1 || iNumChan>8)
+      Abort_SYS(_("Number of ranges must be a number from 1 to 8."));
+
+   rDefScale = rGetReal_SYS("CHROSE","SCALE");
+   if(rDefScale==rDUMMY)
+      Abort_SYS(_("No default scaling is defined."));
+   if(rDefScale<=0.0)
+      Abort_SYS(_("Default scaling must > 0.0"));
+
+
+   GetString_SYS("CHROSE","COLOR",sEdgeCol);
+   if(!iStrlen_STR(sEdgeCol))
+      Strcpy_STR(sEdgeCol,"K");  // black by default
+
+   GetString_SYS("CHROSE","MASK",sMask);  // can be blank
+   iLegend = iGetInt_SYS("CHROSE","LEGEND");
+   if(iLegend!=0) iLegend=1;  // yes by default
+
+   iOffset = iGetInt_SYS("CHROSE","OFFSET");
+   if(iOffset!=1) iOffset=0;  // no by default
+
+   if(iOffset) {
+      iGlobal_SYS("CHPREFERENCES.OFFSIZE",sVal);
+      rOffSize = rScanR_STR(sVal);
+      if(rOffSize==rDUMMY || rOffSize<=0.0)
+         rOffSize = 0.5;
+   }
+
+   rStartAng = rGetReal_SYS("CHROSE", "STARTANG");
+   if(rStartAng==rDUMMY) rStartAng = 0.0;
+
+
+   // --- Channel validation ---
+
+   for(i=0; i<iNumChan; i++) {
+      FormatI_STR(i, sVal, 3);
+      Strcpy_STR(sParm,"CHAN");
+      Strcat_STR(sParm,sVal);
+      GetString_SYS("CHROSE", sParm, sChan);
+      if(!iStrlen_STR(sChan)) {
+         Printf_STR(sMsg, sizeof(sMsg), _("Channel #%s is not defined."), sVal);
+         Abort_SYS(sMsg);
+      }
+   }
+
+   // --- Colour validation ---
+
+   for(i=0; i<iNumChan; i++) {
+      FormatI_STR(i, sVal, 3);
+      Strcpy_STR(sParm,"CHAN");
+      Strcat_STR(sParm,sVal);
+
+      // --- If not defined, set defaults ---
+
+      GetString_SYS("CHROSE", sParm, sCol);
+      if(!iStrlen_STR(sCol)) {
+         GetString_VM(sCol_VM, 0, sCol);
+         SetString_SYS("CHROSE", sParm, sCol);
+      }
+   }
+
+   if(iType==CHIMERA_PLOT_PIE) {   
+      rPieSize = rGetReal_SYS("CHROSE","PIESIZE");
+      if(rPieSize==rDUMMY) rPieSize = 5.0;   // default is 5mm
+      if(rPieSize<=0.0) 
+         Abort_SYS(_("Pie radius must be greater than 0."));
+   }
+
+   if(iType==CHIMERA_PLOT_BAR) {   
+      rBarWidth = rGetReal_SYS("CHROSE","BARWIDTH");
+      if(rBarWidth==rDUMMY) rBarWidth = 1.0;   // default is 1mm
+      if(rBarWidth<=0.0) 
+         Abort_SYS(_("Single bar width must be greater than 0."));
+
+      iStack = iGetInt_SYS("CHROSE","BARSTACK");
+      if(iStack!=1) iStack = 0;     // No by default
+   }
+
+
+   // --- Get some VV's ---
+
+   XVV = Create_VV(REAL,0);
+   YVV = Create_VV(REAL,0);
+   MVV = Create_VV(REAL,0);
+
+   ChVV = Create_VV(INT,iNumChan); // to store the channel symbols
+   ColVV = Create_VV(INT,iNumChan); // to store the colours
+   DVV = Create_VV(INT,iNumChan); // to store the data VV handles
+   for(i=0;i<iNumChan;i++) {      // create and store data VV handles
+      SetInt_VV(DVV, i, (int)Create_VV(REAL,0));       
+   }
+
+   // --- Get scaling ---
+
+   for(i=0; i<iNumChan; i++) {
+
+      // --- Load the SYMBOL_SCALING attribute defaults ---
+
+      FormatI_STR(i, sVal, 3);
+      Strcpy_STR(sParm,"CHAN");
+      Strcat_STR(sParm,sVal);
+      GetString_SYS("CHROSE", sParm, sChan);
+
+      Ch = FindChan_DB(Data,sChan);
+               
+      GetRegSymbSetting_DB(Data,Ch,"SYMBOL_SCALING",sParm, sizeof(sParm));
+      rScale[i] = rScanR_STR(sParm);
+      if(rScale[i]==rDUMMY || rScale[i]<=0.0)
+         rScale[i] = rDefScale;
+   }
+
+   // --- Get and store the colours ---
+
+   for(i=0;i<iNumChan;i++) {
+      
+      FormatI_STR(i, sVal, 3);
+      Strcpy_STR(sParm,"COL");
+      Strcat_STR(sParm,sVal);
+
+      GetString_SYS("CHROSE", sParm, sCol);
+      SetInt_VV(ColVV, i, iColor_MVIEW(sCol));       
+   }
+
+   // --- X and Y channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);   
+
+   // --- Apply mask? ---
+
+   iMask = 0;
+   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      MCh = FindChan_DB(Data,sMask);
+      if (MCh==NULLSYMB)  
+         Abort_SYS(_("Mask channel does not exist."));
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+      iMask = 1;
+   }
+
+   // --- Get data channels ---
+
+   for(i=0;i<iNumChan;i++) {
+
+      FormatI_STR(i, sVal, 3);
+      Strcpy_STR(sParm,"CHAN");
+      Strcat_STR(sParm,sVal);
+      GetString_SYS("CHROSE", sParm, sChan);
+      
+      if (!iExistChan_DB(Data,sChan)) {
+         Printf_STR(sMsg, sizeof(sMsg), _("Channel #%s, %s, does not exist in the database."), sVal, sChan);
+         Abort_SYS(sMsg);
+      }
+
+      Ch = FindChan_DB(Data,sChan);
+      LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);     
+
+      SetInt_VV(ChVV, i, (int)Ch);
+
+   }
+
+   // --- Open the data view ---
+
+   Map  = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   SetWorkingIPJ_MVIEW(View,DataIPJ);
+   
+
+   // --- Scale parameters ---
+
+   rScaleMM = rScaleMM_MVIEW(View); // map scale in units/mm
+
+
+   
+
+   // --- Start a group ---
+
+   GetName_DB(Data,DB_NAME_FILE,sName);
+   FileNamePart_STR(sName,sName,STR_FILE_PART_NAME);
+   if(iType==CHIMERA_PLOT_ROSE)
+      Strcpy_STR(sDataGroup,_n("RosePlot"));
+   else if(iType==CHIMERA_PLOT_PIE)
+      Strcpy_STR(sDataGroup,_n("PiePlot"));
+   else if(iType==CHIMERA_PLOT_BAR)
+      Strcpy_STR(sDataGroup,_n("BarPlot"));
+   StartGroup_MVIEW(View,sDataGroup,MVIEW_GROUP_NEW);
+   
+   // --- Start a separate group for offset markers and lines ---
+
+   Strcpy_STR(sOffsetGroup, _n("OffsetMarkers"));
+   if(iOffset) 
+      StartGroup_MVIEW(View,sOffsetGroup,MVIEW_GROUP_NEW);
+   else {
+      if(iExistGroup_MVIEW (View, sOffsetGroup)) {
+         MarkAllGroups_MVIEW(View, 0);
+         MarkGroup_MVIEW(View, sOffsetGroup, 1);
+         DelMarkedGroups_MVIEW(View);
+      }
+   }
+
+
+   // --- Add maker ---
+
+   if(iType==CHIMERA_PLOT_ROSE)
+      Maker_MVIEW(View,1,1,"CHROSE",MAKER_GX,_("Rose Plot..."),"CHROSE;");
+   else if(iType==CHIMERA_PLOT_PIE)
+      Maker_MVIEW(View,1,1,"CHPIE",MAKER_GX,_("Pie Symbol Plot..."),"CHROSE;");
+   else if(iType==CHIMERA_PLOT_BAR)
+      Maker_MVIEW(View,1,1,"CHBAR",MAKER_GX,_("Bar Symbol Plot..."),"CHROSE;");
+
+
+   // --- Link ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   // --- Get, scale, and plot the data ---
+
+   iLines = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Plotting Symbols, Line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines, iTotLines);
+
+
+      // --- Get X, Y ---
+
+      GetChanVV_DB(Data,Line,XCh,XVV);
+      GetChanVV_DB(Data,Line,YCh,YVV);
+      ReFidVV_VV(YVV,XVV);
+
+		// --- mask? ---
+
+   	if(iMask) {
+      	GetChanVV_DB(Data,Line,MCh,MVV);
+      	ReFidVV_VV(MVV,XVV);
+		}
+
+      // --- Get data and scale it ---
+
+      for(i=0;i<iNumChan;i++) {
+
+         Ch = (DB_SYMB)iGetInt_VV(ChVV, i);
+         DataVV = (VV)iGetInt_VV(DVV, i);
+
+         GetChanVV_DB(Data,Line,Ch,DataVV);
+         ReFidVV_VV(DataVV,XVV);
+
+         if(iMask)
+   			Mask_VVU(DataVV,MVV);
+
+         // --- Clip outliers? ---
+
+         GetRegSymbSetting_DB(Data,Ch,"OUTLIERLIMIT",sParm, sizeof(sParm));
+         rOutlier = rScanR_STR(sParm);
+
+         if(rOutlier!=rDUMMY) 
+            Clip_VVU(DataVV, rDUMMY, rOutlier, VVU_CLIP_LIMIT);
+
+         Trans_VV(DataVV, 0.0, rScaleMM / rScale[i]); 
+      }
+
+      // --- Mask X, Y ---
+
+   	if(iMask) {
+			Mask_VVU(XVV,MVV);
+			Mask_VVU(YVV,MVV);
+		}
+			
+      // --- Add line link ---
+
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine);
+
+
+      // --- Plot the Rsymbols for this line ---
+      
+      if(iType==CHIMERA_PLOT_ROSE)
+         RosePlot2_CHIMERA(View, sDataGroup, sOffsetGroup, XVV, YVV, DVV, ColVV, iColor_MVIEW(sEdgeCol), iOffset, rOffSize*rScaleMM, rStartAng);
+      else if(iType==CHIMERA_PLOT_PIE)
+         PiePlot2_CHIMERA(View, sDataGroup, sOffsetGroup, XVV, YVV, DVV, ColVV, iColor_MVIEW(sEdgeCol), iOffset, rOffSize*rScaleMM, rPieSize*rScaleMM, rStartAng);
+      else if(iType==CHIMERA_PLOT_BAR) {
+         if(iStack)
+            StackedBarPlot_CHIMERA(View, sDataGroup, sOffsetGroup, XVV, YVV, DVV, ColVV, iColor_MVIEW(sEdgeCol), iOffset, rOffSize*rScaleMM, rBarWidth*rScaleMM);
+         else
+            BarPlot_CHIMERA(View, sDataGroup, sOffsetGroup, XVV, YVV, DVV, ColVV, iColor_MVIEW(sEdgeCol), iOffset, rOffSize*rScaleMM, rBarWidth*rScaleMM);
+      }
+
+            
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Done with symbol plot ---
+
+   Progress_SYS(0);
+
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   for(i=0;i<iNumChan;i++) {
+      Ch = (DB_SYMB)iGetInt_VV(ChVV, i); 
+      UnLockSymb_DB(Data,Ch);
+   }
+   if(iMask) UnLockSymb_DB(Data,MCh);
+
+   // --- Done with the data view ---
+
+   Destroy_MVIEW(View);  
+   Destroy_IPJ(DataIPJ);  
+
+   // --- Destroy objects ---
+
+   Destroy_VM(sCol_VM);
+   Destroy_VV(XVV);
+   Destroy_VV(YVV);
+   if(iMask) Destroy_VV(MVV);
+   for(i=0;i<iNumChan;i++) {
+      DataVV = (VV)iGetInt_VV(DVV, i); 
+      Destroy_VV(DataVV);
+   }
+   Destroy_VV(DVV);
+
+   Destroy_VV(ChVV);
+   Destroy_VV(ColVV);
+
+   // --- Release the locks ---
+
+   UnLock_EDB(EData);
+   UnLock_EMAP(EMap);
+
+
+   // --- Plot legend? ---
+
+   if(iLegend) {
+      SetInt_SYS("CHROSELEG","TYPE",iType);
+      iRunGX_SYS("chroseleg");      
+   }
+
+}

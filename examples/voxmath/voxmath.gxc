@@ -1,0 +1,176 @@
+//===========================================================================
+NAME          = "VOXMATH"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "\
+
+Apply a math formula to Grids
+
+Parameters: 
+
+       VOXMATH.VO       Output Voxel Name
+       VOXMATH.VM       Input MASTER Voxel 
+       VOXMATH.V1-V4    Voxel file names. Up to 4 voxels (V1-V4) can be 
+                        defined.  These are refered to as V1 through V4 in
+                        the expression.  
+       VOXMATH.G1-G2    Grid file names. Up to 2 grids (G1-G2) can be 
+                        defined.  These are refered to as G1 through G2 in
+                        the expression.  
+               .EXP     The expression to apply (ie \"OUT=Master+V1;\").
+               .FILE    OR a file name containing an expression.  The
+                        expression cannot be longer than 1023 characters.
+
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.3.0   Enabled ArcGIS specific functionality
+// v6.3.0   Added
+//===========================================================================
+
+RESOURCE = "voxmath.gr"
+#include "voxmath.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;                 // Dialogue handle
+int        i;                    // utility int
+
+string(STR_FILE)  sVO;             // Name of output voxel
+string(STR_FILE)  sVM;             // Name of master voxel
+string(STR_FILE)  sV1;             // Name of voxel 1
+string(STR_FILE)  sV2;             // Name of voxel 2
+string(STR_FILE)  sV3;             // Name of voxel 3
+string(STR_FILE)  sV4;             // Name of voxel 4
+string(STR_FILE)  sG1;             // Name of grid 1
+string(STR_FILE)  sG2;             // Name of grid 2
+string(STR_FILE)  sFile;           // Expression file
+string(1024)      sExp;            // Expression string
+
+RA    File;
+LST   hLST;
+int   iInteractive;
+
+//===========================================================================
+//                            VOXEL MATH CODE
+//===========================================================================
+
+{
+	iInteractive = iInteractive_SYS();
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("VOXMATHForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_0,DGW_FILEPATH,"VOXMATH","VO");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_1,DGW_FILEPATH,"VOXMATH","VM");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_2,DGW_FILEPATH,"VOXMATH","V1");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_3,DGW_FILEPATH,"VOXMATH","V2");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_4,DGW_FILEPATH,"VOXMATH","V3");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_5,DGW_FILEPATH,"VOXMATH","V4");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_6,DGW_FILEPATH,"VOXMATH","G1");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_7,DGW_FILEPATH,"VOXMATH","G2");     
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_8,DGW_TEXT,"VOXMATH","EXP");    
+      SetInfoSYS_DGW(Diag,_VOXMATHFORM_9,DGW_FILEPATH,"VOXMATH","FILE");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_0,DGW_FILEPATH,"VOXMATH","VO");     
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_1,DGW_FILEPATH,"VOXMATH","VM");  
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_2,DGW_FILEPATH,"VOXMATH","V1");     
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_3,DGW_FILEPATH,"VOXMATH","V2");     
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_4,DGW_FILEPATH,"VOXMATH","V3");     
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_5,DGW_FILEPATH,"VOXMATH","V4");     
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_6,DGW_FILEPATH,"VOXMATH","G1");     
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_7,DGW_FILEPATH,"VOXMATH","G2");     
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_8,DGW_TEXT,"VOXMATH","EXP");    
+      GetInfoSYS_DGW(Diag,_VOXMATHFORM_9,DGW_FILEPATH,"VOXMATH","FILE");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VOXMATH","VO",sVO);
+   GetString_SYS("VOXMATH","VM",sVM);
+   GetString_SYS("VOXMATH","V1",sV1);
+   GetString_SYS("VOXMATH","V2",sV2);
+   GetString_SYS("VOXMATH","V3",sV3);
+   GetString_SYS("VOXMATH","V4",sV4);
+   GetString_SYS("VOXMATH","G1",sG1);
+   GetString_SYS("VOXMATH","G2",sG2);
+   GetString_SYS("VOXMATH","EXP",sExp);
+   GetString_SYS("VOXMATH","FILE",sFile);
+
+
+   // --- if there is an expression file, get it ---
+
+   if (iStrlen_STR(sFile)) {
+
+      File = Create_RA(sFile);
+      Strcpy_STR(sExp,"");
+      while (iGets_RA(File,sFile) == 0)
+         Strcat_STR(sExp,sFile);
+      Destroy_RA(File);
+
+   } else
+      Strcat_STR(sExp,";");
+
+   
+   // --- Create LST ---
+
+   hLST = Create_LST(4096);
+
+
+   // --- Load the Source Voxels ---
+   
+   if (iStrlen_STR(sV1) && iFileExist_SYS(sV1)) AddItem_LST(hLST,sV1,"V1");
+   if (iStrlen_STR(sV2) && iFileExist_SYS(sV2)) AddItem_LST(hLST,sV2,"V2");
+   if (iStrlen_STR(sV3) && iFileExist_SYS(sV3)) AddItem_LST(hLST,sV3,"V3");
+   if (iStrlen_STR(sV4) && iFileExist_SYS(sV4)) AddItem_LST(hLST,sV4,"V4");
+   if (iStrlen_STR(sG1) && iFileExist_SYS(sG1)) AddItem_LST(hLST,sG1,"G1");
+   if (iStrlen_STR(sG2) && iFileExist_SYS(sG2)) AddItem_LST(hLST,sG2,"G2");
+
+
+   // --- Apply formula to voxels ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Compute Voxel Math..."),1);
+   Math_VOX(sVM,"VM",sVO,"VO",sExp,hLST);
+   Progress_SYS(0);
+   
+   
+   // --- Display the Voxel ---
+   
+	SetString_SYS("V3DVOX", "VOXEL", sVO);
+	if(iScript_SYS()!=1)
+	{
+		SetInteractive_SYS(0);
+		iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.DispVoxGrid;Run)");
+		SetInteractive_SYS(iInteractive);
+	}
+}

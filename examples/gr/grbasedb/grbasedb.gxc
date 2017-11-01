@@ -1,0 +1,162 @@
+//===========================================================================
+NAME          = "Open/load base station data."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Base Stations"
+
+DESCRIPTION   = "
+
+   GRBASEDB.FILE         location file in CSV format
+           .DATABASE     database name
+
+"
+
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "grbasedb.gr"
+#include "grbasedb.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         eDB;                  // Database
+DB          hDB;                  // Database
+DGW         hDGW;                 // Dialogue handle
+REG         hWorkREG;
+REG         hDataREG;
+
+string(STR_FILE) sDB;
+string(STR_GROUP) sTemp;
+int i,iNew;
+
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- get workspace REG and parameters ---
+   
+   hWorkREG = Create_REG(156);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sDB,sizeof(sDB));
+   
+
+   // --- Are we running interactively ? ---
+
+   iNew = FALSE;
+   if (iInteractive_SYS()) {
+   
+      hDGW = Create_DGW("GRBASEDB");
+      SetInfo_DGW(hDGW,_GRBASEDB_0,DGW_FILEPATH,sDB);
+      
+      i = 0;
+      while(i==0) {
+      
+         if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+         GetInfo_DGW(hDGW,_GRBASEDB_0,DGW_FILEPATH,sDB);
+         
+   
+         // --- check database exists ---
+   
+         if (!iFileExist_SYS(sDB)) {
+            i = iDisplayQuestion_SYS(sDB,_("Database does not exist.  Create new?"));
+            if (i) iNew = TRUE;
+         } else
+            i = 1;   
+      }
+      Destroy_DGW(hDGW);
+      
+   } else {
+   
+      // --- Does the databse exist ? ---
+   
+      if (!iFileExist_SYS(sDB)) iNew = TRUE;   
+   
+   }
+
+
+   // --- existing database ---
+
+   if (!iNew) {
+   
+      // --- check that this is a gravity base station database ---
+      
+      eDB = Load_EDB(sDB);
+      hDB = Lock_EDB(eDB);      
+      hDataREG = Create_REG(256);
+      GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+      Get_REG(hDataREG,"GRAVRED.TYPE",sTemp,sizeof(sTemp));
+      Destroy_SYS(hDataREG);
+      UnLock_EDB(eDB);
+      
+      if (iStrcmp_STR(sTemp,_n("Base"),STR_CASE_TOLERANT) != 0) {
+			if (  iInteractive_SYS()) { 
+      		   if (iDisplayQuestion_SYS(_("Not a base station database"), _("This is not a gravity base station database. Do you want to make it base station database?"))) {
+					iNew = TRUE;                            
+				} else {                            
+					UnLoad_EDB(sDB);                   
+					Cancel_SYS();   
+				}
+			} 
+			else {
+				iNew = TRUE;
+			}
+          
+      }                         
+      
+   }
+   
+   
+   // --- set base parameter ---
+
+   Set_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sDB);
+   SetWorkspaceREG_SYS(hWorkREG);
+   Destroy_SYS(hWorkREG);
+   
+
+   if (iNew) {
+   
+      // --- create new database ---
+      
+      if (iRunGX_SYS("grbasenew") != 0) 
+         Abort_SYS(_("Unable to create a new base station database."));
+      
+      if (  iInteractive_SYS()) { 
+            if (iDisplayQuestion_SYS(_("Load data?"), _("Load gravity data from a file or database now?"))) {
+      
+				if (iRunGX_SYS("grldbase"))	 
+					Abort_SYS(_("Unable to create a new base station database."));
+			}
+            
+      }
+      else {
+		if (iRunGX_SYS("grldbase"))	 
+			Abort_SYS(_("Unable to create a new base station database."));
+      }
+      
+   } 
+   
+   // --- load the database ---
+
+   eDB = Load_EDB(sDB);       
+   UnLoadAllChans_EDB(eDB);
+   LoadChan_EDB(eDB,"Station");
+   LoadChan_EDB(eDB,"Gravity");
+   LoadChan_EDB(eDB,"Longitude");
+   LoadChan_EDB(eDB,"Latitude");
+   LoadChan_EDB(eDB,"Elevation");
+   LoadAllChans_EDB(eDB);
+   
+}

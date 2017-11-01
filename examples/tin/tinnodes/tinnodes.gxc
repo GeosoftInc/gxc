@@ -1,0 +1,210 @@
+//===========================================================================
+NAME          = "TINNODES"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Tinning"
+
+DESCRIPTION   = "Plot TIN nodes
+
+Parameters:
+
+    TINDB.FILE         Input TIN file
+    TINNODES.NODECOLOR Color for node symbols
+    TINNODES.SYMSIZE   Size of symbols in mm.
+    TINNODES.LABELS    Plot number labels?
+    TINNODES.LABSIZE   Label height in mm.
+
+"						 
+
+//===========================================================================
+
+RESOURCE = "tinnodes.gr"
+#include "tinnodes.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sColor;
+string(GS_MAX_PATH) sFile;
+string(GS_MAX_PATH) sGroup;
+real       rSize, rScale, rLabSize;
+
+VV         VVx, VVy, VVz;
+
+DGW        Diag;              // Dialogue handle
+TIN   Tin;
+BF    Bf;
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+IPJ   hIPJ;
+
+int        i, ii, iLabel;
+int        iLen;
+real       rX, rY;
+string(5)  sN;
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   // --- Get the Database ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TINNODES");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TINNODES_0,DGW_FILEPATH,"TINDB","FILE");     
+      SetInfoSYS_DGW(Diag,_TINNODES_1,DGW_TEXT,"TINNODES","NODECOLOR");
+      SetInfoSYS_DGW(Diag,_TINNODES_2,DGW_TEXT,"TINNODES","SYMSIZE");
+      SetInfoSYS_DGW(Diag,_TINNODES_3,DGW_LISTALIAS,"TINNODES","LABELS");
+      SetInfoSYS_DGW(Diag,_TINNODES_4,DGW_TEXT,"TINNODES","LABSIZE");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_TINNODES_0,DGW_FILEPATH,"TINDB","FILE");     
+      GetInfoSYS_DGW(Diag,_TINNODES_1,DGW_TEXT,"TINNODES","NODECOLOR");
+      GetInfoSYS_DGW(Diag,_TINNODES_2,DGW_TEXT,"TINNODES","SYMSIZE");
+      GetInfoSYS_DGW(Diag,_TINNODES_3,DGW_LISTALIAS,"TINNODES","LABELS");
+      GetInfoSYS_DGW(Diag,_TINNODES_4,DGW_TEXT,"TINNODES","LABSIZE");
+           
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   rSize = rGetReal_SYS("TINNODES","SYMSIZE");
+   if(rSize == rDUMMY) rSize = 1.0;
+
+   GetString_SYS("TINNODES","NODECOLOR",sColor);    
+
+   iLabel = iGetInt_SYS("TINNODES","LABELS");
+   if(iLabel==iDUMMY) iLabel = 0;
+
+   rLabSize = rGetReal_SYS("TINNODES","LABSIZE");
+   if(rLabSize == rDUMMY) rLabSize = 2.0;
+
+   GetString_SYS("TINDB","FILE",sFile); 
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("No TIN file specified"));      
+
+   // --- get map ---
+   
+   EMap   = Current_EMAP();
+   Map    = Lock_EMAP(EMap);
+   
+  
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   VVz = Create_VV(REAL,0);
+   
+
+   // --- Get TIN ---
+
+   Bf = Create_BF(sFile, BF_READ);
+   Tin = CreateS_TIN(Bf);
+   
+
+   // --- set the working IPJ ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_TIN(Tin,hIPJ);
+   SetWorkingIPJ_MVIEW(View,hIPJ);
+   Destroy_IPJ(hIPJ);
+
+   
+   Progress_SYS(1);
+   
+
+   // --- create path group ---
+
+   Strcpy_STR(sGroup,"TIN_");
+   FileNamePart_STR(sFile,sFile,STR_FILE_PART_NAME);
+   Strcat_STR(sGroup,sFile);
+   Strcat_STR(sGroup,"_Nodes");
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   
+
+   // --- Set symbol characteristics ---
+
+   SymbFont_MVIEW(View, _n("symbols"), TRUE, MVIEW_FONT_WEIGHT_MEDIUM, FALSE);
+   SymbNumber_MVIEW(View, 20);
+   rScale = rScaleMM_MVIEW(View);
+   SymbSize_MVIEW(View, rSize*rScale);
+   SymbColor_MVIEW(View, iColor_MVIEW(sColor));
+   SymbFillColor_MVIEW(View, iColor_MVIEW(sColor));
+   TextColor_MVIEW(View, iColor_MVIEW(sColor));
+
+   // --- Get the extrema ---
+         
+   GetNodes_TIN(Tin,VVx,VVy,VVz);
+
+   // --- Plot the symbols ---
+         
+   Symbols_MVIEW(View, VVx, VVy);
+
+   // --- Plot labels ---
+   // --- Offset y by 1 mm.
+
+
+   if(iLabel) {
+      TextSize_MVIEW(View, rLabSize*rScale);
+
+      iLen = iLength_VV(VVx);
+      for(ii=0;ii<iLen;ii++) {
+         rX = rGetReal_VV(VVx,ii);
+         rY = rGetReal_VV(VVy,ii);
+   
+         FormatI_STR(ii, sN, 4);
+                
+         Text_MVIEW(View, sN, rX, rY+0.5*rSize*rScale);
+      }
+   }
+
+
+   // --- Add maker object ---
+
+   EasyMaker_MVIEW(View,_("TIN Nodes"),"TINNODES;TINDB");
+
+
+   // --- done ---
+
+   Destroy_TIN(Tin);
+   DestroyEx_BF(Bf);
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   Progress_SYS(0);
+
+}

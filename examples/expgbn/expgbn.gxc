@@ -1,0 +1,166 @@
+//===========================================================================
+NAME          = "Export data to a Geosoft binary file (GBN)."
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Export data to a Geosoft binary format file (GBN).  Either displayed
+   data channels or all data channels may be exported, and either
+   the displayed line, selected lines or all lines may be exported.
+	
+   EXPGBN.FILE   GBN file name, .GBN assumed.
+
+         .CHAN   \"D\" for displayed channels.
+                 \"A\" for all channels.
+
+         .LINE   \"D\" for the displayed line only.
+                 \"S\" for selected lines.
+                 \"A\" for all lines.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
+
+//===========================================================================
+
+RESOURCE = "expgbn.gr"
+#include "expgbn.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define DISPLAYED 0
+#define SELECTED  1
+#define ALL       2
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;
+string(STR_DB_SYMBOL) sChan,sLine,sCurLine;
+
+int         i;
+int         iLine;         // Output line mode
+
+EDB         EData;         // database handle
+DB          Data;          // database handle
+VV          hVV;           // VV handle
+DGW         Diag;          // dialogue box
+DB_SELECT   Select;        // current selection mode
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("EXPGBN");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_EXPGBN_0,DGW_FILEPATH,"EXPGBN","FILE");     
+      SetInfoSYS_DGW(Diag,_EXPGBN_1,DGW_TEXT,"EXPGBN","CHAN");    
+      SetInfoSYS_DGW(Diag,_EXPGBN_2,DGW_TEXT,"EXPGBN","LINE");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_EXPGBN_0,DGW_FILEPATH,"EXPGBN","FILE");     
+      GetInfoSYS_DGW(Diag,_EXPGBN_1,DGW_TEXT,"EXPGBN","CHAN");    
+      GetInfoSYS_DGW(Diag,_EXPGBN_2,DGW_TEXT,"EXPGBN","LINE");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("EXPGBN","FILE",sFile);
+   GetString_SYS("EXPGBN","CHAN",sChan);
+   GetString_SYS("EXPGBN","LINE",sLine);
+
+
+   // --- get currently selected line ---
+
+   EData = Current_EDB();
+   if (iInteractive_SYS()) GetCurLine_EDB(EData,sCurLine);
+
+
+   // --- get the channel list depending on mode ---
+
+   hVV = Create_VV(INT,0);
+   ToUpper_STR(sChan);
+   if (iChar_STR(sChan) == iChar_STR("A")) {
+      Data = Lock_EDB(EData);
+      iSymbList_DB(Data,hVV,DB_SYMB_CHAN);
+   } else {
+      if (!iInteractive_SYS())
+         Abort_SYS(_("Interactive mode required."));
+      iDispChanList_EDB(EData,hVV);
+      Data = Lock_EDB(EData);
+   }
+
+
+   // --- set the line export mode ---
+
+   ToUpper_STR(sLine);
+   if (iChar_STR(sLine) == iChar_STR("D")) {
+      if (!iInteractive_SYS())
+         Abort_SYS(_("Interactive mode required."));
+      iLine = DISPLAYED;
+   } else if (iChar_STR(sLine) == iChar_STR("A"))
+      iLine = ALL;
+   else
+      iLine = SELECTED;
+
+
+   // --- save current selection ---
+
+   if (iLine != SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+
+   // --- export data ---
+
+   Progress_SYS(1);
+   ExportGBN_DU(Data,hVV,sFile);
+   Progress_SYS(0);
+
+
+   // --- get rid of the VV ---
+
+   Destroy_VV(hVV);
+
+
+   // --- reset starting selections
+
+   if (iLine != SELECTED)
+      SetSelect_DB(Data,Select);
+
+}

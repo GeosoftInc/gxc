@@ -1,0 +1,174 @@
+//===========================================================================
+NAME          = "Load gravity base station data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+   This GX loads gravity base station data.
+
+   This GX should only be called by the GRDRIFT GX.
+
+   The absolute G will be placed in \"Gravity\".
+"
+// Revision History
+// v6.4.0: Modifications to allow operation in Script (OMS) mode.
+// v6.3.0: Don't delete existing output channels first.
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         eDB,eDBb;                  // database handle
+DB          hDB,hDBb;                  // database handle
+DB_SYMB     Group,Base;                // Group Handle
+DB_SYMB     GravityCh,StationCh,Ch;
+EXP         Exp;
+TB          hTB;
+REG         hWorkREG;                  // gravity reg
+
+string(STR_DEFAULT_LONG) sBase,sLine;
+int         iUnLoad;
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- get the database and the line ---
+   
+   eDB = Current_EDB();
+   
+   if(iScript_SYS())
+   {
+		GetString_SYS("GRBASE","GROUP",sLine);
+		if(iStrlen_STR(sLine)==0)
+		   Abort_SYS(_("The GRBASE.GROUP parameter must be defined for the GRBASE.GX for script mode."));
+      hDB = Lock_EDB(eDB);   
+		Group = FindSymb_DB(hDB, sLine, DB_SYMB_LINE);
+   }   
+   else
+   {
+		Group = GetCurLineSymb_EDB(eDB);
+		if (Group == NULLSYMB) Abort_SYS(_("No line displayed in current database."));
+      hDB = Lock_EDB(eDB);   
+   }
+   
+   
+   // --- get base  from the gravity reg ---
+
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sBase,sizeof(sBase));
+   Destroy_SYS(hWorkREG);
+   if (iChar_STR(sBase) == 0) 
+      Abort_SYS(_("Base gravity database not specified."));
+   if (!iFileExist_SYS(sBase))      
+      Abort_SYS(_("Base gravity database does not exist."));
+      
+      
+   // --- create a table from the base data ---
+   
+   iUnLoad = !iLoaded_EDB(sBase);
+   eDBb = Load_EDB(sBase);
+   hDBb = Lock_EDB(eDBb);
+   Base = FindSymb_DB(hDBb,"GravData",DB_SYMB_LINE);
+   if (Base == NULLSYMB)
+      Base = FirstSelLine_DB(hDBb);
+   if (Base == NULLSYMB)
+      Abort_SYS(_("Base database does not contain a \"Base\" group."));
+   
+   hTB = CreateDB_TB(hDBb);
+   LoadDB_TB(hTB,hDBb,Base);
+   
+   UnLock_EDB(eDBb);
+   if (iUnLoad) UnLoad_EDB(sBase);
+   
+   
+   // --- create gravity channel ---
+
+   if (iExistSymb_DB(hDB,"Gravity",DB_SYMB_CHAN)) {
+      GravityCh = FindSymb_DB(hDB,"Gravity",DB_SYMB_CHAN);
+      LockSymb_DB(hDB,GravityCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   }
+   else {
+      GravityCh = CreateSymb_DB(hDB,"Gravity",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LockSymb_DB(hDB,GravityCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanWidth_DB(hDB,GravityCh,13);
+      SetChanDecimal_DB(hDB,GravityCh,3);
+      SetChanUnit_DB(hDB,GravityCh,_("mgal"));
+   }
+
+
+   // --- create a temporary lookup channel ---
+
+   if (iExistSymb_DB(hDB,"_Temp",DB_SYMB_CHAN)) {
+      Ch = FindSymb_DB(hDB,"_Temp",DB_SYMB_CHAN);
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      DeleteSymb_DB(hDB,Ch);
+   }
+   CreateSymb_DB(hDB,"_Temp",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   Ch = FindSymb_DB(hDB,"_Temp",DB_SYMB_CHAN);
+
+
+   // --- get station channel ---
+
+   StationCh = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
+   LockSymb_DB(hDB,StationCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   
+   TableLook1_DU(hDB,Group,StationCh,GravityCh,"Station","Gravity",DU_LOOKUP_EXACT,0.0,hTB);
+
+   if (iFindColByName_TB(hTB,"Longitude") != -1) {
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      TableLook1_DU(hDB,Group,StationCh,Ch,"Station","Longitude",DU_LOOKUP_EXACT,0.0,hTB);
+      UnLockSymb_DB(hDB,Ch);
+      Exp = Create_EXP(hDB,"Longitude=(_Temp==DUMMY)?Longitude:_Temp;",60);
+      Math_DU(hDB,Group,Exp);
+      Destroy_EXP(Exp);
+   }
+
+   if (iFindColByName_TB(hTB,"Latitude") != -1) {
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      TableLook1_DU(hDB,Group,StationCh,Ch,"Station","Latitude",DU_LOOKUP_EXACT,0.0,hTB);
+      UnLockSymb_DB(hDB,Ch);
+      Exp = Create_EXP(hDB,"Latitude=(_Temp==DUMMY)?Latitude:_Temp;",60);
+      Math_DU(hDB,Group,Exp);
+      Destroy_EXP(Exp);
+   }
+
+   if (iFindColByName_TB(hTB,"Elevation") != -1) {
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      TableLook1_DU(hDB,Group,StationCh,Ch,"Station","Elevation",DU_LOOKUP_EXACT,0.0,hTB);
+      UnLockSymb_DB(hDB,Ch);
+      Exp = Create_EXP(hDB,"Elevation=(_Temp==DUMMY)?Elevation:_Temp;",60);
+      Math_DU(hDB,Group,Exp);
+      Destroy_EXP(Exp);
+   }
+
+   Destroy_TB(hTB);
+   UnLockSymb_DB(hDB,StationCh);
+
+   LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   DeleteSymb_DB(hDB,Ch);
+   
+   UnLockSymb_DB(hDB,GravityCh);
+   
+   
+   // --- release database and give it focus ---
+   
+   GetName_DB(hDB,DB_NAME_FILE,sBase);
+   UnLock_EDB(eDB);
+   Load_EDB(sBase);
+   
+}
+
+

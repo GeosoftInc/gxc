@@ -1,0 +1,306 @@
+//===========================================================================
+NAME          = "Place an image on a map"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   GRIDIMG.NEW      - 1 to create a new map, 0 to use current map
+          .IMAGE    - grid name
+          .REG      - 0 default registration from image
+                      1 fit to user defined area (interactive only)
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map/Import"
+
+//===========================================================================
+//  The following 8 GXs are very similar in structure and should probably be updated
+//  together (except, perhaps for GRIDIMG3D) whenever something fundamental is 
+//  changed in any one of them. 
+//
+//  Eventually, they should be replaced by a GX.Net method which consolidates 
+//  the duplication.
+//
+// GRIDIMG1.GX:  Display 1 grid (GRD, etc) on a map
+// GRIDIMG.GX    Display 1 image (TIF, BMP etc) on a map
+// GRIDIMGS.GX   Display a colour-shaded grid on a map
+// GRIDIMGT.GX   Display a 3-grid ternary image (e.g. RGB) on a map.
+// GRIDIMG2/3/4.GX  Display 2,3 or 4 grid composite on a map (creates one Agg).
+// GRIDIMG3D     Display a grid in a 3D map: not so much like the others because 
+//               of the 3D handling.
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add image to the grid explorer
+//===========================================================================
+
+RESOURCE = "gridimg.gr"
+#include "gridimg.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrid,sColor,sMap,sName;
+string(STR_GROUP) sDummy,sAgg;
+string(STR_VIEW) sView;
+string(STR_FILE)  sVolume,sDirectory,sExt,sQualifiers;
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+DGW         Diag;
+AGG         Agg;
+IMG         hIMG;
+IPJ         hIPJ, hUserIPJ;
+
+int         iReg,iNew,iRun,iOrient;
+real        rMinX,rMaxX,rMinY,rMaxY;
+
+
+//===========================================================================
+//                           GRIDIMG CODE
+//===========================================================================
+
+{
+	// --- Ensure we have a map and that we are not drawing on grid documents ---
+
+	
+	// --- Are we running interactively ? ---
+
+	if (iInteractive_SYS()) {
+
+
+		// --- Create the Dialogue ---
+
+		Diag = Create_DGW("GRIDIMG");
+		
+		
+		// --- Set any Defaults from INI ---
+
+		SetInfoSYS_DGW(Diag,_GRIDIMG_0,DGW_FILEPATH, "GRIDIMG","IMAGE");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG_1,DGW_LISTALIAS,"GRIDIMG","DUMMY");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG_2,DGW_LISTALIAS,"GRIDIMG","REG");     
+		
+
+		// --- Run the Dialogue ---
+
+		while (1)
+		{
+			iRun = iRunDialogue_DGW(Diag);
+			if (iRun == -1)
+				Cancel_SYS();
+			
+			// --- Ensure we have a map and that we are not drawing on grid documents ---
+			if (iRun != 0 || iRunGX_SYS("sclgrd") != -1)
+				break;
+		}
+		SetInt_SYS("GRIDIMG","NEW",iRun);
+
+		
+		// --- Put values back in INI ---
+
+		GetInfoSYS_DGW(Diag,_GRIDIMG_0,DGW_FILEPATH, "GRIDIMG","IMAGE");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG_1,DGW_LISTALIAS,"GRIDIMG","DUMMY");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG_2,DGW_LISTALIAS,"GRIDIMG","REG");     
+		
+	}
+
+
+	// --- Get Parameters ---
+
+	GetString_SYS("GRIDIMG","IMAGE",sGrid);
+	iReg  = iGetInt_SYS("GRIDIMG","REG");
+	iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor);
+	GetString_SYS("GRIDIMG","DUMMY",sDummy);
+
+
+	// --- add colour decorations to file ---
+
+	FileNamePart_STR(sGrid,sVolume    ,STR_FILE_PART_VOLUME    );
+	FileNamePart_STR(sGrid,sDirectory ,STR_FILE_PART_DIRECTORY );
+	FileNamePart_STR(sGrid,sName      ,STR_FILE_PART_NAME      );
+	FileNamePart_STR(sGrid,sExt       ,STR_FILE_PART_EXTENSION );
+	FileNamePart_STR(sGrid,sQualifiers,STR_FILE_PART_QUALIFIERS);
+
+	Strcat_STR(sQualifiers,";DUMMY=");
+	Strcat_STR(sQualifiers,sDummy);
+
+	FileCombineParts_STR(sVolume,sDirectory,sName,sExt,sQualifiers,sGrid);
+
+
+	// --- Verify Color table file ---
+
+	if (iStrlen_STR(sColor) == 0)                             // undefined in dialogue
+		if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor) == 1)  // undefined in parm block
+			Strcpy_STR(sColor,"colour.tbl");                   // hardwire to 
+
+	// --- create a new map if required ---
+
+	iNew = iGetInt_SYS("GRIDIMG","NEW");
+
+	if (iNew!=0) 
+	{	
+
+		// --- range the grid ---
+
+		//if (iNew==2) SetString_SYS("IMGRANGE","no_clear_warp","100");
+		SetString_SYS("IMGRANGE","FILE",sGrid);
+		if (iRunGX_SYS("imgrange.gx"))
+			Abort_SYS(_("Failed to determine grid range."));
+				
+		// --- For running in a script: When recording, DEFMAP was called, and the user may
+		//     have input a different name than that created from the grid name. Get the name
+		//     created by DEFMAP ---
+
+		if(!iInteractive_SYS()) {
+			GetString_SYS("DEFMAP","NEWMAP",sMap);         
+			if(!iStrlen_STR(sMap)) {     // if not found, revert back to normal behaviour
+				FileNamePart_STR(sGrid,sMap,STR_FILE_PART_NAME);   
+				Strcat_STR(sMap, ".map");
+			}
+			SetString_SYS("DEFMAP","NEWMAP","");   // use it just once
+		}
+		else       
+		{
+			FileNamePart_STR(sGrid,sMap,STR_FILE_PART_NAME);
+			Strcat_STR(sMap, ".map");
+		}
+		
+		SetString_SYS("DEFMAP","MAP",sMap);
+		if (iRunGX_SYS("defmap.gx"))
+			Cancel_SYS();		
+	}
+
+
+	// --- Ensure we have a map and that we are not drawing on grid documents ---
+	if (iNew == 0 && iRunGX_SYS("sclgrd") == -1) 
+		Cancel_SYS();
+
+	// --- get registration area ---
+
+	Strcpy_STR(sView,"*Data");
+	if (iInteractive_SYS() && iReg) 
+	{
+		// --- does a base view exist ---
+
+		EMap = Current_EMAP();
+		Map = Lock_EMAP(EMap);
+		if (iExistView_MAP(Map,"*Base"))
+			Strcpy_STR(sView,"*Base");
+		UnLock_EMAP(EMap);
+
+
+		// --- get the grid location ---
+
+		DisplayMessage_SYS(_("Define Area"), _("Use the mouse to define an area on the map in which to place the image"));
+
+		iSetCurrentView_EMAP(Current_EMAP(), sView);
+		rMinX = rMinY = rMaxX = rMaxY = 0.0;
+		if(iGetBox_EMAP(Current_EMAP(), _("Define the area in which to place the image"),rMinX,rMinY,rMaxX,rMaxY))
+		Cancel_SYS();
+
+	} else
+	iReg = 0;
+
+
+
+	// --- get the map ---
+
+	EMap = Current_EMAP();
+	Map = Lock_EMAP(EMap);
+
+
+	// --- create aggregate ---
+
+	Agg = Create_AGG();
+
+
+	// --- add grid to the agg ---
+
+	Progress_SYS(1);
+	ProgName_SYS(_("Layer"),1);
+	LayerIMG_AGG(Agg,sGrid,0,sColor,rDUMMY);
+	Progress_SYS(0);
+
+
+	// --- open data view ---
+
+	View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+
+
+	// --- put the AGG in the view ---
+
+	Strcpy_STR(sAgg,"AGG_");
+	FileNamePart_STR(sGrid,sName,STR_FILE_PART_NAME);
+	ToLower_STR(sName);
+	Strcat_STR(sAgg,sName);
+	Aggregate_MVIEW(View,Agg,sAgg);
+
+
+	// --- relocate the aggregate ---
+
+	if (iReg)
+		RelocateGroup_MVIEW(View,sAgg,rMinX,rMinY,rMaxX,rMaxY,IMG_RELOCATE_ASPECT);
+	else {      
+
+
+		// --- clip the aggregate group ---
+
+		MarkAllGroups_MVIEW(View,0);
+		MarkGroup_MVIEW(View,sAgg,1);
+		ClipMarkedGroups_MVIEW(View,CLIP_ON);
+		MarkAllGroups_MVIEW(View,0);
+		
+	}      
+
+
+	// --- add a maker ---
+
+	StartGroup_MVIEW(View,sAgg,MVIEW_GROUP_APPEND);
+	Maker_MVIEW(View,0,1,"gridimg",MAKER_GX,_("New image..."),"GRIDIMG;");
+
+
+	// --- For new views, if the grid is oriented in 3D, set the user IPJ
+	//     to be the view IPJ without the orientation, so the status bar gives
+	//     the true location in XYZ ---
+
+	hIMG = CreateFile_IMG(GS_TYPE_DEFAULT,sGrid,IMG_FILE_READONLY);
+	hIPJ = Create_IPJ();
+	GetIPJ_IMG(hIMG,hIPJ);
+
+	if(iNew==1)
+	{
+		iOrient = iGetOrientation_IPJ(hIPJ);
+		if(iOrient!=IPJ_ORIENT_DEFAULT)
+		{
+			hUserIPJ = Create_IPJ();
+			Copy_IPJ(hIPJ, hUserIPJ);   
+			SetPlanView_IPJ(hUserIPJ, 0.0, 0.0, 0.0, 0.0);
+			SetUserIPJ_MVIEW(View, hUserIPJ);
+			SetWorkingIPJ_MVIEW(View, hIPJ);        // Need to reset, because SetUserIPJ_MVIEW changes it
+		}
+	}
+
+
+	// --- Destroy Objects ---
+
+	Destroy_AGG(Agg);
+	Destroy_MVIEW(View);
+
+	Destroy_SYS(hIMG);
+	Destroy_SYS(hIPJ);
+
+
+	// --- Add to the current project ---
+
+	if (!iScript_SYS())   
+		iAddDocument_PROJ(sGrid,"Grid",0);
+
+	UnLock_EMAP(EMap);
+}

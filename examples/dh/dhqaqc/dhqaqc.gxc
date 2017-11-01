@@ -1,0 +1,833 @@
+//===========================================================================
+NAME          = "Drill Hole - QAQC Tools"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "
+   Drill Hole - QAQC Tools
+
+   DHQAQC.FILE      Log file name
+   DHQAQC.TYPE      Data Type to QAQC
+         .SELECTED  SELECTED, ALL or LIST
+			.LOGFILE   In script mode, specified output log file    
+"
+// Revision History:
+// v7.0.1: QA 13216 Collar QAQC done only on selected holes to match other methods.
+// v7.0.0  New QA functions for better formatting of output errors.
+// v6.4.2: QA 10989 Modified error message when no holes are selected.
+//         QA 10988 Added hole selection options.
+// v5.1.3: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhqaqc.gr"
+#include "dhqaqc.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+#define GETGLOBAL(A,B,C) \
+   if (iGlobal_SYS(A,sTemp) == 0) {   \
+      SetString_SYS("DHQAQC",B,sTemp);\
+   }                                  \
+   else                               \
+      SetString_SYS("DHQAQC",B,C);
+
+#define SETGLOBAL(A,B) \
+   GetString_SYS("DHQAQC",B,sTemp);   \
+   GlobalSet_SYS(A,sTemp);
+
+
+#define DONE -1
+#define MAIN 0
+#define COLLAR 1
+#define DIPAZ 2
+#define EASTNORTH 3
+#define FROMTO 4
+#define POINT 5
+#define ALL -2
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+EDB         EData;            // Database handle
+DH          hDH;
+DB          hDB;
+WA          hWA;
+DB_SYMB     Line;
+LST         HoleLST;
+
+int         i,j,iType,iDBs,iHoles,iD,iN, iDType, iH, iAll; 
+real        rTolCurv;
+
+string(STR_FILE) sFile,sDB,sHole;
+string(256) sTemp, sMsg;
+string(STR_DH_HOLES) sHoles;
+string(STR_DEFAULT_SHORT) sSelected;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())   {
+
+      iD = MAIN;
+      while(iD!=DONE) {
+
+         if(iD==MAIN) {
+      
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("DHQAQCForm");
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag,_DHQAQCFORM_0,DGW_LISTALIAS,"DHQAQC","TYPE");
+            SetInfoSYS_DGW(Diag,_DHQAQCFORM_1,DGW_LISTALIAS,"DHQAQC","SELECTED");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();    // Cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag,_DHQAQCFORM_0,DGW_LISTALIAS,"DHQAQC","TYPE");
+            GetInfoSYS_DGW(Diag,_DHQAQCFORM_1,DGW_LISTALIAS,"DHQAQC","SELECTED");
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+
+            // --- Set the data type options ---
+
+            if(i==2) {
+
+               iD = iGetInt_SYS("DHQAQC", "TYPE");
+
+            }
+            else
+
+               iD = DONE;
+
+         }
+         
+         else if(iD == ALL) {
+
+            DisplayMessage_SYS(_("QA/QC Options"), _("To view options, select one of the individual data types."));            
+            iD = MAIN;
+         }
+
+         else if(iD == COLLAR) {
+
+            
+            // --- set current defaults ---
+
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_DUMMY",      "0","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_DUPLICATE",  "1","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_EN_REVERSED","2","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_DIP_RANGE",  "3","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_AZ_RANGE",   "4","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_DIP_SIGN",   "5","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_TOP",        "6","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_BOTTOM",     "7","1")
+            GETGLOBAL("WHOLEPLOT_QC.COLLAR_TOP_BOTTOM", "8","1")
+
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("DHCOLLAR");
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_0,DGW_LISTALIAS,"DHQAQC","0");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_1,DGW_LISTALIAS,"DHQAQC","1");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_2,DGW_LISTALIAS,"DHQAQC","2");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_3,DGW_LISTALIAS,"DHQAQC","3");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_4,DGW_LISTALIAS,"DHQAQC","4");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_5,DGW_LISTALIAS,"DHQAQC","5");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_6,DGW_LISTALIAS,"DHQAQC","6");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_7,DGW_LISTALIAS,"DHQAQC","7");
+            SetInfoSYS_DGW(Diag,_DHCOLLAR_8,DGW_LISTALIAS,"DHQAQC","8");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();    // Cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_0,DGW_LISTALIAS,"DHQAQC","0");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_1,DGW_LISTALIAS,"DHQAQC","1");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_2,DGW_LISTALIAS,"DHQAQC","2");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_3,DGW_LISTALIAS,"DHQAQC","3");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_4,DGW_LISTALIAS,"DHQAQC","4");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_5,DGW_LISTALIAS,"DHQAQC","5");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_6,DGW_LISTALIAS,"DHQAQC","6");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_7,DGW_LISTALIAS,"DHQAQC","7");
+            GetInfoSYS_DGW(Diag,_DHCOLLAR_8,DGW_LISTALIAS,"DHQAQC","8");
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+
+            // --- get/set parameters ---
+
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_DUMMY",      "0")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_DUPLICATE",  "1")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_EN_REVERSED","2")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_DIP_RANGE",  "3")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_AZ_RANGE",   "4")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_DIP_SIGN",   "5")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_TOP",        "6")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_BOTTOM",     "7")
+            SETGLOBAL("WHOLEPLOT_QC.COLLAR_TOP_BOTTOM", "8")
+
+            GlobalWrite_SYS("");            
+            iD = MAIN;
+         }
+
+         else if(iD == DIPAZ) {
+
+            
+            // --- set current defaults ---
+
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_DUMMY",     "0","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_TOP",       "1","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_BOTTOM",    "2","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_DUPLICATE", "3","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_ORDER",     "4","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DIPAZ_DUMMY",     "5","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DIP_RANGE",       "6","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_AZ_RANGE",        "7","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_DIP_SIGN",        "8","1")
+            GETGLOBAL("WHOLEPLOT_QC.DIPAZ_CURVATURE",       "9","")
+
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("DHDIPAZ");
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_0,DGW_LISTALIAS,"DHQAQC","0");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_1,DGW_LISTALIAS,"DHQAQC","1");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_2,DGW_LISTALIAS,"DHQAQC","2");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_3,DGW_LISTALIAS,"DHQAQC","3");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_4,DGW_LISTALIAS,"DHQAQC","4");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_5,DGW_LISTALIAS,"DHQAQC","5");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_6,DGW_LISTALIAS,"DHQAQC","6");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_7,DGW_LISTALIAS,"DHQAQC","7");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_8,DGW_LISTALIAS,"DHQAQC","8");
+            SetInfoSYS_DGW(Diag,_DHDIPAZ_9,DGW_TEXT,     "DHQAQC","9");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();    // Cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_0,DGW_LISTALIAS,"DHQAQC","0");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_1,DGW_LISTALIAS,"DHQAQC","1");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_2,DGW_LISTALIAS,"DHQAQC","2");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_3,DGW_LISTALIAS,"DHQAQC","3");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_4,DGW_LISTALIAS,"DHQAQC","4");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_5,DGW_LISTALIAS,"DHQAQC","5");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_6,DGW_LISTALIAS,"DHQAQC","6");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_7,DGW_LISTALIAS,"DHQAQC","7");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_8,DGW_LISTALIAS,"DHQAQC","8");
+            GetInfoSYS_DGW(Diag,_DHDIPAZ_9,DGW_TEXT,     "DHQAQC","9");
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+
+            // --- get/set parameters ---
+
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_DUMMY",     "0")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_TOP",       "1")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_BOTTOM",    "2")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_DUPLICATE", "3")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DEPTH_ORDER",     "4")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DIPAZ_DUMMY",     "5")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DIP_RANGE",       "6")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_AZ_RANGE",        "7")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_DIP_SIGN",        "8")
+            SETGLOBAL("WHOLEPLOT_QC.DIPAZ_CURVATURE",       "9")
+
+            GlobalWrite_SYS("");            
+            iD = MAIN;
+         }
+
+         else if(iD == EASTNORTH) {
+
+            
+            // --- set current defaults ---
+
+            GETGLOBAL("WHOLEPLOT_QC.EASTNORTH_DUMMY",      "0","1")
+            GETGLOBAL("WHOLEPLOT_QC.EASTNORTH_DUPLICATE",  "1","1")
+            GETGLOBAL("WHOLEPLOT_QC.EASTNORTH_EN_REVERSED","2","1")
+            GETGLOBAL("WHOLEPLOT_QC.EASTNORTH_RL_TREND",   "3","1")
+            GETGLOBAL("WHOLEPLOT_QC.EASTNORTH_CURVATURE",  "4","")
+
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("DHEASTNORTH");
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag,_DHEASTNORTH_0,DGW_LISTALIAS,"DHQAQC","0");
+            SetInfoSYS_DGW(Diag,_DHEASTNORTH_1,DGW_LISTALIAS,"DHQAQC","1");
+            SetInfoSYS_DGW(Diag,_DHEASTNORTH_2,DGW_LISTALIAS,"DHQAQC","2");
+            SetInfoSYS_DGW(Diag,_DHEASTNORTH_3,DGW_LISTALIAS,"DHQAQC","3");
+            SetInfoSYS_DGW(Diag,_DHEASTNORTH_4,DGW_TEXT,     "DHQAQC","4");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();    // Cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag,_DHEASTNORTH_0,DGW_LISTALIAS,"DHQAQC","0");
+            GetInfoSYS_DGW(Diag,_DHEASTNORTH_1,DGW_LISTALIAS,"DHQAQC","1");
+            GetInfoSYS_DGW(Diag,_DHEASTNORTH_2,DGW_LISTALIAS,"DHQAQC","2");
+            GetInfoSYS_DGW(Diag,_DHEASTNORTH_3,DGW_LISTALIAS,"DHQAQC","3");
+            GetInfoSYS_DGW(Diag,_DHEASTNORTH_4,DGW_TEXT,     "DHQAQC","4");
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+
+            // --- get/set parameters ---
+
+            SETGLOBAL("WHOLEPLOT_QC.EASTNORTH_DUMMY",      "0")
+            SETGLOBAL("WHOLEPLOT_QC.EASTNORTH_DUPLICATE",  "1")
+            SETGLOBAL("WHOLEPLOT_QC.EASTNORTH_EN_REVERSED","2")
+            SETGLOBAL("WHOLEPLOT_QC.EASTNORTH_RL_TREND",   "3")
+            SETGLOBAL("WHOLEPLOT_QC.EASTNORTH_CURVATURE",  "4")
+
+            GlobalWrite_SYS("");            
+            iD = MAIN;
+         }
+
+         else if(iD == FROMTO) {
+
+            
+            // --- set current defaults ---
+
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_DUMMY",       "0","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_FROM_GT_TO",  "1","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_FROM_EQ_TO",  "2","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_TOP",         "3","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_BOTTOM",      "4","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_DUPLICATE",   "5","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_ORDER",       "6","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_OVERLAP",     "7","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_MISSING",     "8","1")
+            GETGLOBAL("WHOLEPLOT_QC.FROMTO_DUP_SAMPLES", "9","1")
+
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("DHFROMTO");
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag,_DHFROMTO_0,DGW_LISTALIAS,"DHQAQC","0");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_1,DGW_LISTALIAS,"DHQAQC","1");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_2,DGW_LISTALIAS,"DHQAQC","2");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_3,DGW_LISTALIAS,"DHQAQC","3");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_4,DGW_LISTALIAS,"DHQAQC","4");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_5,DGW_LISTALIAS,"DHQAQC","5");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_6,DGW_LISTALIAS,"DHQAQC","6");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_7,DGW_LISTALIAS,"DHQAQC","7");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_8,DGW_LISTALIAS,"DHQAQC","8");
+            SetInfoSYS_DGW(Diag,_DHFROMTO_9,DGW_LISTALIAS,"DHQAQC","9");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();    // Cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag,_DHFROMTO_0,DGW_LISTALIAS,"DHQAQC","0");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_1,DGW_LISTALIAS,"DHQAQC","1");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_2,DGW_LISTALIAS,"DHQAQC","2");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_3,DGW_LISTALIAS,"DHQAQC","3");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_4,DGW_LISTALIAS,"DHQAQC","4");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_5,DGW_LISTALIAS,"DHQAQC","5");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_6,DGW_LISTALIAS,"DHQAQC","6");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_7,DGW_LISTALIAS,"DHQAQC","7");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_8,DGW_LISTALIAS,"DHQAQC","8");
+            GetInfoSYS_DGW(Diag,_DHFROMTO_9,DGW_LISTALIAS,"DHQAQC","9");
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+
+            // --- get/set parameters ---
+
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_DUMMY",       "0")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_FROM_GT_TO",  "1")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_FROM_EQ_TO",  "2")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_TOP",         "3")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_BOTTOM",      "4")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_DUPLICATE",   "5")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_ORDER",       "6")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_OVERLAP",     "7")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_MISSING",     "8")
+            SETGLOBAL("WHOLEPLOT_QC.FROMTO_DUP_SAMPLES", "9")
+
+            GlobalWrite_SYS("");            
+            iD = MAIN;
+         }
+
+         else if(iD == POINT) {
+
+            
+            // --- set current defaults ---
+
+            GETGLOBAL("WHOLEPLOT_QC.POINT_DUMMY",       "0","1")
+            GETGLOBAL("WHOLEPLOT_QC.POINT_TOP",         "1","1")
+            GETGLOBAL("WHOLEPLOT_QC.POINT_BOTTOM",      "2","1")
+            GETGLOBAL("WHOLEPLOT_QC.POINT_DUPLICATE",   "3","1")
+            GETGLOBAL("WHOLEPLOT_QC.POINT_ORDER",       "4","1")
+            GETGLOBAL("WHOLEPLOT_QC.POINT_DUP_SAMPLES", "5","1")
+
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("DHPOINT");
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag,_DHPOINT_0,DGW_LISTALIAS,"DHQAQC","0");
+            SetInfoSYS_DGW(Diag,_DHPOINT_1,DGW_LISTALIAS,"DHQAQC","1");
+            SetInfoSYS_DGW(Diag,_DHPOINT_2,DGW_LISTALIAS,"DHQAQC","2");
+            SetInfoSYS_DGW(Diag,_DHPOINT_3,DGW_LISTALIAS,"DHQAQC","3");
+            SetInfoSYS_DGW(Diag,_DHPOINT_4,DGW_LISTALIAS,"DHQAQC","4");
+            SetInfoSYS_DGW(Diag,_DHPOINT_5,DGW_LISTALIAS,"DHQAQC","5");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();    // Cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag,_DHPOINT_0,DGW_LISTALIAS,"DHQAQC","0");
+            GetInfoSYS_DGW(Diag,_DHPOINT_1,DGW_LISTALIAS,"DHQAQC","1");
+            GetInfoSYS_DGW(Diag,_DHPOINT_2,DGW_LISTALIAS,"DHQAQC","2");
+            GetInfoSYS_DGW(Diag,_DHPOINT_3,DGW_LISTALIAS,"DHQAQC","3");
+            GetInfoSYS_DGW(Diag,_DHPOINT_4,DGW_LISTALIAS,"DHQAQC","4");
+            GetInfoSYS_DGW(Diag,_DHPOINT_5,DGW_LISTALIAS,"DHQAQC","5");
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+
+            // --- get/set parameters ---
+
+            SETGLOBAL("WHOLEPLOT_QC.POINT_DUMMY",       "0")
+            SETGLOBAL("WHOLEPLOT_QC.POINT_TOP",         "1")
+            SETGLOBAL("WHOLEPLOT_QC.POINT_BOTTOM",      "2")
+            SETGLOBAL("WHOLEPLOT_QC.POINT_DUPLICATE",   "3")
+            SETGLOBAL("WHOLEPLOT_QC.POINT_ORDER",       "4")
+            SETGLOBAL("WHOLEPLOT_QC.POINT_DUP_SAMPLES", "5")
+
+            GlobalWrite_SYS("");            
+            iD = MAIN;
+         }
+
+      }
+   }
+
+
+   // --- Get Parameters ---
+
+   iType = iGetInt_SYS("DHQAQC", "TYPE");
+   GetString_SYS("DHQAQC","SELECTED",sSelected);
+
+
+   // --- Checking ALL the holes? ---
+   
+   iAll = 0;
+   if (iStrcmp_STR(sSelected,"ALL",STR_CASE_TOLERANT) == 0) iAll = 1;
+
+
+   if(iAll!=1) {
+   
+      // --- Do the channel selection by calling the CHCHANLST GX ---
+
+      SetString_SYS("DHHOLELST","DATA",sSelected);
+      SetString_SYS("DHHOLELST","GX","DHQAQC");
+      
+      if(iRunGX_SYS("DHHOLELST.GX")) Cancel_SYS();
+
+      GetString_SYS("DHHOLELST","HOLES", sHoles);
+   }
+
+
+   // --- Set the data type mode ---
+
+	GetString_SYS("DHQAQC","LOGFILE", sFile);   // For script mode
+	SetString_SYS("DHQAQC","LOGFILE", "");		  // Force set every time
+	
+	if(iStrlen_STR(sFile) == 0)
+	{	
+		Strcpy_STR(sFile,"QAQC.log");
+		if (iType == COLLAR)
+			Strcpy_STR(sFile,"Collar.log");
+		else if (iType == DIPAZ)
+			Strcpy_STR(sFile,"DipAzSurvey.log");
+		else if (iType == EASTNORTH)
+			Strcpy_STR(sFile,"EastNorthSurvey.log");
+		else if (iType == FROMTO)
+			Strcpy_STR(sFile,"FromToData.log");
+		else if (iType == POINT)
+			Strcpy_STR(sFile,"PointData.log");
+	}
+
+
+	if (iType == COLLAR)
+		iType = DH_DATA_COLLAR;
+	else if (iType == DIPAZ)
+		iType = DH_DATA_DIPAZIMUTH;
+	else if (iType == EASTNORTH)
+		iType = DH_DATA_EASTNORTH;
+	else if (iType == FROMTO)
+		iType = DH_DATA_FROMTO;
+	else if (iType == POINT)
+		iType = DH_DATA_POINT;
+	else if (iType != ALL)
+	{
+			Strcpy_STR(sMsg, _("Data type must be one of the following: \r\n"));
+			Strcat_STR(sMsg, _("-2 (All), 1 (Collar), 2 (Dip-Az survey), 3 (East-North survey), 4 (From-To data) or 5 (Point data)"));
+			Abort_SYS(sMsg);
+	}
+
+
+   // --- Get Current Database and DH project name ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   hDH = Create_DH(sDB);
+
+
+   // --- Get all the holes ---
+   
+   HoleLST = Create_LST(STR_DB_SYMBOL);      
+   HoleLST2_DH(hDH,HoleLST);
+   Sort_LST(HoleLST,0,0);
+
+
+   // --- Apply selection ---
+   
+   if(iAll!=1) {
+   
+      // --- Retrieve available selected holes ---
+
+      SelectCSVStringItems_LST(HoleLST, sHoles, HoleLST);
+   }
+   iHoles = iSize_LST(HoleLST);
+
+
+   // --- QAQC ---
+
+   hWA = Create_WA (sFile,WA_NEW);
+   Progress_SYS(1);
+
+   if(iType == DH_DATA_COLLAR || iType == ALL) {
+
+      if(iType==ALL) {
+         Puts_WA(hWA, _("Collar Data"));
+         Puts_WA(hWA, "-----------");
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+      }
+   
+      QACollarLST_DH(hDH,HoleLST,hWA);
+
+   }
+
+   if(iType == DH_DATA_DIPAZIMUTH || iType == ALL) {
+
+      if(iType==ALL) {
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+         Puts_WA(hWA, _("Dip-Azimuth Survey Data"));
+         Puts_WA(hWA, "-----------------------");
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+      }
+
+      iN = 0;
+      hDB = hDipAzSurveyDB_DH(hDH);
+      if(hDB!=DB_NULL) {
+   
+         GETGLOBAL("WHOLEPLOT_QC.DIPAZ_CURVATURE","TEMP","")
+         rTolCurv = rGetReal_SYS("DHQAQC","TEMP");
+
+         iN = iQADipAzSurveyLST_DH(hDH,HoleLST,hWA);
+         iN += iQADipAzCurvatureLST_DH(hDH,HoleLST,rTolCurv,hWA);
+         QAWriteUnregisteredHoles_DH(hDH,hDB,hWA);
+         
+         if(iN==0) {
+            Strcpy_STR(sMsg, _("None of the selected holes contain Dip-Azimuth survey data."));
+            if(iType==ALL) {
+               Puts_WA(hWA,"   ");
+               Puts_WA(hWA,sMsg);
+               NewLine_WA(hWA);
+            }
+            else
+               Abort_SYS(sMsg);
+         }         
+      }
+      else
+      {
+         Strcpy_STR(sMsg, _("There is no Dip-Azimuth survey database."));
+         if(iType==ALL) {
+            Puts_WA(hWA,"   ");
+            Puts_WA(hWA,sMsg);
+            NewLine_WA(hWA);
+         }
+         else
+            Abort_SYS(sMsg);
+      }
+   } 
+   
+   if(iType == DH_DATA_EASTNORTH || iType==ALL) {
+
+      if(iType==ALL) {
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+         Puts_WA(hWA, _("East-North Survey Data"));
+         Puts_WA(hWA, "----------------------");
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+      }
+
+
+      iN = 0;
+      hDB = hENSurveyDB_DH(hDH);
+      if(hDB!=DB_NULL) 
+      {   
+         GETGLOBAL("WHOLEPLOT_QC.EASTNORTH_CURVATURE","TEMP","")
+         rTolCurv = rGetReal_SYS("DHQAQC","TEMP");
+   
+         iN = iQAEastNorthSurveyLST_DH(hDH,HoleLST,hWA);
+         iN += iQAEastNorthCurvatureLST_DH(hDH,HoleLST,rTolCurv,hWA);
+         QAWriteUnregisteredHoles_DH(hDH,hDB,hWA);
+      
+         if(iN==0) {
+            Strcpy_STR(sMsg, _("None of the selected holes contain East-North survey data."));
+            if(iType==ALL) {
+               Puts_WA(hWA,"   ");
+               Puts_WA(hWA,sMsg);
+               NewLine_WA(hWA);
+            }
+            else
+               Abort_SYS(sMsg);
+         }
+      }
+      else
+      {
+         Strcpy_STR(sMsg, _("There is no East-North survey database."));
+         if(iType==ALL) {
+            Puts_WA(hWA,"   ");
+            Puts_WA(hWA,sMsg);
+            NewLine_WA(hWA);
+         }
+         else
+            Abort_SYS(sMsg);
+      }
+   } 
+   
+   if(iType == DH_DATA_FROMTO || iType==ALL) {
+
+      if(iType==ALL) {
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+         Puts_WA(hWA, _("From-To Data"));
+         Puts_WA(hWA, "------------");
+         NewLine_WA(hWA);
+      }
+   
+      iDBs = iNumAssays_DH(hDH);
+
+      iN = 0;
+      for(j=0; j<iDBs; j++) {
+
+         hDB = hAssayDB_DH(hDH,j);
+         GetDataType_DH(hDH, hDB, iDType);
+
+         if(iDType == DH_DATA_FROMTO) {
+
+            NewLine_WA(hWA);
+            Puts_WA(hWA, _n("Database: "));
+            GetName_DB(hDB,DB_NAME_FILE,sDB);
+            Puts_WA(hWA, sDB);
+            NewLine_WA(hWA);
+            NewLine_WA(hWA);            
+
+            for(i=0; i<iHoles; i++) {
+
+               GetItem_LST(HoleLST,0,i,sHole);
+               iH = iFindHole_DH(hDH, sHole);
+               Line = hAssaySymb_DH(hDH,j,iH);
+
+               if(Line!=(DB_SYMB)-1) {
+                  QAFromToData_DH(hDH,hDB,hWA,Line,sHole);
+                  iN++;
+               }
+            }
+            QAWriteUnregisteredHoles_DH(hDH,hDB,hWA);
+         }
+      }
+
+      if(iN==0) {
+         Strcpy_STR(sMsg, _("None of the selected holes contain From-To data."));
+         if(iType==ALL) {
+            Puts_WA(hWA,"   ");
+            Puts_WA(hWA,sMsg);
+            NewLine_WA(hWA);
+         }
+         else
+            Abort_SYS(sMsg);
+      }
+   } 
+   
+   if(iType == DH_DATA_POINT || iType == ALL) {
+
+
+      if(iType==ALL) {
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+         Puts_WA(hWA, _("Point Data"));
+         Puts_WA(hWA, "----------");
+         NewLine_WA(hWA);
+      }
+
+      iDBs = iNumAssays_DH(hDH);
+
+      iN = 0;
+      for(j=0; j<iDBs; j++) {
+
+         hDB = hAssayDB_DH(hDH,j);
+         GetDataType_DH(hDH, hDB, iDType);
+
+         if(iDType == DH_DATA_POINT) {
+
+            NewLine_WA(hWA);
+            Puts_WA(hWA, _n("Database: "));
+            GetName_DB(hDB,DB_NAME_FILE,sDB);
+            Puts_WA(hWA, sDB);
+            NewLine_WA(hWA);
+            NewLine_WA(hWA);            
+
+            for(i=0; i<iHoles; i++) {
+
+               GetItem_LST(HoleLST,0,i,sHole);
+               iH = iFindHole_DH(hDH, sHole);
+               Line = hAssaySymb_DH(hDH,j,iH);
+
+               if(Line!=(DB_SYMB)-1) {
+                  QAPointData_DH(hDH,hDB,hWA,Line,sHole);
+                  iN++;
+               }
+            }
+            QAWriteUnregisteredHoles_DH(hDH,hDB,hWA);
+         }
+      }
+      if(iN==0) {
+         Strcpy_STR(sMsg, _("None of the selected holes contain Point data."));
+         if(iType==ALL) {
+            Puts_WA(hWA,"   ");
+            Puts_WA(hWA,sMsg);
+            NewLine_WA(hWA);
+         }
+         else
+            Abort_SYS(sMsg);
+      }
+
+   }
+
+   Destroy_DH(hDH);
+   Destroy_WA(hWA);
+
+
+   // --- Anything to display ---
+
+   if (iFileSize_SYS(sFile)>3) // 3 characters could be UTF-8 BOM only
+   {
+		if (iInteractive_SYS()==1)
+		{
+			// --- edit ---
+
+			SetString_SYS("EDIT","FILE",sFile);
+			SetString_SYS("EDIT","CHILD","Yes");
+			iRunGX_SYS("edit");         
+		}
+   }
+   else {
+
+      if(iType==DH_DATA_COLLAR)
+         DisplayMessage_SYS(_("Drill hole QA/QC"), _("No problems were detected with the Collar data."));
+      else if(iType==DH_DATA_DIPAZIMUTH)
+         DisplayMessage_SYS(_("Drill hole QA/QC"), _("No problems were detected with the Dip-Azimuth Survey data."));
+      else if(iType==DH_DATA_EASTNORTH)
+         DisplayMessage_SYS(_("Drill hole QA/QC"), _("No problems were detected with the East-North Survey data."));
+      else if(iType==DH_DATA_FROMTO)
+         DisplayMessage_SYS(_("Drill hole QA/QC"), _("No problems were detected with the From-To data."));
+      else if(iType==DH_DATA_POINT)
+         DisplayMessage_SYS(_("Drill hole QA/QC"), _("No problems were detected with the Point data."));
+   }
+
+   Progress_SYS(0);
+}

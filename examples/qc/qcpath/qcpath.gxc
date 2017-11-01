@@ -1,0 +1,637 @@
+//===========================================================================
+NAME          = "Quality control on flight path"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/QC Utility"
+
+DESCRIPTION   = "
+
+Use of this GX to carry out quality control on airplane flight path.
+
+Parameters: 
+
+    QCPATH.GDB       -  Geosoft GDB file which contains ideal flight line paths
+          .MAXTOL    -  Maximum tolerance
+          .ALLTOL    -  Allowed tolerance
+          .DIST      -  over a distance of 
+          .MAP       -  New map (1) or current map (0)
+  
+"
+// Revision History:
+// v8.5:   Enabled for batch operation.
+// v6.0:   Fixed that map has to be unlocked when call iGetPoint_EMAP(). 
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "QCPATH.gr"
+#include "QCPATH.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EDataM;
+DB          DataM;            // Master database parameters
+DB_SYMB     XChM,YChM,ChFlag;
+DB_SYMB     LineM;            // Line Handle
+DGW         Diag;             // Dialogue handle
+VV          VVXM,VVYM,VVFlag,VVDev,VVDist;
+
+EDB         EDataI;
+DB          DataI;
+DB_SYMB     XChI,YChI;        // Parameters for database containing ideal line path        
+DB_SYMB     LineI;            
+VV          VVXI,VVYI;
+MVIEW       View;
+MAP         Map;
+EMAP        EMap;
+
+string(STR_FILE)        sFont,sGroup,sName, sMap;
+string(STR_FILE)        sGDBM, sGDBI,sM,sI;
+string(STR_DB_SYMBOL) sChFlag,sLineM,sLineM2,sLineNum;
+string(2)   sLineType;
+string(STR_DEFAULT) sLabel;
+string(1000) sMsg, sInfoMsg;
+string(STR_GROUP) sGrpName;
+
+real        rMaxDev,rAllDev,rDist;
+real        rLineNum;
+real        rXFidStart,rXFidIncr,rYFidStart,rYFidIncr;
+real        rX1,rY1,rX2,rY2;
+real        rMinX,rMinY,rMaxX,rMaxY;
+real        rScaleMM,rXo,rYo,rTxtSize;
+real        rXLegend, rYLegend;
+
+int         i,k,iNew;
+int         iQCType;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+int         iInteract, iShowDialog, iPlotToMap, iPlotPath;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	// ---- Batch control ---
+	
+	iShowDialog = 1;
+	if (iExistInt_SYS("QC", "SHOW_DIALOG"))
+	{
+		iShowDialog = iGetInt_SYS("QC", "SHOW_DIALOG");
+		if(iShowDialog != iDUMMY)
+			SetString_SYS("QC", "SHOW_DIALOG", "");		// force reset each time
+		if(iShowDialog != 0) iShowDialog = 1;				// show by default in interactive mode
+	}
+
+	iPlotToMap = 1;
+	if (iExistInt_SYS("QC", "OUTPUT_MAP"))
+	{
+		iPlotToMap = iGetInt_SYS("QC", "OUTPUT_MAP");
+		if(iPlotToMap != iDUMMY)
+			SetString_SYS("QC", "OUTPUT_MAP", "");			// force reset each time
+		if(iPlotToMap != 0) iPlotToMap = 1;					// plot by default
+	}
+
+	iPlotPath = 1;
+	if (iExistInt_SYS("QC", "PLOT_PATH"))
+	{
+		iPlotPath = iGetInt_SYS("QC", "PLOT_PATH");
+		if(iPlotPath != iDUMMY)
+			SetString_SYS("QC", "PLOT_PATH", "");			// force reset each time
+		if(iPlotPath != 0) iPlotPath = 1;					// plot by default
+	}
+
+	if (iPlotToMap == 0)
+		iPlotPath = 0;			                        // override
+
+
+   iInteract = iInteractive_SYS();    
+   rMinX = rMinY = rMaxX = rMaxY =rDUMMY;
+
+   // --- Get current database ---
+   
+   EDataM = Current_EDB();
+
+
+   // --- Are we running interactively ? ---
+
+   i = 2;
+   while (iInteractive_SYS() && (i == 2) && iShowDialog)
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("QCPATH");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_QCPATH_0,DGW_FILEPATH,"QCPATH","GDB");     
+      SetInfoSYS_DGW(Diag,_QCPATH_1,DGW_TEXT,"QCPATH","MAXDEV");     
+      SetInfoSYS_DGW(Diag,_QCPATH_2,DGW_TEXT,"QCPATH","ALLDEV");     
+      SetInfoSYS_DGW(Diag,_QCPATH_3,DGW_TEXT,"QCPATH","DIST");     
+      SetInfoSYS_DGW(Diag,_QCPATH_4,DGW_LISTALIAS,"QCPATH","MAP");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_QCPATH_0,DGW_FILEPATH,"QCPATH","GDB");     
+      GetInfoSYS_DGW(Diag,_QCPATH_1,DGW_TEXT,"QCPATH","MAXDEV");     
+      GetInfoSYS_DGW(Diag,_QCPATH_2,DGW_TEXT,"QCPATH","ALLDEV");     
+      GetInfoSYS_DGW(Diag,_QCPATH_3,DGW_TEXT,"QCPATH","DIST");     
+      GetInfoSYS_DGW(Diag,_QCPATH_4,DGW_LISTALIAS,"QCPATH","MAP");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+      iNew    = iGetInt_SYS("QCPATH","MAP");
+      
+      if (iNew && iPlotToMap) {
+         
+         // --- Run NEWMAP wizard ---
+   
+         iNew = iRunGX_SYS("newmap.gx");
+              
+         if (iNew == -1)        i = 2;
+         else if (iNew == 1)    Cancel_SYS();
+      }        
+
+   }
+
+
+	if (iPlotToMap)
+	{
+		if (!iInteractive_SYS() || iShowDialog == 0) 
+		{
+			iNew    = iGetInt_SYS("QCPATH","MAP");
+      
+			if (iNew) {
+         
+				// --- Run NEWMAP wizard ---
+   
+				iNew = iRunGX_SYS("newmap.gx");
+				GetString_SYS("NEWMAP","MAP",sMap);
+				Load_EMAP(sMap);
+			}
+		}      
+   }
+
+
+   // --- Get Parameters ---
+
+   rMaxDev  = rGetReal_SYS("QCPATH","MAXDEV");
+   rAllDev  = rGetReal_SYS("QCPATH","ALLDEV");
+   rDist    = rGetReal_SYS("QCPATH","DIST");
+
+   GetString_SYS("QCPATH","GDB",sGDBI);
+
+   
+   // --- Verify parameters ---
+   
+   iQCType = -1;
+   if (rMaxDev >= 0.0) iQCType ++;
+   if ((rAllDev >= 0.0) && (rDist > 0.0)) iQCType += 2;
+   if (iQCType < 0) Abort_SYS(_("Quality control on flight path is not applied as NO deviation parameters are defined."));
+   
+   
+   // --- Check database containing ideal line paths ---
+   
+   if (iStrMin2_STR(sGDBI) == 0) Abort_SYS(_("Database containing ideal line path not specified."));
+   if (!iFileExist_SYS(sGDBI))  Abort_SYS(_("Database containing ideal line path do not exist."));
+   
+   
+   // --- Lock Database ---
+   
+   DataM = Lock_EDB(EDataM);
+   GetName_DB(DataM,DB_NAME_FILE,sGDBM);
+      
+   FileNamePart_STR(sGDBM,sM,STR_FILE_PART_NAME);
+   FileNamePart_STR(sGDBI,sI,STR_FILE_PART_NAME);
+   if (iStrcmp_STR(sM,sI,STR_CASE_TOLERANT) == 0)
+      Abort_SYS(_("The specified database with ideal line path is the same as the current database or has the same root name."));
+                
+
+   
+   // --- Get X and Y channel in master database ---
+
+   XChM = GetXYZChanSymb_DB(DataM, DB_CHAN_X);
+   if (XChM==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist in the master database"));
+   LockSymb_DB(DataM,XChM,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   YChM = GetXYZChanSymb_DB(DataM, DB_CHAN_Y);
+   if (YChM==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist in the master database"));
+   LockSymb_DB(DataM,YChM,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Get X and Y channel in ideal line path database ---
+
+   EDataI = Load_EDB (sGDBI);
+   DataI = Lock_EDB(EDataI);
+   
+   XChI = GetXYZChanSymb_DB(DataI, DB_CHAN_X);
+   if (XChI==NULLSYMB)
+      Abort_SYS(_("X channel does not exist in the ideal line path database."));
+   LockSymb_DB(DataI,XChI,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   YChI = GetXYZChanSymb_DB(DataI, DB_CHAN_Y);
+   if (YChI==NULLSYMB)
+      Abort_SYS(_("Y channel does not exist in the ideal line path database."));
+   LockSymb_DB(DataI,YChI,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+   
+   // --- Does the Flag channel exist ? ---
+
+   Strcpy_STR(sChFlag,"Flag_Path");
+   if (iExistSymb_DB(DataM,sChFlag,DB_SYMB_CHAN)) {
+      ChFlag = FindSymb_DB(DataM,sChFlag,DB_SYMB_CHAN);
+      LockSymb_DB(DataM,ChFlag,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(DataM,ChFlag);
+   }   
+   ChFlag = CreateSymb_DB(DataM,sChFlag,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_BYTE);
+   LockSymb_DB(DataM,ChFlag,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+   
+   // --- VVs ---
+   
+   VVXM   = Create_VV(REAL,0);
+   VVYM   = Create_VV(REAL,0);
+   VVXI   = Create_VV(REAL,0);
+   VVYI   = Create_VV(REAL,0);
+   VVFlag = CreateExt_VV(GS_BYTE,0);
+   VVDev  = Create_VV(REAL,0);
+   VVDist = Create_VV(REAL,0);
+   
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(DataM);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS(_("QC on flight path"),1);
+   LineM = FirstSelLine_DB(DataM);
+   while (iIsLineValid_DB(DataM,LineM))
+   {
+
+      // --- Get line parameters ---
+      
+      GetChanName_DB(DataM,LineM,sLineM);
+      
+      
+      // --- Get 10th line parameters ---
+      
+      Strcpy_STR(sLineM2,sLineM);
+      Strcpy_STR(sLineType,sLineM2);
+      SplitString_STR(sLineM2,sLineType,sLineNum);
+      rLineNum = rScanR_STR(sLineNum);
+      FormatI_STR((int)(rLineNum/10.0)*10,sLineNum,STR_DB_SYMBOL);
+      Strcpy_STR(sLineM2,sLineType);
+      Strcat_STR(sLineM2,sLineNum);
+            
+      
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(DataM,LineM,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      UnLockSymb_DB(DataM,LineM);
+      Strcpy_STR(sLabel,_("Flight path QC on line: "));
+      Strcat_STR(sLabel,sLineM);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+      
+      
+      // --- Find this LINE in the ideal line database ---
+
+      if (!iExistSymb_DB(DataI,sLineM,DB_SYMB_LINE)) {
+         if (!iExistSymb_DB(DataI,sLineM2,DB_SYMB_LINE)) {
+            if (iStrlen_STR(sMsg) == 0) Strcpy_STR(sMsg,_("QC on flight path was not carried out on the following lines:  "));
+               Strcat_STR(sMsg,sLineM);
+            Strcat_STR(sMsg,", ");
+         } else 
+            Strcpy_STR(sLineM,sLineM2);
+      } 
+      
+      
+      // --- Line has been found but another test ---
+         
+      if (iExistSymb_DB(DataI,sLineM,DB_SYMB_LINE)) {
+
+         LineI = FindSymb_DB(DataI, sLineM, DB_SYMB_LINE);
+                 
+         // --- Get data from channels to VVs ---
+         
+         GetChanVV_DB(DataM,LineM,XChM,VVXM);
+         GetChanVV_DB(DataM,LineM,YChM,VVYM);
+         GetChanVV_DB(DataI,LineI,XChI,VVXI);
+         GetChanVV_DB(DataI,LineI,YChI,VVYI);
+
+
+         ReFidVV_VV(VVFlag,VVXM);
+         
+         
+         // --- Two points to define a line ---
+         
+         rX1 = rGetReal_VV(VVXI,0);
+         rY1 = rGetReal_VV(VVYI,0);
+         rX2 = rGetReal_VV(VVXI,1);
+         rY2 = rGetReal_VV(VVYI,1);
+
+         if ((rX1 != rDUMMY) && (rY1 != rDUMMY) && (rX2 != rDUMMY) && (rY2 != rDUMMY)) {
+         
+
+            // --- Deviation VV ---
+            
+            Deviation_VVU(VVXM,VVYM,VVDev,rX1,rY1,rX2,rY2,LINE_2_POINTS);
+
+
+            // --- Prepare distance VV ---
+
+            if (iQCType > 0) {
+
+               rXFidStart = rGetFidStart_DB(DataM,LineM,XChM);
+               rXFidIncr  = rGetFidIncr_DB (DataM,LineM,XChM);
+               rYFidStart = rGetFidStart_DB(DataM,LineM,YChM);
+               rYFidIncr  = rGetFidIncr_DB (DataM,LineM,YChM);
+               
+               if (rXFidStart == rDUMMY || rXFidIncr == rDUMMY || 
+                   rYFidStart == rDUMMY || rYFidIncr == rDUMMY) {
+                   
+                   LineM = NextSelLine_DB(DataM, LineM);
+                   iLines++;
+                   continue;
+               }
+                   
+                      
+                      
+               Distance_VVU(VVXM,VVYM,VVDist,rXFidStart,rXFidIncr,rYFidStart,rYFidIncr);
+               ReFidVV_VV(VVDist,VVXM);
+            }
+
+
+            // --- Apply the QC on flight path ---
+            
+            QC_VVU(VVDev,VVDist,VVFlag,0.0,rMaxDev,rAllDev,rDist,iQCType);
+
+
+            // --- Put QC result back to channel ---
+            
+            PutChanVV_DB(DataM,LineM,ChFlag,VVFlag);
+         } else {
+            if (iStrlen_STR(sMsg) == 0) Strcpy_STR(sMsg,_("QC on flight path was not carried out on the following lines:  "));
+            Strcat_STR(sMsg,sLineM);
+            Strcat_STR(sMsg,", ");
+         }   
+               
+      }        
+      
+      // --- Advance to Next Line ---        
+
+      LineM = NextSelLine_DB(DataM, LineM);
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(DataM,ChFlag,_("Quality control on flight path"),"QCPATH;");
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(DataM,ChFlag);
+   UnLockSymb_DB(DataM,XChM);
+   UnLockSymb_DB(DataM,YChM);
+   UnLockSymb_DB(DataI,XChI);
+   UnLockSymb_DB(DataI,YChI);
+
+   UnLock_EDB(EDataM);
+   UnLock_EDB(EDataI);
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+
+	if (iPlotToMap)
+	{
+		if (iInteract)
+			SetInteractive_SYS(0);
+
+		// --- Plot line path and flag ---
+   
+		Load_EDB(sGDBI);
+		SetString_SYS("PATH","LINE_THICKNESS","0.15");
+		SetString_SYS("PATH","LINE_COLOR","r127");
+		SetString_SYS("PATH","TICKFLAG","0");
+		SetString_SYS("PATH","LABEL_FORMAT","TL");
+		SetString_SYS("PATH","LABEL_LOCATION","1");
+		SetString_SYS("PATH","LABEL_SIZE","2.5");
+		SetString_SYS("PATH","LABEL_COLOR","r127");
+		SetString_SYS("PATH","LABEL_WEIGHT","0");
+		SetString_SYS("PATH","H_OFFSET","2.0");
+		SetString_SYS("PATH","V_OFFSET","0");
+		SetString_SYS("PATH","GAP","0");
+
+		if (iRunGX_SYS("path.gx"))    
+			Cancel_SYS();    // Ideal line path database
+
+
+		Load_EDB(sGDBM);
+		if (iPlotPath)
+		{
+			SetString_SYS("PATH","LINE_COLOR","k");
+			SetString_SYS("PATH","LABEL_COLOR","k");
+			if (iRunGX_SYS("path.gx"))     
+				Cancel_SYS();    // Survey database
+		}
+
+		SetString_SYS("QCDEVMAP","MAP","0");
+		SetString_SYS("QCDEVMAP","RESULT","Flag_Path");
+		SetString_SYS("QCDEVMAP","THICK","0.2");
+		SetString_SYS("QCDEVMAP","COLOR","g");
+		SetString_SYS("QCDEVMAP","OFFSET","0.5");
+   
+		if (iRunGX_SYS("qcdevmap.gx")) Cancel_SYS(); 
+   
+		SetInteractive_SYS(iInteract);   
+
+
+		// ---------------------------------------
+		// --- Plot legend ---
+   
+		// --- check for base view ---
+
+		EMap = Current_EMAP();
+		Map = Lock_EMAP(EMap);
+		if (!iExistView_MAP(Map,"*Base"))
+			Abort_SYS(_("A base view is required to use this GX."));
+
+		if (iInteractive_SYS()) 
+		{
+			UnLock_EMAP(EMap);   
+			iSetCurrentView_EMAP(EMap,"*Base");
+			Map = Lock_EMAP(EMap);
+		}
+		View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+ 
+ 
+		// --- Where to plot ---
+ 
+		rXLegend = rGetReal_SYS("QC", "LEGEND_X_IN");
+		rYLegend = rGetReal_SYS("QC", "LEGEND_Y_IN");
+		if(rXLegend != rDUMMY && rYLegend != rDUMMY)
+		{
+			rXo = rXLegend;
+			rYo = rYLegend;
+			SetString_SYS("QC", "LEGEND_X_IN", "");	// force reset each call
+			SetString_SYS("QC", "LEGEND_Y_IN", "");
+		}
+		else if (iInteractive_SYS()) 
+		{
+			// --- Get the coordinates of a user selected box ---
+
+			DisplayMessage_SYS(_("Locate legend"),_("Locate the lower left corner of the legend..."));
+
+			UnLock_EMAP(EMap);   
+			EMap = Current_EMAP();
+			iSetCurrentView_EMAP(EMap,"*Base");
+
+			if (iGetPoint_EMAP(EMap,_("Locate legend..."),rXo,rYo)) Cancel_SYS(); 
+
+			Map = Lock_EMAP(EMap);
+			View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+		} 
+		else 
+		{
+			// --- Get box area ---
+
+			Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
+			rXo = 0.2*rMinX + 0.8*rMaxX;
+			rYo = 0.2*rMinY + 0.8*rMaxY;
+		}
+
+		rXLegend = rXo;
+		rYLegend = rYo;
+
+
+		// --- Scale parameters ---
+
+		rScaleMM = rScaleMM_MVIEW(View);
+		rTxtSize = rScaleMM*2.5;
+		rXo *= rScaleMM;
+		rYo *= rScaleMM;
+
+
+		// --- Start a group ---
+
+		FileNamePart_STR(sGDBM,sName,STR_FILE_PART_NAME);
+		GenGroupName_STR("LEGEND_QC",sName,_n("Path"),sGrpName);
+		Strcpy_STR(sGroup,sGrpName);
+		StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+		// --- Line path ---
+ 
+		if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+			Strcpy_STR(sFont,_n("default"));
+		TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+		TextSize_MVIEW(View,rTxtSize);
+		TextAngle_MVIEW(View,0.0);
+		TextColor_MVIEW(View,iColor_MVIEW("k"));
+   
+		LineThick_MVIEW(View,0.15*rScaleMM);
+		LineStyle_MVIEW(View,0,0.0);
+		LineColor_MVIEW(View,iColor_MVIEW("k"));
+   
+		if (iPlotPath)
+		{
+			Text_MVIEW(View,_("Survey line path"),rXo+15.0*rScaleMM,rYo);
+			Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
+			rYo += 5.0*rScaleMM;
+		}
+
+
+		TextColor_MVIEW(View,iColor_MVIEW("r127"));
+		LineColor_MVIEW(View,iColor_MVIEW("r127"));
+   
+		Text_MVIEW(View,_("Ideal line path"),rXo+15.0*rScaleMM,rYo);
+		Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
+		rYo += 5.0*rScaleMM;
+
+		// --- QC results ---
+   
+		TextColor_MVIEW(View,iColor_MVIEW("g"));
+		Text_MVIEW(View,_("Flag_Path"),rXo+15.0*rScaleMM,rYo);
+
+		if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+			Strcpy_STR(sFont,_n("symbols"));
+		SymbFont_MVIEW(View,sFont,TRUE,MVIEW_FONT_WEIGHT_MEDIUM,FALSE);
+		SymbColor_MVIEW(View,iColor_MVIEW("g"));
+		SymbFillColor_MVIEW(View,iColor_MVIEW("g"));
+		SymbNumber_MVIEW(View,20);  // solid circle
+		SymbSize_MVIEW(View,0.2*rScaleMM);
+		SymbAngle_MVIEW(View,0.0);
+
+		k = (int)(30.0/0.2) + 1;
+		for (i = 0; i < k; i++)
+			Symbol_MVIEW(View, rXo + 0.33*(real)i*0.2*rScaleMM, rYo + 1.25*rScaleMM);
+
+
+ 		// --- Save group location and extents ---
+
+		SetReal_SYS("QC", "LEGEND_X_OUT", rXLegend);
+		SetReal_SYS("QC", "LEGEND_Y_OUT", rYLegend);
+
+		GetGroupExtent_MVIEW (View, sGroup, rMinX, rMinY, rMaxX, rMaxY, MVIEW_UNIT_MM);
+		SetReal_SYS("QC", "LEGEND_WIDTH", rMaxX - rMinX);
+		SetReal_SYS("QC", "LEGEND_HEIGHT", rMaxY - rMinY);
+
+ 
+		// --- Done with legend ---
+
+		Destroy_MVIEW(View);
+		UnLock_EMAP(EMap);
+	}
+
+
+   // --- Set default plotting channel ---
+
+   SetString_SYS("QCDEVMAP","RESULT","Flag_Path");     
+
+
+   // --- Make survey line database current ---
+
+   Load_EDB(sGDBM);
+   
+   
+	// --- Message ---
+
+   if (iStrlen_STR(sMsg) != 0) {
+      Printf_STR(sInfoMsg, sizeof(sInfoMsg), _("%s because (1) the line does not exist or, (2) the first two pairs of (X,Y) coordinates in the line are dummies in the ideal-line-path database."), sMsg);
+      DisplayMessage_SYS(_("Info"),sInfoMsg);
+   }   
+}

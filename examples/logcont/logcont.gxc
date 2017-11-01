@@ -1,0 +1,169 @@
+//===========================================================================
+NAME          = "Logarithmic contouring"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Contour"
+
+DESCRIPTION   = "\
+
+   Create a logarithmic contour map of a logarithmic grid.  The
+   grid must be stored as log base 10 numbers.
+
+   CONTOUR.GRID   - grid file name.
+
+"
+// Revision History:
+// v6.3.0: Remove obsolete GTITLE parameter from output line #2 comments.
+//         Only remove empty group, don't call Clean_MAP.
+//         Suppress last line of control file for automatic levels.
+// 5.1.4: Fixed "decades only" option and added "automatic" option.
+//===========================================================================
+
+RESOURCE = "logcont.gr"
+#include "logcont.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrid;
+string(STR_DEFAULT_LONG) sGroup, sOpt;
+string(STR_DB_SYMBOL) sLine;
+string(STR_GROUP) sGrpName;
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+WA    WA_con;
+DGW   Diag;
+int  i;
+
+
+//===========================================================================
+//                           CONTOUR CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("logcont");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_LOGCONT_0,DGW_FILEPATH ,"LOGCONT","GRID");
+      SetInfoSYS_DGW(Diag,_LOGCONT_1,DGW_LISTALIAS,"LOGCONT","OPT");
+      SetInfoSYS_DGW(Diag,_LOGCONT_2,DGW_TEXT,     "LOGCONT","GAP");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1) Cancel_SYS();  
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_LOGCONT_0,DGW_FILEPATH ,"LOGCONT","GRID");
+      GetInfoSYS_DGW(Diag,_LOGCONT_1,DGW_LISTALIAS,"LOGCONT","OPT");
+      GetInfoSYS_DGW(Diag,_LOGCONT_2,DGW_TEXT,     "LOGCONT","GAP");
+
+   }
+
+   // --- create an MDF file from the map name ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   MapMDF_MVU(Map,"_contour.mdf","*Data");
+
+
+   // --- get the paramters ---
+
+   GetString_SYS("LOGCONT","GRID",sGrid);
+   GetString_SYS("LOGCONT","OPT",sOpt);
+   
+   
+   // --- Generate Control File ---
+   
+   WA_con=Create_WA("_logcont.con",0); 
+
+   Puts_WA(WA_con,_n("_contour.mdf /MDF|scale, ufac, x0, y0"));
+   NewLine_WA(WA_con);
+   
+   Puts_WA(WA_con,_n("     /border, lowtic, smooth, suppop, nth"));
+   NewLine_WA(WA_con);
+   
+   Puts_WA(WA_con,_n("     /pdef, ptick, pxval, pframe, psidel"));
+   NewLine_WA(WA_con);
+   
+   Puts_WA(WA_con,_n("     /hlb, htl, hcr, htk, hxv, hsl"));
+   NewLine_WA(WA_con);
+   
+   Puts_WA(WA_con,_n("     /ominl,cminl,skipa,skipb,skipc,skipd,skipe,skipf"));
+   NewLine_WA(WA_con);
+   
+   Puts_WA(WA_con,_n("     /xval, digxv, minxv, markxv"));
+   NewLine_WA(WA_con);
+   
+   Puts_WA(WA_con,_n(",,,,,1 /levopt, conbeg, conend, lbup, lbmult, logopt"));
+   NewLine_WA(WA_con);
+   
+   ReplaceString_SYS(_n("%opt%,,%oasis_ccol.c1%,,%gap% /cint,lintyp,catt,label,dense,digits,conlo,conhi"),sLine,"LOGCONT");
+   Puts_WA(WA_con,sLine);
+   NewLine_WA(WA_con);
+   
+   if(iStrlen_STR(sOpt)) {
+      ReplaceString_SYS(_n("1,,%oasis_ccol.c2%,1,%gap% /cint,lintyp,catt,label,dense,digits,conlo,conhi"),sLine,"LOGCONT");
+      Puts_WA(WA_con,sLine);
+      NewLine_WA(WA_con);
+   }
+   
+   Destroy_WA(WA_con);
+   
+   // --- start a group ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   FileNamePart_STR(sGrid,sGroup,STR_FILE_PART_NAME);
+   GenGroupName_STR("LOGCONT",sGroup,"",sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   LineStyle_MVIEW(View,0,0.0);
+
+
+   // --- draw LOGCONTs ---
+
+   Progress_SYS(1);
+   Contour_MVU(View,"_logcont.con",sGrid);
+   
+
+   // --- Delete the empty group in case no contours were plotted ---
+
+   if(iIsGroupEmpty_MVIEW(View, sGroup))
+      DeleteGroup_MVIEW(View, sGroup);
+   
+   Destroy_MVIEW(View);
+   Progress_SYS(0);
+
+
+
+   // --- done ---
+
+   UnLock_EMAP(EMap);
+   
+}
+

@@ -1,0 +1,356 @@
+//===========================================================================
+NAME          = "Filter Operations"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+   Perform Filter operations
+   
+         SEMFILTER.FILTER         Name of filter to apply
+         SEMPLOT.MASK             Name of mask channel
+         SEMFILTER.MINERAL        Mineral to use (\"\" or \"All Minerals\" for all)
+         SEMFILTER.MODE           (0) Append, 1 (New)
+"
+// Revision History
+// v6.3.0: Ensure Mineral and Position channels are initialized.
+//         Updated to allow multiple mineral channels.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.7: Rewritten for v2 upgrade. Uses filter files.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semfilter.gr"
+#include "semfilter.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define SEM_FILTER 0
+#define EDIT_FILE 1
+#define NEW_FILE 2
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+LST         List;
+DB_SYMB     MaskCh;
+
+string(STR_DEFAULT_SHORT) sVal, sMineral;
+string(STR_FILE) sFilter, sModel;
+string(STR_DB_SYMBOL) sMaskCh, sMineralCh;
+
+int i, iApplied, iAutoRedraw, iRefreshGroups, iRet, iMode, iInteractive;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+
+
+   // --- Refresh groups? ---
+
+   iGlobal_SYS("SEMPLOT.REFRESH_GROUPS",sVal);
+   iRefreshGroups = iScanI_STR(sVal);
+   if(iRefreshGroups!=1) iRefreshGroups = 0; // No by default
+
+
+   // --- Auto replot of data? ---
+
+   iGlobal_SYS("SEMPLOT.AUTOREDRAW",sVal);
+   iAutoRedraw = iScanI_STR(sVal);
+   if(iAutoRedraw!=1) iAutoRedraw = 0;
+
+
+   // --- See if the Mineral and/or Position channels exist. If not, warn the user! ---
+   
+   if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.Geochemistry.InitMineralChannel;Run)")!=0) Cancel_SYS();
+
+
+   // --- Has filter been applied yet (can be done from the Edit dialog)?
+
+   iApplied = 0;     
+
+
+   // --- Are we running interactively ? ---
+
+   Data = Lock_EDB(EData);
+
+   iInteractive = iInteractive_SYS();
+   if (iInteractive) {
+   
+
+      i = SEM_FILTER;
+      while (i != -1) {
+
+         switch (i) {
+         
+            case SEM_FILTER:
+
+               Diag = Create_DGW("SEMFILTER");
+
+
+               // --- Create Filter List ---
+
+               List = GetList_DGW(Diag,_SEMFILTER_0);
+               FilterLST_SEMPLOT(List);
+
+
+               // --- If the current filter is not in the list, clear the item ---
+
+               GetString_SYS("SEMFILTER", "FILTER",  sFilter);
+               if(iStrlen_STR(sFilter)) {
+                  if(iFindItem_LST(List, 0, sFilter)==-1)
+                     SetString_SYS("SEMFILTER", "FILTER",  "");
+               }
+
+
+               // --- Create Mask and mineral channel lists ---
+
+               List = GetList_DGW(Diag,_SEMFILTER_1);
+               ClassChanLST_DB(Data,List,"MASK");
+               Sort_LST(List,0,0);
+
+               List = GetList_DGW(Diag,_SEMFILTER_2);
+               ClassChanLST_DB(Data,List,"MINERAL");
+               Sort_LST(List,0,0);
+
+               
+               // --- Get the full mineral list ---
+               
+               List = GetList_DGW(Diag,_SEMFILTER_3);
+               GetFullMineralLST_SEMPLOT(List);
+
+               SetInfoSYS_DGW(Diag,_SEMFILTER_0,DGW_TEXT,"SEMFILTER","FILTER");
+               SetInfoSYS_DGW(Diag,_SEMFILTER_1,DGW_TEXT,"SEMPLOT",  "MASK");
+               SetInfoSYS_DGW(Diag,_SEMFILTER_2,DGW_TEXT,"SEMPLOT",  "MINERAL_CHANNEL");
+               SetInfoSYS_DGW(Diag,_SEMFILTER_3,DGW_LISTALIAS,"SEMFILTER","MINERAL");
+               SetInfoSYS_DGW(Diag,_SEMFILTER_4,DGW_LISTALIAS,"SEMFILTER","MODE");
+                  
+               iRet = iRunDialogue_DGW(Diag);
+               if (iRet == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_SEMFILTER_0,DGW_TEXT,"SEMFILTER","FILTER");
+               GetInfoSYS_DGW(Diag,_SEMFILTER_1,DGW_TEXT,"SEMPLOT",  "MASK");
+               GetInfoSYS_DGW(Diag,_SEMFILTER_2,DGW_TEXT,"SEMPLOT",  "MINERAL_CHANNEL");
+               GetInfoSYS_DGW(Diag,_SEMFILTER_3,DGW_LISTALIAS,"SEMFILTER","MINERAL");
+               GetInfoSYS_DGW(Diag,_SEMFILTER_4,DGW_LISTALIAS,"SEMFILTER","MODE");
+
+               Destroy_DGW(Diag);
+
+
+               // --- Validate Filter name unless creating a new template ---
+
+               if(iRet!=2) {
+                  GetString_SYS("SEMFILTER", "FILTER",  sFilter);
+                  if(!iStrlen_STR(sFilter)) {
+                     DisplayMessage_SYS(_("Filter"), _("The \"Filter\" field is required"));
+                     break;
+                  }
+               }
+
+               if(iRet==1)
+                  i = EDIT_FILE;
+               else if(iRet==2)
+                  i = NEW_FILE;
+               else
+                  i = -1;   // plot using the template                  
+               break;
+
+
+            case EDIT_FILE:
+
+
+               // --- Edit selected filter ---
+
+               GetString_SYS("SEMFILTER", "FILTER",  sFilter);
+               GetString_SYS("SEMFILTER", "MINERAL", sMineral);
+               GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+               GetString_SYS("SEMPLOT", "MINERAL_CHANNEL", sMineralCh);
+               iMode = iGetInt_SYS("SEMFILTER", "MODE");
+
+               while(1) {
+      
+                  iRet = iEditFilter_SEMPLOT(Data, sFilter, sMaskCh, sMineralCh, sMineral);
+                  if(iRet==-1) Cancel_SYS();
+
+                  if(iRet==0) {  // Back to FILTER dialog
+                     i = SEM_FILTER;
+                     break;   
+                  }
+
+
+                  // --- Track whether current filter has been applied to the data ---
+
+                  iApplied = 0;
+
+
+                  // --- Apply filter to data ---
+
+                  if(iRet==1) {
+                     ApplyFilterToMask_SEMPLOT(Data, sFilter, sMaskCh, sMineralCh, sMineral, iMode);
+                     iApplied = 1;
+                  }
+
+                     // --- Reset the mask channel to 1 ---
+
+                  if(iRet==2)               
+                     SetMask_SEMPLOT(Data, sMaskCh, sMineralCh, sMineral, 0, 1);
+
+
+                  // --- Refresh groups? ---
+
+                  if(iRefreshGroups)
+                     ResetGroups_SEMPLOT(Data, sMaskCh);
+
+         
+                  // --- Replot maps? ---
+
+                  if(iAutoRedraw) {
+                     UnLock_EDB(EData);
+                     iRunGX_SYS("semreplotmaps");
+                     Data = Lock_EDB(EData);
+                  }
+ 
+               }  // end while                
+               
+               break;   // end of EDIT
+
+            
+            case NEW_FILE:
+            
+               // --- new filter ---
+               
+               Diag = Create_DGW("SEMFILTERNEW");
+
+
+               // --- Set up the filter list ---
+
+               List = GetList_DGW(Diag,_SEMFILTERNEW_1);
+               FilterLST_SEMPLOT(List);
+               
+               SetInfoSYS_DGW(Diag,_SEMFILTERNEW_0,DGW_TEXT,"SEMFILTER","NEWFILTER");
+               SetInfoSYS_DGW(Diag,_SEMFILTERNEW_1,DGW_TEXT,"SEMFILTER","MODEL");
+
+               iRet = iRunDialogue_DGW(Diag);
+               if (iRet == -1) {
+                  i = SEM_FILTER;
+                  Destroy_DGW(Diag);                  
+                  break;
+               }
+
+               GetInfoSYS_DGW(Diag,_SEMFILTERNEW_0,DGW_TEXT,"SEMFILTER","NEWFILTER");
+               GetInfoSYS_DGW(Diag,_SEMFILTERNEW_1,DGW_TEXT,"SEMFILTER","MODEL");
+
+               Destroy_DGW(Diag);
+
+
+               // --- Create the new filter ---
+
+               GetString_SYS("SEMFILTER","NEWFILTER",sFilter);
+               GetString_SYS("SEMFILTER","MODEL",sModel);
+
+               NewFilter_SEMPLOT(sFilter, sModel);
+
+
+               // --- Edit the new filter ---
+
+               SetString_SYS("SEMFILTER","FILTER",sFilter);
+               i = EDIT_FILE;
+               break;
+
+         }
+      }
+   }               
+
+
+   // --- If filter has already been applied from the Edit dialog, don't need to
+   //     do it here. 
+
+   if(iApplied) Cancel_SYS();
+
+   
+   // --- Filter ---
+
+   Progress_SYS(1);
+
+
+   // --- Get parameters ---      
+   
+   GetString_SYS("SEMFILTER", "FILTER",  sFilter);
+   GetString_SYS("SEMFILTER", "MINERAL", sMineral);
+   GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+   GetString_SYS("SEMPLOT", "MINERAL_CHANNEL", sMineralCh);
+   iMode = iGetInt_SYS("SEMFILTER", "MODE");
+
+   if(!iStrlen_STR(sFilter))
+      Abort_SYS(_("No filter defined"));
+
+   if(!iStrlen_STR(sMaskCh))
+      Abort_SYS(_("No mask channel defined"));
+
+   if(!iStrlen_STR(sMineralCh))
+      Abort_SYS(_("No mineral channel defined"));
+
+   if(iMode!=0 && iMode!=1)
+      Abort_SYS(_("Masking mode not defined."));
+
+
+   // --- Create mask channel if it does not exist ---
+
+   MaskCh = FindChan_DB(Data, sMaskCh);
+   if(MaskCh==NULLSYMB) {
+
+      
+      // --- Create a new mask channel ---
+
+      SetInteractive_SYS(0);
+      UnLock_EDB(EData);
+
+      iRunGX_SYS("semmask.gx");
+
+      SetInteractive_SYS(iInteractive);
+      Data = Lock_EDB(EData);
+   }
+
+
+   // --- Apply the filter to the mask ---
+
+   ApplyFilterToMask_SEMPLOT(Data, sFilter, sMaskCh, sMineralCh, sMineral, iMode);
+
+   
+   // --- Set default mask channel ---
+
+   GlobalSet_SYS("SEMPLOT.MASK",sMaskCh);
+
+
+   // --- Refresh groups? ---
+
+   if(iRefreshGroups)
+      DefaultGroups_SEMPLOT(Data);
+
+
+   // --- Replot maps? ---
+
+   if(iAutoRedraw) {
+      UnLock_EDB(EData);
+      iRunGX_SYS("semreplotmaps");
+      Data = Lock_EDB(EData);
+   }
+
+   Progress_SYS(0);
+
+   UnLock_EDB(EData);   
+   
+}

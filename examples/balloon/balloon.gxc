@@ -1,0 +1,381 @@
+//===========================================================================
+NAME          = "Place a text balloon on a map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+   BALLOON.TEXT      text
+          .FONT      font name
+          .HEIGHT    posting size (mm)
+          .SPACING   posting angle (deg CCW from X)
+          .JUSTIFY   justification (0-9)
+          .ARROWSIZE Size of arrow (mm)
+          .ARROWTYPE Type of arrow
+          .X         X location of box
+          .Y         Y location of box
+          .SX        Width of box
+          .SY        Height of box
+          .AX        X location of arrow
+          .AY        Y location of arrow
+"
+// Revision History:
+// v6.0.1: Fixed for all warped or oriented views.
+// v6.0.0: Corrected behaviour for views with inverted user IPJs.
+//===========================================================================
+
+RESOURCE = "balloon.gr"
+#include "balloon.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sFont,sI;
+string(STR_GROUP) sGroup;
+string(4096) sText;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+LST   List;
+DGW   Diag;
+IPJ   ViewIPJ, ViewIPJ2, UserIPJ;
+int   i,iJust,iArrType,iArrFlags,iCancel;
+real  rX,rY,rSX,rSY,rX1,rY1,rAX,rAY,rDX,rDY,rScaleMM,rScaleYMM, rArrSize;
+real  rX2,rY2,rArrAngle,rArrThick;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+	// --- Ensure we have a map and that we are not drawing on grid documents ---
+   
+   if (iRunGX_SYS("sclgrd") == -1) 
+      Cancel_SYS();
+
+   // --- get EMap ---
+   
+   EMap = Current_EMAP();
+   
+   
+   // --- Get the various projections. ---
+
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"*Data",MVIEW_READ);
+   
+   ViewIPJ = Create_IPJ();
+   ViewIPJ2 = Create_IPJ();
+   UserIPJ = Create_IPJ();
+   
+   GetIPJ_MVIEW(View,ViewIPJ);
+   GetIPJ_MVIEW(View,ViewIPJ2);
+   GetUserIPJ_MVIEW(View,UserIPJ);
+
+
+   // --- Clear any warp and orientation while creating the balloon ---
+   
+   ClearOrientation_IPJ(ViewIPJ2);
+   ClearWarp_IPJ(ViewIPJ2);
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+
+   
+   // --- Set defaults ---
+   
+   if (!iExistString_SYS("BALLOON","FONT")) {
+      if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+         Strcpy_STR(sFont,"Arial(TT)");
+      SetString_SYS("BALLOON","FONT",sFont);
+   }
+   DefaultInt_SYS("BALLOON","JUSTIFY",0);
+   DefaultReal_SYS("BALLOON","ARROWSIZE",2.5);
+   DefaultReal_SYS("BALLOON","ARROWTHICK",0.5);
+   DefaultInt_SYS("BALLOON","ARROWTYPE",1);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("BALLOON");
+      
+      
+      // --- set up font list ---
+      
+      List = GetList_DGW(Diag,_BALLOON_7);
+      FontLST_EMAP(EMap,List,EMAP_FONT_TT);
+      FontLST_EMAP(EMap,List,EMAP_FONT_GFN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_BALLOON_0 ,DGW_TEXT,     "BALLOON","TEXT");
+      SetInfoSYS_DGW(Diag,_BALLOON_1 ,DGW_TEXT,     "BALLOON","AX");
+      SetInfoSYS_DGW(Diag,_BALLOON_2 ,DGW_TEXT,     "BALLOON","AY");
+      SetInfoSYS_DGW(Diag,_BALLOON_3 ,DGW_TEXT,     "BALLOON","X");
+      SetInfoSYS_DGW(Diag,_BALLOON_4 ,DGW_TEXT,     "BALLOON","Y");
+      SetInfoSYS_DGW(Diag,_BALLOON_5 ,DGW_TEXT,     "BALLOON","SX");
+      SetInfoSYS_DGW(Diag,_BALLOON_6 ,DGW_TEXT,     "BALLOON","SY");
+      SetInfoSYS_DGW(Diag,_BALLOON_7 ,DGW_LISTALIAS,"BALLOON","FONT");     
+      SetInfoSYS_DGW(Diag,_BALLOON_8, DGW_LISTALIAS,"BALLOON","JUSTIFY");     
+      SetInfoSYS_DGW(Diag,_BALLOON_9, DGW_TEXT,     "BALLOON","ARROWSIZE");     
+      SetInfoSYS_DGW(Diag,_BALLOON_10,DGW_TEXT,     "BALLOON","ARROWTHICK");     
+      SetInfoSYS_DGW(Diag,_BALLOON_11,DGW_LISTALIAS,"BALLOON","ARROWTYPE");     
+
+      i = 1;
+      
+      while (i != 0) {
+      
+      
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+         
+         
+         // --- locate ---
+         
+         if (i == 1) {
+
+            iSetCurrentView_EMAP(EMap,"*Data");
+         
+            rX=rY=0.0;
+            rX1=rY1=0.0;
+
+
+            // --- Define coordinates in the unwarped, non-oriented view ---            
+
+            Map = Lock_EMAP(EMap);
+            View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+            SetIPJ_MVIEW(View, ViewIPJ2);
+            SetUserIPJ_MVIEW(View, ViewIPJ2);
+            Destroy_MVIEW(View);
+            UnLock_EMAP(EMap);
+            
+         
+            iCancel = iGetLine_EMAP(EMap,_("Draw line from arrow to balloon corner..."),rX,rY,rX1,rY1);
+            if(!iCancel) {
+            
+               DrawLine_EMAP(EMap,rX,rY,rX1,rY1);
+            
+
+               SetReal_SYS("BALLOON","AX",rX);
+               SetReal_SYS("BALLOON","AY",rY);
+               SetInfoSYS_DGW(Diag,_BALLOON_1,DGW_TEXT,"BALLOON","AX");
+               SetInfoSYS_DGW(Diag,_BALLOON_2,DGW_TEXT,"BALLOON","AY");
+               
+               rDX = rX= rX1;
+               rDY = rY= rY1;
+               iCancel = iGetRect_EMAP(EMap,_("Select balloon box..."),rX,rY,rX1,rY1);
+               
+               if(!iCancel) 
+                  DrawRect_EMAP(EMap,rX,rY,rX1,rY1);
+            }
+            
+
+            // --- Reset everything ---
+            
+            Map = Lock_EMAP(EMap);
+            View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+            SetIPJ_MVIEW(View, ViewIPJ);
+            SetUserIPJ_MVIEW(View, UserIPJ);
+            Destroy_MVIEW(View);
+            UnLock_EMAP(EMap);
+            
+            
+            // --- Can safely cancel now ---
+            
+            if(iCancel) Cancel_SYS();
+            
+            if (rX != rDX)
+               rSX = rX-rDX;
+            else   
+               rSX = rX1-rDX;
+               
+            if (rY != rDY)
+               rSY = rY-rDY;
+            else   
+               rSY = rY1-rDY;
+
+            SetReal_SYS("BALLOON","X",rDX);
+            SetReal_SYS("BALLOON","Y",rDY);
+            SetReal_SYS("BALLOON","SX",rSX);
+            SetReal_SYS("BALLOON","SY",rSY);
+            SetInfoSYS_DGW(Diag,_BALLOON_3,DGW_TEXT,"BALLOON","X");
+            SetInfoSYS_DGW(Diag,_BALLOON_4,DGW_TEXT,"BALLOON","Y");
+            SetInfoSYS_DGW(Diag,_BALLOON_5,DGW_TEXT,"BALLOON","SX");
+            SetInfoSYS_DGW(Diag,_BALLOON_6,DGW_TEXT,"BALLOON","SY");
+         }      
+      }    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_BALLOON_0 ,DGW_TEXT,     "BALLOON","TEXT");
+      GetInfoSYS_DGW(Diag,_BALLOON_1 ,DGW_TEXT,     "BALLOON","AX");
+      GetInfoSYS_DGW(Diag,_BALLOON_2 ,DGW_TEXT,     "BALLOON","AY");
+      GetInfoSYS_DGW(Diag,_BALLOON_3 ,DGW_TEXT,     "BALLOON","X");
+      GetInfoSYS_DGW(Diag,_BALLOON_4 ,DGW_TEXT,     "BALLOON","Y");
+      GetInfoSYS_DGW(Diag,_BALLOON_5 ,DGW_TEXT,     "BALLOON","SX");
+      GetInfoSYS_DGW(Diag,_BALLOON_6 ,DGW_TEXT,     "BALLOON","SY");
+      GetInfoSYS_DGW(Diag,_BALLOON_7 ,DGW_LISTALIAS,"BALLOON","FONT");     
+      GetInfoSYS_DGW(Diag,_BALLOON_8, DGW_LISTALIAS,"BALLOON","JUSTIFY");     
+      GetInfoSYS_DGW(Diag,_BALLOON_9, DGW_TEXT,     "BALLOON","ARROWSIZE");     
+      GetInfoSYS_DGW(Diag,_BALLOON_10,DGW_TEXT,     "BALLOON","ARROWTHICK");     
+      GetInfoSYS_DGW(Diag,_BALLOON_11,DGW_LISTALIAS,"BALLOON","ARROWTYPE");     
+
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("BALLOON","TEXT",sText);
+   GetString_SYS("BALLOON","FONT",sFont);
+   iJust    = iGetInt_SYS("BALLOON","JUSTIFY");     
+   rArrSize = rGetReal_SYS("BALLOON","ARROWSIZE");     
+   rArrThick= rGetReal_SYS("BALLOON","ARROWTHICK");     
+   iArrType = iGetInt_SYS("BALLOON","ARROWTYPE");     
+   rX       = rGetReal_SYS("BALLOON","X");     
+   rY       = rGetReal_SYS("BALLOON","Y");
+   rSX      = rGetReal_SYS("BALLOON","SX");     
+   rSY      = rGetReal_SYS("BALLOON","SY");
+   rAX      = rGetReal_SYS("BALLOON","AX");     
+   rAY      = rGetReal_SYS("BALLOON","AY");
+
+   // --- Validate Parameters ---
+
+   if(iJust<0 || iJust>2)
+      Abort_SYS(_("Invalid Justification: must be in range 0-2."));
+
+   if(rArrSize<0.0)
+      Abort_SYS(_("Invalid Arrow size: must be >=0."));
+
+   if(rArrThick<0.0)
+      Abort_SYS(_("Invalid Arrow thickness: must be >=0."));
+
+   if(iArrType<0 || iArrType>1)
+      Abort_SYS(_("Invalid Arrow Type: must be in range 0-1."));
+   
+   if(rAX==rDUMMY || rAY==rDUMMY)
+      Abort_SYS(_("Arrow location must be defined."));
+        
+   if(rX==rDUMMY || rY==rDUMMY)
+      Abort_SYS(_("Balloon corner location must be defined."));
+
+   if(rSX==rDUMMY || rSY==rDUMMY)
+      Abort_SYS(_("Balloon width and height must be defined."));
+
+   if(rSX==0.0 || rSY==0.0)
+      Abort_SYS(_("Balloon width and height must not be 0.0."));
+      
+
+   // --- open the data view ---
+
+   Map  = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+
+   // --- scale parameters ---
+
+   rScaleMM = rScaleMM_MVIEW(View);
+   rScaleYMM = rScaleYMM_MVIEW(View);
+
+
+   // --- start a group ---
+   
+   Strcpy_STR(sGroup,"");
+   GetString_SYS("BALLOON","GROUPNAME",sGroup);
+   if (iStrlen_STR(sGroup)==0)
+   {
+       i = 1;
+       do {
+         FormatI_STR(i,sI,10);
+         Printf_STR(sGroup, sizeof(sGroup), _n("Balloon%s"), sI);
+         i++;
+       } while (iExistGroup_MVIEW(View,sGroup));
+   }
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   SetString_SYS("BALLOON","GROUPNAME",sGroup);
+
+
+   // --- add maker ---
+
+   Maker_MVIEW(View,1,1,"BALLOON",MAKER_GX,_("Text Balloon..."),"BALLOON;");
+   SetString_SYS("BALLOON","GROUPNAME","");
+
+
+   // --- set parameters ---
+
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextAngle_MVIEW(View,0.0);
+   TextSize_MVIEW(View,10.0*rScaleMM);
+   LineThick_MVIEW(View,rArrThick*rScaleMM);
+   
+   
+   if (iArrType)
+   {
+     iArrFlags = MVU_ARROW_FIXED + MVU_ARROW_SOLID;
+     rArrAngle = 15.0;
+   } else {
+     iArrFlags = MVU_ARROW_FIXED;
+     rArrAngle = 10.0;
+   }  
+     
+   FillColor_MVIEW(View,iColor_MVIEW("K"));
+   Arrow_MVU(View,rAX,rAY,rX,rY,rArrSize*rScaleMM,rArrAngle,iArrFlags);
+   
+   rX1 = rX;
+   rY1 = rY;
+   rX2 = rX+rSX;
+   rY2 = rY+rSY;
+   if (rSX < 0.0) {
+      rX1 = rX+rSX;
+      rX2 = rX;
+   }
+   if (rSY < 0.0) {
+      rY1 = rY+rSY;
+      rY2 = rY;
+   }
+   
+   
+   // --- Define coordinates in the unwarped, non-oriented view ---            
+
+   SetIPJ_MVIEW(View, ViewIPJ2);
+   SetUserIPJ_MVIEW(View, ViewIPJ2);
+   
+   
+   // --- Plot the text box ---
+      
+   TextBox_MVU(View,rX1,rY1,rX2,rY2,sText,1.5,iJust);
+
+
+   // --- Reset the projections ---
+   
+   SetIPJ_MVIEW(View, ViewIPJ);
+   SetUserIPJ_MVIEW(View, UserIPJ);
+
+   
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   Destroy_IPJ(ViewIPJ);
+   Destroy_IPJ(ViewIPJ2);
+   Destroy_IPJ(UserIPJ);
+   UnLock_EMAP(EMap);
+   
+}

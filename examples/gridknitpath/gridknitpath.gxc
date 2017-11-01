@@ -1,0 +1,147 @@
+//===========================================================================
+
+NAME          = "Plot the suture path"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Grid Knitting"
+
+DESCRIPTION   = "
+
+         GRIDKNITPATH.FILE                 Name of suture file.
+         GRIDKNITPATH.COLOR
+         GRIDKNITPATH.THICKNESS
+"
+// Revision History:
+// v5.1.5  Replace erroneous GRIDKNITPATH.FILE parameter with GRIDKNITPATH.FILE
+//===========================================================================
+
+RESOURCE = "gridknitpath.gr"
+#include "gridknitpath.grh"
+
+//===========================================================================
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sLineColor;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+VV    VVx, VVy;
+BF    Bf;
+
+int   i;
+real  rScale;
+real  rThickness;
+string(GS_MAX_PATH) sFile;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDKNITPATH");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDKNITPATH_0,DGW_FILEPATH,"GRIDKNITPATH","FILE");     
+      SetInfoSYS_DGW(Diag,_GRIDKNITPATH_1,DGW_TEXT,"GRIDKNITPATH","COLOR");
+      SetInfoSYS_DGW(Diag,_GRIDKNITPATH_2,DGW_TEXT,"GRIDKNITPATH","THICKNESS");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDKNITPATH_0,DGW_FILEPATH,"GRIDKNITPATH","FILE");     
+      GetInfoSYS_DGW(Diag,_GRIDKNITPATH_1,DGW_TEXT,"GRIDKNITPATH","COLOR");
+      GetInfoSYS_DGW(Diag,_GRIDKNITPATH_2,DGW_TEXT,"GRIDKNITPATH","THICKNESS");
+
+      Destroy_DGW(Diag);
+      
+   }      
+         
+   // --- get database and map ---
+   
+   EMap   = Current_EMAP();
+   Map    = Lock_EMAP(EMap);   
+
+   GetString_SYS("GRIDKNITPATH","FILE",sFile); 
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("No TIN file specified"));   
+
+   rThickness = rGetReal_SYS("GRIDKNITPATH","THICKNESS");
+   if(rThickness==rDUMMY) rThickness = 0.1;
+
+   GetString_SYS("GRIDKNITPATH","COLOR",sLineColor); 
+   if(!iStrlen_STR(sLineColor))
+      Abort_SYS(_("No line color specified"));   
+
+   // --- Create the VVs ---
+
+   Bf = Create_BF(sFile, BF_READ);
+   VVx = CreateS_VV(Bf);
+   VVy = CreateS_VV(Bf);
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+   Progress_SYS(1);
+
+   // --- create path group ---
+
+   StartGroup_MVIEW(View,"Suture_Path",MVIEW_GROUP_NEW);
+
+   // --- set plotting parameters ---
+
+   SetThinRes_MVIEW(View,0.02);
+   rScale = rScaleMM_MVIEW(View);
+
+   // --- set line characteristics ---
+
+   LineColor_MVIEW(View,iColor_MVIEW(sLineColor));
+   LineThick_MVIEW(View,rThickness*rScale);
+   LineStyle_MVIEW(View,0,0.0);
+
+   // --- Draw the suture path
+
+   PolyLineDm_MVIEW(View, VVx, VVy);   
+
+   // --- Add maker object ---
+
+   EasyMaker_MVIEW(View,_("GridKnit Suture Path"),"GRIDKNITPATH");
+
+   // --- done ---
+
+   DestroyEx_BF(Bf);
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   
+}

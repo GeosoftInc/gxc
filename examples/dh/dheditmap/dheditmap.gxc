@@ -1,0 +1,580 @@
+//===========================================================================
+NAME          = "Edit parameters and replot a Target map"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "
+   Edit parameters and replot a Target mapt.
+"
+// Revision History:
+// v7.0.2 Fixed bug editing 3D map.
+// v7.0.1 Added fence sections to allowed plot types.
+// v6.3.0 Unload the map before re-creating it to prevent resource crash.
+// v6.2.0 Display the last created map at the end (new map can have a different
+//        name than the original.)
+// v5.1.7 Added stacked section maps.
+// v5.1.6 Added 3D maps.
+// v5.1.3 Added strip logs.
+//        Now rescale data to selected window.
+//        Using selection box instead of point for plan maps.
+//        Allow for east-facing N-S sections.
+// v5.1.2 New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dheditmap.gr"
+#include "dheditmap.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+// dialogs
+//===========================================================================
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+#define ARAD  57.29577951
+
+DGW      Diag;
+EDB      EData;
+EMAP     EMap;
+MAP      Map;
+DH       Drill;
+REG      MapReg, Reg;
+VV       VVn;
+
+int         iNSec, iMod, iPage, iType, iPlotType, iJust, iStacked;
+real        rX0, rY0, rRefX, rRefY, rWid, rLen, rX, rY, rW, rH, rF1, rF2;
+real        rAng, rAz, rDX, rDY, rSin, rCos;
+real        rX1, rX2, rY1, rY2, rBit, rVal, rScale, rXInt, rYInt, rOldLen;
+string(STR_FILE) sDB, sJob, sJob2, sPlanMap, sMap;
+string(STR_DEFAULT_LONG) sTemp;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- get database and current map ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+   GetString_SYS("DHEDITMAP","MAP",sMap);
+
+   if(iStrlen_STR(sMap) && iFileExist_SYS(sMap))
+      EMap = Load_EMAP(sMap);
+   else {
+      EMap = Current_EMAP();
+      GetName_EMAP(EMap, sMap);
+   }
+   Map = Lock_EMAP(EMap);
+   
+   // Turn on progress 
+
+   Progress_SYS(1);
+
+   // --- get DH handle for current database ---
+   
+   Drill = Create_DH(sDB);
+   
+   
+   // -- Get the map REG and create an INI file ---
+
+   Reg = GetREG_MAP(Map);
+
+   Strcpy_STR(sJob, "_temp.ini");
+   SaveINI_REG(Reg, sJob);
+
+   UnLock_EMAP(EMap);
+
+
+   // --- Get the plot type ---
+
+   GetInt_REG(Reg, "DH.PLOT_TYPE", iPlotType);
+
+
+   // --- Check for stacked section plots ---
+
+   iStacked = 0;
+   GetInt_REG(Reg, "DH.STACKED", iStacked);
+   if(iPlotType == DH_PLOT_SECTION_STACK) {
+      iPlotType = DH_PLOT_SECTION;
+      iStacked = 1;
+   }
+   if(iStacked==iDUMMY) iStacked = 0;
+     
+   if(iPlotType != DH_PLOT_PLAN &&
+      iPlotType != DH_PLOT_SECTION &&
+		iPlotType != DH_PLOT_SECTION_FENCE  &&    
+      iPlotType != DH_PLOT_STRIPLOG &&
+      iPlotType != DH_PLOT_HOLE_TRACES &&
+      iPlotType != DH_PLOT_3D)
+      Abort_SYS(_("The current map is not recognized as a Target plan, section, fence, strip log or 3D plot."));
+
+
+   // Turn off progress 
+
+   Progress_SYS(0);
+   
+
+   // --- Are we running interactively ? ---
+
+   iMod = 0;
+   if (iInteractive_SYS()) {
+
+
+      // --- Create a temporary copy of the job ---
+
+      TempFileName_SYS(sJob,sJob2);
+            
+      if (iCopyFile_SYS(sJob, sJob2))
+         Abort_SYS(_("Could not create temporary copy of job"));
+
+      GetInt_REG(Reg, "DH.PAGE", iPage);
+
+
+      do {
+
+         if(iPlotType == DH_PLOT_PLAN)
+            iMod = iModifyPlanGUI_DH(Drill, sJob2, iPage);
+         else if(iPlotType == DH_PLOT_SECTION) {
+
+            if(iStacked==1)
+               iMod = iModifyStackedSectionGUI_DH(Drill, sJob2, iPage);
+            else
+               iMod = iModifySectionGUI_DH(Drill, sJob2, iPage);
+         }
+         else if(iPlotType == DH_PLOT_SECTION_FENCE)
+            iMod = iModifyFenceGUI_DH(Drill, sJob2, iPage);
+         else if(iPlotType == DH_PLOT_STRIPLOG)
+            iMod = iModifyStripLogGUI_DH(Drill, sJob2, iPage);
+         else if(iPlotType == DH_PLOT_HOLE_TRACES)
+            iMod = iModifyHoleTracesGUI_DH(Drill, sJob2, iPage);
+         else if(iPlotType == DH_PLOT_3D)
+            iMod = iModify3dGUI_DH(Drill, sJob2, iPage);
+
+         if(iMod==-1)
+            break;
+
+
+         // --- Set to return to the same page in the dialogue ---
+
+         if(iPlotType == DH_PLOT_PLAN) {
+            
+            if(iMod==DH_DEFINE_PLAN) {
+
+               // --- Get the current map, check its REG to see if it's a plan map ---
+
+               EMap = Current_EMAP();
+               Map = Lock_EMAP(EMap);
+               MapReg = GetREG_MAP(Map);                   
+               iType = iDUMMY;
+               GetInt_REG(MapReg, "DH_TYPE", iType);              
+               UnLock_EMAP(EMap);
+
+               // --- If the current map is not a plan map, search for a plan map ---
+
+               if(iType!=0) {
+                  
+                  if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sPlanMap)) {
+
+                     // --- No plan maps found, prompt for a new map and try again ---
+
+                     Diag = Create_DGW("DHEDITMAP");
+                     SetInfoSYS_DGW(Diag,_DHEDITMAP_0,DGW_FILEPATH,"DH","PLANMAP");                     
+                     if(iRunDialogue_DGW(Diag)==-1) {
+                        Destroy_DGW(Diag);
+                        break;
+                     }
+                     GetInfoSYS_DGW(Diag,_DHEDITMAP_0,DGW_FILEPATH,"DH","PLANMAP");
+                     Destroy_DGW(Diag);
+
+                     GetString_SYS("DH","PLANMAP",sPlanMap);
+
+                     // --- See if the new map is a plan map; if not, exit the procedure ---
+
+                     EMap = Load_EMAP(sPlanMap);
+   
+                     if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sPlanMap)) {
+                        DisplayMessage_SYS(_("Define Plan"),_("The specified map is not a plan map."));
+                        break;
+                     }
+                  }  
+                  else
+                     EMap = Load_EMAP(sPlanMap);                                                   
+               }
+
+               iSetCurrentView_EMAP(EMap,"Data");
+
+
+               // --- Define the plan ---
+
+               if(!iGetBox_EMAP(EMap,_("Define area for plan map..."),
+                                          rX1,rY1,rX2,rY2)) {
+
+                  if(rX1==rX2 || rY1==rY2) {
+                     DisplayMessage_SYS(_("Plan Area Definition"), _("Error in plan area definition - zero area"));
+                  }
+                  else {
+
+                     OpenJob_DH(Drill, sJob2, DH_PLOT_PLAN);
+            
+                     iJust = iGetInt_SYS("DH","PJUSTIFY");
+                     if(iJust/3==0)
+                        rY = rY1;
+                     else if(iJust/3==1)
+                        rY = 0.5*(rY1+rY2);
+                     else
+                        rY = rY2;
+
+                     if(iJust%3==0)
+                        rX = rX1;
+                     else if(iJust%3==1)
+                        rX = 0.5*(rX1+rX2);
+                     else
+                        rX = rX2;
+
+                     // --- Round to nearest integer ---
+
+                     rX = rFloor_MATH(rX + 0.5);
+                     rY = rFloor_MATH(rY + 0.5);
+
+                     SetReal_SYS("DH","EAST",rX);
+                     SetReal_SYS("DH","NORTH",rY);
+
+
+                     // --- Adjust scale based on selected area ---
+
+                     rW = rGetReal_SYS("DH", "PLANWIDTH");
+                     rH = rGetReal_SYS("DH", "PLANHEIGHT");
+                     rScale = rGetReal_SYS("DH","SCALE");
+
+                     if(rScale !=rDUMMY && rH!=rDUMMY && rW!=rDUMMY) {
+
+   
+                        // --- Since the user-selected rectangle will not normally have the
+                        //     same aspect ratio as the final map, select the adjustment that
+                        //     will yield the largest scale, so the user is guaranteed to have
+                        //     everything in the selection box. ---
+
+                        rF1 = (rX2-rX1)/rW;
+                        rF2 = (rY2-rY1)/rH;
+
+                        if(rF1<rF2)
+                           rScale *= rF2;
+                        else
+                           rScale *= rF1;
+
+                        rScale = rRound_MATH(rScale, 3);     // Round to a nice value
+                        SetReal_SYS("DH","SCALE",rScale);                  
+                  
+                     }
+
+
+                     // --- Save the parameters ---
+
+                     SaveJob_DH(Drill, sJob2, DH_PLOT_PLAN);
+
+                  }  // end of valid area selected
+               }  // end of interactive plan area definition
+            }  // end if(iMod==DH_DEFINE_PLAN)
+         }  // end if(iPlotType == DH_PLOT_PLAN)
+
+         else if(iPlotType == DH_PLOT_SECTION) {
+         
+
+               // --- Handle user-defined section ---
+
+            if(iMod==DH_DEFINE_SECT_EW || 
+               iMod==DH_DEFINE_SECT_NS || 
+               iMod==DH_DEFINE_SECT_ANGLED) {
+
+               // --- Get the current map, check its REG to see if it's a plan map ---
+
+               EMap = Current_EMAP();
+               Map = Lock_EMAP(EMap);
+               MapReg = GetREG_MAP(Map);                   
+               iType = iDUMMY;
+               GetInt_REG(MapReg, "DH_TYPE", iType);              
+               UnLock_EMAP(EMap);
+
+               // --- If the current map is not a plan map, search for a plan map ---
+
+               if(iType!=0) {
+                  
+                  if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sPlanMap)) {
+   
+                     // --- No plan maps found, prompt for a new map and try again ---
+
+                     Diag = Create_DGW("DHEDITMAP");
+                     SetInfoSYS_DGW(Diag,_DHEDITMAP_0,DGW_FILEPATH,"DH","PLANMAP");                     
+                     if(iRunDialogue_DGW(Diag)==-1) {
+                        Destroy_DGW(Diag);
+                        break;
+                     }
+                     GetInfoSYS_DGW(Diag,_DHEDITMAP_0,DGW_FILEPATH,"DH","PLANMAP");
+                     Destroy_DGW(Diag);
+
+                     GetString_SYS("DH","PLANMAP",sPlanMap);
+
+                     // --- See if the new map is a plan map; if not, exit the procedure ---
+
+                     EMap = Load_EMAP(sPlanMap);
+
+                     if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sPlanMap)) {
+                        DisplayMessage_SYS(_("Define Section"),_("The specified map is not a plan map."));
+                        break;
+                     }
+                  }  
+                  else
+                     EMap = Load_EMAP(sPlanMap);                                                   
+               }
+
+               iSetCurrentView_EMAP(EMap,"data");
+
+               if(iMod==DH_DEFINE_SECT_NS) {  // Vertical
+                  rAng = 90.0;    // Input using normal coord system
+               }
+               else if(iMod==DH_DEFINE_SECT_EW) { // Horizontal
+                  rAng = 0.0;
+               }
+               else {
+                  rAng = rDUMMY;    // User set.
+               }
+
+
+               // --- Load current settings ---
+
+               OpenJob_DH(Drill, sJob2, iPlotType);
+
+
+               // --- Get the current number of sections ---
+
+               iNSec = iGetInt_SYS("DH","NSEC");
+
+
+               // --- Define the sections ---
+
+               if(iGetGrid_EMAP(EMap,_("Click on section ends..."),
+                                      1,iNSec,rAng,rX0,rY0,rDX,rDY)) {
+                  break;      
+               }
+
+               rAz = 90.0 - rAng;    // Convert back to DH coords.
+                  
+
+               // --- Get thickness and length of one slice ---
+
+               rWid = rDY / (real)iNSec;
+               rLen = rDX;
+
+
+               // --- Convert corner to "true" center reference point ---
+               //     Flip definition for vertical azimuth so that sections increase
+               //     to the right ---
+
+               if(rAz==0.0) {       // to center of slice, front edge
+                  rRefX = rX0 - rDY + 0.5*rWid;
+                  rRefY = rY0 + 0.5*rLen;
+                  rXInt = rWid;
+                  rYInt = 0.0;
+
+                  // --- Set N-S azimuth for east-facing sections ---
+
+                  if (iGlobal_SYS("WHOLEPLOT.EASTWEST",sTemp) == 0) {
+                     if(iCharComp_STR(sTemp, "0")) rAz = 180.0;
+                  }
+
+               }
+               else if(rAz==90.0) {
+                  rRefX = rX0 + 0.5*rLen;
+                  rRefY = rY0 + 0.5*rWid;
+                  rXInt = 0.0;
+                  rYInt = rWid;
+               }
+               else {
+
+                  rSin = rSin_MATH(rAz/ARAD);
+                  rCos = rCos_MATH(rAz/ARAD);
+
+                  // --- iGrid_EMAP returns angles, measured ccw from horizontal X. We always want a reference point
+                  //     such that for multiple sections, either X or Y is always increasing, (selecting the one
+                  //     that changes fastest. Since the angles returned by iGrid_EMAP are always in the range 
+                  //     -90 < angle <= 90, then the azimuths are in the range 180 > azimuth >= 0.
+
+                  // --- Reverse azimuth and reference point for azimuth angles less than 45 degrees
+
+                  if(rAz < 45.0) {
+
+                     // --- Switch to the opposite corner, reverse the angle, then make the same calculation ---
+
+                     rX0 += rDX*rSin - rDY*rCos;
+                     rY0 += rDX*rCos + rDY*rSin;
+   
+                     rSin = rSin_MATH((rAz+180.0)/ARAD);
+                     rCos = rCos_MATH((rAz+180.0)/ARAD);
+
+                  }
+               
+                  rRefX = rX0 + 0.5*rLen*rSin - 0.5*rWid*rCos;
+                  rRefY = rY0 + 0.5*rLen*rCos + 0.5*rWid*rSin; 
+               
+                  rXInt = -rCos*rWid;
+                  rYInt =  rSin*rWid;
+               }
+
+
+               // --- Get nice numbers by rounding, but make sure the rounding error doesn't move the section
+               //     off the holes! ---
+
+               rBit = 0.01*rWid;
+               rWid = rRound_MATH(rWid+rBit, 3);   // add a little to the width
+
+               rVal = rRound_MATH(rRefX, 4);
+               if(rAbs_MATH(rRefX - rVal) >= 0.5*rBit) 
+                  rVal = rRound_MATH(rRefX, 5);
+               if(rAbs_MATH(rRefX - rVal) >= 0.5*rBit) 
+                  rVal = rRound_MATH(rRefX, 6);
+               rRefX = rVal;
+
+               rVal = rRound_MATH(rRefY, 4);
+               if(rAbs_MATH(rRefY - rVal) >= 0.5*rBit) 
+                  rVal = rRound_MATH(rRefY, 5);
+               if(rAbs_MATH(rRefY - rVal) >= 0.5*rBit) 
+                  rVal = rRound_MATH(rRefY, 6);
+               rRefY = rVal;
+
+               rAz = rRound_MATH(rAz, 2);
+               rXInt = rRound_MATH(rXInt, 3);
+               rYInt = rRound_MATH(rYInt, 3);
+
+               SetReal_SYS("DH","EAST",rRefX);
+               SetReal_SYS("DH","NORTH",rRefY);
+
+               SetReal_SYS("DH","AZIMUTH",rAz);                                   
+               SetReal_SYS("DH","TOLERANCE",0.5*rWid);
+
+               SetReal_SYS("DH","EINT",rXInt);
+               SetReal_SYS("DH","NINT",rYInt);
+
+
+               // --- Adjust the scale for the new section length ---
+
+               rScale = rGetReal_SYS("DH","SCALE");
+               rOldLen = rGetReal_SYS("DH","SECLENGTH");
+
+
+               if(rScale!=rDUMMY && rOldLen!=rDUMMY && rLen>0.0) {
+                  rScale *= rLen/rOldLen;
+                  rScale = rRound_MATH(rScale, 3);
+                  SetReal_SYS("DH","SCALE",rScale);
+                  SetReal_SYS("DH","SECLENGTH",rLen);
+               }
+
+
+               // --- Save the parameters ---
+
+               SaveJob_DH(Drill, sJob2, DH_PLOT_SECTION);
+
+            }
+
+         }  // --- End of interactive SECTION definition
+
+      } while(iMod != 0);     // - Modify data dialog
+
+            
+      // --- Save the modified data ---
+
+      if(iMod!=-1) {
+
+         if (iCopyFile_SYS(sJob2, sJob))
+            Abort_SYS(_("Could not restore from temporary copy of job"));   
+      }            
+
+      if(iFileExist_SYS(sJob2))
+         iDeleteFile_SYS(sJob2);
+
+      if(iMod == -1) Cancel_SYS();
+   }
+
+   
+
+   // --- Plot the sections ---
+
+   Progress_SYS(1);
+
+   if(iPlotType==DH_PLOT_HOLE_TRACES) {
+
+      Map = Lock_EMAP(EMap);
+      PlotHoleTraces_DH(Drill, Map, sJob);
+      UnLock_EMAP(EMap);
+   }
+   else {
+      
+      
+      // --- Unload the map before beginning ---
+      
+      UnLoad_EMAP(sMap);
+      
+      if(iStacked)
+         Wholeplot_DH(Drill,sJob,DH_PLOT_SECTION_STACK);
+      else
+         Wholeplot_DH(Drill,sJob,iPlotType);
+
+
+      // --- Save the job as the default ---
+
+      if(iPlotType==DH_PLOT_PLAN) 
+      {
+         if (iCopyFile_SYS(sJob, "_plan.inp"))
+            Abort_SYS(_("Could not copy job to _plan.inp"));
+      } else if(iPlotType==DH_PLOT_SECTION) 
+      {
+         if (iCopyFile_SYS(sJob, "_section.ins"))
+            Abort_SYS(_("Could not copy job to _section.ins"));
+      } else if(iPlotType==DH_PLOT_STRIPLOG) 
+      {
+         if (iCopyFile_SYS(sJob, "_striplog.inl"))
+            Abort_SYS(_("Could not copy job to _striplog.inl"));
+      } else if(iPlotType==DH_PLOT_3D) 
+      {
+         if (iCopyFile_SYS(sJob, "_3D.in3"))
+            Abort_SYS(_("Could not copy job to _3D.in3"));
+      }
+   }          
+
+   Progress_SYS(0);
+
+
+   // --- Get the name of the map created ---
+   
+   VVn = Create_VV(-STR_FILE, 0);
+   GetMapNamesVV_DH(Drill, VVn);
+   if(iLength_VV(VVn)>0) {
+      GetString_VV(VVn, iLength_VV(VVn)-1, sMap);
+   }
+
+
+   // --- Clean up ---
+
+   Destroy_DH(Drill);
+   Destroy_VV(VVn);
+
+
+   // --- Bring the current map to the front ---
+
+   EMap = Load_EMAP(sMap);
+   MakeCurrent_EMAP(EMap);
+   
+}
+

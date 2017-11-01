@@ -1,0 +1,89 @@
+//===========================================================================
+NAME          = "Set a projection on current X and Y"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport"
+
+DESCRIPTION   = "
+   If the option is set in the Oasis montaj settings, and...
+   if a current X and Y channel exists, and...
+   if no projection is already set...
+   Calls the SETIPJCH GX to set the projection.
+
+"
+// Revision History:
+// v5.1.3: GX Created.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+IPJ         Ipj;
+DB_SYMB     XCh, YCh;
+
+string(STR_DB_SYMBOL) sXCh, sYCh;
+string(STR_DEFAULT_SHORT) sTemp;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Set projection if not set already? ---
+
+   if (iGlobal_SYS("MONTAJ.NEW_GDB_PROJECTION",sTemp) == 0) {
+
+      if(iStrcmp_STR(sTemp, _n("Yes"), STR_CASE_TOLERANT)==0) {
+
+
+         // --- Get and lock the current database ---
+
+         EData = Current_EDB();
+         Data = Lock_EDB(EData);
+         
+
+         // --- Must be a current X and Y ---
+
+         GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+         GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+         XCh = FindChan_DB(Data, sXCh);
+         YCh = FindChan_DB(Data, sYCh);
+
+         if(XCh!=NULLSYMB && YCh!=NULLSYMB) {
+
+            // --- Set only if no projection exists ---
+
+            Ipj = Create_IPJ();
+            GetIPJ_DB(Data, XCh, Ipj);
+
+            if(iSourceType_IPJ(Ipj) == IPJ_TYPE_NONE) {
+
+
+               // --- set channel names and run setchprj gx ---
+   
+               SetString_SYS("SETCHPRJ","X",sXCh);
+               SetString_SYS("SETCHPRJ","Y",sYCh);
+
+               UnLock_EDB(EData);
+               if(iRunGX_SYS("setchprj")) Cancel_SYS();
+               Data = Lock_EDB(EData);
+            }
+         }
+         UnLock_EDB(EData);
+      }
+   }
+}

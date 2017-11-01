@@ -1,0 +1,136 @@
+//===========================================================================
+NAME          = "CHIMERA: Filter detection limits in ASSAY data"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "Filter detection limits from ASSAY data"
+
+// Revision History:
+// v5.1.3: Modified behaviour of autoconvert negatives.
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sClass;
+string(STR_DB_SYMBOL) sChan;
+string(STR_DEFAULT_LONG) sMessage;
+
+EDB   EData;
+DB    Data;
+
+DB_SYMB Ch,Line;
+VV    ChVV,DataVV;
+REG   hREG;
+ST    hST;
+
+int i,iChan,iConv;
+real rDetLimit;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   
+   // --- create a objects ---
+   
+   DataVV = Create_VV(REAL,0);
+   ChVV = Create_VV(INT,0);
+   hREG = Create_REG(128);
+   hST = Create_ST();
+   
+   
+   // --- get list of channel symbols and lock them ---
+   
+   iChan = iSymbList_DB(Data,ChVV,DB_SYMB_CHAN);
+   
+   
+   // --- Set negative handling behaviour ---
+
+   iConv = iGetInt_SYS("CHDETFLT","CONVNEG");      // Set negative conversion
+   if(iConv!=1) iConv = 0;    // don't convert negatives by default
+
+
+   // --- go through every channel ---
+   
+   Progress_SYS(1);
+   for (i=0;i<iChan;i++) {
+   
+   
+      // --- get and lock channel ---
+      
+      Ch = (DB_SYMB)iGetInt_VV(ChVV,i);
+      LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);      
+      
+      
+      // --- report progress ---
+   
+      Strcpy_STR(sMessage,_("Filter detection limit: "));
+      GetChanName_DB(Data,Ch,sChan);
+      Strcat_STR(sMessage,sChan);
+      ProgName_SYS(sMessage,0);
+      ProgUpdateL_SYS(i,iChan);
+      
+   
+      // --- get the channel reg ---
+      
+      GetRegSymb_DB(Data,Ch,hREG);
+      
+   
+      // --- if this is an ASSAY channel process ---
+      
+      Get_REG(hREG,"CLASS",sClass,sizeof(sClass));
+      if (iStrcmp_STR(sClass,"ASSAY",STR_CASE_TOLERANT) == 0) {
+      
+      
+         // --- See if a detection limit is set ---
+
+         GetReal_REG(hREG, "DETECTLIMIT",rDetLimit);
+
+         
+         // --- filter the detection limit, convert negatives.
+         //     (dummy values of rDetLimit are ignored) ---
+         
+         if(iConv || rDetLimit != rDUMMY) {
+         
+            Line=FirstSelLine_DB(Data);
+            while (iIsLineValid_DB(Data,Line)) {
+               GetChanVV_DB(Data,Line,Ch,DataVV);
+               ClipToDetectLimit_CHIMERA(DataVV,rDetLimit,iConv);
+               PutChanVV_DB(Data,Line,Ch,DataVV);
+               Line=NextSelLine_DB(Data,Line);
+            }
+         }         
+      }         
+
+      // --- unlock symbol ---
+      
+      UnLockSymb_DB(Data,Ch);      
+      
+   }
+
+   // --- destroy objects ---
+   
+   UnLock_EDB(EData);   
+   Destroy_SYS(DataVV);      
+   Destroy_SYS(ChVV);      
+   Destroy_SYS(hREG);
+   Destroy_SYS(hST);
+   
+   Progress_SYS(0);
+   
+}

@@ -1,0 +1,154 @@
+//===========================================================================
+NAME          = "Drill Hole - Export data to a Microsoft Access database (MDB)."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Export"
+
+DESCRIPTION   = "
+
+   Export a Drill Hole project to a Microsoft Access database file (MDB).  
+	
+   DHEXPDB.FILE      MDB file name, .mdb assumed.
+          .SELECTED  SELECTED, ALL or LIST
+          .LIST      CSV separated hole list, used with
+                     the \"LIST\" option of DHEXPDB.SELECTED 
+"
+// Revision History:
+// v6.3.1: Delete existing database (like it says it will).
+// v6.0.0: Made huge hole list string buffer.
+// v5.1.8: Updated hole selection.
+// v5.1.3: Fixed selection behaviour.
+//===========================================================================
+
+RESOURCE = "dhexpdb.gr"
+#include "dhexpdb.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sSelected;
+string(STR_FILE) sDB, sFile;
+string(STR_DH_HOLES) sHoles;
+
+int         i;
+
+EDB         EData;         // database handle
+DH          Drill;
+DGW         Diag;          // dialogue box
+LST         HoleLST;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DHEXPDB");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DHEXPDB_0,DGW_FILEPATH,"DHEXPDB","FILE");     
+      SetInfoSYS_DGW(Diag,_DHEXPDB_1,DGW_LISTALIAS,"DHEXPDB","SELECTED");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DHEXPDB_0,DGW_FILEPATH,"DHEXPDB","FILE");     
+      GetInfoSYS_DGW(Diag,_DHEXPDB_1,DGW_LISTALIAS,"DHEXPDB","SELECTED");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("DHEXPDB","FILE",sFile);
+   AbsoluteFileName_SYS(sFile, sFile);
+
+   GetString_SYS("DHEXPDB","SELECTED",sSelected);
+   
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("DHHOLELST","DATA",sSelected);
+   SetString_SYS("DHHOLELST","GX","DHEXPDB");
+   
+   if(iRunGX_SYS("DHHOLELST.GX")) Cancel_SYS();
+
+   GetString_SYS("DHHOLELST","HOLES", sHoles);
+   
+
+   // --- Get current database and open Drill project ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+
+   
+   // --- create LSTs to hold hole lists ---
+   
+   HoleLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   
+   // --- Get all the holes ---
+
+   HoleLST2_DH(Drill, HoleLST);
+
+
+   // --- Retrieve available selected holes ---
+
+   SelectCSVStringItems_LST(HoleLST, sHoles, HoleLST);
+
+   if(iSize_LST(HoleLST)==0)
+      Abort_SYS(_("No holes have been selected for export."));
+
+
+   // --- Delete existing file ---
+   
+   if(iFileExist_SYS(sFile))
+   {
+      if(iDeleteFile_SYS(sFile)==1)
+         Abort_SYS(_("Unable to delete the existing database file."));
+   }
+   
+   
+   // --- export data ---
+
+   Progress_SYS(1);
+
+   ExportLST_DH(Drill, HoleLST, sFile, DH_EXP_ACCESS);
+  
+   Destroy_DH(Drill);
+
+
+   // --- Put the current database back on top ---
+
+   MakeCurrent_EDB(EData);
+   
+   Progress_SYS(0);
+
+   Destroy_LST(HoleLST);
+}

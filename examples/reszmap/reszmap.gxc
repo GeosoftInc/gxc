@@ -1,0 +1,268 @@
+//===========================================================================
+NAME          = "Resize a map to enclose full extent of all views."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+   Resize a map to the extent of all objects currently in the data view.
+   
+   RESZMAP.MARGIN    the minimum margin (in mm) to add the extents.
+          .REDRAW    \"Yes\" or \"No\" to redraw the base map.
+          .CHILD     1 run as a child without a dialog
+"
+// Revision History
+// v6.4.1: Added error message if this GX is called interactively and
+//         the current map is not set.
+//===========================================================================
+
+RESOURCE = "reszmap.gr"
+#include "reszmap.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+MVIEW DataView;
+MVIEW BaseView;
+DGW   Diag;
+LST   hLST;
+
+string(2) sYN, sAliasFlag;
+string(STR_VIEW)  sView;
+string(STR_GROUP) sGroup;
+real  rMargin;
+real  rDCx0,rDCy0,rDCx1,rDCy1;   // data clip extents
+real  rDDx0,rDDy0,rDDx1,rDDy1;   // data drawing extent
+real  rBCx0,rBCy0,rBCx1,rBCy1;   // base clip extent
+real  rBDx0,rBDy0,rBDx1,rBDy1;   // base drawing extent
+real  rMb,rMr,rMt,rMl;           // map margins
+real  rXmin,rYmin,rXmax,rYmax;    // map limits
+int   iRedraw,i,iGroups;
+
+
+//===========================================================================
+
+{
+
+   // --- open the map ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS() && (iGetInt_SYS("RESZMAP","CHILD") != 1)) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("RESZMAP");
+      
+      SetInfoSYS_DGW(Diag,_RESZMAP_0,DGW_TEXT,"RESZMAP","MARGIN");
+      if (iExistView_MAP(Map,"*Base"))
+         SetInfo_DGW(Diag,_RESZMAP_1,DGW_TEXT,_("Yes"));     
+      else   
+         SetInfo_DGW(Diag,_RESZMAP_1,DGW_TEXT,_("No"));     
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_RESZMAP_0,DGW_TEXT,"RESZMAP","MARGIN");
+      GetInfoSYS_DGW(Diag,_RESZMAP_1,DGW_TEXT,"RESZMAP","REDRAW");     
+
+      GetInfo_DGW(Diag,_RESZMAP_1,DGW_LISTALIAS,sAliasFlag);
+   }
+   SetString_SYS("RESZMAP","CHILD","0");
+   
+   
+   // --- get parameters ---
+   
+   if (iExistReal_SYS("RESZMAP","MARGIN"))
+      rMargin = rGetReal_SYS("RESZMAP","MARGIN") * 100.0;
+   else   
+      rMargin = 0.0;
+   
+   iRedraw = FALSE;
+   if (iExistString_SYS("RESZMAP","REDRAW")) {
+      GetString_SYS("RESZMAP","REDRAW",sYN);
+      
+      if (iStrcmp_STR(sYN,_("Yes"),STR_CASE_TOLERANT) == 0 || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))
+         iRedraw = TRUE;
+   }
+   
+   
+   // --- get data view clip extents ---
+   
+   DataView = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+                
+   if (iExistView_MAP(Map,"*Base")) {
+   
+      BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+      
+      
+      // --- get data clip extents ---
+      
+      rDCx0 = rDCy0 = rDCx1 = rDCy1 = 0.0;
+      Extent_MVIEW(DataView,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_PLOT,
+                   rDCx0,rDCy0,rDCx1,rDCy1);
+                   
+                
+      // --- get data drawing extents, all groups but "Coordinates" ---
+      
+      rDDx0 = rMAX;                   
+      rDDy0 = rMAX;                   
+      rDDx1 = rMIN;                   
+      rDDy1 = rMIN;                   
+      rBCx0 = rBCy0 = rBCx1 = rBCy1 = 0.0;
+      hLST = Create_LST(STR_GROUP+8);
+      iGroups = iListGroups_MVIEW(DataView,hLST,MVIEW_GROUP_LIST_ALL);
+      for (i=0;i<iGroups;i++) {
+         GetItem_LST(hLST,0,i,sGroup);
+         if (iStrcmp_STR(sGroup,_n("Coordinates"),STR_CASE_TOLERANT) != 0) {
+            GetGroupExtent_MVIEW(DataView,sGroup,
+                         rBCx0,rBCy0,rBCx1,rBCy1,MVIEW_UNIT_PLOT);
+            if (rBCx0 < rDDx0) rDDx0 = rBCx0;                         
+            if (rBCy0 < rDDy0) rDDy0 = rBCy0;                         
+            if (rBCx1 > rDDx1) rDDx1 = rBCx1;                         
+            if (rBCy1 > rDDy1) rDDy1 = rBCy1;                         
+         }
+      }
+      Destroy_LST(hLST);
+      
+      
+      // --- use clip limits if groups not there or invalid ---
+      
+      if (rDDx0 > rDDx1) {
+         rDDx0 = rDCx0;
+         rDDx1 = rDCx1;
+      }
+      if (rDDy0 > rDDy1) {
+         rDDy0 = rDCy0;
+         rDDy1 = rDCy1;
+      }
+      
+                   
+      // --- get base view clip extents ---
+      
+      Extent_MVIEW(BaseView,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_PLOT,
+                   rBCx0,rBCy0,rBCx1,rBCy1);
+                   
+                   
+      // --- get base view drawing extents ---
+      
+      rBDx0 = rBDy0 = rBDx1 = rBDy1 = 0.0;
+      Extent_MVIEW(BaseView,MVIEW_EXTENT_ALL,MVIEW_EXTENT_UNIT_PLOT,
+                   rBDx0,rBDy0,rBDx1,rBDy1);
+                   
+                   
+      // --- current map margins from clip extents ---
+         
+      rMl = rDCx0 - rBCx0;  if (rMl < 0.0) rMl = 0.0;
+      rMr = rBCx1 - rDCx1;  if (rMr < 0.0) rMr = 0.0;
+      rMb = rDCy0 - rBCy0;  if (rMb < 0.0) rMb = 0.0;
+      rMt = rBCy1 - rDCy1;  if (rMt < 0.0) rMt = 0.0;
+      
+      
+      // --- adjust data limits for new inside margin ---
+      
+      if (rMargin != 0.0) {
+      
+         rDDx0 -= rMargin;
+         rDDy0 -= rMargin;
+         rDDx1 += rMargin;
+         rDDy1 += rMargin;
+         
+      }
+      
+      
+      // --- expand clip extents to maximum of clip/drawing ---
+      
+      if (rDDx0 < rDCx0) rDCx0 = rDDx0;                   
+      if (rDDy0 < rDCy0) rDCy0 = rDDy0;                   
+      if (rDDx1 > rDCx1) rDCx1 = rDDx1;
+      if (rDDy1 > rDCy1) rDCy1 = rDDy1;
+      
+                   
+      // --- set new data extents clip region ---
+      
+      SetWindow_MVIEW(DataView,rDCx0,rDCy0,rDCx1,rDCy1,MVIEW_UNIT_PLOT);
+
+
+      // --- expand base extents ---
+      
+      if (rBDx0 < rBCx0) rBCx0 = rBDx0;                   
+      if (rBDy0 < rBCy0) rBCy0 = rBDy0;                   
+      if (rBDx1 > rBCx1) rBCx1 = rBDx1;
+      if (rBDy1 > rBCy1) rBCy1 = rBDy1;
+      
+      if (rBCx0 > (rDCx0 - rMl)) rBCx0 = rDCx0 - rMl;                   
+      if (rBCy0 > (rDCy0 - rMb)) rBCy0 = rDCy0 - rMb;
+      if (rBCx1 < (rDCx1 + rMr)) rBCx1 = rDCx1 + rMr;
+      if (rBCy1 < (rDCy1 + rMt)) rBCy1 = rDCy1 + rMt;
+      
+      SetWindow_MVIEW(BaseView,rBCx0,rBCy0,rBCx1,rBCy1,MVIEW_UNIT_PLOT);
+   
+      Destroy_MVIEW(BaseView);
+      
+   } else {
+   
+   
+      // --- reset data view to full extents ---
+      
+      Extent_MVIEW(DataView,MVIEW_EXTENT_ALL,MVIEW_EXTENT_UNIT_PLOT,
+                rDCx0,rDCy0,rDCx1,rDCy1);
+      SetWindow_MVIEW(DataView,rDCx0,rDCy0,rDCx1,rDCy1,MVIEW_UNIT_PLOT);
+   
+                
+   }                
+                
+   
+   // --- close up views ---
+   
+   Destroy_MVIEW(DataView);
+   UnLock_EMAP(EMap);
+   
+   
+   // --- redraw base map ---
+   
+   if (iRedraw) iRunGX_SYS("basemap2");
+   
+   
+   // --- redraw to full view ---
+   if (iInteractive_SYS() == 1)
+      GetCurrentView_EMAP(EMap,sView);
+   else {
+      GetString_SYS("RESZMAP","CURRENTVIEW",sView);      
+      if(iStrlen_STR(sView)==0)
+         Abort_SYS(_("The RESZMAP.CURRENTVIEW parameter must be set when the RESZMAP GX is called non-interactively."));
+   }   
+      
+   Map = Lock_EMAP(EMap);
+   rXmin=rYmin=rXmax=rYmax=0.0;
+   GetMapSize_MAP(Map,rXmin,rYmin,rXmax,rYmax);   
+   
+   // --- convert to current view coordinates ---
+   
+   View = Create_MVIEW(Map,sView,MVIEW_READ);
+   PlotToView_MVIEW(View,rXmin,rYmin); 
+   ViewToUser_MVIEW(View,rXmin,rYmin); 
+   PlotToView_MVIEW(View,rXmax,rYmax); 
+   ViewToUser_MVIEW(View,rXmax,rYmax); 
+   Destroy_MVIEW(View);
+   
+   
+   // --- unlock map and set the new size ---
+   
+   UnLock_EMAP(EMap);
+   if (!iScript_SYS())
+      SetDisplayArea_EMAP(EMap,rXmin,rYmin,rXmax,rYmax);   
+   
+}

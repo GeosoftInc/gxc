@@ -1,0 +1,169 @@
+//===========================================================================
+NAME          = "Decimate a channel"
+#include <version.gxh>
+DESCRIPTION   = "
+   Decimate a channel by removing values.
+
+   DECIMATE.CHANNEL    : Name of channel to decimate
+           .FACTOR     : Decimation factor, must be > 1.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History:
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "decimate.gr"
+#include "decimate.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCh;              // Channel Names
+
+EDB         EData;
+DB          Data;             // Database handle
+DB_SYMB     Ch;               // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+
+int         i;                // Utility 
+int         iN;               // Decimation factor
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("DECIMATEForm");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_DECIMATEFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_DECIMATEFORM_0,DGW_TEXT,"DECIMATE","CHANNEL");     
+     SetInfoSYS_DGW(Diag,_DECIMATEFORM_1,DGW_TEXT,"DECIMATE","FACTOR");    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_DECIMATEFORM_0,DGW_TEXT,"DECIMATE","CHANNEL");    
+     GetInfoSYS_DGW(Diag,_DECIMATEFORM_1,DGW_TEXT,"DECIMATE","FACTOR");    
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DECIMATE","CHANNEL",sCh);
+   iN = iGetInt_SYS("DECIMATE","FACTOR");
+
+   if (!(iN > 1))  Abort_SYS(_("Decimation factor must be > 1."));
+
+   // --- Do the Input Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sCh)) 
+      Abort_SYS(_("GX failed: the Channel does not exist."));
+   Ch = FindChan_DB(Data,sCh);
+
+   // --- Cannot decimate read only channels ---
+
+   if (iGetChanProtect_DB(Data,Ch) == DB_CHAN_PROTECTED) 
+       Abort_SYS(_("GX failed: the Channel is read-only.")); 
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- lock the channels ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel, _("Decimate line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+      // --- decimate ---
+
+      Decimate_DU(Data,Line,Ch,Ch,iN);
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,Ch, _("Decimate"),"DECIMATE");
+
+
+
+   // --- unlock the channels ---
+
+   UnLockSymb_DB(Data,Ch);
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

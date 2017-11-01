@@ -1,0 +1,96 @@
+//===========================================================================
+
+NAME          = "Reset view clip region to current data extents"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+		CLEARMASK.VIEW        name of the view
+"
+
+//===========================================================================
+
+RESOURCE = "CLEARMASK.gr"
+#include "CLEARMASK.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_VIEW) sView;
+
+DGW         Diag;             // Dialogue handle
+EMAP        EMap;
+MAP   		Map;
+MVIEW 		View;
+LST         List;
+
+//===========================================================================
+
+{
+	// --- get current map ---
+
+   EMap  = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+
+      // --- Create the 1st Dialogue ---
+
+      Diag = Create_DGW("CLEARMASK");
+
+      List = GetList_DGW(Diag,_CLEARMASK_0);
+      ViewList_MAP(Map,List);
+      Sort_LST(List,0,0);
+      
+      
+      // --- set default view to the current data view ---
+      
+      GetClassName_MAP(Map,"Data",sView);
+      SetInfo_DGW(Diag,_CLEARMASK_0,DGW_TEXT,sView);
+      
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) < 0) Cancel_SYS();
+
+    
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_CLEARMASK_0,DGW_TEXT,"CLEARMASK","VIEW");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+	}
+
+            
+   // --- Get parameters ---
+
+   GetString_SYS("CLEARMASK","VIEW",sView);
+
+
+	// --- get view and clear ---
+
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+	ClipClear_MVIEW(View);
+
+
+   Destroy_SYS(View);
+   
+   // --- Release the Map ---
+
+   UnLock_EMAP(EMap);
+}

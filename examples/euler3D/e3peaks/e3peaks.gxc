@@ -1,0 +1,669 @@
+//===========================================================================
+NAME          = "Locate potential solutions"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "euler"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Located Euler Decon"
+DESCRIPTION   = "
+
+    Applies a Hanning filter to a grid to reduce the number
+    of low amplitude solutions found when running gridpeak. The
+    X, Y coordinates and the grid value of each peak found are
+    written to a specified line within the current database.
+    The sizes of the windows containing the peaks are then estimated.
+    
+     E3PEAKS.GRID     :  Input grid file
+            .CHAN     :  Channel to save grid peak values to.
+            .PASS     :  Number of passes of Hanning filter. Default is 3.
+            .BLAKELY  :  Blakely test:   'one side', 'two sides', 'three sides'
+                         or 'four sides'. Default is 'four sides'.
+            .CUTOFF   :  Grid amplitude cut-off limit
+
+     EULER3D.SOLDB    :  Output Database (Solution) file name.
+     EULER3D.XYSOLGRP :  Located solutions list. Default is \"Locations\".
+     EULER3D.MARKER_SYMBOL   :  Symbol number
+     EULER3D.MARKER_SIZE     :  Symbol size in mm
+     EULER3D.MARKER_WEIGHT   :  Symbol weight
+     EULER3D.MARKER_LINE_COLOUR  Symbol colour 
+     EULER3D.MARKER_FILL_COLOUR  Fill colour
+
+"
+// Revision History:
+// v7.0.0: Symbol font weight fix-up.
+// v5.1.7: Using "Targets" as group name instead of "XYEuler"
+// v5.1.5: New GX based on UXPARSE.GX and UXPEAKSZ.
+//===========================================================================
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "E3PEAKS.gr"
+#include "E3PEAKS.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+#define GETCHAN(A, B, C, D, E, F)   \
+   A = FindChan_DB(Data, B);        \
+   if(A==NULLSYMB) {               \
+      A=CreateSymb_DB(Data, B, DB_SYMB_CHAN,DB_OWN_SHARED, C); \
+      LockSymb_DB(Data,A,DB_LOCK_READWRITE,DB_WAIT_NONE);      \
+      SetChanFormat_DB(Data,A,DB_CHAN_FORMAT_NORMAL);          \
+      SetChanWidth_DB(Data,A,D);       \
+      SetChanDecimal_DB(Data,A,E);     \
+      SetChanProtect_DB(Data,A,F); \
+      Associate_DB(Data, Solutions, A);  \
+   }  \
+   else  \
+      LockSymb_DB(Data,A,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+#define PUT_DATA(A,B) \
+   iProtected = iGetChanProtect_DB(Data, A);        \
+   SetChanProtect_DB(Data, A, DB_CHAN_UNPROTECTED);\
+   PutChanVV_DB(Data,Solutions, A,  B);   \
+   SetChanProtect_DB(Data, A, iProtected);
+
+#define SET_IPJ(A,B,C,D)                            \
+   iProtected = iGetChanProtect_DB(A,B);            \
+   iProtected = iGetChanProtect_DB(A,C);            \
+   SetIPJ_DB(A,B,C,D);                              \
+   SetChanProtect_DB(A,B,iProtected);               \
+   SetChanProtect_DB(A,C,iProtected);
+   
+#define SET_UNITS(A,B,C)                            \
+   iProtected = iGetChanProtect_DB(A,B);            \
+   SetChanUnit_DB(A,B,C);                           \
+   SetChanProtect_DB(A,B,iProtected);
+   
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         Diag;                    // Dialogue handle
+VV          XVV,YVV,ZVV,HVV,SVV,MVV,TmpVV;
+DB          Data;
+EDB         EData;                   // Database handle
+EMAP        EMap;                    // Map object
+MAP         Map;                     // Map object
+MVIEW       View;
+LST         Lst, Lst2;
+DB_SYMB     Solutions,XWndCh,YWndCh,GridCh,WndSzCh,MaskCh;
+
+IMG         IMG1;                    // Image tied to the input grid
+IMG         IMGO;                    // Image for the output grid
+IPJ         hIPJ;
+
+string(STR_FILE) sGridIn,sGridOut,sFont,sSolDB;
+string(STR_DB_SYMBOL) sSolutions,sXWndCh,sYWndCh,sGridCh,sWndSzCh,sMaskCh;
+string(STR_DEFAULT_LONG) sColourLine,sColourFill,sName,sValue;
+string(STR_GROUP) sGroup;
+string(STR_GROUP) sGrpName;
+string(DB_GROUP_CLASS_SIZE) sClass;
+string(STR_DEFAULT)      sUnits;
+
+real        rTemp,rMult,rXSep,rYSep;
+real        rXo,rYo;
+real        rSize,rScale,rCutOff;
+real        rF;
+
+int         iBlakely,iLenVV,iTemp,iProtected;
+int         iSet,iDum,iDx,iPass,iUseFile;
+int         iSymb,iWeight;
+int         iDone, iValue, iRet;
+int         iChans, iLines, iBlobs;     
+
+int         iInteract, i, iN;
+
+//===========================================================================
+//                                  CODE
+//===========================================================================
+
+{
+   iInteract = iInteractive_SYS();    
+
+   Strcpy_STR(sGridOut, "_Temp.grd");
+
+
+   // --- Set input solution group class name ---
+
+   Strcpy_STR(sClass, _n("Targets")); // used to be "XYEuler"
+
+
+   // --- Set output channel names ---
+   
+   Strcpy_STR(sXWndCh, "X");
+   Strcpy_STR(sYWndCh, "Y");
+   Strcpy_STR(sWndSzCh, _n("WndSize"));
+   Strcpy_STR(sMaskCh, _n("Mask"));
+
+
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      iDone = 0;
+      iValue = 1;
+      while(!iDone) {
+
+         if(iValue == 1) {   // --- Run Main dialogue ---
+
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("E3PEAKS");
+
+
+
+            // --- Create the Solution list and channels list from the current database ---
+
+            if(iHaveCurrent_EDB()) {
+
+               EData = Current_EDB();
+               Data = Lock_EDB(EData);
+      
+            
+               // --- Get targets list ---
+   
+               Lst = GetList_DGW(Diag,_E3PEAKS_2);
+               ClassGroupLST_DB (Data, Lst, sClass);
+
+
+               // --- Add items from the old "XYEuler" groups ---
+
+               Lst2 = Create_LST(STR_DB_SYMBOL);
+               ClassGroupLST_DB(Data,Lst2,"XYEuler");
+   
+               iN = iSize_LST(Lst2);
+               for(i=0;i<iN;i++) {
+                  GetItem_LST(Lst2, 0, i, sName);
+                  GetItem_LST(Lst2, 1, i, sValue);
+                  AddUniqueItem_LST(Lst, sName, sValue);
+               }
+               Sort_LST(Lst, 0, 0);
+               Destroy_LST(Lst2);
+
+               Lst = GetList_DGW(Diag,_E3PEAKS_3);
+               SymbLST_DB (Data, Lst, DB_SYMB_CHAN);
+               Sort_LST(Lst,0,0);
+
+               UnLock_EDB(EData);
+            }
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag,_E3PEAKS_0,DGW_FILEPATH,   "E3PEAKS", "GRID");    
+            SetInfoSYS_DGW(Diag,_E3PEAKS_1,DGW_FILEPATH,   "EULER3D", "SOLDB");     
+            SetInfoSYS_DGW(Diag,_E3PEAKS_2,DGW_TEXT,       "EULER3D", "XYSOLGRP");
+            SetInfoSYS_DGW(Diag,_E3PEAKS_3,DGW_TEXT,       "E3PEAKS", "CHAN");    
+            SetInfoSYS_DGW(Diag,_E3PEAKS_4,DGW_TEXT,       "E3PEAKS", "PASS");    
+            SetInfoSYS_DGW(Diag,_E3PEAKS_5,DGW_LISTALIAS,  "E3PEAKS", "BLAKELY");
+            SetInfoSYS_DGW(Diag,_E3PEAKS_6,DGW_TEXT,       "E3PEAKS", "CUTOFF");    
+      
+
+            // --- Run the Dialogue ---
+
+            iRet = iRunDialogue_DGW(Diag);
+            if (iRet == -1) Cancel_SYS();    // He hit cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag,_E3PEAKS_0,DGW_FILEPATH,   "E3PEAKS", "GRID");    
+            GetInfoSYS_DGW(Diag,_E3PEAKS_1,DGW_FILEPATH,   "EULER3D", "SOLDB");     
+            GetInfoSYS_DGW(Diag,_E3PEAKS_2,DGW_TEXT,       "EULER3D", "XYSOLGRP");
+            GetInfoSYS_DGW(Diag,_E3PEAKS_3,DGW_TEXT,       "E3PEAKS", "CHAN");    
+            GetInfoSYS_DGW(Diag,_E3PEAKS_4,DGW_TEXT,       "E3PEAKS", "PASS");    
+            GetInfoSYS_DGW(Diag,_E3PEAKS_5,DGW_LISTALIAS,  "E3PEAKS", "BLAKELY");
+            GetInfoSYS_DGW(Diag,_E3PEAKS_6,DGW_TEXT,       "E3PEAKS", "CUTOFF");    
+
+            
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+   
+
+            if(iRet == 0)
+               iDone = 1;
+            else if(iRet == 1)
+               iValue = 2;    // get symbol definition
+
+         }
+         else if(iValue == 2) {     // symbols dialog
+
+            SetInt_SYS("E3SYMB","SUB",1);
+            iRunGX_SYS("e3symb");
+            iValue = 1;
+
+         }
+      }
+   }
+   
+
+   // --- Start progress ---
+
+   Progress_SYS(1);
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("E3PEAKS","GRID",sGridIn);
+   GetString_SYS("EULER3D","SOLDB", sSolDB);
+   GetString_SYS("EULER3D","XYSOLGRP",sSolutions);
+   GetString_SYS("E3PEAKS","CHAN",sGridCh);
+   iPass    = iGetInt_SYS("E3PEAKS","PASS");
+   iBlakely = iGetInt_SYS("E3PEAKS","BLAKELY");
+   rCutOff = rGetReal_SYS("E3PEAKS","CUTOFF");
+
+
+   // --- Verify parameters ---
+   
+   if (iPass < 0) iPass = 0;
+   if ((iBlakely < 1) || (iBlakely > 4)) iBlakely = 4;
+
+   if (!iStrlen_STR(sGridCh))
+      Abort_SYS(_("Grid peak value channel not specified!"));
+
+   if (!iStrlen_STR(sSolDB))
+      Abort_SYS(_("Output database not specified!"));
+
+   
+   // --- Check input grid exists ---
+
+   if (iFileExist_SYS(sGridIn) == 0)
+      Abort_SYS(_("The specified grid file does not exist."));
+
+   if (!iStrlen_STR(sSolutions))
+      Abort_SYS(_("Output solution group not specified!"));
+
+
+   // --- Create Solution Database if it doesn't exist ---
+
+   if(!iFileExist_SYS(sSolDB)) {
+      iLines = 20;
+      iChans = 20;
+      iBlobs = iLines + iChans + 20;
+      Create_DB(sSolDB,iLines,iChans,iBlobs,20,10,"super","");
+   }
+
+   EData = Load_EDB(sSolDB);
+   Data = Lock_EDB(EData);
+
+
+   // --- Create a group line to store the solutions in - make it "XYEuler" class ---
+
+   Solutions = FindSymb_DB(Data,sSolutions,DB_SYMB_LINE);
+   if(Solutions != NULLSYMB) {
+      LockSymb_DB(Data,Solutions,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      DeleteSymb_DB(Data, Solutions);
+   }
+   Solutions=CreateSymb_DB(Data,sSolutions,DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_GROUP);
+   
+   LockSymb_DB(Data,Solutions,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   SetGroupClass_DB(Data, Solutions, sClass);
+   UnLockSymb_DB(Data,Solutions);
+
+
+   // ---- Get the channels ---
+
+   GETCHAN(XWndCh,  sXWndCh,  DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)
+   GETCHAN(YWndCh,  sYWndCh,  DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)
+   GETCHAN(GridCh,  sGridCh,  DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)   
+   GETCHAN(WndSzCh, sWndSzCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)   
+   GETCHAN(MaskCh,  sMaskCh,  DB_CATEGORY_CHAN_LONG,    5, 0, DB_CHAN_UNPROTECTED)   
+
+
+   // --- If user wants to smooth the grid ---
+
+   if (iPass > 0){
+
+      // --- Create VV to store Hanning filter coefficients ---
+
+      HVV = Create_VV(REAL,10);
+
+
+      // --- Hanning filter coefficients --- 
+         
+      iSet = 1;
+      SetReal_VV(HVV,0,0.06);
+      SetReal_VV(HVV,1,0.1);
+      SetReal_VV(HVV,2,0.06);
+      SetReal_VV(HVV,3,0.1);
+      SetReal_VV(HVV,4,0.36);
+      SetReal_VV(HVV,5,0.1);
+      SetReal_VV(HVV,6,0.06);
+      SetReal_VV(HVV,7,0.1);
+      SetReal_VV(HVV,8,0.06);
+
+
+      // --- Do not interpolate the dummies ---
+
+      iDum = IMU_FILT_DUMMY_NO;
+
+
+      // --- Multiplier to apply to grid values ---
+
+      rMult = 1.0;
+
+
+      // --- No horizontal derivative calculated ---
+
+      iDx = IMU_FILT_HZDRV_NO;
+
+
+      // --- No file containing filter coefficients ---
+
+      iUseFile = IMU_FILT_FILE_NO;
+
+
+      // --- Initialise progress bar ---
+
+      ProgName_SYS(_("Creating images..."),1);
+
+
+      // --- Create images tied to the grids ---  
+      
+      IMG1 = CreateFile_IMG(GS_FLOAT,sGridIn,IMG_FILE_READONLY);
+      IMGO = CreateOutFile_IMG(GS_FLOAT,sGridOut,IMG1); 
+
+      ProgName_SYS(_("Filtering Grid..."),1);
+
+
+      // --- Filter the grid ---
+
+      GridFilt_IMU(IMG1,IMGO,iPass,rMult,iDum,iDx,iUseFile,"",HVV);
+         
+
+      // --- Destroy handles ---
+
+      Destroy_IMG(IMG1);
+      Destroy_IMG(IMGO);
+
+
+      // --- Destroy VV's ---
+
+      Destroy_VV(HVV);
+
+
+   }
+   
+
+   // --- Create temp VVs ---
+
+   XVV = Create_VV(REAL,0);
+   YVV = Create_VV(REAL,0);
+   ZVV = Create_VV(REAL,0);
+   SVV = Create_VV(REAL,0);   // Peak window sizes
+   MVV = Create_VV(INT,0);
+   
+   
+   // --- Find peaks ---   
+
+   ProgName_SYS(_("Pick peaks from grid"),1);
+   if (iPass > 0)
+      GridPeak_PGU(sGridOut,iBlakely,XVV,YVV,ZVV);
+   else
+      GridPeak_PGU(sGridIn,iBlakely,XVV,YVV,ZVV);
+   
+
+   // --- Window on analytic signal amplitude ---
+
+   if (rCutOff != rDUMMY) {
+
+      TmpVV = Create_VV(REAL, 0);
+      Copy_VV(TmpVV, ZVV);
+
+      Clip_VVU(TmpVV, rCutOff, rDUMMY, VVU_CLIP_DUMMY);
+
+
+      // --- Remove dummied values ---
+
+      Prune_VVU(XVV, TmpVV, VVU_PRUNE_DUMMY);
+      Prune_VVU(YVV, TmpVV, VVU_PRUNE_DUMMY);
+      Prune_VVU(ZVV, TmpVV, VVU_PRUNE_DUMMY);
+      Destroy_VV(TmpVV);
+
+      
+      // --- The lengths should aways be true... ---
+
+      iLenVV = iLength_VV(XVV);
+      if(iLength_VV(YVV) != iLenVV ||
+         iLength_VV(ZVV) != iLenVV)
+         Abort_SYS(_("Channel length mismatch - this shouldn't happen!"));
+   }
+
+
+   // --- Get grid stats ---
+
+   ProgName_SYS(_("Grid stats"),1);
+
+   if (iPass > 0)
+      GridStat_IMU(sGridOut,iTemp,iTemp,iTemp,rXSep,rYSep,iTemp,rXo,rYo,rTemp,rTemp,rTemp);
+   else 
+      GridStat_IMU(sGridIn,iTemp,iTemp,iTemp,rXSep,rYSep,iTemp,rXo,rYo,rTemp,rTemp,rTemp);
+
+
+   // --- Get correct X/Y locations ---
+
+   Trans_VV(XVV, rXo/rXSep, rXSep);
+   Trans_VV(YVV, rYo/rYSep, rYSep);
+
+
+   // --- Get peak sizes ---
+
+   ProgName_SYS(_("Determine peak sizes"),1);
+
+   if (iPass > 0)
+      PeakSize2_IMU(sGridOut,XVV,YVV,10000,SVV);
+   else
+      PeakSize2_IMU(sGridIn,XVV,YVV,10000,SVV);
+
+
+
+   // --- Get grid values ---
+   
+   IMG1 = CreateFile_IMG(GS_DOUBLE,sGridIn,IMG_FILE_READONLY);
+   ProfileVV_IMU(IMG1,XVV,YVV,ZVV);
+
+
+   // --- Copy projection and units to output gdb ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_IMG(IMG1, hIPJ);
+   GetUnits_IPJ(hIPJ, rF, sUnits);
+   
+   SET_IPJ(Data,XWndCh,YWndCh,hIPJ)
+
+   SET_UNITS(Data,XWndCh,sUnits)
+   SET_UNITS(Data,YWndCh,sUnits)
+   SET_UNITS(Data,WndSzCh,sUnits)
+
+   Destroy_IMG(IMG1);
+   
+
+   // --- Write VVs to channels ---
+
+   PUT_DATA(XWndCh,XVV)
+   PUT_DATA(YWndCh,YVV)
+   PUT_DATA(GridCh,ZVV)
+   PUT_DATA(WndSzCh,SVV)
+
+
+   // --- Fill mask with ones ---
+
+   SetIntN_VV(MVV, 0, iLength_VV(XVV), 1);
+   PUT_DATA(MaskCh,MVV)
+
+
+   // --- Unlock channels ---
+
+   UnLockSymb_DB(Data,XWndCh);
+   UnLockSymb_DB(Data,YWndCh);
+   UnLockSymb_DB(Data,GridCh);
+   UnLockSymb_DB(Data,WndSzCh);
+   UnLockSymb_DB(Data,MaskCh);
+   
+
+
+
+   // --- Get the map ---
+   if (iInteract) {
+      if (!iHaveCurrent_EMAP()) {
+         if (iDisplayQuestion_SYS(_("Create new map ?"),_("Press YES to create a new map or NO to open an existing map.")) == 1) 
+         {   
+            SetInteractive_SYS(0);                    // Interactive off
+            SetInt_SYS("GRIDIMG1","NEW",1);           // Send it to the current map
+            SetString_SYS("GRIDIMG1","GRID",sGridIn);
+            SetString_SYS("GRIDIMG1","COLOR","Colour.tbl");
+            SetInt_SYS("GRIDIMG1","ZONE",2);
+            SetString_SYS("GRIDIMG1","CONTOUR","");
+            SetInt_SYS("GRIDIMG1","REG",0);
+   
+            SetString_SYS("DEFMAP","NEWMAP","");
+   
+            if (iRunGX_SYS("GRIDIMG1.GX") != 0) {
+               if (iInteract)
+                  SetInteractive_SYS(1);                 // Interactive on
+               Abort_SYS(_("Failure to display the grid."));
+            }
+            SetInteractive_SYS(iInteract);             // Interactive on
+         }                  
+      }
+   }
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+
+   // --- Open data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   rScale = rScaleMM_MVIEW(View);
+
+
+   // --- Get and verify symbol parameters ---
+
+   iSymb = iGetInt_SYS("EULER3D","MARKER_SYMBOL");       
+   iWeight = iGetInt_SYS("EULER3D","MARKER_WEIGHT");    
+   rSize = rGetReal_SYS("EULER3D","MARKER_SIZE");
+   GetString_SYS("EULER3D","MARKER_LINE_COLOUR",sColourLine);
+   GetString_SYS("EULER3D","MARKER_FILL_COLOUR",sColourFill);
+
+   if (rSize <= 0.0)       rSize = 2.0;
+   if (iSymb == iDUMMY)    iSymb = 2;
+   if (iWeight == iDUMMY)  iWeight = MVIEW_FONT_WEIGHT_MEDIUM;
+   if (iStrMin_STR(sColourLine) == 0) Strcpy_STR(sColourLine,"R0");
+   if (iStrMin_STR(sColourFill) == 0) Strcpy_STR(sColourFill,"N");
+
+
+   // --- Start a new group for the symbols ---
+
+   GetName_DB(Data,DB_NAME_FILE,sGroup);
+   FileNamePart_STR(sGroup,sGroup,STR_FILE_PART_NAME);
+   GenGroupName_STR("SYMBOLS",sGroup,sSolutions,sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- Create link to database ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+
+   // --- Set symbol parameters ---
+
+   iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont);
+   SymbFont_MVIEW(View,sFont,TRUE,iWeight,FALSE);
+   SymbColor_MVIEW(View,iColor_MVIEW(sColourLine));
+   SymbFillColor_MVIEW(View,iColor_MVIEW(sColourFill));
+   SymbNumber_MVIEW(View,iSymb);
+   SymbSize_MVIEW(View,rSize*rScale);
+   SymbAngle_MVIEW(View,0.0);
+
+ 
+   // --- Draw ---
+
+   Symbols_MVIEW(View,XVV,YVV);
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("E3PEAKS GX (Locate solutions)"), FALSE);
+   AddComment_DB(Data, "Grid", sGridIn, TRUE);
+   AddComment_DB(Data, "Solution list", sSolutions, TRUE);
+   AddComment_DB(Data, "Channel to save grid values", sGridCh, TRUE);
+   AddComment_DB(Data, "Window size channel", sWndSzCh, TRUE);
+   AddIntComment_DB(Data, _n("No. of passes of smoothing filter"), iPass, TRUE);
+   AddIntComment_DB(Data, _n("Level of peak detection"), iBlakely, TRUE);
+   AddRealComment_DB(Data, _n("Grid value cutoff level"), rCutOff, TRUE);
+
+
+   // --- Destroy VV's ---
+   
+   Destroy_VV(XVV);
+   Destroy_VV(YVV);
+   Destroy_VV(ZVV);
+   Destroy_VV(SVV);
+   Destroy_VV(MVV);
+
+
+   // --- Load some of the channels ---
+
+   AddAssociatedLoad_DB(Data, Solutions, XWndCh);    // Current "X"
+   AddAssociatedLoad_DB(Data, Solutions, YWndCh);    // Current "Y"
+   AddAssociatedLoad_DB(Data, Solutions, GridCh);    // Grid value channel
+   AddAssociatedLoad_DB(Data, Solutions, WndSzCh);   // Window size channel
+   AddAssociatedLoad_DB(Data, Solutions, MaskCh);    // Mask channel
+
+
+   // --- Make sXWndCh and sYWndCh the current X, Y channels. ---
+
+   SetXYZChan_DB(Data, DB_CHAN_X, sXWndCh);
+   SetXYZChan_DB(Data, DB_CHAN_Y, sYWndCh);
+
+
+   // --- Release the database ---
+
+   UnLock_EDB(EData);
+
+   
+   // --- Delete empty line 0 ---
+   
+   DelLine0_EDB(EData);
+
+
+   // --- go to the solutions line ---
+
+   SetCurLine_EDB(EData, sSolutions);
+   
+
+   // --- Delete temp file ---
+   
+//   if (iPass > 0) iDeleteFile_SYS(sGridOut);
+   
+
+   // --- Set grid name to be input for other GXs ---
+
+   SetString_SYS("E3EULER","AS",sGridIn);
+   SetString_SYS("E3PEAKSZ","GRID",sGridIn);
+
+
+   // --- Clean up ---
+
+   Progress_SYS(0);
+
+
+
+}
+

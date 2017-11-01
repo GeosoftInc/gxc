@@ -1,0 +1,342 @@
+//===========================================================================
+NAME          = "Regional terrain correction grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav/Terrain Corrections"
+
+DESCRIPTION   = "
+
+      GRREGTER.REGDEMGRD    Regional DEM grid
+              .LOCDEMGRD    Local DEM (Survey Elevation) grid
+              .ELEVUNIT     Elevation unit
+              .WATERELEV    Water reference elevation (in elevation unit)
+              .WATERDENS    Water density g/cc (overridden on input by the system REG value)
+              .OUTGRD       Output terrain correction grid
+              .DOUTER       Outer correction distance
+              .DINNER       Inner correction distance
+              .OPT          Optimization
+              .MIN_X        Survey region 
+              .MIN_Y
+              .MAX_X
+              .MAX_Y
+              .SURVEYTYPE   0: Ground Survey, 1: Shipborne Survey, 2: Airborne Survey
+
+"
+// Revision History:
+// v8.5:   Added water density as a parameter, don't use system REG
+// v6.4.1: Reviewed and corrected.
+// v6.2:   Added survey type parameter (ground/shipborne/airborne).
+// v6.0:   Modified to add water elevation parameter.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grregter.gr"
+#include "grregter.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW   Diag;
+IMG   ImgLocdem,ImgRegdem;
+IMG   ImgO;
+TC    TCg;
+SBF   hSBF;
+BF    hBF;
+IPJ   hIPJ;
+
+string(STR_FILE)  sRegdemGrd, sLocdemGrd; 
+string(STR_FILE)  sOutGrd;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_DEFAULT_SHORT) sSurveyType;
+
+real  rElevUnit,rDinner,rDouter,rElevW,rDensT,rDensW;
+real  rMinX,rMinY,rMaxX,rMaxY,rCS;
+real  rDx,rDy,rXo,rYo,rRot;
+
+int   iKx,iWidth,iHeight;
+int   iSurveyReg;
+int   i, iEdge, iOpt;
+int   iSurveyType;    // 0-Ground Survey, 1-Shipborne Survey, 2-Airborne Survey
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) 
+	{
+      i = 1;
+      while (i!=0) {
+         
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("GRREGTER");
+
+
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_GRREGTER_0, DGW_FILEPATH, "GRREGTER","REGDEMGRD");
+         SetInfoSYS_DGW(Diag,_GRREGTER_1, DGW_FILEPATH, "GRREGTER","LOCDEMGRD");
+         SetInfoSYS_DGW(Diag,_GRREGTER_2, DGW_FILEPATH, "GRREGTER","OUTGRD");
+         SetInfoSYS_DGW(Diag,_GRREGTER_3, DGW_LISTALIAS,"GRREGTER","ELEVUNIT");
+         SetInfoSYS_DGW(Diag,_GRREGTER_4, DGW_TEXT,     "GRREGTER","WATERELEV");
+         SetInfoSYS_DGW(Diag,_GRREGTER_5, DGW_TEXT,     "GRREGTER","DENST");     
+         SetInfoSYS_DGW(Diag,_GRREGTER_6, DGW_TEXT,     "GRREGTER","WATERDENS");     
+         SetInfoSYS_DGW(Diag,_GRREGTER_7, DGW_TEXT,     "GRREGTER","DOUTER");
+         SetInfoSYS_DGW(Diag,_GRREGTER_8, DGW_TEXT,     "GRREGTER","DINNER");
+         SetInfoSYS_DGW(Diag,_GRREGTER_9, DGW_LISTALIAS,"GRREGTER","OPT");
+         SetInfoSYS_DGW(Diag,_GRREGTER_10, DGW_TEXT,    "GRREGTER","MIN_X");
+         SetInfoSYS_DGW(Diag,_GRREGTER_11,DGW_TEXT,     "GRREGTER","MIN_Y");
+         SetInfoSYS_DGW(Diag,_GRREGTER_12,DGW_TEXT,     "GRREGTER","MAX_X");
+         SetInfoSYS_DGW(Diag,_GRREGTER_13,DGW_TEXT,     "GRREGTER","MAX_Y");
+         SetInfoSYS_DGW(Diag,_GRREGTER_14,DGW_LISTALIAS,"GRREGTER","SURVEYTYPE");     
+                                   
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag); 
+         if (i == -1)
+            Cancel_SYS();   
+
+
+         // --- Get the Strings and replace in INI ---
+
+         GetInfoSYS_DGW(Diag,_GRREGTER_0, DGW_FILEPATH, "GRREGTER","REGDEMGRD");
+         GetInfoSYS_DGW(Diag,_GRREGTER_1, DGW_FILEPATH, "GRREGTER","LOCDEMGRD");
+         GetInfoSYS_DGW(Diag,_GRREGTER_2, DGW_FILEPATH, "GRREGTER","OUTGRD");
+         GetInfoSYS_DGW(Diag,_GRREGTER_3, DGW_LISTALIAS,"GRREGTER","ELEVUNIT");
+         GetInfoSYS_DGW(Diag,_GRREGTER_4, DGW_TEXT,     "GRREGTER","WATERELEV");
+         GetInfoSYS_DGW(Diag,_GRREGTER_5, DGW_TEXT,     "GRREGTER","DENST");     
+         GetInfoSYS_DGW(Diag,_GRREGTER_6, DGW_TEXT,     "GRREGTER","WATERDENS");     
+         GetInfoSYS_DGW(Diag,_GRREGTER_7, DGW_TEXT,     "GRREGTER","DOUTER");
+         GetInfoSYS_DGW(Diag,_GRREGTER_8, DGW_TEXT,     "GRREGTER","DINNER");
+         GetInfoSYS_DGW(Diag,_GRREGTER_9, DGW_LISTALIAS,"GRREGTER","OPT");
+         GetInfoSYS_DGW(Diag,_GRREGTER_10, DGW_TEXT,    "GRREGTER","MIN_X");
+         GetInfoSYS_DGW(Diag,_GRREGTER_11,DGW_TEXT,     "GRREGTER","MIN_Y");
+         GetInfoSYS_DGW(Diag,_GRREGTER_12,DGW_TEXT,     "GRREGTER","MAX_X");
+         GetInfoSYS_DGW(Diag,_GRREGTER_13,DGW_TEXT,     "GRREGTER","MAX_Y");
+         GetInfoSYS_DGW(Diag,_GRREGTER_14,DGW_LISTALIAS,"GRREGTER","SURVEYTYPE");     
+                                   
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+      
+         if (i == 1) { // --- range from data ---
+         
+            if (iRunGX_SYS("rangedb"))
+               DisplayMessage_SYS(_("rangedb GX"),_("Failed to calculate range from database."));
+               
+            GetString_SYS("XYRANGE", "MIN_X",sTemp);
+            SetString_SYS("GRREGTER","MIN_X",sTemp);
+            GetString_SYS("XYRANGE", "MIN_Y",sTemp);
+            SetString_SYS("GRREGTER","MIN_Y",sTemp);
+            GetString_SYS("XYRANGE", "MAX_X",sTemp);
+            SetString_SYS("GRREGTER","MAX_X",sTemp);
+            GetString_SYS("XYRANGE", "MAX_Y",sTemp);
+            SetString_SYS("GRREGTER","MAX_Y",sTemp);
+         }     
+      } //while       
+       
+   } //if (iInteractive_SYS
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRREGTER","REGDEMGRD",sRegdemGrd);
+   GetString_SYS("GRREGTER","LOCDEMGRD",sLocdemGrd);
+   GetString_SYS("GRREGTER","OUTGRD",sOutGrd);
+
+   rElevUnit = rGetReal_SYS("GRREGTER","ELEVUNIT");
+   
+   GetString_SYS("GRREGTER","WATERELEV",sTemp);
+   rElevW = 0.0;
+   if (iStrlen_STR(sTemp))
+   {
+      rElevW = rGetReal_SYS("GRREGTER","WATERELEV");
+      if (rElevW == rDUMMY)
+         Abort_SYS(_("Invalid water reference elevation! Must be a real number or blank."));
+   }
+
+   rDensT = 2.67;
+   GetString_SYS("GRREGTER","DENST",sTemp);
+   if (iStrlen_STR(sTemp))
+   {
+      rDensT = rGetReal_SYS("GRREGTER","DENST");
+      if (rDensT == rDUMMY)
+         Abort_SYS(_("Invalid terrain density! Must be a real number or blank."));
+   }
+   
+   rDinner = rDUMMY;
+   GetString_SYS("GRREGTER","DINNER",sTemp);
+   if (iStrlen_STR(sTemp))
+   {
+      rDinner = rGetReal_SYS("GRREGTER","DINNER");
+      if (rDinner == rDUMMY)
+         Abort_SYS(_("Invalid Inner correction distance! Must be a real number or blank."));
+   } else
+      rDinner = 0.0;
+
+   rDouter = rDUMMY;
+   GetString_SYS("GRREGTER","DOUTER",sTemp);
+   if (iStrlen_STR(sTemp))
+   {
+      rDouter = rGetReal_SYS("GRREGTER","DOUTER");
+      if (rDouter == rDUMMY)
+         Abort_SYS(_("Invalid Outer correction distance! Must be a real number or blank."));
+   }
+
+	rDensW = rGetReal_SYS("GRREGTER", "WATERDENS");
+	if(rDensW == rDUMMY)
+		rDensW = 1.0;
+
+   iOpt = iGetInt_SYS("GRREGTER","OPT");
+
+
+   rMinX = rDUMMY;
+   GetString_SYS("GRREGTER","MIN_X",sTemp);
+   if (iStrlen_STR(sTemp))  {
+      rMinX = rGetReal_SYS("GRREGTER","MIN_X");
+      if (rMinX == rDUMMY)   Abort_SYS(_("Invalid range! Must be a real number or blank."));
+   }
+   rMinY = rDUMMY;
+   GetString_SYS("GRREGTER","MIN_Y",sTemp);
+   if (iStrlen_STR(sTemp))  {
+      rMinY = rGetReal_SYS("GRREGTER","MIN_Y");
+      if (rMinY == rDUMMY)   Abort_SYS(_("Invalid range! Must be a real number or blank."));
+   }
+   rMaxX = rDUMMY;
+   GetString_SYS("GRREGTER","MAX_X",sTemp);
+   if (iStrlen_STR(sTemp))  {
+      rMaxX = rGetReal_SYS("GRREGTER","MAX_X");
+      if (rMaxX == rDUMMY)   Abort_SYS(_("Invalid range! Must be a real number or blank."));
+   }
+   rMaxY = rDUMMY;
+   GetString_SYS("GRREGTER","MAX_Y",sTemp);
+   if (iStrlen_STR(sTemp))  {
+      rMaxY = rGetReal_SYS("GRREGTER","MAX_Y");
+      if (rMaxY == rDUMMY)   Abort_SYS(_("Invalid range! Must be a real number or blank."));
+   }
+   
+   if(rMinX==rDUMMY || rMinY==rDUMMY || rMaxX==rDUMMY || rMaxY==rDUMMY)    iSurveyReg = 0;
+   else    iSurveyReg = 1;
+
+   GetString_SYS("GRREGTER","SURVEYTYPE",sSurveyType);
+   if(iStrcmp_STR(sSurveyType,_n("Ground Survey"),STR_CASE_TOLERANT)==0)          iSurveyType = 0;
+   else if(iStrcmp_STR(sSurveyType,_n("Shipborne Survey"),STR_CASE_TOLERANT)==0)  iSurveyType = 1;
+   else if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0)   iSurveyType = 2;
+   else  Abort_SYS(_("Invalid Survey Type! This GX only works for Ground Survey or Shipborne Survey."));
+
+
+   // --- Set parameters for grterain GX ---
+
+   SetString_SYS("GRTERAIN","DEMGRD",sLocdemGrd);
+   SetString_SYS("GRTERAIN","CORGRD",sOutGrd);
+   SetReal_SYS("GRTERAIN","DIST",rDinner);
+   SetString_SYS("GRTERAIN","SURVEYTYPE",sSurveyType);
+	SetReal_SYS("GRTERAIN", "WATERDENS", rDensW);
+
+
+   // --- Set default for GRBOUG GX ---
+
+   SetString_SYS("GRAVRED","SURVEYTYPE",sSurveyType);
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sLocdemGrd))
+      Abort_SYS(_("Local DEM Grid  Not Specified!"));   
+      
+   if (!iStrlen_STR(sRegdemGrd))
+      Abort_SYS(_("Regional DEM Grid  Not Specified!"));   
+      
+   if (!iStrlen_STR(sOutGrd))
+      Abort_SYS(_("Output Grid Not Specified!")); 
+
+   
+   // --- Create Images tied to the grids ---  
+   
+   ImgLocdem = CreateFile_IMG(GS_DOUBLE,sLocdemGrd,IMG_FILE_READONLY);
+
+   if(iSurveyReg)  {
+   
+      rDx=1.0;  rDy=1.0;  rXo=0.0;  rYo=0.0;  rRot=0.0;
+      GetInfo_IMG(ImgLocdem,rDx,rDy,rXo,rYo,rRot);
+      rCS = rDx;
+      if(rCS>rDy)  rCS=rDy;
+     
+      iKx = 1;
+      iWidth  = (int)((rMaxX-rMinX)/rCS+0.000001) + 1;
+      iHeight = (int)((rMaxY-rMinY)/rCS+0.000001) + 1;
+      
+      //DisplayInt_SYS("iWidth",iWidth);
+      //DisplayInt_SYS("iHeight",iHeight);
+      
+      ImgO = CreateNewFile_IMG(GS_DOUBLE, iKx, iWidth, iHeight, sOutGrd);
+
+      SetInfo_IMG(ImgO, rCS, rCS, rMinX, rMinY, 0.0);
+   
+   } else {
+   
+      ImgO = CreateOutFile_IMG(GS_DOUBLE, sOutGrd, ImgLocdem);
+   }
+
+   ImgRegdem = CreateFile_IMG(GS_DOUBLE,sRegdemGrd,IMG_FILE_READONLY);
+
+   
+   // --- Set projection ---
+   
+   hSBF = hGetSYS_SBF();
+   
+   if (iExistFile_SBF(hSBF,"_xyrange.ipj")) {
+   
+      hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READ);
+      hIPJ = CreateS_IPJ(hBF);
+      DestroyEx_BF(hBF);
+      
+   } else {
+   
+      hIPJ = Create_IPJ();
+   }
+      
+   SetIPJ_IMG(ImgO,hIPJ);
+
+   Progress_SYS(1);
+
+
+   // --- Regional DEM Terrain Correction Gird ---
+   
+   ProgName_SYS(_("Reginal DEM Terrain Correction ..."),1); 
+   
+   iEdge=TRUE; 
+   if(rDouter!=rDUMMY)  iEdge=FALSE;
+
+   TCg = CreateEx_TC(ImgRegdem,rElevUnit,rDinner,rDouter,1.0,rDensW/rDensT,rElevW,iEdge,rDUMMY,iOpt,iSurveyType);
+//                  (IMG,rElevUnit,rDinner,rDouter,rDensT,rDensW,rElevW,iEdge,rEdgeElev,iOpt,iSurveyType)
+   
+   Grregter_TC(TCg,ImgLocdem,ImgO);
+   
+   Destroy_TC(TCg);   
+   
+   
+   // --- Destroy the Images ---
+   
+   Destroy_IMG(ImgLocdem);
+   Destroy_IMG(ImgRegdem);
+   Destroy_IMG(ImgO);
+
+   Progress_SYS(0);
+}

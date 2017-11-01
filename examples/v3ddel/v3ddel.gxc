@@ -1,0 +1,114 @@
+//===========================================================================
+
+NAME          = "Delete a 3D View"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/3D"
+
+DESCRIPTION   = "
+
+      V3DDEL.VIEW         3D View name
+            .SURFACE      Surface to delete
+"
+
+//===========================================================================
+
+RESOURCE="v3ddel.gr"
+#include "v3ddel.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+DGW   Diag;
+LST   hPlaneLST;         
+MVIEW View;
+
+string(STR_VIEW) sSurface,s3DView;
+int i,iPlane;
+
+
+//===========================================================================
+
+{
+
+   // --- Current Map and 3D view ---
+
+   EMap = Current_EMAP();
+   GetCurrentView_EMAP(EMap,s3DView);
+   
+   
+   // --- get surface list ---
+   
+   Map  = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+   hPlaneLST = Create_LST(256);
+   ListPlanes_MVIEW(View,hPlaneLST);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   if (iSize_LST(hPlaneLST) <= 0)
+      Abort_SYS(_("This view does not contain any surfaces."));
+   
+   
+   // --- default plane ---
+   
+   GetString_SYS("V3DDEL","SURFACE",sSurface);
+   iPlane = iFindItem_LST(hPlaneLST,0,sSurface);
+   if (iPlane == -1) {
+      GetItem_LST(hPlaneLST,0,0,sSurface);
+      SetString_SYS("V3DDEL","SURFACE",sSurface);
+   }
+   
+   
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      Diag = Create_DGW("V3DDEL");
+      Copy_LST(GetList_DGW(Diag,_V3DDEL_1),hPlaneLST);
+      SetInfo_DGW(Diag,_V3DDEL_0,DGW_TEXT,s3DView);
+      SetInfoSYS_DGW(Diag,_V3DDEL_1,DGW_TEXT,"V3DDEL","SURFACE");
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==-1) Cancel_SYS(); 
+
+      GetInfoSYS_DGW(Diag,_V3DDEL_0,DGW_TEXT,"V3DDEL","VIEW");
+      GetInfoSYS_DGW(Diag,_V3DDEL_1,DGW_TEXT,"V3DDEL","SURFACE");
+      Destroy_DGW(Diag);
+      
+   }
+
+   
+   Map  = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+   
+   
+   // --- get the surface name ---
+   
+   GetString_SYS("V3DDEL","SURFACE",sSurface);
+   iPlane = iFindItem_LST(hPlaneLST,0,sSurface);
+   if (iPlane == -1) 
+      Abort_SYS(_("Surface does not exist in this View."));
+   iPlane = iGetInt_LST(hPlaneLST,1,iPlane);
+   DeletePlane_MVIEW(View,iPlane,TRUE);
+   
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_YES);
+   
+}

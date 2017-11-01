@@ -1,0 +1,298 @@
+//===========================================================================
+NAME          = "Create a new empty database - Chimera"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport"
+
+DESCRIPTION   = "
+   Create a new database file. This GX is designed to run as a subroutine
+   from the CHIMPORT and CHIMPLAB GXs, and returns \"0\" from the back button
+   or \"2\" from the OK button.
+
+    CHCREATE.NAME       - database name (.gdb assumed)
+            .LINES      - maximum number of lines    (def. 200)
+            .CHANNELS   - maximum number of channels (def. 50)
+            .BLOBS      - maximum number of BLOBS    (def. 50)
+            .USERS      - maximum number of users    (def. 10)
+            .PAGESIZE   - size of Database Pages     (def. 1024)
+            .COMPRESSION- Compression type           (def. -1)
+            .ERASE      - maximum erase caches       (def. 100)
+            .SUPER      - name of the super user     (def. SUPER)
+            .PASSWORD   - super user password        (def. none)
+"
+// Revision History:
+// v6.1.4: SJC: Return to main dialog after OK in advanced parameters dialog.
+// v5.1.8: SJC: In interactive mode use compression setting from SETTINGS GX as default.
+// v5.1.4: SJC: Modified CREATE GX to create new CHCREATE.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chcreate.gr"
+#include "chcreate.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;
+
+string(STR_FILE) sName, sDataBase;
+int         iLines, iChans;
+int         iChannels;
+int         iBlobs;
+int         iMinBlobs;
+int         iUsers;
+int         iErase;
+int         iPageSize;
+int         iCompress;
+int         i,iData,iChan;
+string(STR_DEFAULT) sSuper,sData,sChan,sTemp;
+string(STR_DEFAULT) sPassword;
+string(STR_DEFAULT_LONG) sErr;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      // --- interactive defaults ---
+                     
+      SetInt_SYS("CHCREATE","BLOBS",-1);
+      SetInt_SYS("CHCREATE","USERS",-1);
+      SetInt_SYS("CHCREATE","ERASE",-1);
+      SetInt_SYS("CHCREATE","PAGESIZE",1024);
+      SetString_SYS("CHCREATE","SUPER","");
+      SetString_SYS("CHCREATE","PASSWORD","");
+
+
+      // --- Set default compression from SETTINGS ---
+
+      if (iGlobal_SYS("MONTAJ.DB_COMPRESS",sTemp) == 0)
+         SetString_SYS("CHCREATE","COMPRESSION",sTemp);
+
+      
+      i = 1;
+      while (i != 0 && i!=2) {  // Ok = 2, Back = 0, Advanced = 3
+      
+         switch (i) {
+         
+            case 1:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("CHCREATEForm");
+
+
+               // --- Set any Defaults ---
+                                     
+               SetInfoSYS_DGW(Diag,_CHCREATEFORM_0,DGW_FILEPATH,"CHCREATE","NAME");
+               SetInfoSYS_DGW(Diag,_CHCREATEFORM_1,DGW_TEXT,"CHCREATE","LINES");
+               SetInfoSYS_DGW(Diag,_CHCREATEFORM_2,DGW_TEXT,"CHCREATE","CHANNELS");
+               SetInfoSYS_DGW(Diag,_CHCREATEFORM_3,DGW_LISTALIAS,"CHCREATE","COMPRESSION");
+
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i==-1) Cancel_SYS();
+
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_CHCREATEFORM_0,DGW_FILEPATH,"CHCREATE","NAME");
+               GetInfoSYS_DGW(Diag,_CHCREATEFORM_1,DGW_TEXT,"CHCREATE","LINES");
+               GetInfoSYS_DGW(Diag,_CHCREATEFORM_2,DGW_TEXT,"CHCREATE","CHANNELS");
+               GetInfoSYS_DGW(Diag,_CHCREATEFORM_3,DGW_LISTALIAS,"CHCREATE","COMPRESSION");
+
+               Destroy_DGW(Diag);
+               
+               
+               // --- verify overwrite if database exists ---
+
+               if (i != 0) {
+
+                  // --- Get parameters ---
+
+                  GetString_SYS("CHCREATE","NAME",sDataBase);
+                  iLines = iGetInt_SYS("CHCREATE","LINES");
+                  iChans = iGetInt_SYS("CHCREATE","CHANNELS");
+
+                  if(!iStrlen_STR(sDataBase)) {
+                     DisplayMessage_SYS(_("Create new database"),_("You must specify the New database name."));
+                     i = 1;
+                     break;
+                  }
+                  if(iLines == iDUMMY) {
+                     DisplayMessage_SYS(_("Create new database"),_("You must specify the Maximum survey lines."));
+                     i = 1;
+                     break;
+                  }
+                  if(iChans == iDUMMY) {
+                     DisplayMessage_SYS(_("Create new database"),_("You must specify the Maximum fields/channels."));
+                     i = 1;
+                     break;
+                  }
+
+
+                  if (iFileExist_SYS(sDataBase)) {
+                     Strcpy_STR(sErr,_("Overwrite existing database: "));
+                     Strcat_STR(sErr,sDataBase);
+                     if (iDisplayQuestion_SYS(_("Create database"),sErr)==0) {
+                        UnLoad_EDB(sDataBase);
+                        i = 1;
+                        break;
+                     }
+                  }                  
+               }      
+
+
+               break;
+               
+               
+            case 3:               
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("CHCREATEFormAdv");
+
+               SetInfoSYS_DGW(Diag,_CHCREATEFORMADV_0,DGW_LISTALIAS,"CHCREATE","PAGESIZE");
+               SetInfoSYS_DGW(Diag,_CHCREATEFORMADV_1,DGW_LISTALIAS,"CHCREATE","PAGESIZE");
+
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+               if (i == 1) {
+                  Destroy_DGW(Diag);
+                  break;
+               }
+               
+
+               // --- Get the Strings ---
+
+               GetInfo_DGW(Diag,_CHCREATEFORMADV_0,DGW_LISTALIAS,sData);
+               GetInfo_DGW(Diag,_CHCREATEFORMADV_1,DGW_LISTALIAS,sChan);
+               
+               
+               // --- make pagesize larger of the two values ---
+               
+               iData = iScanI_STR(sData);
+               iChan = iScanI_STR(sChan);
+               if (iChan > iData) iData = iChan;
+               if (iData < 64) iData = 64;
+               SetInt_SYS("CHCREATE","PAGESIZE",iData);
+               
+
+               // --- Destroy the Dialogue and return to the main dialog ---
+
+               i = 1;   
+               Destroy_DGW(Diag);
+               break;
+      
+         }
+      
+      }
+
+   }
+   else {
+      i = iGetInt_SYS("CHCREATE", "RETURN");
+   }
+   
+
+   // --- At this point return is "0" (for back) or "2" (for OK)
+
+   SetInt_SYS("CHCREATE","RETURN", i);
+
+   if(i==0) Exit_SYS();
+     
+
+   // --- is database is loaded, unload ---
+
+   GetString_SYS("CHCREATE","NAME",sName);
+   if (iLoaded_EDB(sName)) UnLoad_EDB(sName);
+   
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("CHCREATE","NAME",sName);
+   iLines    = iGetInt_SYS("CHCREATE","LINES");
+   iChannels = iGetInt_SYS("CHCREATE","CHANNELS");
+   iBlobs    = iGetInt_SYS("CHCREATE","BLOBS");
+   iUsers    = iGetInt_SYS("CHCREATE","USERS");
+   iErase    = iGetInt_SYS("CHCREATE","ERASE");
+   iPageSize = iGetInt_SYS("CHCREATE","PAGESIZE");
+   iCompress = iGetInt_SYS("CHCREATE","COMPRESSION");
+   GetString_SYS("CHCREATE","SUPER",sSuper);
+   GetString_SYS("CHCREATE","PASSWORD",sPassword);
+
+
+   // --- Set defaults ---
+
+   if (iStrlen_STR(sName) == 0)
+      Abort_SYS(_("Database name not specified"));
+      
+   if ( (iLines <= 0) || (iLines == iDUMMY) )
+      iLines = 200;
+      
+   if ( (iChannels <= 0) || (iChannels == iDUMMY) )
+      iChannels = 50;
+      
+   iMinBlobs = iLines+iChannels+100;
+   if ( (iBlobs < iMinBlobs) || (iBlobs == iDUMMY) )
+      iBlobs = iMinBlobs;
+      
+   if ( (iUsers <= 0) || (iUsers == iDUMMY) )
+      iUsers = 10;
+      
+   if ( (iErase <= 0) || (iErase == iDUMMY) )
+   {
+      iErase = (int)(  ((real)(iLines*iChannels)) *0.05 );
+      if (iErase < 100)   iErase = 100;
+      if (iErase > 10000) iErase = 10000;
+   }
+      
+   if ( (iPageSize < 64) || (iPageSize == iDUMMY) )
+      iPageSize = 1024;
+
+   if ( (iCompress < 0) || (iCompress > 4) )
+      iCompress = 0;
+
+   if (iStrlen_STR(sSuper)==0)
+      Strcpy_STR(sSuper,"SUPER");
+   if (iStrlen_STR(sPassword)==0)
+      Strcpy_STR(sPassword,"");
+      
+      
+   // --- Create database ---
+
+   CreateComp_DB(sName,
+                 iLines,
+                 iChannels,
+                 iBlobs,
+                 iUsers,
+                 iErase,
+                 sSuper,
+                 sPassword,
+                 iPageSize,
+                 iCompress);
+             
+   // --- Open the database and make it current ---
+
+   if (iInteractive_SYS())
+     LoadNew_EDB(sName);
+
+}

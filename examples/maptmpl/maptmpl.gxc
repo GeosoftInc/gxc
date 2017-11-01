@@ -1,0 +1,291 @@
+//===========================================================================
+
+NAME          = "MAPPLOT template manager"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+
+   MAPTMPL.NAME   - name of a current default map template.
+
+"
+
+//===========================================================================
+
+RESOURCE = "maptmpl.gr"
+#include "maptmpl.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT) sTmpl;
+string(STR_DEFAULT) sSet;
+
+DGW ManDgw,EditDgw,NewDiag;
+LTB hTMP,hMED;
+int i,ii,iRec;
+int iType;
+int iMedia;
+int iLayout;
+int iFixed;
+int iMargin_bottom;
+int iMargin_right;
+int iMargin_top;
+int iMargin_left;
+int iMargin_inside;
+int iUp_direction;
+int iUp_angle;
+
+
+//===========================================================================
+//                             MAP CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS())
+      Abort_SYS(_("The GX will only run interactively."));
+      
+   
+   // --- create tables ---
+   
+   hMED = CreateCSV_LTB("media");
+   
+   hTMP = CreateCSV_LTB("maptmpl");
+   iType = iFindField_LTB(hTMP,"TYPE");
+   iMedia = iFindField_LTB(hTMP,"MEDIA");
+   iLayout = iFindField_LTB(hTMP,"LAYOUT");
+   iFixed = iFindField_LTB(hTMP,"FIXED");
+   iMargin_bottom = iFindField_LTB(hTMP,"MARGIN_BOTTOM");
+   iMargin_right = iFindField_LTB(hTMP,"MARGIN_RIGHT");
+   iMargin_top = iFindField_LTB(hTMP,"MARGIN_TOP");
+   iMargin_left = iFindField_LTB(hTMP,"MARGIN_LEFT");
+   iMargin_inside = iFindField_LTB(hTMP,"MARGIN_INSIDE");
+   iUp_direction = iFindField_LTB(hTMP,"UP_DIR");
+   iUp_angle = iFindField_LTB(hTMP,"UP_ANG");
+   
+   
+   // --- set default template name ---
+   
+   if (iExistString_SYS("MAPTMPL","NAME"))
+      GetString_SYS("MAPTMPL","NAME",sTmpl);
+   else   
+      Strcpy_STR(sTmpl,"DEFAULT");
+      
+   
+   // --- Create the Dialogue ---
+
+   ManDgw = Create_DGW("maptmpl");
+   EditDgw = Create_DGW("edit");
+   NewDiag = Create_DGW("newtmpl");
+   
+   
+   
+   do {
+   
+      // --- Set up lists ---
+      
+      GetLST_LTB(hTMP,0,GetList_DGW(ManDgw,_MAPTMPL_0));
+      
+   
+      // --- template manager ---
+   
+      SetInfo_DGW(ManDgw,_MAPTMPL_0,DGW_TEXT,sTmpl);
+      i = iRunDialogue_DGW(ManDgw);
+      if (i < 0) break;
+      GetInfo_DGW(ManDgw,_MAPTMPL_0,DGW_TEXT,sTmpl);
+      
+      
+      // --- OK - done ---
+      
+      if (i == 0) break;
+      
+      
+      // --- new template ---
+      
+      if (i == 2) {
+      
+      
+         // --- modify, template must exist ---
+      
+         if (iRunDialogue_DGW(NewDiag) == -1)
+            continue;
+         GetInfo_DGW(NewDiag,_NEWTMPL_0,DGW_TEXT,sTmpl);     
+         iRec = iFindKey_LTB(hTMP,sTmpl);
+         
+      
+         // --- test if section already exists ---
+         
+         if (iRec >= 0) {
+            if (iDisplayQuestion_SYS(sTmpl,_("Template exists, modify?")) == 0)
+               continue;
+         } else {
+            SetInfo_DGW(EditDgw,_EDIT_1,DGW_TEXT,_("map"));
+            SetInfo_DGW(EditDgw,_EDIT_2,DGW_TEXT,"A4");
+            SetInfo_DGW(EditDgw,_EDIT_3,DGW_TEXT,_n("landscape"));
+            SetInfo_DGW(EditDgw,_EDIT_4,DGW_TEXT,_n("minimum"));
+            SetInfo_DGW(EditDgw,_EDIT_5,DGW_TEXT,"4.0");
+            SetInfo_DGW(EditDgw,_EDIT_6,DGW_TEXT,"14.0");
+            SetInfo_DGW(EditDgw,_EDIT_7,DGW_TEXT,"3.0");
+            SetInfo_DGW(EditDgw,_EDIT_8,DGW_TEXT,"3.0");
+            SetInfo_DGW(EditDgw,_EDIT_9,DGW_TEXT,"1.0");
+            SetInfo_DGW(EditDgw,_EDIT_10,DGW_TEXT,_n("right"));
+            SetInfo_DGW(EditDgw,_EDIT_11,DGW_TEXT,"67.5");
+         }         
+               
+      } else {
+      
+         // --- template record ---
+         
+         iRec = iFindKey_LTB(hTMP,sTmpl);
+      
+      
+         // --- set up from existing template ---
+         
+         GetString_LTB(hTMP,iRec,iType,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,_n("map"));
+         SetInfo_DGW(EditDgw,_EDIT_1,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iMedia,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,"A4");
+         SetInfo_DGW(EditDgw,_EDIT_2,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iLayout,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,_n("landscape"));
+         SetInfo_DGW(EditDgw,_EDIT_3,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iFixed,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,_n("minimum"));
+         SetInfo_DGW(EditDgw,_EDIT_4,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iMargin_bottom,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,"4.0");
+         SetInfo_DGW(EditDgw,_EDIT_5,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iMargin_right,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,"14.0");
+         SetInfo_DGW(EditDgw,_EDIT_6,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iMargin_top,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,"3.0");
+         SetInfo_DGW(EditDgw,_EDIT_7,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iMargin_left,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,"3.0");
+         SetInfo_DGW(EditDgw,_EDIT_8,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iMargin_inside,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,"1.0");
+         SetInfo_DGW(EditDgw,_EDIT_9,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iUp_direction,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,_n("right"));
+         SetInfo_DGW(EditDgw,_EDIT_10,DGW_TEXT,sSet);
+         
+         GetString_LTB(hTMP,iRec,iUp_angle,sSet);
+         if (iStrMin_STR(sSet) == 0)
+            Strcpy_STR(sSet,"67.5");
+         SetInfo_DGW(EditDgw,_EDIT_11,DGW_TEXT,sSet);
+         
+      }
+         
+         
+      // --- Set up ---
+      
+      GetLST_LTB(hMED,0,GetList_DGW(EditDgw,_EDIT_2));
+               
+
+      // --- display dialogue ---
+
+      SetInfo_DGW(EditDgw,_EDIT_0,DGW_TEXT,sTmpl);     
+      ii = iRunDialogue_DGW(EditDgw);
+      if (ii == -1)
+         continue;
+         
+      if (ii == 1) {
+         DeleteRecord_LTB(hTMP,iRec);
+         if (iRecords_LTB(hTMP) > 0)
+            GetString_LTB(hTMP,0,0,sTmpl);
+         else
+            Strcpy_STR(sTmpl,"");   
+         iRec = 0;
+         continue;
+      }         
+   
+   
+      // --- create new template if required ---
+      
+      if (i == 2)
+         AddRecord_LTB(hTMP,sTmpl,iRec);
+         
+         
+      // --- get/set template parameters ---         
+         
+      GetInfo_DGW(EditDgw,_EDIT_1,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iType,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_2,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iMedia,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_3,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iLayout,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_4,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iFixed,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_5,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iMargin_bottom,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_6,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iMargin_right,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_7,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iMargin_top,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_8,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iMargin_left,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_9,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iMargin_inside,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_10,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iUp_direction,sSet);
+      
+      GetInfo_DGW(EditDgw,_EDIT_11,DGW_TEXT,sSet);
+      SetString_LTB(hTMP,iRec,iUp_angle,sSet);
+      
+      
+   } while (1);
+   
+   
+   // --- save changes ---
+
+   Save_LTB(hTMP,"");
+   SetString_SYS("MAPTMPL","NAME",sTmpl);
+   
+   Destroy_SYS(ManDgw);      
+   Destroy_SYS(EditDgw);      
+   Destroy_SYS(hTMP);
+   Destroy_SYS(hMED);
+      
+}

@@ -1,0 +1,464 @@
+//===========================================================================
+NAME          = "GRIDFLTN"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Filters"
+
+DESCRIPTION   = "\Apply a nxn (n=5, 7 or 9) symmetric Filter to a Grid using any number of passes.
+Parameters:
+       GRIDFILTN.GRD                    File Name of the Input Grid.
+                .NEWn     (n=5, 7 or 9) File Name of New Grid.                          
+                .DEFFILTn (n=5, 7 or 9) Name of pre-defined 6, 10 or 15 point filter. (optional)
+                .FILTn    (n=5, 7 or 9) Name of file containing 6, 10 or 15 point filter. (optional)
+                .FILTSTRn (n=5, 7 or 9) filter coef. string - comma delimited 6, 10 or 15 numbers (optional)
+                .PASSn    (n=5, 7 or 9) Number of filter Passes to apply to create the new grid.
+"
+// Revision History:
+// v5.1.5: New GX.
+//===========================================================================
+
+RESOURCE = "gridfltn.gr"
+#include "gridfltn.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+int        iSet;              // flags if filter is set
+int        iToks;             // Tokens in filter point string
+int        iUseFile;          // flags to use file for filter values
+int        iPass;             // Number of passes to apply
+int        iCellSize;         // number of filter window, 5, 7 or 9
+int        iNX,iNY;           // grid size
+int        iVVSize;
+
+real       rVal;
+real       rDx,rDy,rXo,rYo,rRot;     // grid info
+
+string(STR_FILE)     sGrd;            // Name of input grid
+string(STR_FILE)     sNew;            // Name of new resultant grid
+string(STR_FILE)     sFiltFile;       // Name of filter file
+string(STR_FILE)     sRefFil;         // Name of reference file (_ref.bin)
+string(STR_DEFAULT)  sDefFilt;        // Pre-Defined filter
+string(STR_DEFAULT_LONG) sFiltStr;        // Filter string
+string(STR_DEFAULT_LONG) sMessage, sPass; 
+
+string(STR_DEFAULT) sTemp;           // Temporary string
+
+IMG         IMGi;             // Image tied to the input grid
+IMG         IMGo;             // Image for the output grid
+
+VV          hVV;              // Holds the 6 coef. values in filter
+PG          hPG;
+TR          hTR;
+IPJ         hIPJ;
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+   // --- get cell size ---
+   
+   iCellSize = iGetInt_SYS( "GRIDFLTN", "CELLSIZE" );
+   if( 5 != iCellSize && 7 != iCellSize && 9 != iCellSize ) {
+      Abort_SYS( _("ERROR: This GX only works via GRIDFLT5, GRIDFLT7 or GRIDFLT9 GX!") );
+   }
+
+   SetInt_SYS( "GRIDFLTN", "CELLSIZE", 0 );
+
+   
+   // --- start dialog ---
+
+   if (iInteractive_SYS( ) ) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW( "GRIDFLTNForm" );
+      switch( iCellSize ) {
+      case 5: SetTitle_DGW(Diag, _("Grid 5x5 symmetric Filters")); break;
+      case 7: SetTitle_DGW(Diag, _("Grid 7x7 symmetric Filters")); break;
+      case 9: SetTitle_DGW(Diag, _("Grid 9x9 symmetric Filters")); break;
+      }
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_0,DGW_FILEPATH,"GRIDFLTN","GRD"); 
+
+      switch( iCellSize ) {
+      case 5: 
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_1,DGW_FILEPATH,"GRIDFLTN","NEW5" );    
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_2,DGW_LISTALIAS,    "GRIDFLTN","DEFFILT5" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_3,DGW_FILEPATH,"GRIDFLTN","FILT5" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_4,DGW_TEXT,    "GRIDFLTN","FILTSTR5" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_5,DGW_TEXT,    "GRIDFLTN","PASS5" );
+         break;
+      case 7:
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_1,DGW_FILEPATH,"GRIDFLTN","NEW7" );    
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_2,DGW_LISTALIAS,    "GRIDFLTN","DEFFILT7" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_3,DGW_FILEPATH,"GRIDFLTN","FILT7" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_4,DGW_TEXT,    "GRIDFLTN","FILTSTR7" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_5,DGW_TEXT,    "GRIDFLTN","PASS7" );
+         break;
+      case 9:
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_1,DGW_FILEPATH,"GRIDFLTN","NEW9" );    
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_2,DGW_LISTALIAS,    "GRIDFLTN","DEFFILT9" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_3,DGW_FILEPATH,"GRIDFLTN","FILT9" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_4,DGW_TEXT,    "GRIDFLTN","FILTSTR9" );     
+         SetInfoSYS_DGW(Diag,_GRIDFLTNFORM_5,DGW_TEXT,    "GRIDFLTN","PASS9" );  
+         break;
+      }
+    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_0,DGW_FILEPATH,"GRIDFLTN","GRD");     
+      switch( iCellSize ) {
+      case 5: 
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_1,DGW_FILEPATH,"GRIDFLTN","NEW5");    
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_2,DGW_LISTALIAS,    "GRIDFLTN","DEFFILT5");     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_3,DGW_FILEPATH,"GRIDFLTN","FILT5");     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_4,DGW_TEXT,    "GRIDFLTN","FILTSTR5");     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_5,DGW_TEXT,    "GRIDFLTN","PASS5");
+         break;
+      case 7:
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_1,DGW_FILEPATH,"GRIDFLTN","NEW7" );    
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_2,DGW_LISTALIAS,    "GRIDFLTN","DEFFILT7" );     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_3,DGW_FILEPATH,"GRIDFLTN","FILT7" );     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_4,DGW_TEXT,    "GRIDFLTN","FILTSTR7" );     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_5,DGW_TEXT,    "GRIDFLTN","PASS7" );
+         break;
+      case 9:
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_1,DGW_FILEPATH,"GRIDFLTN","NEW9" );    
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_2,DGW_LISTALIAS,    "GRIDFLTN","DEFFILT9" );     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_3,DGW_FILEPATH,"GRIDFLTN","FILT9" );     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_4,DGW_TEXT,    "GRIDFLTN","FILTSTR9" );     
+         GetInfoSYS_DGW(Diag,_GRIDFLTNFORM_5,DGW_TEXT,    "GRIDFLTN","PASS9" );  
+         break;
+      }
+           
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters and Check for pass ---
+
+   GetString_SYS( "GRIDFLTN", "GRD", sGrd);
+
+   switch( iCellSize ) {
+   case 5: 
+      GetString_SYS( "GRIDFLTN", "NEW5",     sNew );
+      GetString_SYS( "GRIDFLTN", "DEFFILT5", sDefFilt );
+      GetString_SYS( "GRIDFLTN", "FILT5",    sFiltFile );
+      GetString_SYS( "GRIDFLTN", "FILTSTR5", sFiltStr );
+      GetString_SYS( "GRIDFLTN", "PASS5",    sPass );
+      if ( 0 >= iStrlen_STR( sPass ) ) {
+         iPass = 1;
+      } else {
+         iPass = iGetInt_SYS( "GRIDFLTN", "PASS5" );
+      }
+      break;
+   case 7:
+      GetString_SYS( "GRIDFLTN", "NEW7",      sNew);
+      GetString_SYS( "GRIDFLTN", "DEFFILT7",  sDefFilt);
+      GetString_SYS( "GRIDFLTN", "FILT7",     sFiltFile);
+      GetString_SYS( "GRIDFLTN", "FILTSTR7",  sFiltStr);
+      GetString_SYS( "GRIDFLTN", "PASS7",    sPass );
+      if ( 0 >= iStrlen_STR( sPass ) ) {
+         iPass = 1;
+      } else {
+         iPass = iGetInt_SYS( "GRIDFLTN", "PASS7" );
+      }
+      break;
+   case 9: 
+      GetString_SYS( "GRIDFLTN", "NEW9",      sNew);
+      GetString_SYS( "GRIDFLTN", "DEFFILT9",  sDefFilt);
+      GetString_SYS( "GRIDFLTN", "FILT9",     sFiltFile);
+      GetString_SYS( "GRIDFLTN", "FILTSTR9",  sFiltStr);
+      GetString_SYS( "GRIDFLTN", "PASS9",    sPass );
+      if ( 0 >= iStrlen_STR( sPass ) ) {
+         iPass = 1;
+      } else {
+         iPass = iGetInt_SYS( "GRIDFLTN", "PASS9" );
+      }
+      break;
+   }
+
+
+   
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrd)) {
+      Abort_SYS(_("Input Grid Not Specified!"));
+   }
+
+   if (!iStrlen_STR( sNew ) ) {
+      Abort_SYS(_("New Resultant Grid Not Specified!"));   
+   }
+
+   if (!iStrcmp_STR( sGrd, sNew, STR_CASE_TOLERANT ) ) {
+      Abort_SYS(_("Names of Input Grid and New Resultant Grid Must be Different!"));
+   }
+
+   iSet = 0;                  // Filter is not set
+
+
+   // --- Create and initialize a VV to hold the filter values ---
+
+   switch( iCellSize ) {
+   case 5: iVVSize = 6; break;
+   case 7: iVVSize = 10; break;
+   case 9: iVVSize = 15; break;
+   }
+    
+   hVV = Create_VV(REAL, iVVSize );
+   FillReal_VV ( hVV, 0.0 );
+
+
+   // --- Check the defined filter and set values in ---
+
+   if (!iStrcmp_STR( sDefFilt, _n("Least Square"), STR_CASE_TOLERANT ) ) {
+
+      iSet = 1;
+      
+      switch( iCellSize ) {
+      case 5: 
+         SetReal_VV( hVV, 0, 0.15428);
+         SetReal_VV( hVV, 1, 0.12571);
+         SetReal_VV( hVV, 2, 0.09714);
+         SetReal_VV( hVV, 3, 0.04000);
+         SetReal_VV( hVV, 4, 0.01142);
+         SetReal_VV( hVV, 5,-0.07428);
+         break;
+      case 7: 
+         SetReal_VV( hVV, 0,  0.07483 );
+         SetReal_VV( hVV, 1,  0.06803 );
+         SetReal_VV( hVV, 2,  0.06122 );
+         SetReal_VV( hVV, 3,  0.04762 );
+         SetReal_VV( hVV, 4,  0.04082 );
+         SetReal_VV( hVV, 5,  0.02041 );
+         SetReal_VV( hVV, 6,  0.01361 );
+         SetReal_VV( hVV, 7,  0.00680 );
+         SetReal_VV( hVV, 8, -0.01361 );
+         SetReal_VV( hVV, 9, -0.04762 );
+         break;
+      case 9:
+         SetReal_VV( hVV,  0,  0.04441238 );
+         SetReal_VV( hVV,  1,  0.04200738 );
+         SetReal_VV( hVV,  2,  0.03960237 );
+         SetReal_VV( hVV,  3,  0.03479237 );
+         SetReal_VV( hVV,  4,  0.03238737 );
+         SetReal_VV( hVV,  5,  0.02517236 );
+         SetReal_VV( hVV,  6,  0.02276736 );
+         SetReal_VV( hVV,  7,  0.02036235 );
+         SetReal_VV( hVV,  8,  0.01314735 );
+         SetReal_VV( hVV,  9,  0.00112233 );
+         SetReal_VV( hVV, 10,  0.00593234 ); 
+         SetReal_VV( hVV, 11,  0.00352734 ); 
+         SetReal_VV( hVV, 12, -0.00368767 ); 
+         SetReal_VV( hVV, 13, -0.01571268 ); 
+         SetReal_VV( hVV, 14, -0.03254770 ); 
+         break;
+      } 
+
+   }
+
+
+   // --- If filter not set, then try to get it from the file ---
+
+   iUseFile = 0;
+
+   if ( ( !iSet ) && ( iStrlen_STR( sFiltFile ) ) ) {
+      iUseFile = 1;
+      iSet = 1;    
+   }
+
+
+   // --- if filter still not set, try to get it from filter edit box ---
+
+   if ( (!iSet) && (iStrlen_STR( sFiltStr ) ) ) {
+      iSet = 1;
+
+      // --- Tokenize the string and get the 9 points ---
+
+      iToks = iTokens_STR(sFiltStr,",");
+      if ( iToks != iVVSize ) {
+         Destroy_VV( hVV );
+         switch( iCellSize ) {
+         case 5: 
+         	 Strcpy_STR(sMessage, _("Invalid Filter Value string. Must have 6 numbers delimited by commas.")); break;
+         case 7: 
+         	 Strcpy_STR(sMessage, _("Invalid Filter Value string. Must have 10 numbers delimited by commas.")); break;
+         case 9: 
+         	 Strcpy_STR(sMessage, _("Invalid Filter Value string. Must have 15 numbers delimited by commas.")); break;
+         } 
+         
+         Abort_SYS( sMessage );
+      }
+
+      // --- Get the values and put into the VV ---
+
+      for ( i = 0 ; i < iVVSize ; i++ ) {
+         rVal = 0.0;
+         GetToken_STR( sTemp, sFiltStr, i ) ;
+         rVal = rScanR_STR( sTemp );
+         if ( rVal == rDUMMY ) {
+            Destroy_VV(hVV);
+            
+            switch( iCellSize ) {
+            case 5: 
+              Strcpy_STR(sMessage, _("Invalid Filter Value string. Must have 6 numbers delimited by commas.")); break;
+            case 7: 
+              Strcpy_STR(sMessage, _("Invalid Filter Value string. Must have 10 numbers delimited by commas.")); break;
+            case 9: 
+              Strcpy_STR(sMessage, _("Invalid Filter Value string. Must have 15 numbers delimited by commas.")); break;
+            } 
+            Abort_SYS( sMessage );
+         }
+         SetReal_VV(hVV,i,rVal);      
+      }
+   }
+
+
+   // --- If the filter is still not set - default to Least Square filter ---   
+
+   if ( !iSet ) {
+      
+      iSet = 1;
+
+      switch( iCellSize ) {
+      case 5: 
+         SetReal_VV( hVV, 0, 0.15428);
+         SetReal_VV( hVV, 1, 0.12571);
+         SetReal_VV( hVV, 2, 0.09714);
+         SetReal_VV( hVV, 3, 0.04000);
+         SetReal_VV( hVV, 4, 0.01142);
+         SetReal_VV( hVV, 5,-0.07428);
+         break;
+      case 7: 
+         SetReal_VV( hVV, 0,  0.07483 );
+         SetReal_VV( hVV, 1,  0.06803 );
+         SetReal_VV( hVV, 2,  0.06122 );
+         SetReal_VV( hVV, 3,  0.04762 );
+         SetReal_VV( hVV, 4,  0.04082 );
+         SetReal_VV( hVV, 5,  0.02041 );
+         SetReal_VV( hVV, 6,  0.01361 );
+         SetReal_VV( hVV, 7,  0.00680 );
+         SetReal_VV( hVV, 8, -0.01361 );
+         SetReal_VV( hVV, 9, -0.04762 );
+         break;
+      case 9:
+         SetReal_VV( hVV,  0,  0.04441238 );
+         SetReal_VV( hVV,  1,  0.04200738 );
+         SetReal_VV( hVV,  2,  0.03960237 );
+         SetReal_VV( hVV,  3,  0.03479237 );
+         SetReal_VV( hVV,  4,  0.03238737 );
+         SetReal_VV( hVV,  5,  0.02517236 );
+         SetReal_VV( hVV,  6,  0.02276736 );
+         SetReal_VV( hVV,  7,  0.02036235 );
+         SetReal_VV( hVV,  8,  0.01314735 );
+         SetReal_VV( hVV,  9,  0.00112233 );
+         SetReal_VV( hVV, 10,  0.00593234 ); 
+         SetReal_VV( hVV, 11,  0.00352734 ); 
+         SetReal_VV( hVV, 12, -0.00368767 ); 
+         SetReal_VV( hVV, 13, -0.01571268 ); 
+         SetReal_VV( hVV, 14, -0.03254770 ); 
+         break;
+      } 
+   }
+
+
+
+   // --- Check the multiplier and pass parameters ---
+
+   if ((iPass < 1) || (iPass > iMAX) || ( iPass == iDUMMY ) ) {
+      Destroy_VV(hVV);
+      Abort_SYS(_("Number of Passes is Invalid. Must be an integer from 1 to 2147483647"));
+   }
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+
+   // --- Create Images tied to the grids ---  
+   
+   IMGi = CreateFile_IMG( GS_FLOAT, sGrd, IMG_FILE_READONLY );
+   IMGo = CreateOutFile_IMG( GS_FLOAT, sNew, IMGi ); 
+
+   rDx = 1.0;
+   rDy = 1.0;
+   rXo = 0.0;
+   rYo = 0.0;
+   rRot= 0.0;
+   GetInfo_IMG(IMGi,rDx,rDy,rXo,rYo,rRot);
+   iNX = iNX_IMG(IMGi);
+   iNY = iNY_IMG(IMGi);
+   hPG = Create_PG(iNY,iNX,GS_FLOAT);
+   hTR = Create_TR(3);    // iOrder
+   hIPJ = Create_IPJ();
+   GetPG_IMG(IMGi,hPG);
+   GetTR_IMG(IMGi,hTR);
+   GetIPJ_IMG(IMGi,hIPJ);
+
+   ProgName_SYS(_("Filtering Grid..."),1);
+
+
+   // --- Create reference file ---
+
+   FileNamePart_STR(sGrd,sRefFil,STR_FILE_PART_NAME);
+   Strcat_STR(sRefFil,"_ref.bin");
+   RefFile_PGU(hPG,sRefFil);
+
+
+   // --- Filter the grid ---
+
+   FiltSym_PGU( hPG, iPass, iUseFile, sFiltFile, iCellSize, hVV );
+   
+   // --- Grid Bool ---
+
+   Bool_PGU( hPG, sRefFil );
+   
+   SetPG_IMG(IMGo,hPG);
+   SetTR_IMG(IMGo,hTR);
+   SetIPJ_IMG(IMGo,hIPJ);
+
+
+   // --- Destroy the Images and VV ---
+   
+   Destroy_IMG(IMGi);
+   Destroy_IMG(IMGo);
+   Destroy_VV(hVV);
+   Destroy_PG(hPG);
+   Destroy_TR(hTR);
+   Destroy_IPJ(hIPJ);
+        
+
+   // --- done ---
+   
+   Progress_SYS(0);
+
+   
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sNew,"Grid",1);
+      
+}

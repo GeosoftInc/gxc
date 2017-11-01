@@ -1,0 +1,122 @@
+//===========================================================================
+NAME          = "Calculate derived data from imported data channels"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+         Calculates the X, Y positions, the \"N\" factor, as well as the derived
+         channels : Resistivitity (\"Res_Calc\"), Metal Factor (\"MF\"). and Averaged
+         total IP (\"IP_Avg\").
+
+			IPRECALC.CALCULATE_XYZ: 1: Yes (default); 0: No (must set every time).
+"
+// Revision History
+// v6.0.1: Verify that it's in interactive mode before running the channel maker
+// v6.0.0: Channel makers now run only on IP-generated topo and grid channels.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+IP          Ip;   
+LST         Lst;
+DB_SYMB     Ch;
+
+int i, iN, iRecalculateXYZ;
+string(STR_DB_SYMBOL) sCh;
+string(STR_FILE) sGX;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	// --- Recalculate XYZ locations (yes by default) ---
+
+	iRecalculateXYZ = iGetInt_SYS("IPRECALC", "CALCULATE_XYZ");
+	if(iRecalculateXYZ != 0) iRecalculateXYZ = 1;
+	SetInt_SYS("IPRECALC", "CALCULATE_XYZ", 1);		// force reset each usage
+
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Do the work ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Recalculating reduced data"),1);
+
+   Ip = Create_IP();
+   RecalculateEx_IP(Ip, Data, iRecalculateXYZ);
+   Destroy_IP(Ip);
+    
+   // --- run makers for any channel with an IPIMPGRID maker ---
+   
+   Lst = Create_LST(128);
+   SymbLST_DB(Data, Lst, DB_SYMB_CHAN);
+   iN = iSize_LST(Lst);
+   for(i=iN-1;i>=0;i--) {
+      
+      Ch = (DB_SYMB)iGetInt_LST(Lst, 1, i);
+      
+      LOCK_R(Data,Ch);
+      GetRegSymbSetting_DB(Data, Ch, "HAS_MAKER", sGX, sizeof(sGX));
+      UNLOCK(Data,Ch);
+      
+      if(iStrcmp_STR(sGX, "IPIMPGRID", STR_CASE_TOLERANT)==0) continue;
+      
+      
+      // --- Delete items without makers ---
+      DelItem_LST(Lst, i);
+   }
+   
+   
+   // --- Run the maker on remaining channels ---
+   
+   UnLock_EDB(EData);
+   iN = iSize_LST(Lst);
+   if (iInteractive_SYS()) {
+      for(i=0;i<iN;i++) {
+      
+         GetItem_LST(Lst, 0, i, sCh);
+         RunChannelMaker_EDB(EData, sCh);      
+      }
+   
+      // --- run makers for the topo channel ---
+
+		if(iRecalculateXYZ == 1)
+			RunChannelMaker_EDB(EData, "Topo");   
+   }
+   
+   
+   // --- Recalculate "Z" channels, since the Topo values may have been changed by
+   //     the channel makers ---
+
+	if(iRecalculateXYZ == 1)
+	{
+		Ip = Create_IP();
+		Data = Lock_EDB(EData);
+		RecalculateZ_IP(Ip, Data);
+		Destroy_IP(Ip);
+	}
+
+
+   Progress_SYS(0);
+
+   
+}

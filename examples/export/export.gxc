@@ -1,0 +1,232 @@
+//===========================================================================
+NAME          = "Export data to an XYZ file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+    EXPORT.FILE     : Output XYZ data file name.
+          .TEMPLATE : Export template file name (.o0 assumed)
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
+
+// Revision History:
+// 5.1.8: If current line is a "Group" line, exports all groups with same class.
+//        (Previously only exported the current group).
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "export.gr"
+#include "export.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+DB_SELECT   Select;           // current selection mode
+DB_SYMB     CurLine, Line;    // Current line symbol
+
+int         i;                // Utility 
+int         iGroup;           // Is current line a group?
+
+string(STR_DB_SYMBOL) sCurLine, sLine;
+string(STR_FILE) sFile;
+string(STR_FILE) sTemplate;
+string(STR_DEFAULT_LONG) sTemp, sMsg;
+string(DB_GROUP_CLASS_SIZE) sGroupClass;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+
+
+   // --- Get currently selected line ---
+
+   if (iInteractive_SYS()) GetCurLine_EDB(EData,sCurLine);
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      i = 1;
+      while(i!=0) 
+      {
+      
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("EXPORTForm");
+
+
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_EXPORTFORM_0,DGW_FILEPATH,"EXPORT","FILE");
+         SetInfoSYS_DGW(Diag,_EXPORTFORM_1,DGW_FILEPATH,"EXPORT","TEMPLATE");
+
+         i = iRunDialogue_DGW(Diag);
+         if(i==-1) Cancel_SYS();
+
+         GetInfoSYS_DGW(Diag,_EXPORTFORM_0,DGW_FILEPATH,"EXPORT","FILE");
+         GetInfoSYS_DGW(Diag,_EXPORTFORM_1,DGW_FILEPATH,"EXPORT","TEMPLATE");
+         
+         Destroy_DGW(Diag);
+
+         
+         // --- Get the template ---
+         
+         GetString_SYS("EXPORT","TEMPLATE",sTemplate);
+
+       
+         // --- Run Template ---
+         
+         
+
+         if (i==0) {
+
+            // --- Locate the Template ---
+
+            if(!iStrlen_STR(sTemplate) ||
+               !iFileExist_SYS(sTemplate)) 
+            {
+               i = 1;
+            }            
+            else 
+            {         
+            
+               // --- Validate the output file ---
+                  
+               GetString_SYS("EXPORT","FILE",sFile);
+               if(iFileExist_SYS(sFile)) {
+                  Strcpy_STR(sMsg, _("Overwrite the \""));
+                  Strcat_STR(sMsg, sFile);
+                  Strcat_STR(sMsg, _("\" file?"));
+
+                  if(iDisplayQuestion_SYS(_("Export XYZ data"), sMsg)==0) {
+                     i = 1;
+                     continue;
+                  }
+               }
+            }
+         }  
+         
+         if(i==1)    // --- Run the Template Editor ---
+         {
+            
+            if (iExportXYZTemplateEditor_GUI(Data,sTemplate,sizeof(sTemplate)) == 0)
+            {   
+               // --- Copy the Information Back to the Dialog ---
+  
+               SetString_SYS("EXPORT","TEMPLATE",sTemplate);
+            }
+         } 
+      }
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("EXPORT","FILE",sFile);
+   GetString_SYS("EXPORT","TEMPLATE",sTemplate);
+
+
+   // --- Validate parameters ---
+
+   if (iStrlen_STR(sFile) == 0)
+      Abort_SYS(_("XYZ Export failed: No output data file was specified."));
+
+   if (iStrlen_STR(sTemplate) == 0)
+      Abort_SYS(_("XYZ Export failed: No export template file was specified."));
+
+
+
+   // --- Group Specific Exporting only works in Interactive Mode ---
+
+   if (iInteractive_SYS())
+   {
+      // --- SPECIAL CASE: This GX did not previously work for groups. ---
+      //     The new rule is: If the currently displayed "line" is a group,
+      //     select all groups with the same class and export those.
+
+      CurLine = FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+      iGroup = 0;
+      LockSymb_DB(Data, CurLine, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      if(iLineCategory_DB(Data, CurLine)==DB_CATEGORY_LINE_GROUP) {
+         GetGroupClass_DB(Data, CurLine, sGroupClass);
+         iGroup=1;
+      }
+      UnLockSymb_DB(Data, CurLine);
+
+
+      if(iGroup) {
+
+         // --- Unselect all regular lines, and those groups whose class name is not
+         //     the same as the current line ---
+
+         Select = GetSelect_DB(Data);
+
+         Line = FirstSelLine_DB(Data);
+         while (iIsLineValid_DB(Data,Line))
+         {
+            LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+            GetSymbName_DB(Data,Line,sLine);
+
+            if(iLineCategory_DB(Data, Line)!=DB_CATEGORY_LINE_GROUP) {
+               Select_DB(Data,sLine,DB_LINE_SELECT_EXCLUDE);
+            }
+            else {
+
+               GetGroupClass_DB(Data, Line, sTemp);
+               if(iStrcmp_STR(sTemp, sGroupClass,STR_CASE_TOLERANT)!=0) {
+
+                  Select_DB(Data,sLine,DB_LINE_SELECT_EXCLUDE);
+               }
+            }
+
+            UnLockSymb_DB(Data,Line);
+            Line = NextSelLine_DB(Data, Line );
+         }
+      }  
+   }
+   
+
+   // --- turn on progress ---
+
+   Strcpy_STR(sTemp,_("Export: "));
+   Strcat_STR(sTemp,sFile);
+   Progress_SYS(1);
+   ProgName_SYS(sTemp,1);
+
+
+   // --- export ---
+
+   ExportXYZ_DU(Data,sFile,sTemplate);
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   if(iGroup) {
+      SetSelect_DB(Data,Select);
+   }
+
+   // --- Unlock Data ---
+
+   UnLock_EDB(EData);
+}

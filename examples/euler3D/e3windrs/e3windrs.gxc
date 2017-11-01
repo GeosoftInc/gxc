@@ -1,0 +1,170 @@
+//===========================================================================
+NAME          = "E3WINDRS.GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "euler"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Window Results"
+DESCRIPTION   = "
+
+Select all of the Euler deconvolution solutions for plotting
+
+Parameters:
+
+     EULER3D.SOLUTIONS : Solution list
+     EULER3D.MASK    : Mask channel
+"
+//===========================================================================
+// Revision History:
+// v5.1.5: Now using selected mask channel and solution group.
+
+RESOURCE = "E3WINDRS.gr"
+#include "E3WINDRS.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define GET_CHAN(A,B,C)       \
+   if (!iExistSymb_DB(Data,A,DB_SYMB_CHAN))     \
+      B = CreateSymb_DB(Data,A,DB_SYMB_CHAN, DB_OWN_SHARED, C);   \
+   else                                                           \
+      B = FindSymb_DB(Data,A,DB_SYMB_CHAN);                       \
+   LockSymb_DB(Data,B,DB_LOCK_READWRITE,DB_WAIT_INFINITY);        \
+   AddAssociatedLoad_DB(Data,Solutions,B);                          \
+   if (iGetChanProtect_DB(Data,B) == DB_CHAN_PROTECTED)            \
+      SetChanProtect_DB(Data,B,DB_CHAN_UNPROTECTED);              
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         Diag;                // dialogue handle
+LST         List;                // list of channel names
+
+EDB         EData;
+DB          Data;                // name of database to window
+DB_SYMB     Solutions;                // Solutions handle
+DB_SYMB     XCh,MaskCh;            
+VV          XVV,MVV;
+
+string(STR_DB_SYMBOL) sMask;
+string(STR_DB_SYMBOL) sSolutions;     
+
+//===========================================================================
+//                          MAIN PROGRAM CODE
+//===========================================================================
+
+{
+   // --- Get handle to current database ---
+
+   EData=Current_EDB();
+   Data = Lock_EDB(EData);
+
+   if (iInteractive_SYS())
+   {
+      // --- Define dialogue windows ---
+
+      Diag = Create_DGW("E3WINDRS");
+
+
+      // --- Solution lists ---
+
+      List = GetList_DGW(Diag,_E3WINDRS_0);
+      ClassGroupLST_DB(Data,List,"Targets");
+      Sort_LST(List,0,0);
+
+
+      // --- Mask channel list ---
+
+      List = GetList_DGW(Diag,_E3WINDRS_1);
+      ClassChanLST_DB(Data,List,"MASK");
+
+                                       
+      // --- Set defaults from last window ---
+      
+      SetInfoSYS_DGW(Diag,_E3WINDRS_0,DGW_TEXT,"EULER3D","SOLUTIONS");
+      SetInfoSYS_DGW(Diag,_E3WINDRS_1,DGW_TEXT,"EULER3D","MASK");
+
+
+      // --- Run dialogue --- 
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+
+      // --- Get values from dialogue ---
+
+      GetInfoSYS_DGW(Diag,_E3WINDRS_0,DGW_TEXT,"EULER3D","SOLUTIONS");
+      GetInfoSYS_DGW(Diag,_E3WINDRS_1,DGW_TEXT,"EULER3D","MASK");
+
+   }
+
+   // --- Get Solutions number ---
+
+   GetString_SYS("EULER3D","SOLUTIONS",sSolutions);
+   if (!iExistSymb_DB(Data,sSolutions,DB_SYMB_LINE))
+      Abort_SYS(_("The specified solution list does not exist"));
+   Solutions = FindSymb_DB(Data,sSolutions,DB_SYMB_LINE);
+
+
+   // --- Get mask channel ---
+
+   GetString_SYS("EULER3D","MASK",sMask);
+   GET_CHAN(sMask,MaskCh, DB_CATEGORY_CHAN_BYTE)
+
+
+   // --- Get X channel ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+
+   // --- Create VVs ---
+
+   XVV = Create_VV(REAL,0);
+   MVV = CreateExt_VV(GS_BYTE, 0);
+
+         
+   // --- Get data and refid ---
+
+   GetChanVV_DB(Data,Solutions,XCh,XVV);
+   GetChanVV_DB(Data,Solutions,MaskCh,MVV);
+
+   ReFidVV_VV(MVV, XVV);
+
+
+   // --- If using reset mask mode, begin by setting all mask values to 1; otherwise,
+   //     begin by masking all data values where the mask is a dummy ---
+   
+   SetIntN_VV(MVV, 0, -1, 1);
+
+
+   // --- Put back the mask channel ---
+
+   PutChanVV_DB(Data,Solutions,MaskCh,MVV);
+
+
+   // --- Done - clean up and exit ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,MaskCh);
+
+
+   Destroy_VV(XVV);
+   Destroy_VV(MVV);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("E3WINDRS GX (Select all solutions)"), FALSE);
+   AddComment_DB(Data, "Solution list", sSolutions, TRUE);
+   AddComment_DB(Data, "Mask channel", sMask, TRUE);
+
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+}

@@ -1,0 +1,186 @@
+//===========================================================================
+NAME          = "Edit all selected line information"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   EDITLINE.TYPE     L - normal
+                     B - base
+                     T - tie
+                     S - test
+                     R - trend
+                     P - special
+                     D - random
+           .DATE     date as yyyy/mm/dd
+           .FLIGHT   flight number
+              
+   Any parameters that are blank will remain unchanged.
+   
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Line"
+
+// Revision History:
+// v5.1.5: Flight lines: no longer attempt to set for group lines
+//===========================================================================
+
+RESOURCE = "editline.gr"
+#include "editline.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;
+EDB        EData;
+DB         Data;
+DB_SYMB    Line;
+
+
+string(STR_DEFAULT_SHORT) sType,sDate;
+string(STR_DEFAULT_LONG) sTemp,sLabel;
+int         iLine,iTotLines,iType,iFlight;
+real        rDate;
+
+//===========================================================================
+//                             XLEVEL CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("editline");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_EDITLINE_0,DGW_TEXT,"EDITLINE","TYPE");
+      SetInfoSYS_DGW(Diag,_EDITLINE_1,DGW_TEXT,"EDITLINE","DATE");
+      SetInfoSYS_DGW(Diag,_EDITLINE_2,DGW_TEXT,"EDITLINE","FLIGHT");    
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_EDITLINE_0,DGW_TEXT,"EDITLINE","TYPE");
+      GetInfoSYS_DGW(Diag,_EDITLINE_1,DGW_TEXT,"EDITLINE","DATE");
+      GetInfoSYS_DGW(Diag,_EDITLINE_2,DGW_TEXT,"EDITLINE","FLIGHT");    
+
+   }
+   
+
+   // --- get parameters ---
+
+   if (iExistString_SYS("EDITLINE","TYPE")) {
+   
+      GetString_SYS("EDITLINE","TYPE",sType);
+      ToUpper_STR(sType);
+      if (iCharComp_STR(sType,"L"))
+         iType = DB_LINE_TYPE_NORMAL;
+      else if (iCharComp_STR(sType,"B"))
+         iType = DB_LINE_TYPE_BASE;
+      else if (iCharComp_STR(sType,"T"))
+         iType = DB_LINE_TYPE_TIE;
+      else if (iCharComp_STR(sType,"S"))
+         iType = DB_LINE_TYPE_TEST;
+      else if (iCharComp_STR(sType,"R"))
+         iType = DB_LINE_TYPE_TREND;
+      else if (iCharComp_STR(sType,"P"))
+         iType = DB_LINE_TYPE_SPECIAL;
+      else if (iCharComp_STR(sType,"D"))
+         iType = DB_LINE_TYPE_RANDOM;
+      else
+         Abort_SYS(_("Invalid line type."));         
+         
+   } else
+      iType = iDUMMY;
+         
+   if (iExistString_SYS("EDITLINE","DATE")) {
+   
+      GetString_SYS("EDITLINE","DATE",sDate);
+      rDate = rScanDate_STR(sDate,DATE_FORMAT_YYYYMMDD);
+      if (rDate == rDUMMY)
+         Abort_SYS(_("Invalid date."));
+         
+   } else
+      rDate = rDUMMY;         
+      
+   if (iExistInt_SYS("EDITLINE","Flight"))
+      iFlight = iGetInt_SYS("EDITLINE","Flight");
+   else   
+      iFlight = iDUMMY;
+   
+
+   if ((iType != iDUMMY) ||
+       (rDate != rDUMMY) ||
+       (iFlight != iDUMMY)) {
+       
+       
+      // --- get current line and database ---
+
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+
+
+      // --- Prepare to do the work ---
+
+      iLine = 0;
+      iTotLines = iCountSelLines_DB(Data);
+      Progress_SYS(1);
+
+
+      // --- Go through all selected Lines ---
+
+      ProgName_SYS(_("Modify lines"),1);
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+
+         // --- Update the Progress Bar ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sTemp);
+         Strcpy_STR(sLabel,_("Modify line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLine,iTotLines);
+
+         if(iLineCategory_DB(Data, Line) == DB_CATEGORY_LINE_FLIGHT) {
+         
+            if (iType != iDUMMY)
+               SetLineType_DB(Data,Line,iType);
+            
+            if (rDate != rDUMMY)
+               SetLineDate_DB(Data,Line,rDate);
+         
+            if (iFlight != iDUMMY) 
+               SetLineFlight_DB(Data,Line,iFlight);
+         }
+            
+         UnLockSymb_DB(Data,Line);
+         Line = NextSelLine_DB(Data, Line);
+         iLine++;
+
+      }
+      Progress_SYS(0);
+
+      // --- Release the Database ---
+
+      UnLock_EDB(EData);
+   }      
+}

@@ -1,0 +1,277 @@
+//===========================================================================
+NAME          = "Analytic signal grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "euler"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Located Euler Decon"
+DESCRIPTION   = "\
+
+Computes the analytic signal grid out of existing derivative grids.
+The analytic signal grid is then displayed in the current map.
+           
+Parameters: 
+
+      EULER3D.DX       - x-derivative input grid
+             .DY       - y-derivative input grid
+             .DZ       - z-derivative input grid
+             .ASIG     - output AS grid
+      E3ASIG .NEW      - display AS grid in a new map (1) or current map (0)            
+"
+// Revision History
+// v5.1.5: New GX - modified from UXASIG.
+//===========================================================================
+// ***NOTE*** Changes to this GX should be made in parallel with UXASIG.GX
+//===========================================================================
+
+RESOURCE = "E3ASIG.gr"
+#include "E3ASIG.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define  E3ASIG_BACK  999
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+IEXP        IEXP_asig;  // Analytic signal image expression
+
+DGW         Diag;       // Dialogue handle
+IMG         IMGX,IMGY,IMGZ,IMGAsig; 
+PG          PGAsig;
+EMAP        EMap;                    // Map object
+MAP         Map;                     // Map object
+IPJ         Ipj;
+
+string(STR_FILE) sGDX,sGDY,sGDZ;
+string(STR_FILE) sAsig,sAGG,sTmp;
+
+real        rMinX,rMinY,rMaxX,rMaxY,rMin,rMax,rInc;
+
+int         i,iRet,iDec,iPow;  
+int         iNew;
+
+int         iInteract;
+
+//===========================================================================
+//                           E3ASIG CODE
+//===========================================================================
+
+{
+   iInteract = iInteractive_SYS();    
+
+   // --- Are we running interactively ? ---
+
+   i = E3ASIG_BACK;
+   while (iInteractive_SYS() && (i == E3ASIG_BACK))
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("E3ASIGForm");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_E3ASIGFORM_0,DGW_FILEPATH, "EULER3D","DX");
+      SetInfoSYS_DGW(Diag,_E3ASIGFORM_1,DGW_FILEPATH, "EULER3D","DY");
+      SetInfoSYS_DGW(Diag,_E3ASIGFORM_2,DGW_FILEPATH, "EULER3D","DZ");
+      SetInfoSYS_DGW(Diag,_E3ASIGFORM_3,DGW_FILEPATH, "EULER3D","ASIG");
+      SetInfoSYS_DGW(Diag,_E3ASIGFORM_4,DGW_LISTALIAS,"E3ASIG","NEW");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS(); 
+
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_E3ASIGFORM_0,DGW_FILEPATH, "EULER3D","DX");
+      GetInfoSYS_DGW(Diag,_E3ASIGFORM_1,DGW_FILEPATH, "EULER3D","DY");
+      GetInfoSYS_DGW(Diag,_E3ASIGFORM_2,DGW_FILEPATH, "EULER3D","DZ");
+      GetInfoSYS_DGW(Diag,_E3ASIGFORM_3,DGW_FILEPATH, "EULER3D","ASIG");
+      GetInfoSYS_DGW(Diag,_E3ASIGFORM_4,DGW_LISTALIAS,"E3ASIG","NEW");
+
+      Destroy_DGW(Diag);
+
+      
+      // --- Run 2nd dialog ---
+      
+      iNew    = iGetInt_SYS("E3ASIG","NEW");
+      
+      if (iNew) {
+
+         // --- Get the starting range from a derivative grid ---
+
+         GetString_SYS("EULER3D","DX",sGDX);
+
+         SetString_SYS("IMGRANGE","FILE", sGDX);     
+         if (iRunGX_SYS("imgrange.gx"))
+            DisplayMessage_SYS(_("imgrange GX"),_("Failed to calculate range from grid."));
+
+      
+         // --- Run NEWMAP wizard ---
+         
+         do {
+            iRet = iRunGX_SYS("newmap.gx");
+            if(iRet==-1) i = E3ASIG_BACK;    // Cancelled out of new map
+            if(iRet==1) ShowError_SYS();     // Dump errors.
+         } while(iRet==1);
+      }        
+   } 
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("EULER3D","DX",sGDX);
+   GetString_SYS("EULER3D","DY",sGDY);
+   GetString_SYS("EULER3D","DZ",sGDZ);
+   GetString_SYS("EULER3D","ASIG",sAsig);
+   iNew = iGetInt_SYS("E3ASIG","NEW");
+   
+   // --- Validate essential parameters ---
+
+   if (iStrMin2_STR(sGDX) == 0)
+      Abort_SYS(_("X-derivative grid name is not specified."));
+
+   if (iStrMin2_STR(sGDY) == 0)
+      Abort_SYS(_("Y-derivative grid name is not specified."));
+
+   if (iStrMin2_STR(sGDZ) == 0)
+      Abort_SYS(_("Z-derivative grid name is not specified."));
+
+   if (iStrMin2_STR(sAsig) == 0)
+      Abort_SYS(_("Analytic signal grid name is not specified."));
+      
+
+
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- COMPUTE ANALYTIC SIGNAL ---
+
+   IEXP_asig=Create_IEXP();
+
+   IMGX = CreateFile_IMG(GS_DOUBLE,sGDX,IMG_FILE_READONLY);
+   IMGY = CreateFile_IMG(GS_DOUBLE,sGDY,IMG_FILE_READONLY);
+   IMGZ = CreateFile_IMG(GS_DOUBLE,sGDZ,IMG_FILE_READONLY);
+   IMGAsig = CreateOutFile_IMG(GS_DOUBLE,sAsig,IMGX);
+
+   // --- Copy projection to output grid ---
+   
+   Ipj = Create_IPJ();
+   GetIPJ_IMG(IMGX, Ipj);
+   SetIPJ_IMG(IMGAsig, Ipj);
+
+
+   AddGrid_IEXP (IEXP_asig,IMGX,"dx");
+   AddGrid_IEXP (IEXP_asig,IMGY,"dy");
+   AddGrid_IEXP (IEXP_asig,IMGZ,"dz");
+   AddGrid_IEXP (IEXP_asig,IMGAsig,"asig");
+
+
+   DoFormula_IEXP (IEXP_asig,"asig=sqrt(dx*dx+dy*dy+dz*dz);",100);
+
+
+   // --- Get dynamic range of the grid for the colorbar scale number of decimals ---
+
+   PGAsig = GethPG_IMG(IMGAsig);
+   Range_PG (PGAsig, rMin, rMax);
+
+   iDec = iDUMMY;    // use colorbar default by default
+   if(rMin!=rDUMMY) {
+
+      // --- Base it on the scale increment ---
+
+      NicerScale_MATH(rMin, rMax, rInc, iPow);
+
+      iDec = -(int)rLog10_MATH(rInc/10.0) + 1;
+      if(iDec<0) iDec=0;
+      
+   }
+
+
+
+                 
+   // --- cleanup ---
+
+   Destroy_IEXP(IEXP_asig);
+   Destroy_IMG(IMGX);
+   Destroy_IMG(IMGY);
+   Destroy_IMG(IMGZ);
+   Destroy_IMG(IMGAsig);
+
+   // --- done ---
+    
+   Progress_SYS(0);
+   
+   
+   // --- Display AS grid and color bar ---
+   
+   
+   if (iInteract)
+      SetInteractive_SYS(0);                    // Interactive off
+
+   // --- Grid ---
+   
+   SetInt_SYS("GRIDIMG1","NEW",0);           // Send it to the current map
+   SetString_SYS("GRIDIMG1","GRID",sAsig);
+   SetString_SYS("GRIDIMG1","COLOR","Colour.tbl");
+   SetInt_SYS("GRIDIMG1","ZONE",2);
+   SetString_SYS("GRIDIMG1","CONTOUR","");
+   SetInt_SYS("GRIDIMG1","REG",0);
+
+
+  
+   if (iRunGX_SYS("GRIDIMG1.GX") != 0) {
+      if (iInteract)
+         SetInteractive_SYS(1);                 // Interactive on
+      Abort_SYS(_("Failure to display the analytic signal grid."));
+   }
+   
+   
+   // --- Plot colorbar ---
+         
+   rMinX = rMinY = rMaxX = rMaxY = rDUMMY;
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   GetMapSize_MAP(Map,rMinX,rMinY,rMaxX,rMaxY);                                        
+   UnLock_EMAP(EMap);
+
+   FileNamePart_STR(sAsig, sTmp, STR_FILE_PART_NAME);
+   Strcpy_STR(sAGG,"data\\AGG_");
+   Strcat_STR(sAGG,sTmp);
+   Strcat_STR(sAGG,"\\");
+   Strcat_STR(sAGG,sTmp);
+
+   SetString_SYS("COLORBAR","AGG",sAGG);
+   SetString_SYS("COLORBAR","AGG2","");
+   SetString_SYS("COLORBAR","TITLE","Analytic Signal");
+   SetString_SYS("COLORBAR","SUBTITLE",sTmp);
+   SetReal_SYS  ("COLORBAR","X",rMaxX - (rMaxX - rMinX)*0.1);
+   SetReal_SYS  ("COLORBAR","Y",rMinY + (rMaxY - rMinY)*0.3);
+   SetInt_SYS   ("COLORBAR","DECIMALS",3);
+
+
+   // --- Run the GX ---
+   
+   if (iRunGX_SYS("COLORBAR.GX") != 0) { 
+      if (iInteract)
+         SetInteractive_SYS(1);                 // Interactive on
+      Abort_SYS(_("Failure to draw colorbar."));
+   } 
+   
+   if (iInteract)
+      SetInteractive_SYS(1);                    // Interactive on
+   
+   
+
+   // -------------------------------------------------------
+   // --- Set grid name to be input for GXs that follow ---
+
+   SetString_SYS("E3PARSE","GRID",sAsig);
+   SetString_SYS("E3PEAKS","GRID",sAsig);
+      
+}

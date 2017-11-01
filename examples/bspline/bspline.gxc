@@ -1,0 +1,195 @@
+//===========================================================================
+NAME          = "B-Spline curves in a channel."
+#include <version.gxh>
+
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "
+
+B-Spline curves in a channel by cubic B-spline on the valid values.
+
+    BSPLINE.IN     : Name of the channel to Bspline
+           .OUT    : Output splined channel (may be same as input)
+           .SMOOTH : Smoothness (0.0 to 1.0 or more)
+           .TAU    : Tension (0.0 to 1.0)
+"
+
+//===========================================================================
+
+RESOURCE = "bspline.gr"
+#include "bspline.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;             // Channel Name
+string(STR_DB_SYMBOL) sOutCh;            // Channel Name
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh;              // Channel handle
+DB_SYMB    OutCh;             // Channel handle
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        iLines;            // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+real       rRou;              // Roughness (Rou > 0.0)
+real       rTau;              // Tension (0.<= Tau <=1.)
+
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("BsplineForm");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_BSPLINEFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_BSPLINEFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_BSPLINEFORM_0,DGW_TEXT,"BSPLINE","IN");     
+      SetInfoSYS_DGW(Diag,_BSPLINEFORM_1,DGW_TEXT,"BSPLINE","OUT");     
+      SetInfoSYS_DGW(Diag,_BSPLINEFORM_2,DGW_TEXT,"BSPLINE","SMOOTH");     
+      SetInfoSYS_DGW(Diag,_BSPLINEFORM_3,DGW_TEXT,"BSPLINE","TAU");     
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();  
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_BSPLINEFORM_0,DGW_TEXT,"BSPLINE","IN");     
+      GetInfoSYS_DGW(Diag,_BSPLINEFORM_1,DGW_TEXT,"BSPLINE","OUT");     
+      GetInfoSYS_DGW(Diag,_BSPLINEFORM_2,DGW_TEXT,"BSPLINE","SMOOTH");     
+      GetInfoSYS_DGW(Diag,_BSPLINEFORM_3,DGW_TEXT,"BSPLINE","TAU");     
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("BSPLINE","IN",sInCh);
+   GetString_SYS("BSPLINE","OUT",sOutCh);
+   rRou = rGetReal_SYS("BSPLINE","SMOOTH");
+   rTau = rGetReal_SYS("BSPLINE","TAU");
+
+
+   // --- calculate roughness from smoothness ---
+
+//   if (rRou < 0.0001) 
+//      rRou = 1.0;
+//   else
+//      rRou = rPow_MATH(10.0,-(rRou*10.0));
+
+   rRou = rPow_MATH(10.0,5.0-(rRou*10.0));
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))  
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+
+   
+   // --- Does the Output Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) { 
+      OutCh = DupSymb_DB(Data,InCh,sOutCh);       // Create it 
+      UnLockSymb_DB(Data,OutCh);
+   } else   
+      OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+      
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line)) {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Bspline line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Bspline data ---
+
+      BSpline_DU(Data,Line,InCh,OutCh,1.0,rRou,rTau);
+
+      
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("B-Spline line"),"BSPLINE;");
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}
+

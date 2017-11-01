@@ -1,0 +1,325 @@
+//===========================================================================
+NAME          = "Create a geoid height channel"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   This GX will create a channel of geoid height given a projected X,Y 
+   location and a grid that contains the Geoid model.
+   
+    GEOID.X       X channel
+         .Y       Y channel
+         .GEOID   output geoid channel
+         .GRID    geoid grid
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
+
+//===========================================================================
+// Revision History:
+// v6.4.0: Set default X and Y to the current X, Y.
+// v6.0.0:  First release
+//===========================================================================
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "geoid.gr"
+#include "geoid.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sX,sY,sG,sIMG,sIMGFile;      // Channel Names, grid name
+
+EDB        eDB;
+DB         hDB;
+DB_SYMB    X,Y,Z;             // Channel Handles
+IMG        hIMG;              // Grid handle
+DB_SYMB    Line;              // Line Handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+IPJ        hIPJxy,hIPJgrd;    // 
+META       hMETA;
+META_TOKEN mcGrid;
+META_TOKEN maUnit;
+
+int        i;                 // Utility int
+int        iLines;            // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT) sUnit;
+
+//===========================================================================
+//                                  CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+
+   eDB = Current_EDB();
+   hDB = Lock_EDB(eDB);
+   
+   
+   // --- Set default new X, Y channels to the existing current X, Y ---
+   
+   GetString_SYS("GEOID", "X", sX);
+   if(!iStrlen_STR(sX) || !iExistChan_DB(hDB, sX))
+   {
+      GetXYZChan_DB(hDB, DB_CHAN_X, sX);
+      SetString_SYS("GEOID", "X", sX);
+   }
+
+   GetString_SYS("GEOID", "Y", sY);
+   if(!iStrlen_STR(sY) || !iExistChan_DB(hDB, sY))
+   {
+      GetXYZChan_DB(hDB, DB_CHAN_Y, sY);
+      SetString_SYS("GEOID", "Y", sY);
+   }
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      
+      i = 0;
+      while (i != 2) {
+      
+         switch (i) {
+      
+            case 0:
+
+               // --- Create the Dialogue ---
+      
+               Diag = Create_DGW("GEOID0");
+      
+      
+               // --- Set up input and output lists ---
+      
+               List = GetList_DGW(Diag,_GEOID0_0);
+               SymbLST_DB(hDB,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+               List = GetList_DGW(Diag,_GEOID0_1);
+               SymbLST_DB(hDB,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+               List = GetList_DGW(Diag,_GEOID0_2);
+               SymbLST_DB(hDB,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+      
+               SetInfoSYS_DGW(Diag,_GEOID0_0,DGW_TEXT,"GEOID","X");     
+               SetInfoSYS_DGW(Diag,_GEOID0_1,DGW_TEXT,"GEOID","Y");     
+               SetInfoSYS_DGW(Diag,_GEOID0_2,DGW_TEXT,"GEOID","GEOID");    
+               SetInfoSYS_DGW(Diag,_GEOID0_3,DGW_LISTALIAS,"GEOID","GROP");    
+      
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+      
+               GetInfoSYS_DGW(Diag,_GEOID0_0,DGW_TEXT,"GEOID","X");     
+               GetInfoSYS_DGW(Diag,_GEOID0_1,DGW_TEXT,"GEOID","Y");     
+               GetInfoSYS_DGW(Diag,_GEOID0_2,DGW_TEXT,"GEOID","GEOID");    
+               GetInfoSYS_DGW(Diag,_GEOID0_3,DGW_LISTALIAS,"GEOID","GROP");    
+               Destroy_DGW(Diag);
+               
+               // --- do we need to choose a different grid? ---
+               
+               GetString_SYS("GEOID","GROP",sIMG);
+               if (iStrncmp_STR(sIMG,_n("Other"),5,STR_CASE_TOLERANT) == 0) {
+                  i = 1;
+               } else {
+                  SetString_SYS("GEOID","GRID",sIMG);
+                  i = 2;
+               }                  
+            
+               break;
+               
+            
+            case 1:
+         
+               // --- Create the Dialogue ---
+      
+               Diag = Create_DGW("GEOID1");
+      
+               SetInfoSYS_DGW(Diag,_GEOID1_0,DGW_FILEPATH,"GEOID","GRID");
+               
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+      
+               GetInfoSYS_DGW(Diag,_GEOID1_0,DGW_FILEPATH,"GEOID","GRID");    
+               Destroy_DGW(Diag);
+            
+               break;   
+               
+            default:
+         
+               DisplayMessage_SYS(_("I'm lost"),_("I'm lost."));
+               i = 0;
+               break;
+         }                  
+      }
+   }  
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GEOID","X",sX);
+   GetString_SYS("GEOID","Y",sY);
+   GetString_SYS("GEOID","GEOID",sG);
+   GetString_SYS("GEOID","GRID",sIMG);
+
+
+   // --- sX and sY should not be the same ---
+
+   if(iStrcmp_STR(sX,sY,STR_CASE_TOLERANT)==0)
+      Abort_SYS(_("Input X and Y channels should be different!"));
+
+
+   // --- Do the Input Channels Exist ? ---
+
+   if (!iExistChan_DB(hDB,sX))  
+      Abort_SYS(_("Input X channel does not exist."));
+   X = FindChan_DB(hDB,sX);
+   if (!iExistChan_DB(hDB,sY))  
+      Abort_SYS(_("Input Y channel does not exist."));
+   Y = FindChan_DB(hDB,sY);
+   
+
+   // --- get the projection ---
+
+   LockSymb_DB(hDB,X,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   hIPJxy = Create_IPJ();
+   GetIPJ_DB(hDB,X,hIPJxy);
+   UnLockSymb_DB(hDB,X);
+   
+               
+   // --- Create a grid handle ---
+
+   iFindPathNameEx_SYS(sIMG,FIND_GEOSOFT,GEO_DIRECTORY_ETC,sIMGFile);          
+   hIMG = CreateFile_IMG(GS_DOUBLE,sIMGFile,IMG_FILE_READONLY);
+   
+   
+   // --- get the grid IPJ and pass on to ---
+   
+   hIPJgrd = Create_IPJ();
+   GetIPJ_IMG(hIMG,hIPJgrd);
+   if ((iSourceType_IPJ(hIPJgrd) != IPJ_TYPE_NONE) && 
+       (iSourceType_IPJ(hIPJxy) == IPJ_TYPE_NONE)) {
+      
+      // --- grid has an IPJ, but database XY does not - pass it on ---
+      
+      LockSymb_DB(hDB,X,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(hDB,Y,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetIPJ_DB(hDB,X,Y,hIPJgrd);
+      UnLockSymb_DB(hDB,X);
+      UnLockSymb_DB(hDB,Y);
+      
+   }         
+   
+
+   // --- Ouput Channel ---
+
+   if (!iExistChan_DB(hDB,sG)) {
+      CreateSymb_DB(hDB,sG,DB_SYMB_CHAN,DB_OWN_USER,DB_CATEGORY_CHAN_DOUBLE);
+   }
+   Z = FindChan_DB(hDB,sG);
+   
+
+   // --- get data units from grid ---
+   
+   hMETA = Create_META();
+   GetMETA_IMG(hIMG,hMETA);
+   mcGrid = ResolveUMN_META(hMETA,"CLASS:/geosoft/data/grid");
+   maUnit = ResolveUMN_META(hMETA,"ATTRIB:/geosoft/data/grid/data unit");
+   GetAttribString_META(hMETA,mcGrid,maUnit,sUnit);
+   Destroy_META(hMETA);
+   SetChanUnit_DB(hDB,Z,sUnit);
+   
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(hDB);
+   Progress_SYS(1);
+   
+
+   // --- lock the channels ---
+
+   LockSymb_DB(hDB,X,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDB,Y,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDB,Z,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   if (iTotLines > 2)
+      LoadIntoPager_IMG(hIMG);
+      
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(hDB);
+   while (iIsLineValid_DB(hDB,Line)) {
+   
+   
+      // --- Update the Progress Bar ---
+      
+      LockSymb_DB(hDB,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(hDB,Line,sTemp);
+      UnLockSymb_DB(hDB,Line);
+      
+      Printf_STR(sLabel, sizeof(sLabel), _("Geoid %s"), sTemp);
+      
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+      
+      Associate_DB(hDB,Line,Z);
+      
+
+      // --- sample the grid ---
+
+      SampleIMG_DU (hDB,Line,X,Y,Z,hIMG);
+      
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(hDB, Line );
+      iLines++;
+      
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(hDB,Z,_("Grid sample"),"GEOID;");
+
+
+   // --- unlock the channels ---
+
+   UnLockSymb_DB(hDB,X);
+   UnLockSymb_DB(hDB,Y);
+   UnLockSymb_DB(hDB,Z);
+
+   Destroy_IMG(hIMG);
+   Progress_SYS(0);
+
+   
+   // --- Release the hDBbase ---
+
+   UnLock_EDB(eDB);
+   
+   
+   // --- Load the new channel ---
+   
+   if (iInteractive_SYS())
+      LoadChan_EDB(eDB,sG);
+}

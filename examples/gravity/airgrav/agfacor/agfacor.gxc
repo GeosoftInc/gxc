@@ -1,0 +1,187 @@
+//===========================================================================
+NAME          = "Calculate free air correction"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   AGFACOR.HEIGHT  Height channel
+          .OUTCH   Output free-air correction channel
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3: New GX.
+    
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "agfacor.gr"
+#include "agfacor.grh"
+
+//===========================================================================
+//                                INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DB          Data;                   // Database handle
+EDB         EData;                  // Edited database handle
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // Channel list handle
+EXP         Exp;
+
+DB_SYMB     Line,HeightCh,OutCh;
+
+int         i;                      // Utility
+
+string(STR_DEFAULT)  sHeightCh,sOutCh;
+string(512)          sFormula;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGFACOR");
+                                                 
+
+      // --- Set up channel lists ---
+      
+      List = GetList_DGW(Diag,_AGFACOR_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGFACOR_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+
+      // --- Set any Defaults ---
+  
+      SetInfoSYS_DGW(Diag,_AGFACOR_0,DGW_TEXT,"AGFACOR","HEIGHT");
+      SetInfoSYS_DGW(Diag,_AGFACOR_1,DGW_TEXT,"AGFACOR","OUTCH");
+                           
+                             
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();           // They hit cancel
+                                                 
+     
+      // --- Read inputs from the dialogue box ---
+      
+      GetInfoSYS_DGW(Diag,_AGFACOR_0,DGW_TEXT,"AGFACOR","HEIGHT");
+      GetInfoSYS_DGW(Diag,_AGFACOR_1,DGW_TEXT,"AGFACOR","OUTCH");
+     
+      // --- Destroy the Dialogue ---
+     
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGFACOR","HEIGHT",sHeightCh);
+   GetString_SYS("AGFACOR","OUTCH",sOutCh);
+    
+   
+   // --- Get handles to the input data channels ---
+
+   if (!iExistChan_DB(Data,sHeightCh)) 
+      Abort_SYS(_("The height channel does not exist."));
+
+   HeightCh = FindChan_DB(Data,sHeightCh);
+   LockSymb_DB(Data,HeightCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Get handle to the output channel ---
+
+   if (!iExistChan_DB(Data,sOutCh)) 
+      OutCh = DupSymb_DB(Data,HeightCh,sOutCh);
+   else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+      SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);     
+   }   
+                         
+
+   // --- Create expression ---
+
+   Strcpy_STR(sFormula,"$sOutCh=$sHeightCh*0.3086;");
+
+   Exp = Create_EXP(Data,sFormula,512);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating free air correction"),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, HeightCh) > 0) {
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Free air correction"),"AGFACOR;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Free Air Correction"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   UnLockSymb_DB(Data,HeightCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+
+
+   // --- Set default for AGFREEAIR GX ---
+
+   SetString_SYS("AGFREEAIR","FACORCH", sOutCh);
+
+   // --- Load channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);      
+}

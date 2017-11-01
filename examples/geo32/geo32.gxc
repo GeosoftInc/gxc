@@ -1,0 +1,79 @@
+//===========================================================================
+NAME          = "Run a process"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   GEO32.NAME - process name
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+//===========================================================================
+
+RESOURCE = "geo32.gr"
+#include "geo32.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sProcess;
+
+DGW   Diag;
+int   i;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GEO32");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GEO32_0,DGW_TEXT,"GEO32","NAME");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_GEO32_0,DGW_TEXT,"GEO32","NAME");     
+
+   }
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("GEO32","NAME",sProcess);
+
+
+   // --- run the process ---
+
+   iRun_SYS(sProcess,"",
+      SYS_RUN_TYPE_DOS+SYS_RUN_HOLD_ALWAYS);
+
+
+}

@@ -1,0 +1,134 @@
+//===========================================================================
+NAME          = "DB file import into VOX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Creates a VOX from a database file.
+
+   IMPDBVOX.VOX:   VOX File
+   IMPDBVOX.CHAN:  Name of Data channel
+
+"
+// Revision History:
+// v6.3.0   Enabled ArcGIS specific functionality
+// v6.3.0   First version
+//===========================================================================
+
+RESOURCE = "impdbvox.gr"
+#include "impdbvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         hDGW;   
+EDB         hEDB;
+DB          hDB;
+DB_SYMB     hChan;
+LST         hLST;
+
+string(STR_FILE) sVox,sChan;
+int i;
+int iChanType;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+  
+   // --- Get database ---
+   
+   hEDB = Current_EDB();
+   hDB  = Lock_EDB(hEDB);
+
+
+	// --- Ensure that there are current X, Y and Z channels ---
+
+	if(GetXYZChanSymb_DB(hDB, DB_CHAN_X) == NULLSYMB ||
+	   GetXYZChanSymb_DB(hDB, DB_CHAN_Y) == NULLSYMB)
+	{
+		Abort_SYS(_("Current X and Y channels must be defined for this GX."));
+	}
+
+	if(GetXYZChanSymb_DB(hDB, DB_CHAN_Z) == NULLSYMB)
+	{
+		Abort_SYS(_("A \"Current Z\" channel must be defined for this GX."));
+	}
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     hDGW = Create_DGW("IMPDBVOX");
+
+     // --- Set up hLSTs ---
+
+     hLST = GetList_DGW(hDGW,_IMPDBVOX_0);
+     SymbLST_DB(hDB,hLST,DB_SYMB_CHAN);
+     Sort_LST(hLST,0,0);
+
+     
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(hDGW,_IMPDBVOX_0,DGW_TEXT,"IMPDBVOX","CHAN");     
+     SetInfoSYS_DGW(hDGW,_IMPDBVOX_1,DGW_FILEPATH,"IMPDBVOX","VOX");     
+
+     
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(hDGW);
+     if (i == -1) Cancel_SYS();    // The user hit cancel
+
+     
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(hDGW,_IMPDBVOX_0,DGW_TEXT,"IMPDBVOX","CHAN");     
+     GetInfoSYS_DGW(hDGW,_IMPDBVOX_1,DGW_FILEPATH,"IMPDBVOX","VOX");    
+        
+        
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(hDGW);
+  }
+   
+   // --- Get and verify parameters ---
+
+   GetString_SYS("IMPDBVOX","VOX",sVox);
+   GetString_SYS("IMPDBVOX","CHAN",sChan);
+   hChan = FindSymb_DB(hDB,sChan,DB_SYMB_CHAN);
+
+   iChanType = iGetChanType_DB(hDB, hChan);
+
+   if (iChanType != DB_CATEGORY_CHAN_BYTE && iChanType != DB_CATEGORY_CHAN_USHORT && iChanType != DB_CATEGORY_CHAN_SHORT && iChanType != DB_CATEGORY_CHAN_LONG &&
+      iChanType != DB_CATEGORY_CHAN_FLOAT && iChanType != DB_CATEGORY_CHAN_DOUBLE && iChanType != DB_CATEGORY_CHAN_UBYTE && iChanType != DB_CATEGORY_CHAN_ULONG && 
+      iChanType != DB_CATEGORY_CHAN_LONG64 && iChanType != DB_CATEGORY_CHAN_ULONG64)
+      Abort_SYS(_("Data channel must be a numerical channel."));
+   
+   // --- Create the VOX ---
+   
+   Progress_SYS(1);
+   GenerateDB_VOX(sVox,hDB,hChan);
+   Progress_SYS(0);
+   
+   
+   // --- Display the Voxel ? ---
+   if (!iScript_SYS()) 
+	{
+		SetString_SYS("VOXEL_UTILS","DISPLAY_VOXEL",sVox);
+		iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.VoxelGxUtils;DisplayNewVoxel)");
+	}	
+	
+}

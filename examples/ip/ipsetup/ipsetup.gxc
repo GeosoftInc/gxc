@@ -1,0 +1,392 @@
+//===========================================================================
+NAME          = "IP System Setup Parameters"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Import an IP Instrument dump file into the database.
+
+    IP.DOMAIN   : Time (0) or Frequency (1) domain
+    IP.ARRAYTYPE: Array Type  DPDP (0), PLDP (1), PLPL (2), GRAD (3), 3D (9)
+    IP.LINEDIR  : Line direction - N-S (1), E-W (-1)
+    IP.UNITS    : Distance Units Feet (0), Metres (1)
+    IP.RUNITS   : Resistivity Units - Ohm*m (0) Ohm*ft (1) Ohm*ft/2pi (2)
+    IP.FILTER   : Pseudo-section filters - 1, 2, 3 or 4.
+    IP.WEIGHTS  : Pseudo-section filter weights, comma or space delimited.
+    IP.TOPOADJUST: Adjust app. resistivity using topography
+
+    IP.ASEP     : \"A\" or Dipole separation
+    IP.TX1
+    IP.TY1
+    IP.TZ1
+    IP.TX2
+    IP.TY2
+    IP.TZ2
+    IP.RX1
+    IP.RX2
+    IP.RZ2
+
+	 IP.AVGWINDOWS: CSV list of window widths (msec)
+	 IP.AVGNORM: Normalize Average IP using window widths (default Yes).
+
+"
+// Revision History:
+// v6.3.0: Added Z-values for distant electrodes.
+// v5.1.5: Added option IP.TOPOADJUST
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "ipsetup.gr"
+#include "ipsetup.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+
+int i, iD, iDone, iArray;
+
+#define IPSETUP_MAIN 100
+#define IPSETUP_CALC 101
+#define IPSETUP_DPDP 0
+#define IPSETUP_PLDP 1
+#define IPSETUP_PLPL 2
+#define IPSETUP_GRAD 3
+#define IPSETUP_3D 9
+#define IPSETUP_LABELS 102
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      iDone = 0;
+      i = IPSETUP_MAIN;
+      while(!iDone) {
+      
+         switch(i)  {
+
+            case IPSETUP_MAIN:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP1");
+
+               // --- Set any Defaults ---
+
+               SetInfoSYS_DGW(Diag,_IPSETUP1_0,DGW_LISTALIAS,"IP","DOMAIN");
+               SetInfoSYS_DGW(Diag,_IPSETUP1_1,DGW_LISTALIAS,"IP","ARRAYTYPE");
+               SetInfoSYS_DGW(Diag,_IPSETUP1_2,DGW_LISTALIAS,"IP","LINEDIR");
+               SetInfoSYS_DGW(Diag,_IPSETUP1_3,DGW_LISTALIAS,"IP","LINESENSE");
+               SetInfoSYS_DGW(Diag,_IPSETUP1_4,DGW_TEXT,"IP","LINEMULT");
+               SetInfoSYS_DGW(Diag,_IPSETUP1_5,DGW_TEXT,"IP","STATMULT");
+               SetInfoSYS_DGW(Diag,_IPSETUP1_6,DGW_LISTALIAS,"IP","UNITS");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();    // He hit cancel
+
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_IPSETUP1_0,DGW_LISTALIAS,"IP","DOMAIN");
+               GetInfoSYS_DGW(Diag,_IPSETUP1_1,DGW_LISTALIAS,"IP","ARRAYTYPE");
+               GetInfoSYS_DGW(Diag,_IPSETUP1_2,DGW_LISTALIAS,"IP","LINEDIR");
+               GetInfoSYS_DGW(Diag,_IPSETUP1_3,DGW_LISTALIAS,"IP","LINESENSE");
+               GetInfoSYS_DGW(Diag,_IPSETUP1_4,DGW_TEXT,"IP","LINEMULT");
+               GetInfoSYS_DGW(Diag,_IPSETUP1_5,DGW_TEXT,"IP","STATMULT");
+               GetInfoSYS_DGW(Diag,_IPSETUP1_6,DGW_LISTALIAS,"IP","UNITS");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               // --- Get the domain and array type ---
+
+               iArray = iGetInt_SYS("IP","ARRAYTYPE");
+               i = iArray;
+
+               break;
+
+            case IPSETUP_DPDP:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP2A");
+
+               // --- Set any Defaults ---
+
+               SetInfo_DGW(Diag,_IPSETUP2A_0,DGW_TEXT,_("Dipole-Dipole"));
+               SetInfoSYS_DGW(Diag,_IPSETUP2A_1,DGW_TEXT,"IP","ASEP");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_IPSETUP2A_1,DGW_TEXT,"IP","ASEP");
+
+               if(iD==0)
+                  i = IPSETUP_MAIN;
+               else
+                  i = IPSETUP_CALC;
+               break;
+
+            case IPSETUP_PLDP:
+   
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP2B");
+
+               // --- Set any Defaults ---
+
+               SetInfo_DGW(Diag,_IPSETUP2B_0,DGW_TEXT,_("Pole-Dipole"));
+               SetInfoSYS_DGW(Diag,_IPSETUP2B_1,DGW_TEXT,"IP","ASEP");
+               SetInfoSYS_DGW(Diag,_IPSETUP2B_2,DGW_TEXT,"IP","T2X");
+               SetInfoSYS_DGW(Diag,_IPSETUP2B_3,DGW_TEXT,"IP","T2Y");
+               SetInfoSYS_DGW(Diag,_IPSETUP2B_4,DGW_TEXT,"IP","T2Z");
+               SetInfoSYS_DGW(Diag,_IPSETUP2B_5,DGW_LISTALIAS,"IP","PLDP_CONV");
+               SetInfoSYS_DGW(Diag,_IPSETUP2B_6,DGW_LISTALIAS,"IP","DCONV");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_IPSETUP2B_1,DGW_TEXT,"IP","ASEP");
+               GetInfoSYS_DGW(Diag,_IPSETUP2B_2,DGW_TEXT,"IP","T2X");
+               GetInfoSYS_DGW(Diag,_IPSETUP2B_3,DGW_TEXT,"IP","T2Y");
+               GetInfoSYS_DGW(Diag,_IPSETUP2B_4,DGW_TEXT,"IP","T2Z");
+               GetInfoSYS_DGW(Diag,_IPSETUP2B_5,DGW_LISTALIAS,"IP","PLDP_CONV");
+               GetInfoSYS_DGW(Diag,_IPSETUP2B_6,DGW_LISTALIAS,"IP","DCONV");
+
+               if(iD==0)
+                  i = IPSETUP_MAIN;
+               else
+                  i = IPSETUP_CALC;
+               break;
+
+            case IPSETUP_PLPL:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP2C");
+
+               // --- Set any Defaults ---
+
+               SetInfo_DGW(Diag,_IPSETUP2C_0,DGW_TEXT,_("Pole-Pole"));
+               SetInfoSYS_DGW(Diag,_IPSETUP2C_1,DGW_TEXT,"IP","T2X");
+               SetInfoSYS_DGW(Diag,_IPSETUP2C_2,DGW_TEXT,"IP","T2Y");
+               SetInfoSYS_DGW(Diag,_IPSETUP2C_3,DGW_TEXT,"IP","T2Z");
+               SetInfoSYS_DGW(Diag,_IPSETUP2C_4,DGW_TEXT,"IP","R2X");
+               SetInfoSYS_DGW(Diag,_IPSETUP2C_5,DGW_TEXT,"IP","R2Y");
+               SetInfoSYS_DGW(Diag,_IPSETUP2C_6,DGW_TEXT,"IP","R2Z");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_IPSETUP2C_1,DGW_TEXT,"IP","T2X");
+               GetInfoSYS_DGW(Diag,_IPSETUP2C_2,DGW_TEXT,"IP","T2Y");
+               GetInfoSYS_DGW(Diag,_IPSETUP2C_3,DGW_TEXT,"IP","T2Z");
+               GetInfoSYS_DGW(Diag,_IPSETUP2C_4,DGW_TEXT,"IP","R2X");
+               GetInfoSYS_DGW(Diag,_IPSETUP2C_5,DGW_TEXT,"IP","R2Y");
+               GetInfoSYS_DGW(Diag,_IPSETUP2C_6,DGW_TEXT,"IP","R2Z");
+
+               if(iD==0)
+                  i = IPSETUP_MAIN;
+               else
+                  i = IPSETUP_CALC;
+               break;
+
+            case IPSETUP_GRAD:   
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP2D");
+               
+               // --- Set any Defaults ---
+
+               SetInfo_DGW(Diag,_IPSETUP2D_0,DGW_TEXT,_("Gradient"));
+               SetInfoSYS_DGW(Diag,_IPSETUP2D_1,DGW_TEXT,"IP","T1X");
+               SetInfoSYS_DGW(Diag,_IPSETUP2D_2,DGW_TEXT,"IP","T1Y");
+               SetInfoSYS_DGW(Diag,_IPSETUP2D_3,DGW_TEXT,"IP","T1Z");
+               SetInfoSYS_DGW(Diag,_IPSETUP2D_4,DGW_TEXT,"IP","T2X");
+               SetInfoSYS_DGW(Diag,_IPSETUP2D_5,DGW_TEXT,"IP","T2Y");
+               SetInfoSYS_DGW(Diag,_IPSETUP2D_6,DGW_TEXT,"IP","T2Z");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_IPSETUP2D_1,DGW_TEXT,"IP","T1X");
+               GetInfoSYS_DGW(Diag,_IPSETUP2D_2,DGW_TEXT,"IP","T1Y");
+               GetInfoSYS_DGW(Diag,_IPSETUP2D_3,DGW_TEXT,"IP","T1Z");
+               GetInfoSYS_DGW(Diag,_IPSETUP2D_4,DGW_TEXT,"IP","T2X");
+               GetInfoSYS_DGW(Diag,_IPSETUP2D_5,DGW_TEXT,"IP","T2Y");
+               GetInfoSYS_DGW(Diag,_IPSETUP2D_6,DGW_TEXT,"IP","T2Z");
+
+               if(iD==0)
+                  i = IPSETUP_MAIN;
+               else
+                  i = IPSETUP_CALC;
+               break;
+
+            case IPSETUP_3D:
+   
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP3D");
+
+               // --- Set any Defaults ---
+
+               SetInfo_DGW(Diag,_IPSETUP3D_0,DGW_TEXT,_("3D"));
+               SetInfoSYS_DGW(Diag,_IPSETUP3D_1,DGW_TEXT,"IP","T2X");
+               SetInfoSYS_DGW(Diag,_IPSETUP3D_2,DGW_TEXT,"IP","T2Y");
+               SetInfoSYS_DGW(Diag,_IPSETUP3D_3,DGW_TEXT,"IP","T2Z");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_IPSETUP3D_1,DGW_TEXT,"IP","T2X");
+               GetInfoSYS_DGW(Diag,_IPSETUP3D_2,DGW_TEXT,"IP","T2Y");
+               GetInfoSYS_DGW(Diag,_IPSETUP3D_3,DGW_TEXT,"IP","T2Z");
+
+               if(iD==0)
+                  i = IPSETUP_MAIN;
+               else
+                  i = IPSETUP_CALC;
+               break;
+
+
+            case IPSETUP_CALC:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP3");
+
+               // --- Set any Defaults ---
+
+               SetInfoSYS_DGW(Diag,_IPSETUP3_0,DGW_TEXT,"IP","AVGWINDOWS");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_1,DGW_LISTALIAS,"IP","AVGNORM");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_2,DGW_LISTALIAS,"IP","RUNITS");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_3,DGW_LISTALIAS,"IP","MFFORM");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_4,DGW_TEXT,"IP","MFM");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_5,DGW_TEXT,"IP","MINN");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_6,DGW_TEXT,"IP","MAXN");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_7,DGW_LISTALIAS,"IP","NINC");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_8,DGW_LISTALIAS,"IP","FILTER");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_9,DGW_TEXT,"IP","WEIGHTS");
+               SetInfoSYS_DGW(Diag,_IPSETUP3_10,DGW_LISTALIAS,"IP","TOPOADJUST");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(Diag,_IPSETUP3_0,DGW_TEXT,"IP","AVGWINDOWS");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_1,DGW_LISTALIAS,"IP","AVGNORM");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_2,DGW_LISTALIAS,"IP","RUNITS");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_3,DGW_LISTALIAS,"IP","MFFORM");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_4,DGW_TEXT,"IP","MFM");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_5,DGW_TEXT,"IP","MINN");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_6,DGW_TEXT,"IP","MAXN");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_7,DGW_LISTALIAS,"IP","NINC");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_8,DGW_LISTALIAS,"IP","FILTER");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_9,DGW_TEXT,"IP","WEIGHTS");
+               GetInfoSYS_DGW(Diag,_IPSETUP3_10,DGW_LISTALIAS,"IP","TOPOADJUST");
+
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==0)
+                  i = iArray;
+               else
+                  i = IPSETUP_LABELS;
+
+
+               break;
+
+            case IPSETUP_LABELS:
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSETUP4");
+
+               SetInfoSYS_DGW(Diag,_IPSETUP4_0,DGW_TEXT,"IP","CLIENT");
+               SetInfoSYS_DGW(Diag,_IPSETUP4_1,DGW_TEXT,"IP","TITLE1");
+               SetInfoSYS_DGW(Diag,_IPSETUP4_2,DGW_TEXT,"IP","TITLE2");
+               SetInfoSYS_DGW(Diag,_IPSETUP4_3,DGW_TEXT,"IP","INTERP");
+               SetInfoSYS_DGW(Diag,_IPSETUP4_4,DGW_TEXT,"IP","CONTRACTOR");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSETUP4_0,DGW_TEXT,"IP","CLIENT");
+               GetInfoSYS_DGW(Diag,_IPSETUP4_1,DGW_TEXT,"IP","TITLE1");
+               GetInfoSYS_DGW(Diag,_IPSETUP4_2,DGW_TEXT,"IP","TITLE2");
+               GetInfoSYS_DGW(Diag,_IPSETUP4_3,DGW_TEXT,"IP","INTERP");
+               GetInfoSYS_DGW(Diag,_IPSETUP4_4,DGW_TEXT,"IP","CONTRACTOR");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==0)
+                  i = IPSETUP_CALC;
+               else
+                  iDone = 1;
+
+            break;
+
+
+            default:
+
+               DisplayMessage_SYS(_("IPSETUP"),_("I'm lost"));
+               break;
+
+         }  // End switch(i)
+
+      }  // End while(!iDone)
+
+      GlobalWrite_SYS("");            
+   }       
+   else
+      DisplayMessage_SYS(_("IPSETUP"),_("This GX must be run interactively"));  
+}

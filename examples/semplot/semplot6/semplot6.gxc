@@ -1,0 +1,878 @@
+//===========================================================================
+NAME          = "Plot up to 6 maps on a page"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+   Plot up to 6 maps on a page.
+   
+         SEMPLOT6.MAP         Output map Name
+         SEMPLOT6.TEMPLATE1   Template Name
+         SEMPLOT6.TEMPLATE2   Template Name
+         SEMPLOT6.TEMPLATE3   Template Name
+         SEMPLOT6.TEMPLATE6   Template Name
+         SEMPLOT6.LEGEND      Plot symbol legend?
+
+         SEMPLOT6.USE_LEGEND_PREFERENCE: Set this to 1 in a script, and the
+         global setting \"SEMPLOT.SYMBLEGEND\" will be used instead of
+         SEMPLOT6.LEGEND.
+
+         SEMPLOT.MASK        Mask Channel
+
+"
+// Revision History
+// v6.3.0: Added support for multiple mineral channels.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+//         Added  USE_LEGEND_PREFERENCE parameter to control legend plotting in 
+//            script mode, and always to use preference as default interactively.
+// v5.1.7: Changed to template names instead of files. Removed multi-DB plots
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semplot6.gr"
+#include "semplot6.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define PROGRESS(A)  \
+   Strcpy_STR(sMsg, _("Plotting: "));   \
+   FileNamePart_STR(A, sBuff, STR_FILE_PART_NAME); \
+   Strcat_STR(sMsg, sBuff);  \
+   ProgName_SYS(sMsg,0);   \
+   ProgUpdateL_SYS(iProg, iProgN);   \
+   iProg++;
+
+
+#define PLOT_TEMPLATE(A)   \
+   Plot_SEMPLOT(Data, A, sMaskCh, sMineralCh, sMap, MAP_WRITEOLD, FALSE);  \
+
+#define GET_VIEW(A)  \
+   iType = iTemplateType_SEMPLOT(A); \
+   if(iType==SEMPLOT_PLOT_XYPLOT) \
+      Strcpy_STR(sView, "XYplot_");  \
+   else   \
+      Strcpy_STR(sView, "Triplot_");  \
+   Map = Create_MAP(sMap, MAP_WRITEOLD);  \
+   FileNamePart_STR(A, sBuff, STR_FILE_PART_NAME); \
+   Strcat_STR(sView, sBuff);  \
+   View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
+
+
+#define GET_DXDY(A, B, C) \
+   Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_MM, rXVMin, rYVMin, rXVMax, rYVMax);\
+   rScaleX = (rXVMax-rXVMin)/(rXSize);\
+   rScaleY = (rYVMax-rYVMin)/(rYSize);\
+   if(rScaleX > rScaleY) {            \
+      rDX = 0.5*rXSize;                    \
+      rDY = 0.5*rYSize * rScaleY / rScaleX;\
+   } else {                            \
+      rDX = 0.5*rXSize* rScaleX / rScaleY; \
+      rDY = 0.5*rYSize;                    \
+   }
+
+#define GET_DXDY2(A, B, C, D) \
+   Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_MM, rXVMin, rYVMin, rXVMax, rYVMax);\
+   rScaleX = (rXVMax-rXVMin)/(rXSize);\
+   rScaleY = (rYVMax-rYVMin)/(rYSize);\
+   if(iType[D-1]==SEMPLOT_PLOT_XYPLOT)   \
+      rFact = rScale[D-1] / rScaleXY;  \
+   else  \
+      rFact = rScale[D-1] / rScaleTRI;  \
+   if(rScaleX > rScaleY) {            \
+      rDX = 0.5*rXSize;                    \
+      rDY = 0.5*rYSize * rScaleY / rScaleX;\
+   } else {                            \
+      rDX = 0.5*rXSize* rScaleX / rScaleY; \
+      rDY = 0.5*rYSize;                    \
+   }  \
+   rDX *= rFact;  \
+   rDY *= rFact;  \
+   rXV[D-1] += (rFact-1.0)*rDX;
+
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;        // Database handle
+DB          Data;
+DGW         Diag;             // Dialogue handle
+LTB         hTMP, hMED;
+MVIEW       View;
+MAP         Map;
+LST         List, List2;
+REG         MapReg;
+WA          hWA;
+
+int         iRet;                // Utility 
+
+int iMed, iRec, iTmp, i;
+int iNameF, iLayoutF, iMediaF, iTypeF, iFixedF, iMargin_InsideF, iMargin_BottomF;
+int iMargin_RightF, iMargin_TopF, iMargin_LeftF, iUpDirF, iUpAngF;
+int iSizeXF, iSizeYF;
+int iPort, iExact, iLegend, iTry, iProgN,  iProg, iGlobalLegend;
+int iType;
+
+real  rMargXmin, rMargXmax, rMargYmin, rMargYmax, rInside;
+real  rXPage, rYPage, rXSize, rYSize, rDX, rDY;
+real(6) rXV, rYV;
+real rXGMin, rXGMax, rYGMin, rYGMax;
+real rXVMin, rXVMax, rYVMin, rYVMax;
+real rScaleX, rScaleY, rSymbol, rSpace;
+
+// real rX, rY;
+
+string(STR_DEFAULT_SHORT) sTemp;
+string(200) sBuff, sMsg, sSize, sSet, sLegend;
+string(STR_FILE) sTemplate1, sTemplate2, sTemplate3, sTemplate4, sTemplate5, sTemplate6;
+string(STR_FILE) sMap, sTmpl, sView, sScript, sDir;
+string(STR_DB_SYMBOL) sMaskCh, sMineralCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Load Tables ---
+      
+   hTMP = CreateCSV_LTB("maptmpl");
+   iNameF = iFindField_LTB(hTMP,"Name");
+   iLayoutF = iFindField_LTB(hTMP,"Layout");
+   iMediaF = iFindField_LTB(hTMP,"Media");
+   iTypeF = iFindField_LTB(hTMP,"Type");
+   iFixedF = iFindField_LTB(hTMP,"Fixed");
+   iMargin_InsideF = iFindField_LTB(hTMP,"Margin_Inside");
+   iMargin_BottomF = iFindField_LTB(hTMP,"Margin_Bottom");
+   iMargin_RightF = iFindField_LTB(hTMP,"Margin_Right");
+   iMargin_TopF = iFindField_LTB(hTMP,"Margin_Top");
+   iMargin_LeftF = iFindField_LTB(hTMP,"Margin_Left");
+   iUpDirF = iFindField_LTB(hTMP,"Up_Dir");
+   iUpAngF = iFindField_LTB(hTMP,"Up_Ang");
+   
+   if (iNameF         ==-1) Abort_SYS(_("The [Name] not found in maptmpl table."));
+   if (iLayoutF       ==-1) Abort_SYS(_("The [Layout] not found in maptmpl table."));
+   if (iMediaF        ==-1) Abort_SYS(_("The [Media] not found in maptmpl table."));
+   if (iTypeF         ==-1) Abort_SYS(_("The [Type] not found in maptmpl table."));
+   if (iFixedF        ==-1) Abort_SYS(_("The [Fixed] not found in maptmpl table."));
+   if (iMargin_InsideF==-1) Abort_SYS(_("The [Margin_Inside] not found in maptmpl table."));
+   if (iMargin_BottomF==-1) Abort_SYS(_("The [Margin_Bottom] not found in maptmpl table."));
+   if (iMargin_RightF ==-1) Abort_SYS(_("The [Margin_Right] not found in maptmpl table."));
+   if (iMargin_TopF   ==-1) Abort_SYS(_("The [Margin_Top] not found in maptmpl table."));
+   if (iMargin_LeftF  ==-1) Abort_SYS(_("The [Margin_Left] not found in maptmpl table."));
+   if (iUpDirF        ==-1) Abort_SYS(_("The [Up_Dir] not found in maptmpl table."));
+   if (iUpAngF        ==-1) Abort_SYS(_("The [Up_Ang] not found in maptmpl table."));
+
+   hMED = Create_LTB("media",LTB_TYPE_HEADER,LTB_DELIM_COMMA,"");
+   iSizeXF = iFindField_LTB(hMED,"Size_X");
+   iSizeYF = iFindField_LTB(hMED,"Size_Y");
+
+   if (iSizeXF         ==-1) Abort_SYS(_("The [Size_X] not found in media table."));
+   if (iSizeYF         ==-1) Abort_SYS(_("The [Size_Y] not found in media table."));
+
+   // --- Remove the "unlimited" items from the list ---
+
+   while(1) {
+      iRec = iFindKey_LTB(hTMP, "Unlimited");
+      if(iRec==-1) break;
+      DeleteRecord_LTB(hTMP, iRec);
+   }
+
+
+   // --- Get current database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+           
+      i = 1;           
+      while(i!=0) {
+
+         
+        switch (i) {
+       
+ 
+            case 1:
+
+
+               // --- Get Template name or create/edit template ---
+            
+               Diag = Create_DGW("SEMPLOT6");
+
+               List = GetList_DGW(Diag,_SEMPLOT6_1);
+               GetLST_LTB(hTMP,0,List);
+               Sort_LST(List,0,0);
+               
+
+               // --- Set up the template lists ---
+
+               List = Create_LST(128);
+               TemplateLST_SEMPLOT(List, SEMPLOT_PLOT_ALL);
+               Sort_LST(List,0,0);
+      
+               List2 = GetList_DGW(Diag,_SEMPLOT6_2);
+               Copy_LST(List2, List);
+               List2 = GetList_DGW(Diag,_SEMPLOT6_3);
+               Copy_LST(List2, List);
+               List2 = GetList_DGW(Diag,_SEMPLOT6_4);
+               Copy_LST(List2, List);
+               List2 = GetList_DGW(Diag,_SEMPLOT6_5);
+               Copy_LST(List2, List);
+               List2 = GetList_DGW(Diag,_SEMPLOT6_6);
+               Copy_LST(List2, List);
+               List2 = GetList_DGW(Diag,_SEMPLOT6_7);
+               Copy_LST(List2, List);
+
+
+               // --- Mask Channel list ---
+                     
+               List = GetList_DGW(Diag,_SEMPLOT6_8);
+               ClassChanLST_DB(Data, List, _("Mask"));
+               Sort_LST(List,0,0);
+
+
+               // --- Use Global setting for legend ---
+
+               if (iGlobal_SYS("SEMPLOT.SYMBLEGEND",sTemp)==0) {
+                  iLegend = iScanI_STR(sTemp);
+                  if(iLegend!=0) iLegend=1;
+                  SetInt_SYS("SEMPLOT6","LEGEND",iLegend);
+               }
+               
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_0,DGW_FILEPATH,"SEMPLOT6","MAP");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_1,DGW_TEXT,"SEMPLOT6","MAPTMPL");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_2,DGW_TEXT,"SEMPLOT6","TEMPLATE1");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_3,DGW_TEXT,"SEMPLOT6","TEMPLATE2");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_4,DGW_TEXT,"SEMPLOT6","TEMPLATE3");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_5,DGW_TEXT,"SEMPLOT6","TEMPLATE4");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_6,DGW_TEXT,"SEMPLOT6","TEMPLATE5");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_7,DGW_TEXT,"SEMPLOT6","TEMPLATE6");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_8,DGW_TEXT,"SEMPLOT","MASK");
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_9,DGW_LISTALIAS,"SEMPLOT6","LEGEND");
+               
+               iRet = iRunDialogue_DGW(Diag);
+               if (iRet == -1) Cancel_SYS();
+               
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_0,DGW_FILEPATH,"SEMPLOT6","MAP");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_1,DGW_TEXT,"SEMPLOT6","MAPTMPL");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_2,DGW_TEXT,"SEMPLOT6","TEMPLATE1");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_3,DGW_TEXT,"SEMPLOT6","TEMPLATE2");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_4,DGW_TEXT,"SEMPLOT6","TEMPLATE3");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_5,DGW_TEXT,"SEMPLOT6","TEMPLATE4");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_6,DGW_TEXT,"SEMPLOT6","TEMPLATE5");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_7,DGW_TEXT,"SEMPLOT6","TEMPLATE6");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_8,DGW_TEXT,"SEMPLOT","MASK");
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_9,DGW_LISTALIAS,"SEMPLOT6","LEGEND");
+                              
+               Destroy_DGW(Diag);
+
+               if(iRet==0) {
+
+                  // --- Validate map ---
+
+                  GetString_SYS("SEMPLOT6","MAP",sMap);
+                  if(iFileExist_SYS(sMap)) {
+
+                     Printf_STR(sBuff, sizeof(sBuff), _("The plot file %s already exists.\r\nDo you wish to overwrite it?"), sMap);
+                     
+                     if(!iDisplayQuestion_SYS(_("Plot 4 plots on a page"), sBuff)) {
+                        i = 1;
+                        break;
+                     }
+                  }
+
+                  i=0;
+                  break;
+               }
+
+               i = 2;   // write a script
+               break;
+
+
+            case 2:
+
+               i = 1;   // set to return to main dialog no matter what
+            
+               Diag = Create_DGW("SEMPLOTSCRIPT");
+
+               SetInfoSYS_DGW(Diag,_SEMPLOT6_0,DGW_FILEPATH,"SEMPLOT6","SCRIPT");
+
+               iRet = iRunDialogue_DGW(Diag);
+               if (iRet == -1) {
+                  Destroy_DGW(Diag);                      
+                  break;
+               }
+
+               GetInfoSYS_DGW(Diag,_SEMPLOT6_0,DGW_FILEPATH,"SEMPLOT6","SCRIPT");
+
+               Destroy_DGW(Diag);
+
+
+
+               // --- Get all the parameters and write the script ---
+
+               GetString_SYS("SEMPLOT6","MAP",sMap);
+               GetString_SYS("SEMPLOT6","MAPTMPL",sTmpl);
+
+               GetString_SYS("SEMPLOT6","TEMPLATE1",sTemplate1);
+               GetString_SYS("SEMPLOT6","TEMPLATE2",sTemplate2);
+               GetString_SYS("SEMPLOT6","TEMPLATE3",sTemplate3);
+               GetString_SYS("SEMPLOT6","TEMPLATE4",sTemplate4);
+               GetString_SYS("SEMPLOT6","TEMPLATE5",sTemplate5);
+               GetString_SYS("SEMPLOT6","TEMPLATE6",sTemplate6);
+
+               GetString_SYS("SEMPLOT6", "LEGEND", sLegend);
+   
+               iProgN = 0;
+               if(iStrlen_STR(sTemplate1)) iProgN++;
+               if(iStrlen_STR(sTemplate2)) iProgN++;
+               if(iStrlen_STR(sTemplate3)) iProgN++;
+               if(iStrlen_STR(sTemplate4)) iProgN++;
+
+               if(iProgN==0) {
+                  DisplayMessage_SYS(_("Creating Plotting Script"), _("Add least one plot template must be specified"));
+                  break;
+               }
+
+               GetString_SYS("SEMPLOT6","SCRIPT",sScript);
+
+               hWA = Create_WA(sScript, WA_NEW);
+               
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.MAP=\""));
+               Puts_WA(hWA, sMap);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.TEMPLATE1= \""));
+               Puts_WA(hWA, sTemplate1);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.TEMPLATE2= \""));
+               Puts_WA(hWA, sTemplate2);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.TEMPLATE3= \""));
+               Puts_WA(hWA, sTemplate3);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.TEMPLATE4= \""));
+               Puts_WA(hWA, sTemplate4);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.TEMPLATE5= \""));
+               Puts_WA(hWA, sTemplate5);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.TEMPLATE6= \""));
+               Puts_WA(hWA, sTemplate6);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.MAPTMPL= \""));
+               Puts_WA(hWA, sTmpl);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("SETINI        SEMPLOT6.LEGEND= \""));
+               Puts_WA(hWA, sLegend);
+               Puts_WA(hWA, "\"");
+               NewLine_WA(hWA);
+
+               Puts_WA(hWA, _n("GX       semplot6.gx"));
+               NewLine_WA(hWA);
+
+               Destroy_WA(hWA);
+
+               break;
+               
+         }
+      }
+   }
+   
+   
+   // --- get template names and verify ---
+   
+   GetString_SYS("SEMPLOT6","TEMPLATE1",sTemplate1);
+   GetString_SYS("SEMPLOT6","TEMPLATE2",sTemplate2);
+   GetString_SYS("SEMPLOT6","TEMPLATE3",sTemplate3);
+   GetString_SYS("SEMPLOT6","TEMPLATE4",sTemplate4);
+   GetString_SYS("SEMPLOT6","TEMPLATE5",sTemplate5);
+   GetString_SYS("SEMPLOT6","TEMPLATE6",sTemplate6);
+
+   iProgN = 1;
+   if(iStrlen_STR(sTemplate1)) iProgN++;
+   if(iStrlen_STR(sTemplate2)) iProgN++;
+   if(iStrlen_STR(sTemplate3)) iProgN++;
+   if(iStrlen_STR(sTemplate4)) iProgN++;
+   if(iStrlen_STR(sTemplate5)) iProgN++;
+   if(iStrlen_STR(sTemplate6)) iProgN++;
+
+
+   if(iProgN==0)
+      Abort_SYS(_("Add least one plot template must be specified"));
+
+
+   // --- Get mask channel ---
+
+   GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+
+
+   // --- Get mineral channel (not always required, e.g. not for raw data plots) ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+
+   
+   // --- get map template parameters ---
+   
+   GetString_SYS("SEMPLOT6","MAPTMPL",sTmpl);
+   iTmp = iFindKey_LTB(hTMP,sTmpl);
+   if (iTmp < 0) {
+      Strcpy_STR(sBuff,_("Template not found:"));
+      Strcat_STR(sBuff,sTmpl);
+      Abort_SYS(sBuff);
+   }
+   
+   
+   // --- layout ---
+   
+   GetString_LTB(hTMP,iTmp,iLayoutF,sSet);
+   if (iStrStr_STR(sSet, _("portrait"), STR_CASE_TOLERANT) != -1)
+      iPort = TRUE;
+   else         
+      iPort = FALSE;
+   
+   
+   // --- exact size ---
+   
+   GetString_LTB(hTMP,iTmp,iFixedF,sSet);
+   if (iStrStr_STR(sSet, _("fixed"), STR_CASE_TOLERANT) != -1)
+      iExact = TRUE;
+   else         
+      iExact = FALSE;
+         
+   
+   // --- margins ---
+   
+   rMargXmin = rGetReal_LTB(hTMP,iTmp,iMargin_LeftF);
+   rMargXmax = rGetReal_LTB(hTMP,iTmp,iMargin_RightF);
+   rMargYmin = rGetReal_LTB(hTMP,iTmp,iMargin_BottomF);
+   rMargYmax = rGetReal_LTB(hTMP,iTmp,iMargin_TopF);
+   rInside   = rGetReal_LTB(hTMP,iTmp,iMargin_InsideF);
+
+   
+   // --- media string ---
+   
+   GetString_LTB(hTMP,iTmp,iMediaF,sSet);
+   iMed = iFindKey_LTB(hMED,sSet);
+   if (iMed < 0) {
+      Strcpy_STR(sBuff,_("Media not found:"));
+      Strcat_STR(sBuff,sSet);
+      Abort_SYS(sBuff);
+   }
+   GetString_LTB(hMED,iMed,iSizeXF,sSet);
+   Strcpy_STR(sSize,sSet);
+   Strcat_STR(sSize,",");
+   GetString_LTB(hMED,iMed,iSizeYF,sSet);
+   Strcat_STR(sSize,sSet);
+
+   rXPage = rGetReal_LTB(hMED,iMed,iSizeXF);
+   rYPage = rGetReal_LTB(hMED,iMed,iSizeYF);
+                    
+
+   // --- open the map and set up views ---
+   GetString_SYS("SEMPLOT6","MAPDIR",sDir);  
+   GetString_SYS("SEMPLOT6","MAP",sMap);
+   if (iStrlen_STR(sDir) > 0) {
+      Strcat_STR(sDir, sMap);
+      Strcpy_STR(sMap, sDir);   
+   }
+   UnLoad_EMAP(sMap);   // Unload existing (harmless if not loaded)
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+   Mapset_MVU(Map,"*Base","",0.0,1.0,0.0,1.0,sSize,iPort,iExact,
+              rDUMMY,rDUMMY,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside);
+              
+   // --- create the map REG ---
+   
+   MapReg = Create_REG(128);
+   GetString_LTB(hTMP,iTmp,iTypeF,sSet);
+   Set_REG(MapReg,"MAP.STYLE",sSet);
+   
+   
+   // --- inside margin ---
+   
+   GetString_LTB(hTMP,iTmp,iMargin_InsideF,sSet);
+   Set_REG(MapReg,"MAP.MARGIN_INSIDE",sSet);
+   
+   
+   // --- up ---
+   
+   GetString_LTB(hTMP,iTmp,iUpDirF,sSet);
+   Set_REG(MapReg,"MAP.UP_DIRECTION",sSet);
+   GetString_LTB(hTMP,iTmp,iUpAngF,sSet);
+   Set_REG(MapReg,"MAP.UP_ANGLE",sSet);
+   
+   
+   // --- put REG in the map ---
+   
+   SetREG_MAP(Map,MapReg);
+   Destroy_MAP(Map);
+
+   // --- Convert values to mm from cm ---
+
+   rXPage *= 10.0;
+   rYPage *= 10.0;
+   rMargXmin *= 10.0;
+   rMargXmax *= 10.0;
+   rMargYmin *= 10.0;
+   rMargYmax *= 10.0;
+
+/*
+   DisplayReal_SYS("rXPage",rXPage);
+   DisplayReal_SYS("rYPage",rYPage);
+   DisplayReal_SYS("rMarXmin",rMargXmin);
+   DisplayReal_SYS("rMarXmax",rMargXmax);
+   DisplayReal_SYS("rMarYmin",rMargYmin);
+   DisplayReal_SYS("rMarYmax",rMargYmax);
+*/
+
+   // --- Plot symbol legend? ---
+
+   iGlobalLegend = iGetInt_SYS("SEMPLOT6", "USE_LEGEND_PREFERENCE");
+   SetInt_SYS("SEMPLOT6", "USE_LEGEND_PREFERENCE", 0);  // must reset each time
+
+   iLegend = 1;   // default is to plot a legend
+   if(iGlobalLegend==1) {
+
+      // --- Use Global setting for legend ---
+
+      if (iGlobal_SYS("SEMPLOT.SYMBLEGEND",sTemp)==0)
+         iLegend = iScanI_STR(sTemp);
+   }
+   else {
+
+      // --- Use local setting for legend ---
+
+      iLegend = iGetInt_SYS("SEMPLOT6","LEGEND");
+   }
+   if(iLegend!=0) iLegend = 1;
+
+   if(iLegend) iProgN++;
+
+   // --- For some reason, page orientations are reversed in the LTB,
+   //     so for 8.5 x 11, X = 11 and Y = 8.5 (specified in cm) ---
+
+   // --- Make interior spacing 1 cm ---
+
+   rSpace = 10.0;
+
+   if(iPort) {    
+      rXSize = (rYPage - rMargYmin - rMargYmax - rSpace) / 2.0;
+      if(iLegend)      
+         rYSize = (rXPage - rMargXmin - rMargXmax - 3.0*rSpace) / 3.5;
+      else
+         rYSize = (rXPage - rMargXmin - rMargXmax - rSpace) / 3.0;
+
+      rXV[0] = rMargYmin + rXSize/2.0;
+      rXV[1] = rXV[0] + rSpace + rXSize;
+      rXV[2] = rXV[0];
+      rXV[3] = rXV[1];
+      rXV[4] = rXV[0];
+      rXV[5] = rXV[1];
+
+      rYV[0] = rXPage - rMargXmin - rYSize/2.0;
+      rYV[1] = rYV[0];
+      rYV[2] = rYV[1] - rYSize - rSpace;
+      rYV[3] = rYV[2];
+      rYV[4] = rYV[3] - rYSize - rSpace;
+      rYV[5] = rYV[4];
+
+   }
+   else {
+      if(iLegend)      
+         rXSize = (rXPage - rMargXmin - rMargXmax - 3.0*rSpace) / 3.5;
+      else
+         rXSize = (rXPage - rMargXmin - rMargXmax - rSpace) / 3.0;
+      rYSize = (rYPage - rMargYmin - rMargYmax - rSpace) / 2.0;
+
+      rXV[0] = rMargXmin + rXSize/2.0;
+      rXV[1] = rXV[0] + rSpace + rXSize;
+      rXV[2] = rXV[1] + rSpace + rXSize;
+      rXV[3] = rXV[0];
+      rXV[4] = rXV[1];
+      rXV[5] = rXV[2];
+
+      rYV[0] = rYPage - rMargYmax - rYSize/2.0;
+      rYV[1] = rYV[0];
+      rYV[2] = rYV[0];
+      rYV[3] = rYV[1] - rYSize - rSpace;
+      rYV[4] = rYV[3];
+      rYV[5] = rYV[3];
+
+   }
+
+/*
+   for(i=0;i<6;i++) {
+
+      DisplayReal_SYS("X",rXV[i]);
+      DisplayReal_SYS("Y",rYV[i]);
+   }
+*/
+
+
+   // --- Plot ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Plotting"),1);
+
+
+   // --- Track which values are plotted ---
+   
+   ResetUsedChannel_SEMPLOT(Data);
+
+
+   // --- Track which symbols are used ---
+   
+   InitGroupSymbolsUsed_SEMPLOT(Data);
+
+
+   iProg = 0;
+   
+   if(iStrlen_STR(sTemplate1)) {
+   
+      PROGRESS(sTemplate1)
+
+      PLOT_TEMPLATE(sTemplate1)     // Plot it.
+      GET_VIEW(sTemplate1)          // Recover its view
+      GET_DXDY(View, rDX, rDY)      // Get its size and scaling to fit.
+
+      Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rXGMin, rYGMin, rXGMax, rYGMax);
+      FitWindow_MVIEW (View, rXV[0]-rDX, rYV[0]-rDY, rXV[0]+rDX, rYV[0]+rDY, rXGMin, rYGMin, rXGMax, rYGMax);
+
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+   }
+
+   if(iStrlen_STR(sTemplate2)) {
+
+      PROGRESS(sTemplate2)
+
+      PLOT_TEMPLATE(sTemplate2)     // Plot it.
+      GET_VIEW(sTemplate2)          // Recover its view
+      GET_DXDY(View, rDX, rDY)      // Get its size and scaling to fit.
+      
+      Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rXGMin, rYGMin, rXGMax, rYGMax);
+      FitWindow_MVIEW (View, rXV[1]-rDX, rYV[1]-rDY, rXV[1]+rDX, rYV[1]+rDY, rXGMin, rYGMin, rXGMax, rYGMax);
+   
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+   }
+
+   if(iStrlen_STR(sTemplate3)) {
+
+      PROGRESS(sTemplate3)
+
+      PLOT_TEMPLATE(sTemplate3)     // Plot it.
+      GET_VIEW(sTemplate3)          // Recover its view
+      GET_DXDY(View, rDX, rDY)      // Get its size and scaling to fit.
+
+      Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rXGMin, rYGMin, rXGMax, rYGMax);
+      FitWindow_MVIEW (View, rXV[2]-rDX, rYV[2]-rDY, rXV[2]+rDX, rYV[2]+rDY, rXGMin, rYGMin, rXGMax, rYGMax);
+   
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+   }
+
+   if(iStrlen_STR(sTemplate4)) {
+
+      PROGRESS(sTemplate4)
+
+      PLOT_TEMPLATE(sTemplate4)     // Plot it.
+      GET_VIEW(sTemplate4)          // Recover its view
+      GET_DXDY(View, rDX, rDY)      // Get its size and scaling to fit.
+
+      Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rXGMin, rYGMin, rXGMax, rYGMax);
+      FitWindow_MVIEW (View, rXV[3]-rDX, rYV[3]-rDY, rXV[3]+rDX, rYV[3]+rDY, rXGMin, rYGMin, rXGMax, rYGMax);
+   
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+   }
+
+   if(iStrlen_STR(sTemplate5)) {
+
+      PROGRESS(sTemplate5)
+
+      PLOT_TEMPLATE(sTemplate5)     // Plot it.
+      GET_VIEW(sTemplate5)          // Recover its view
+      GET_DXDY(View, rDX, rDY)      // Get its size and scaling to fit.
+
+      Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rXGMin, rYGMin, rXGMax, rYGMax);
+      FitWindow_MVIEW (View, rXV[4]-rDX, rYV[4]-rDY, rXV[4]+rDX, rYV[4]+rDY, rXGMin, rYGMin, rXGMax, rYGMax);
+   
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+   }
+
+   if(iStrlen_STR(sTemplate6)) {
+
+      PROGRESS(sTemplate6)
+
+      PLOT_TEMPLATE(sTemplate6)     // Plot it.
+      GET_VIEW(sTemplate6)          // Recover its view
+      GET_DXDY(View, rDX, rDY)      // Get its size and scaling to fit.
+
+      Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rXGMin, rYGMin, rXGMax, rYGMax);
+      FitWindow_MVIEW (View, rXV[5]-rDX, rYV[5]-rDY, rXV[5]+rDX, rYV[5]+rDY, rXGMin, rYGMin, rXGMax, rYGMax);
+   
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+   }
+
+
+   // --- Plot the legend ---
+
+   if(iLegend) {
+
+      ProgName_SYS(_("Plotting Symbols"),0);
+      ProgUpdateL_SYS(iProg, iProgN);
+
+      Map = Create_MAP(sMap, MAP_WRITEOLD);
+      View = Create_MVIEW(Map, "*Base", MVIEW_WRITENEW);
+
+      if(iPort) {
+         rXV[0] = rMargYmin;     
+         rXV[1] = rYPage - rMargYmax;
+         rYV[0] = rMargXmax;
+         rYV[1] = rYV[0] + rYSize/2.0;
+      }
+      else {
+         rXV[0] = rXPage - rMargXmax - rXSize/2.0;
+         rXV[1] = rXV[0] + rXSize/2.0;
+         rYV[0] = rMargYmin;
+         rYV[1] = rYPage - rMargYmax;
+      }
+
+
+      // --- Plot the legend ---
+
+      rSymbol = 2.0;
+      PlotSymbolLegend_SEMPLOT(Data, View, rXV[0], rYV[0], rYV[1], rSymbol);
+
+      // --- Do we need to shrink to fit? ---
+
+      iTry = 0;
+      while (1) {
+
+         GetGroupExtent_MVIEW(View, "SymbolLegend", rXVMin, rYVMin, rXVMax, rYVMax, MVIEW_UNIT_MM);
+         if(rXVMax > rXV[1] && iTry<7) {
+            rSymbol *= 0.85;
+            PlotSymbolLegend_SEMPLOT(Data, View, rXV[0], rYV[0], rYV[1], rSymbol);
+            iTry++;
+         }
+         else
+            break;
+         
+      }
+
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+
+   }
+/*
+   // Debugging - for outlining regions
+   // plot margins
+
+   Map = Create_MAP(sMap, MAP_WRITEOLD);
+   View = Create_MVIEW(Map, "*Base", MVIEW_WRITEOLD);
+
+   StartGroup_MVIEW (View, "Border", MVIEW_GROUP_NEW);
+
+   if(iPort) {
+      rX = rMargYmin;
+      Line_MVIEW(View,  rX, 0.0, rX, rXPage);
+      rX += rXSize;
+      Line_MVIEW(View,  rX, 0.0, rX, rXPage);
+      rX += rSpace;
+      Line_MVIEW(View,  rX, 0.0, rX, rXPage);
+      rX += rXSize;
+      Line_MVIEW(View,  rX, 0.0, rX, rXPage);
+
+      rY = rXPage - rMargXmin;
+      Line_MVIEW(View,  0.0, rY, rYPage, rY);
+      rY -= rYSize;
+      Line_MVIEW(View,  0.0, rY, rYPage, rY);
+      rY -= rSpace;
+      Line_MVIEW(View,  0.0, rY, rYPage, rY);
+      rY -= rYSize;
+      Line_MVIEW(View,  0.0, rY, rYPage, rY);
+      rY -= rSpace;
+      Line_MVIEW(View,  0.0, rY, rYPage, rY);
+      rY -= rYSize;
+      Line_MVIEW(View,  0.0, rY, rYPage, rY);
+
+      Line_MVIEW(View, 0.0, 0.0, 0.0, rXPage);
+      Line_MVIEW(View, 0.0, 0.0, rYPage, 0.0);
+      Line_MVIEW(View, 0.0, rXPage, rYPage, rXPage);
+      Line_MVIEW(View, rYPage, 0.0, rYPage, rXPage);
+   }
+   else {
+
+      rX = rMargXmin;
+      Line_MVIEW(View,  rX, 0.0, rX, rYPage);
+      rX += rXSize;
+      Line_MVIEW(View,  rX, 0.0, rX, rYPage);
+      rX += rSpace;
+      Line_MVIEW(View,  rX, 0.0, rX, rYPage);
+      rX += rXSize;
+      Line_MVIEW(View,  rX, 0.0, rX, rYPage);
+      rX += rSpace;
+      Line_MVIEW(View,  rX, 0.0, rX, rYPage);
+      rX += rXSize;
+      Line_MVIEW(View,  rX, 0.0, rX, rYPage);
+
+      rY = rMargYmin;
+      Line_MVIEW(View,  0.0, rY, rXPage, rY);
+      rY += rYSize;
+      Line_MVIEW(View,  0.0, rY, rXPage, rY);
+      rY += rSpace;
+      Line_MVIEW(View,  0.0, rY, rXPage, rY);
+      rY += rYSize;
+      Line_MVIEW(View,  0.0, rY, rXPage, rY);
+
+      Line_MVIEW(View, 0.0, 0.0, 0.0, rYPage);
+      Line_MVIEW(View, 0.0, 0.0, rXPage, 0.0);
+      Line_MVIEW(View, 0.0, rYPage, rXPage, rYPage);
+      Line_MVIEW(View, rXPage, 0.0, rXPage, rYPage);
+
+   }
+   Destroy_MVIEW(View);
+   Destroy_MAP(Map);
+
+*/
+   Progress_SYS(0);
+
+   // --- display map ---
+
+   Load_EMAP(sMap);
+
+   // --- Unlock database ---
+
+   UnLock_EDB(EData);
+
+}

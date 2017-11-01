@@ -1,0 +1,181 @@
+//===========================================================================
+NAME          = "Import an entire external database"
+#include <version.gxh>
+DESCRIPTION   = "
+   Import a Database table into the Oasis Montaj database.
+
+    IMPDB2.FILE       : Input data file name
+    IMPDB2.EXCELFILE  : Input Excel file name
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/Database Table"
+
+// Revision History:
+// v5.1.6: Split out Excel using a flag.
+// v5.1.3: Using "Current" X and Y channels
+//         Added projection setting if enabled.
+// v5.1.2: Using ADO instead of DAO.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "impdb2.gr"
+#include "impdb2.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+
+string(STR_FILE) sData, sConnect;
+string(STR_DB_SYMBOL) sLine;
+int iStorage, iExcel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get Excel flag ---
+
+   iExcel = iGetInt_SYS("IMPDB2", "EXCEL");
+   if(iExcel!=1) iExcel = 0;   
+   SetInt_SYS("IMPDB2", "EXCEL", 0);    // must set every call.
+
+
+   // --- Get Oasis Database ---
+
+   if (iInteractive_SYS()) {
+      if (iHaveCurrent_EDB()) {
+
+         if (iDisplayQuestion_SYS(_("Import Database"), _("Import data into the current database ?"))==0)
+         {
+            if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)"))  Cancel_SYS();
+         }  
+
+      } else {
+        if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) Cancel_SYS();
+      }
+   }
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+     
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      if(iExcel) {
+                  
+         Diag = Create_DGW("IMPDB2Excel");
+
+   
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_IMPDB2EXCEL_0,DGW_FILEPATH,"IMPDB2","EXCELFILE");
+         SetInfoSYS_DGW(Diag,_IMPDB2EXCEL_1,DGW_LISTALIAS,"IMPDB2","STORAGE");
+
+
+         // --- Run the Dialogue ---
+
+         if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+
+         // --- Get the Strings ---
+
+         GetInfoSYS_DGW(Diag,_IMPDB2EXCEL_0,DGW_FILEPATH,"IMPDB2","EXCELFILE");
+         GetInfoSYS_DGW(Diag,_IMPDB2EXCEL_1,DGW_LISTALIAS,"IMPDB2","STORAGE");
+      
+      }
+      else {
+
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("IMPDB2");
+
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_IMPDB2_0,DGW_FILEPATH,"IMPDB2","FILE");
+         SetInfoSYS_DGW(Diag,_IMPDB2_1,DGW_LISTALIAS,"IMPDB2","STORAGE");
+
+
+         // --- Run the Dialogue ---
+
+         if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+   
+         // --- Get the Strings ---
+
+         GetInfoSYS_DGW(Diag,_IMPDB2_0,DGW_FILEPATH,"IMPDB2","FILE");
+         GetInfoSYS_DGW(Diag,_IMPDB2_1,DGW_LISTALIAS,"IMPDB2","STORAGE");
+
+      }
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+   
+   // --- Get Parameters ---
+
+   if(iExcel)
+      GetString_SYS("IMPDB2","EXCELFILE",sData);
+   else
+      GetString_SYS("IMPDB2","FILE",sData);
+
+   if(!iStrlen_STR(sData)) 
+      Abort_SYS(_("No database file name defined to import"));
+
+   iStorage = iGetInt_SYS("IMPDB2","STORAGE");
+   if(iStorage!=DU_STORAGE_GROUP && iStorage!=DU_STORAGE_LINE)
+      Abort_SYS(_("Invalid or undefined storage type"));
+      
+   // --- import ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing Data"),1);
+   Strcpy_STR(sConnect, "FILENAME=");
+   Strcat_STR(sConnect, sData);
+
+   ImportAllADO_DU(Data,sConnect,iStorage);
+
+   Progress_SYS(0);
+
+
+   // --- release database to DBE ---
+   
+   UnLock_EDB(EData);
+   
+   
+   // --- display data ---
+
+   if (iInteractive_SYS()) {
+      DelLine0_EDB(EData);
+      SetCurLine_EDB(EData,sLine);
+      LoadAllChans_EDB(EData);
+      DelLine0_EDB(EData);
+   }
+
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+}

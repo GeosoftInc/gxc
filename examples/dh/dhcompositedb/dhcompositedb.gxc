@@ -1,0 +1,826 @@
+//===========================================================================
+NAME          = "Wholeplot Composite Database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Creates a composite database from input From-To assay database.
+
+Parameters: 
+
+	DHCOMPOSITEDB.MASTER    Master database to composite
+					 .TAG       New composite database tag
+					 .HOLSEL    Hole selection: all or selected
+					 .INTSEL    Interval selection: fixed, lithological, best-fit litho or from file
+
+	DHCOMPOSITEDB.FIXINT    Interval length
+					 .LITHCH    Lithology data chan
+					 .INTLEN    Interval length for the best-fit lithological
+					 .INTFILE   Interval file name
+					 .WTCH      Weighting Chanal
+					
+	DHCOMPOSITEDB.PRIMARY_ASSAY_CHAN  Primary assay channel	
+					 .CUTOFF_GRADE					Cut-off grade
+					 .MAX_GRADE						Outlier limit - clip high values to this.
+					 .MIN_COMPOSITE_THICKNESS  Minimum output composite interval length
+					 .MIN_COMPOSITE_GRADE      Minimum output composite grade
+					 .MAX_DILUTION_LENGTH      Minimum length of internal dilution interval
+					 .MIN_DILUTION_GRADE       Minimum grade of internal dilution interval
+					 .MISSING_ASSAY_GRADE      Grade assigned to missing intervals
+					 
+	DHCOMPOSITEDB.REJ1VAL   Value for reject intervals shorter than
+					 .REJ2VAL   Value for reject intervals gaps greater than
+					 .REJ3CH    Channel for reject intervals where the value
+					 .REJ3OP    0: >, 1: >=, 2: <, 3: <=
+					 .REJ3VAL   Value
+
+"              
+// Revision History:
+// v7.2 :  Added significant intersection calculations.
+// v6.4.2: Don't ask for required values when hitting the "back" button.
+// v6.0.0: Make the composite DB the current DB, and load all the channels.
+// v5.1.8: Fixed "Lithography" type - should be lithology!
+// v5.1.7: New gx.
+//===========================================================================
+
+RESOURCE = "dhcompositedb.gr"
+#include "dhcompositedb.grh"
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sMastDB,sCompDB,sProject, sDB, sCurDB;
+string(STR_FILE) sVol, sDir, sName, sAssay;
+string(STR_FILE) sIntFile, sFile, sMsg;
+string(STR_DEFAULT) sTag,sRejVal;
+string(STR_DB_SYMBOL) sWtCh,sLithCh,sCutoffCh,sRejCh,sChan,sChanLabel,sLabelChan;  // channels
+														 
+EDB      EMastDB, ECompDB;
+DB       MastDB,CompDB,hDB;
+DGW      Diag;         
+DH       hDH;
+LST      hLST, AssayLST, AssayFileLST, NumericChanLST, ChanLST;
+DB_SYMB  hCh;
+
+int      i, iDone, iHolSel, iIntSel, iDelDB, iNAssay, iType, iDB;
+int      iLines,iChans,iBlobs,iPrimaryChan,iLabelChan,iN;
+real     rFixInt;
+real     rRej1Val,rRej2Val,rRej3Val;
+int      iRej3Op;
+real     rCutOffGrade;    //Cut off grade for Primary Assay
+real     rClipGrade;    //Cut off grade for Primary Assay
+real     rMinCompositeThickness;   //Minimum Composite Thickness	
+real     rMinCompositeGrade;    //Minimum Composite Grade	
+real     rMaxInternalDilutionLength;    //Maximum Internal Dilution Length (at...)
+real     rMinInternalDilutionGrade;  // Minimum Dilution Grade 
+real     rGradeForMissingAssays;   // Grade for Missing Assays
+
+
+//===========================================================================
+//                           DHCOMPOSITEDB CODE
+//===========================================================================
+
+{
+	// --- Get current database ---
+	
+	EMastDB = Current_EDB();
+	GetName_EDB(EMastDB, sCurDB);
+
+	
+	// --- Create DH ---
+
+	hDH = Create_DH(sCurDB);
+	GetProjectName_DH(hDH, sProject);
+
+	NumericChanLST = Create_LST(2*STR_DB_SYMBOL);
+	NumericChanLST_DH(hDH,NumericChanLST);
+	
+	
+	// --- Make a LST of the From-To assay databases in this project ---
+	
+	AssayLST = Create_LST(2*STR_DB_SYMBOL);
+	
+	AssayLST_DH(hDH, AssayLST);
+	
+	iNAssay = iSize_LST(AssayLST);   
+	for(i=iNAssay-1;i>=0;i--) 
+	{
+		iDB = iGetInt_LST(AssayLST, LST_ITEM_VALUE, i);   
+		hDB = hAssayDB_DH(hDH,iDB);
+
+		// --- Delete POINT  data sets ---
+
+		GetDataType_DH(hDH, hDB, iType);
+		
+		if(iType != DH_DATA_FROMTO)
+			DelItem_LST(AssayLST, i);
+	}
+
+	iNAssay = iSize_LST(AssayLST);   
+	if(iNAssay==0)
+		Abort_SYS(_("No From-To assay databases were identified in the current drill hole project."));
+
+
+	// --- Create corresponding list with full assay database names ---
+		
+	AssayFileLST = Create_LST(2*STR_DB_SYMBOL);
+	for(i=0;i<iNAssay;i++) 
+	{
+		iDB = iGetInt_LST(AssayLST, LST_ITEM_VALUE, i);   
+		hDB = hAssayDB_DH(hDH,iDB);
+
+		// --- Skip POINT  data sets ---
+
+		GetDataType_DH(hDH, hDB, iType);
+		
+		if(iType == DH_DATA_POINT)
+			continue;
+
+		GetName_DB(hDB,DB_NAME_FILE,sDB);
+		FileNamePart_STR(sDB,sDB,STR_FILE_PART_NAME_EXTENSION);
+		GetItem_LST(AssayLST, LST_ITEM_NAME, i, sAssay);
+		AddItem_LST(AssayFileLST, sDB, sAssay);
+	}
+
+
+	// --- Set some init values ---
+
+	rFixInt = 1.0;
+	Strcpy_STR(sLithCh,"");
+	Strcpy_STR(sWtCh,"");
+	Strcpy_STR(sRejCh,"");
+	Strcpy_STR(sIntFile,"");
+	rRej1Val = rDUMMY;
+	rRej2Val = rDUMMY;
+	rRej3Val = rDUMMY;
+	iRej3Op  = 0;
+
+
+	// --- Are we running interactively ? ---
+
+	if(iInteractive_SYS())  {
+
+		i = 0;
+		iDone = 0;
+		iDelDB = 0;
+		while (iDone==0)
+		{
+			// --- Main dialogue ---
+
+			if(i==0) {
+
+				// --- Create the Dialogue ---
+
+				Diag = Create_DGW("DHCOMPOSITEDB");
+
+				// --- Set up lists ---
+
+				hLST = GetList_DGW(Diag,_DHCOMPOSITEDB_0);
+				Copy_LST(hLST, AssayFileLST);
+  
+
+				// --- If the master database is not set, set default ---
+
+				GetString_SYS("DHCOMPOSITEDB","MASTER",sMastDB);
+				if(!iStrlen_STR(sMastDB)) 
+				{
+					// --- If current DB is an assay DB, use it ---
+
+					FileNamePart_STR(sCurDB,sFile,STR_FILE_PART_NAME_EXTENSION);
+
+					for(i=0;i<iNAssay;i++) 
+					{
+						GetItem_LST(AssayFileLST, LST_ITEM_NAME, i, sFile);
+						if(iStrcmp_STR(sCurDB, sFile, STR_CASE_TOLERANT)==0) 
+							Strcpy_STR(sMastDB, sFile);
+					}
+
+
+					// --- If still not set, use the first item ---
+
+					if(!iStrlen_STR(sMastDB)) {
+						GetItem_LST(AssayFileLST, LST_ITEM_NAME, 0, sMastDB);                  
+						SetString_SYS("DHCOMPOSITEDB","MASTER",sMastDB);
+					}
+				}
+				
+
+				// --- Set any Defaults from INI ---
+
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_0,DGW_TEXT,     "DHCOMPOSITEDB","MASTER");
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_1,DGW_TEXT,     "DHCOMPOSITEDB","TAG");
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_2,DGW_LISTALIAS,"DHCOMPOSITEDB","HOLSEL");     
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_3,DGW_LISTALIAS,"DHCOMPOSITEDB","INTSEL");     
+
+				// --- Run the Dialogue ---
+
+				i = iRunDialogue_DGW(Diag);
+				if (i == -1)   Cancel_SYS();    // Cancel
+				
+				// --- Put values back in INI ---
+
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_0,DGW_TEXT,     "DHCOMPOSITEDB","MASTER");
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_1,DGW_TEXT,     "DHCOMPOSITEDB","TAG");
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_2,DGW_LISTALIAS,"DHCOMPOSITEDB","HOLSEL");     
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB_3,DGW_LISTALIAS,"DHCOMPOSITEDB","INTSEL");     
+	
+				Destroy_DGW(Diag);
+
+
+				// --- Get parameters ---
+
+				GetString_SYS("DHCOMPOSITEDB","MASTER",sMastDB);
+				GetString_SYS("DHCOMPOSITEDB","TAG",sTag);
+				iIntSel = iGetInt_SYS("DHCOMPOSITEDB","INTSEL");
+				
+				
+				// --- Warn user if existing composite database will be overwritten. ---
+				
+				Strcpy_STR(sName, sProject);
+				Strcat_STR(sName, "_");
+				Strcat_STR(sName, sTag);
+				
+				iDB = iFindItem_LST(AssayFileLST, LST_ITEM_NAME, sMastDB);
+				hDB = hAssayDB_DH(hDH,iDB);
+				GetName_DB(hDB, DB_NAME_FILE, sDB);
+
+				FileNamePart_STR(sDB, sVol, STR_FILE_PART_VOLUME);
+				FileNamePart_STR(sDB, sDir, STR_FILE_PART_DIRECTORY);
+				FileCombineParts_STR(sVol,sDir,sName,"gdb","",sCompDB);            
+
+				if (iFileExist_SYS(sCompDB)) {
+
+						  Printf_STR(sMsg, sizeof(sMsg), _("The Project Database \"%s\" exists. Overwrite?"), sCompDB);
+					if(iDisplayQuestion_SYS(_("New Composite Database"),sMsg))
+						iDelDB = 1;
+					else {
+						DisplayMessage_SYS(_("Tag string"),_("Please enter a different tag string."));
+						i = 0;
+					} 
+				} 
+			}
+
+			// ---  Interval selections ---
+
+			if(i==1) {
+
+				if(iIntSel==0) {
+					Diag = Create_DGW("DHCOMPOSITEDB1");
+					
+					hLST = GetList_DGW(Diag,_DHCOMPOSITEDB1_1);
+					Copy_LST(hLST, NumericChanLST);
+					
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB1_0,DGW_TEXT,"DHCOMPOSITEDB","FIXINT");     
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB1_1,DGW_TEXT,"DHCOMPOSITEDB","WTCH");     
+	
+					i = iRunDialogue_DGW(Diag);
+					if (i == -1)   Cancel_SYS();    // Cancel
+					if (i ==  0)   continue;        // Back
+					
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB1_0,DGW_TEXT,"DHCOMPOSITEDB","FIXINT");                    
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB1_1,DGW_TEXT,"DHCOMPOSITEDB","WTCH");     
+				}
+				else if(iIntSel==1) 
+				{
+					Diag = Create_DGW("DHCOMPOSITEDB2");
+					
+					hLST = GetList_DGW(Diag,_DHCOMPOSITEDB2_0);
+					FromToDataLST_DH(hDH, "", hLST);		// Lithologies from any From-To dataset
+
+					hLST = GetList_DGW(Diag,_DHCOMPOSITEDB2_1);
+					Copy_LST(hLST, NumericChanLST);
+
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB2_0,DGW_TEXT,"DHCOMPOSITEDB","LITHCH");     
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB2_1,DGW_TEXT, "DHCOMPOSITEDB","WTCH");     
+
+					i = iRunDialogue_DGW(Diag);
+					if (i == -1)   Cancel_SYS();    // Cancel
+					if (i ==  0)   continue;        // Back
+					
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB2_0,DGW_TEXT,"DHCOMPOSITEDB","LITHCH"); 
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB2_1,DGW_TEXT,"DHCOMPOSITEDB","WTCH");     
+
+
+					// --- Need to validate manually in case user hits the back button with the field blank. ---
+					
+					GetString_SYS("DHCOMPOSITEDB","LITHCH",sLithCh);
+					if(i==2 && !iStrlen_STR(sLithCh))
+					{
+						DisplayMessage_SYS(_("Lithological interval"),  _("The \"Lithology data channel\" field is required."));
+						i = 1;
+						continue;               
+					}
+				}
+				else if(iIntSel==2) 
+				{
+					Diag = Create_DGW("DHCOMPOSITEDB3");
+
+					hLST = GetList_DGW(Diag,_DHCOMPOSITEDB3_0);
+					FromToDataLST_DH(hDH, "", hLST);		// Lithologies from any From-To dataset
+					
+					hLST = GetList_DGW(Diag,_DHCOMPOSITEDB3_2);
+					Copy_LST(hLST, NumericChanLST);               
+					
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB3_0,DGW_TEXT,"DHCOMPOSITEDB","LITHCH");     
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB3_1,DGW_TEXT,"DHCOMPOSITEDB","INTLEN");     
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB3_2,DGW_TEXT, "DHCOMPOSITEDB","WTCH");     
+					
+					i = iRunDialogue_DGW(Diag);
+					if (i == -1)   Cancel_SYS();    // Cancel
+					if (i ==  0)   continue;        // Back
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB3_0,DGW_TEXT,"DHCOMPOSITEDB","LITHCH");     
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB3_1,DGW_TEXT,"DHCOMPOSITEDB","INTLEN");     
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB3_2,DGW_TEXT, "DHCOMPOSITEDB","WTCH");     
+
+
+					// --- Need to validate manually in case use hit's the back button with the field blank. ---
+					
+					GetString_SYS("DHCOMPOSITEDB","LITHCH",sLithCh);
+					if(i==2 && !iStrlen_STR(sLithCh))
+					{
+						DisplayMessage_SYS(_("Lithological interval"),  _("The \"Lithology data channel\" field is required."));
+						i = 1;
+						continue;               
+					}
+				}
+				else if(iIntSel==3) 
+				{
+					Diag = Create_DGW("DHCOMPOSITEDB4");
+
+					hLST = GetList_DGW(Diag,_DHCOMPOSITEDB4_1);
+					Copy_LST(hLST, NumericChanLST);
+
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB4_0,DGW_FILEPATH,"DHCOMPOSITEDB","INTFILE");     
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB4_1,DGW_TEXT, "DHCOMPOSITEDB","WTCH");     
+
+					i = iRunDialogue_DGW(Diag);
+					if (i == -1)   Cancel_SYS();    // Cancel
+					if (i ==  0)   continue;        // Back
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB4_0,DGW_FILEPATH,"DHCOMPOSITEDB","INTFILE");     
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB4_1,DGW_TEXT, "DHCOMPOSITEDB","WTCH");     
+					
+
+					// --- Need to validate manually in case use hits the back button with the field blank. ---
+					
+					GetString_SYS("DHCOMPOSITEDB","INTFILE",sIntFile);
+					if(i==2 && !iStrlen_STR(sIntFile))
+					{
+						DisplayMessage_SYS(_("Intervals from file"),  _("The \"Interval file\" field is required."));
+						i = 1;
+						continue;               
+					}               
+				}
+				else if(iIntSel == 4)
+				{
+					Diag = Create_DGW("DHCOMPOSITEDBSIG");
+					
+					hLST = GetList_DGW(Diag,_DHCOMPOSITEDBSIG_0);
+					iDB = iFindItem_LST(AssayFileLST, LST_ITEM_NAME, sMastDB);
+					GetItem_LST(AssayFileLST, LST_ITEM_VALUE, iDB, sAssay);
+					NumericFromToDataLST_DH(hDH, sAssay, hLST);		// Master database channels only
+					
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_0,DGW_TEXT,	   "DHCOMPOSITEDBSIG","PRIMARY_ASSAY_CHAN");
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_1,DGW_TEXT,     "DHCOMPOSITEDBSIG","MIN_COMPOSITE_GRADE");
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_2,DGW_TEXT,     "DHCOMPOSITEDBSIG","MIN_COMPOSITE_THICKNESS");
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_3,DGW_TEXT,     "DHCOMPOSITEDBSIG","CUTOFF_GRADE");
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_4,DGW_TEXT,     "DHCOMPOSITEDBSIG","MAX_GRADE");
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_5,DGW_TEXT,     "DHCOMPOSITEDBSIG","MISSING_ASSAY_GRADE");
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_6,DGW_TEXT,     "DHCOMPOSITEDBSIG","MAX_DILUTION_LENGTH");
+					SetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_7,DGW_TEXT,     "DHCOMPOSITEDBSIG","MIN_DILUTION_GRADE");
+					
+					i = iRunDialogue_DGW(Diag);
+					if (i == -1)   Cancel_SYS();    // Cancel
+					
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_0,DGW_TEXT,	   "DHCOMPOSITEDBSIG","PRIMARY_ASSAY_CHAN");
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_1,DGW_TEXT,     "DHCOMPOSITEDBSIG","MIN_COMPOSITE_GRADE");
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_2,DGW_TEXT,     "DHCOMPOSITEDBSIG","MIN_COMPOSITE_THICKNESS");
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_3,DGW_TEXT,     "DHCOMPOSITEDBSIG","CUTOFF_GRADE");
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_4,DGW_TEXT,     "DHCOMPOSITEDBSIG","MAX_GRADE");
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_5,DGW_TEXT,     "DHCOMPOSITEDBSIG","MISSING_ASSAY_GRADE");
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_6,DGW_TEXT,     "DHCOMPOSITEDBSIG","MAX_DILUTION_LENGTH");
+					GetInfoSYS_DGW(Diag,_DHCOMPOSITEDBSIG_7,DGW_TEXT,     "DHCOMPOSITEDBSIG","MIN_DILUTION_GRADE");
+														  
+					if (i ==  0)   continue;        // Back
+				  
+				  
+					// --- Need to validate manually in case user hits the back button with the field blank. ---
+					
+					if (i == 3)  // Finish - no rejection interval dialog for significant intervals
+					{
+						GetString_SYS("DHCOMPOSITEDBSIG","PRIMARY_ASSAY_CHAN",sCutoffCh);
+						if(!iStrlen_STR(sCutoffCh))
+						{
+							DisplayMessage_SYS(_("Primary assay data channel"),  _("The \"Primary assay data channel\" field is required."));
+							i = 1;
+							continue;               
+						}
+
+						// --- Both minimum composite grade and thickness are required ---
+																
+						rMinCompositeThickness = rGetReal_SYS("DHCOMPOSITEDBSIG","MIN_COMPOSITE_THICKNESS");
+						if(rMinCompositeThickness == rDUMMY)
+						{
+							DisplayMessage_SYS(_("Minimum composite length"),  _("The \"Mininum composite length\" is required."));
+							i = 1;
+							continue;               
+						}               
+
+						rMinCompositeGrade = rGetReal_SYS("DHCOMPOSITEDBSIG","MIN_COMPOSITE_GRADE");
+						if(rMinCompositeGrade == rDUMMY)
+						{
+							DisplayMessage_SYS(_("Minimum composite grade"),  _("The \"Mininum composite grade\" is required."));
+							i = 1;
+							continue;               
+						}               
+
+						rMaxInternalDilutionLength = rGetReal_SYS("DHCOMPOSITEDBSIG","MAX_DILUTION_LENGTH");
+						rMinInternalDilutionGrade = rGetReal_SYS("DHCOMPOSITEDBSIG","MIN_DILUTION_GRADE");
+						if(rMaxInternalDilutionLength != rDUMMY && rMinInternalDilutionGrade == rDUMMY)
+						{
+							DisplayMessage_SYS(_("Cut-off Grade"),  _("You must specify the \"Mininum internal dilution grade\" if the \"Maximum internal dilution length\" is defined."));
+							i = 1;
+							continue;               					
+						}
+						if(rMaxInternalDilutionLength == rDUMMY && rMinInternalDilutionGrade != rDUMMY)
+						{
+							DisplayMessage_SYS(_("Cut-off Grade"),  _("You must specify the \"Maximum internal dilution length\" if the \"Mininum internal dilution grade\" is defined."));
+							i = 1;
+							continue;               					
+						}
+						
+						if (rMaxInternalDilutionLength > rMinCompositeThickness)
+						{
+							DisplayMessage_SYS(_("Cut-off Grade"), _("The \"Maximum internal dilution length\" must be less than or equal to the \"Mininum composite length\"."));
+							i = 1;
+							continue;
+						}
+					}
+				}
+				
+
+				Destroy_DGW(Diag);
+			
+				// --- Validate interval parameters ---
+
+				if(iIntSel==0) {
+					rFixInt = rGetReal_SYS("DHCOMPOSITEDB","FIXINT"); 
+					if(rFixInt<=0.0) {
+						DisplayMessage_SYS(_("Fixed interval"),_("Please enter interval value greater than 0"));
+						i = 1;
+					}
+				} else if(iIntSel==1)  {
+					
+					// --- Nothing to test. channel is required value ---
+
+				} else if(iIntSel==2)  {
+					
+					rFixInt = rGetReal_SYS("DHCOMPOSITEDB","INTLEN"); 
+					if(rFixInt<=0.0) {
+						DisplayMessage_SYS(_("Best-fit lithological interval"),_("Please enter best-fit interval value greater than 0.0"));
+						i = 1;
+					}
+
+				} else if(iIntSel==3)  {
+					
+					// --- Nothing to test. existing file is required value ---
+				}
+			}
+			
+			// --- Reject options ---
+
+			if(i==2) {
+
+				Diag = Create_DGW("DHCOMPOSITEDB5");
+				hLST = GetList_DGW(Diag,_DHCOMPOSITEDB5_2);
+				Copy_LST(hLST, NumericChanLST);		// Use same list as for weight channel - numeric only.
+				
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_0,DGW_TEXT,     "DHCOMPOSITEDB","REJ1VAL");     
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_1,DGW_TEXT,     "DHCOMPOSITEDB","REJ2VAL");     
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_2,DGW_TEXT,     "DHCOMPOSITEDB","REJ3CH");     
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_3,DGW_LISTALIAS,"DHCOMPOSITEDB","REJ3OP");     
+				SetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_4,DGW_TEXT,     "DHCOMPOSITEDB","REJ3VAL");     
+				
+				i = iRunDialogue_DGW(Diag);
+				if (i == -1)   Cancel_SYS();    // Cancel
+
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_0,DGW_TEXT,     "DHCOMPOSITEDB","REJ1VAL");     
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_1,DGW_TEXT,     "DHCOMPOSITEDB","REJ2VAL");     
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_2,DGW_TEXT,     "DHCOMPOSITEDB","REJ3CH");     
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_3,DGW_LISTALIAS,"DHCOMPOSITEDB","REJ3OP");     
+				GetInfoSYS_DGW(Diag,_DHCOMPOSITEDB5_4,DGW_TEXT,     "DHCOMPOSITEDB","REJ3VAL");     
+			
+				Destroy_DGW(Diag);
+			
+				
+				// --- Validate interval parameters ---
+			
+				GetString_SYS("DHCOMPOSITEDB","REJ1VAL",sRejVal); 
+				rRej1Val = rGetReal_SYS("DHCOMPOSITEDB","REJ1VAL"); 
+				if(rRej1Val!=rDUMMY && rRej1Val<0.0)  {
+					DisplayMessage_SYS(_("Reject1 interval"),_("Please enter valid reject interval value"));
+					i = 2;
+				}
+
+				rRej2Val = rGetReal_SYS("DHCOMPOSITEDB","REJ2VAL"); 
+				if(rRej2Val!=rDUMMY && rRej2Val<0.0)  {
+					DisplayMessage_SYS(_("Reject2 interval"),_("Please enter valid reject interval value"));
+					i = 2;
+				}
+
+				
+				// --- Rejection channel option ---
+
+				GetString_SYS("DHCOMPOSITEDB","REJ3CH",sRejCh); 
+				if(iStrlen_STR(sRejCh)) {
+
+					iRej3Op = iGetInt_SYS("DHCOMPOSITEDB","REJ3OP"); 
+					rRej3Val = rGetReal_SYS("DHCOMPOSITEDB","REJ3VAL"); 
+
+					if(rRej3Val==rDUMMY)  {
+						DisplayMessage_SYS(_("Reject3 value"),_("Please enter valid channel reject value"));
+						i = 2;
+					}
+				}
+			} 
+
+
+			// --- Finish ---
+
+			if(i==3) {
+				iDone = 1;
+			}
+
+		} // end while(!iDone)
+	} 
+
+
+	// --- Get and validate parameters ---
+
+	iHolSel = iGetInt_SYS("DHCOMPOSITEDB","HOLSEL");
+	if(iHolSel<0 || iHolSel>1)  Abort_SYS(_("Hole selection is invalid!"));
+	
+	iIntSel = iGetInt_SYS("DHCOMPOSITEDB","INTSEL");
+	if(iIntSel<0 || iIntSel>4)  Abort_SYS(_("Interval selection is invalid!"));
+	
+	GetString_SYS("DHCOMPOSITEDB","WTCH",sWtCh); 
+
+						 
+	if(iIntSel==0) 
+	{
+		rFixInt = rGetReal_SYS("DHCOMPOSITEDB","FIXINT"); 
+		if(rFixInt<=0.0)  
+			Abort_SYS(_("Invalid interval value!"));
+	} 
+	else if(iIntSel==1)  
+	{
+		GetString_SYS("DHCOMPOSITEDB","LITHCH",sLithCh); 
+		if(!iStrlen_STR(sLithCh))
+			Abort_SYS(_("Invalid lithology channel name!"));
+	} 
+	else if(iIntSel==2)  
+	{
+		GetString_SYS("DHCOMPOSITEDB","LITHCH",sLithCh); 
+		if(!iStrlen_STR(sLithCh))
+			Abort_SYS(_("Invalid lithology channel name!"));
+		rFixInt = rGetReal_SYS("DHCOMPOSITEDB","INTLEN"); 
+		if(rFixInt<=0.0)  
+			Abort_SYS(_("Invalid interval value!"));
+	} 
+	else if(iIntSel==3)  
+	{
+		GetString_SYS("DHCOMPOSITEDB","INTFILE",sIntFile); 
+		if(!iStrlen_STR(sIntFile) || !iFileExist_SYS(sIntFile))   
+			Abort_SYS(_("Invalid interval file name"));
+	}    
+	else if (iIntSel == 4) 
+	{
+		GetString_SYS("DHCOMPOSITEDBSIG","PRIMARY_ASSAY_CHAN",sCutoffCh); 
+		if(!iStrlen_STR(sCutoffCh))   Abort_SYS(_("Invalid assay data channel name!"));
+		
+		rCutOffGrade = rGetReal_SYS("DHCOMPOSITEDBSIG","CUTOFF_GRADE");
+		if(rCutOffGrade != rDUMMY && rCutOffGrade < 0.0)
+			Abort_SYS(_("The cutoff grade must be left undefined, or set to a value greater than or equal to zero."));
+			
+		rClipGrade = rGetReal_SYS("DHCOMPOSITEDBSIG","MAX_GRADE");
+		if(rClipGrade != rDUMMY && rClipGrade <= 0.0)
+			Abort_SYS(_("The clip grade must be left undefined, or set to a value greater than zero."));
+		
+		rMinCompositeThickness = rGetReal_SYS("DHCOMPOSITEDBSIG","MIN_COMPOSITE_THICKNESS");
+		if(rMinCompositeThickness == rDUMMY)
+			Abort_SYS(_("The minimum composite thickness is required."));	
+		if(rMinCompositeThickness <= 0.0)
+			Abort_SYS(_("The minimum composite thickness must be greater than zero."));
+					
+		rMinCompositeGrade = rGetReal_SYS("DHCOMPOSITEDBSIG","MIN_COMPOSITE_GRADE");
+		if(rMinCompositeGrade == rDUMMY)
+			Abort_SYS(_("The minimum composite grade is required."));
+		if(rMinCompositeGrade <= 0.0)
+			Abort_SYS(_("The minimum composite grade must be greater than zero."));
+
+		rMaxInternalDilutionLength = rGetReal_SYS("DHCOMPOSITEDBSIG","MAX_DILUTION_LENGTH");
+		rMinInternalDilutionGrade = rGetReal_SYS("DHCOMPOSITEDBSIG","MIN_DILUTION_GRADE");
+		
+		if(rMaxInternalDilutionLength != rDUMMY && rMinInternalDilutionGrade == rDUMMY)
+			Abort_SYS(_("You must specify the \"Mininum diluted grade\" if the \"Maximum internal dilution length\" is defined."));
+		if(rMaxInternalDilutionLength == rDUMMY && rMinInternalDilutionGrade != rDUMMY)
+			Abort_SYS(_("You must specify the \"Maximum internal dilution length\" if the \"Mininum diluted grade\" is defined."));
+			
+		if(rMaxInternalDilutionLength != rDUMMY && rMaxInternalDilutionLength <= 0.0)
+			Abort_SYS(_("The maximum internal dilution length must be left undefined or set to a value greater than zero."));
+		
+		if(rMinInternalDilutionGrade != rDUMMY && rMinInternalDilutionGrade < 0.0)
+			Abort_SYS(_("The minimum internal dilution grade must be left undefined or set to a value greater than or equal to zero."));
+					
+		if (rMaxInternalDilutionLength > rMinCompositeThickness)
+			Abort_SYS(_("The maximum internal dilution length must be less than or equal to the minimum composite thickness."));
+
+		rGradeForMissingAssays = rGetReal_SYS("DHCOMPOSITEDBSIG","MISSING_ASSAY_GRADE");
+		if(rGradeForMissingAssays == rDUMMY)
+			rGradeForMissingAssays = 0.0;
+			
+	}
+	
+
+	// --- Do not get or validate rejection intervals for significant intervals selection ---
+	
+	if(iIntSel!=4)
+	{
+		rRej1Val = rGetReal_SYS("DHCOMPOSITEDB","REJ1VAL"); 
+		if(rRej1Val!=rDUMMY && rRej1Val<=0.0)  Abort_SYS(_("Invalid reject value!"));
+
+		rRej2Val = rGetReal_SYS("DHCOMPOSITEDB","REJ2VAL"); 
+		if(rRej2Val!=rDUMMY && rRej2Val<=0.0)  Abort_SYS(_("Invalid reject value!"));
+		
+		GetString_SYS("DHCOMPOSITEDB","REJ3CH",sRejCh); 
+		if(iStrlen_STR(sRejCh)) {   
+			rRej3Val = rGetReal_SYS("DHCOMPOSITEDB","REJ3VAL"); 
+			if(rRej3Val==rDUMMY)  Abort_SYS(_("Undefined reject value!"));
+			iRej3Op = iGetInt_SYS("DHCOMPOSITEDB","REJ3OP"); 
+		}
+	}
+
+	GetString_SYS("DHCOMPOSITEDB","MASTER",sMastDB);   
+
+	
+	// --- Get line/channel/blob info from the master database ---
+	
+	i = iFindItem_LST(AssayFileLST, LST_ITEM_NAME, sMastDB);
+	GetItem_LST(AssayFileLST, LST_ITEM_VALUE, i, sAssay);
+	
+	AssayLST_DH(hDH, AssayLST);   
+	i = iFindItem_LST(AssayLST, LST_ITEM_NAME, sAssay);
+	iDB = iGetInt_LST(AssayLST, LST_ITEM_VALUE, i);
+	MastDB = hAssayDB_DH(hDH,iDB);
+	GetName_DB(MastDB, DB_NAME_FILE, sMastDB);		// Get full path of the master database
+	
+	iLines = -1;
+	iLines = iLinesMax_DB(MastDB);
+	iChans = iChansMax_DB(MastDB);
+	if(iLines == iDUMMY)   iLines = 250;
+	if(iChans == iDUMMY)   iChans = 100;
+	iBlobs = iLines+iChans+50;
+	
+	if(iLines==-1) 
+		 Abort_SYS(_("Unable to get master DB information"));    // shouldn't happen!
+
+
+	// --- Create the composite database ---
+	
+	GetString_SYS("DHCOMPOSITEDB","TAG",sTag);
+	Strcpy_STR(sName, sProject);
+	Strcat_STR(sName, "_");
+	Strcat_STR(sName, sTag);
+	
+	FileNamePart_STR(sMastDB, sVol, STR_FILE_PART_VOLUME);
+	FileNamePart_STR(sMastDB, sDir, STR_FILE_PART_DIRECTORY);
+	FileCombineParts_STR(sVol,sDir,sName,"gdb","",sCompDB);
+
+	if (iFileExist_SYS(sCompDB)) 
+	{
+		if(iLoaded_EDB(sCompDB)) 
+		{
+			Destroy_DH(hDH);
+			UnLoad_EDB(sCompDB);
+			if(iDeleteFile_SYS(sCompDB)==1)
+				Abort_SYS(_("Unable to delete existing composite database."));
+
+			hDH = Create_DH(sMastDB);
+			GetProjectName_DH(hDH, sProject);
+		}
+		else if(iDeleteFile_SYS(sCompDB)==1)
+			Abort_SYS(_("Unable to delete existing composite database."));
+
+		// --- Need to get new DB handle for the master ---
+					
+		AssayLST_DH(hDH, AssayLST);   
+		i = iFindItem_LST(AssayLST, LST_ITEM_NAME, sAssay);
+		iDB = iGetInt_LST(AssayLST, LST_ITEM_VALUE, i);
+		MastDB = hAssayDB_DH(hDH,iDB);			
+	} 
+	
+	CreateEx_DB(sCompDB, iLines, iChans, iBlobs, 10, 200, "SUPER", "", 64);         
+
+	ECompDB = Load_EDB(sCompDB);
+	CompDB = Lock_EDB(ECompDB);
+
+	
+	// --- Composite Database ---
+	
+	if(iIntSel == 4)
+	{
+		 SignificantIntersectionsDB_DH(hDH,MastDB,CompDB,iHolSel,sCutoffCh,
+			  rCutOffGrade,rClipGrade,rMinCompositeThickness,rMinCompositeGrade,
+			  rMaxInternalDilutionLength,rMinInternalDilutionGrade,rGradeForMissingAssays);
+	}
+	else
+	{
+	 CompositeDB_DH(hDH,MastDB,CompDB,iHolSel,iIntSel,rFixInt,sLithCh,sIntFile,sWtCh,
+						rRej1Val,rRej2Val,rRej3Val,iRej3Op,sRejCh);
+	}
+
+
+	Destroy_DH(hDH);
+
+
+	// --- Anything composited? ---
+	
+	if(iIsEmpty_DB(CompDB))
+	{
+		UnLock_EDB(ECompDB);
+		UnLoad_EDB(sCompDB);
+		iDeleteFile_SYS(sCompDB);
+		
+		DisplayMessage_SYS(_("Drill Hole Composite Database"), _("The compositing process produced no output data. The empty output database has been deleted."));
+	}
+	else
+	{
+		UnLock_EDB(ECompDB);
+		DelLine0_EDB(ECompDB);
+		
+		// --- Bring composite DB to front and display all the channels ---
+	
+		MakeCurrent_EDB(ECompDB);
+		
+		
+		// --- For significant intersections, load the label channel after the primary assay channel ---
+
+		if(iIntSel == 4)
+		{		
+			// --- Get a LST of all the channel in the loaded order ---
+			
+			LoadAllChans_EDB(ECompDB);		
+			ChanLST = Create_LST(STR_DB_SYMBOL+20);
+			iN = iDispChanLST_EDB(ECompDB, ChanLST);			
+			
+			
+			// --- Get the channel label to create the label channel name ---
+			
+			CompDB = Lock_EDB(ECompDB);		
+			hCh = FindChan_DB(CompDB, sCutoffCh);
+			LOCK_R(CompDB, hCh);
+			GetChanLabel_DB(CompDB, hCh, sChanLabel);
+			UNLOCK(CompDB, hCh);
+			UnLock_EDB(ECompDB);
+
+			
+			// --- Create the label channel name and find it in the list ---
+			
+			Strcpy_STR(sLabelChan, sChanLabel);
+			Strcat_STR(sLabelChan, "_Labels");
+			
+			iPrimaryChan = iFindItem_LST(ChanLST, LST_ITEM_NAME, sCutoffCh);
+			iLabelChan = iFindItem_LST(ChanLST, LST_ITEM_NAME, sLabelChan);
+			if(iPrimaryChan!=-1 && iLabelChan!=-1)
+			{
+				UnLoadAllChans_EDB(ECompDB);
+				for(i=0;i<=iPrimaryChan;i++)
+				{
+					if(i==iLabelChan)
+						continue;
+					GetItem_LST(ChanLST, LST_ITEM_NAME, i, sChan);
+					LoadChan_EDB(ECompDB, sChan);
+				}
+				LoadChan_EDB(ECompDB, sLabelChan);
+				for(i=iPrimaryChan+1; i<iN; i++)
+				{
+					if(i==iLabelChan)
+						continue;
+					GetItem_LST(ChanLST, LST_ITEM_NAME, i, sChan);
+					LoadChan_EDB(ECompDB, sChan);
+				}
+			}
+			else
+				LoadAllChans_EDB(ECompDB);	
+		}
+		else
+			LoadAllChans_EDB(ECompDB);		
+	}
+}

@@ -1,0 +1,1054 @@
+//===========================================================================
+NAME          = "XYZSTAT GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Report"
+
+DESCRIPTION   = "
+
+Use this GX to produce a statistics summary report of a selected list
+of channels.
+
+For channels with no elements for the calculations
+of statistics (after discarding elements at both ends), only the channel
+names will be output to the summary file.
+
+PARAMETERS:
+
+  XYZSTAT.CHAN      A list of comma delimited channel names
+         .FILE      Name of the stats file
+         .SHOWLOG   Show stats file (1 by default, 0 to suppress) after
+                    calculation using the default editor.
+"
+// Revision History:
+// v6.1.4: Increase string buffers to max to increase number of channels you can enter using a string.
+// v5.1.7: Display of log file now uses EDIT GX,
+//         Stats not displayed in script mode.
+// v5.1.6: Should not have skipped string type channels.
+//         Added script option to suppress display of stats file.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+
+RESOURCE = "XYZSTAT.gr"
+#include "XYZSTAT.grh"
+
+//===========================================================================
+
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+#define PROG_BLOCKS 10
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DBREAD      DBRead, DBReadX, DBReadY;
+DB_SYMB     Line;              // line handle
+DGW         Diag;              // dialogue handle
+LST         List;              // dialog list handle
+LST         hLineLST;
+LST         hLineLabelLST;
+DB_SYMB     InCh,XCh,YCh;
+VV          ChanVV;
+VA          InVA;
+VV          XVV,YVV,FullVV,ColumnVV;
+VA          DummiesVA, ItemsVA, MinVA, MaxVA, MeanVA, DevVA;
+VV          STVV, STVVLine; 
+WA          hWA;
+ST          hST, hSTLine, hXST, hYST;
+
+string(STR_DEFAULT_LONG) sLine2;
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_VERY_LONG) sInChStr;
+string(STR_DEFAULT_LONG) sSubCh;
+string(STR_DB_SYMBOL) sInCh,sChan,sXCh,sYCh;
+string(STR_VERY_LONG) sWALine;
+string(STR_FILE)   sFile,sData,sRelData;
+
+string(STR_VERY_LONG)  sMsg, sMsg2;
+
+real        rItems, rItemsX, rItemsY, rDummies, rMean, rDev;
+real        rMin, rMax, rMinX, rMinY, rMaxX, rMaxY;
+real        rMinXt, rMinYt, rMaxXt, rMaxYt;
+real        rTotItemsX, rTotItemsY, rLastTotItemsX, rLastTotItemsY;
+real        rTotlDist, rDist;
+real        rMAXConst;
+
+int         iSNum,iENum,iNL;
+int         iTok;
+int         iStrlen,iChType,iChDecimal;
+int         iX, iXChType,iXChDecimal;
+int         iY, iYChType,iYChDecimal;
+int         iCh;
+int         iBlock, iBlockX, iBlockY;
+int         iLineBlock, iLineBlockX, iLineBlockY;
+int         iNLineBlocks, iNLineBlocksX, iNLineBlocksY;
+int         iTotBlocks, iTotBlocksX, iTotBlocksY;
+int         i,j,k;
+int         iLenVV,iChan;
+int         iColVA;
+int         iLine;
+int         iTotLines;        // Total Number of Lines to Process
+int         iShowLog;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Set constant ---
+
+   rMAXConst = (real)iMAX;
+
+
+   // --- Get the database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   GetName_DB(Data,DB_NAME_FILE,sData);
+   RelativeFileName_SYS(sData,sRelData);
+
+
+   // --- Get current X, Y channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the 1st dialogue ---
+
+      Diag = Create_DGW("XYZSTAT");
+
+      // --- Set up channel list ---
+
+      List = GetList_DGW(Diag,_XYZSTAT_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_XYZSTAT_0,DGW_TEXT,"XYZSTAT","CHAN");
+      SetInfoSYS_DGW(Diag,_XYZSTAT_1,DGW_FILEPATH,"XYZSTAT","FILE");
+
+      // --- Run the dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the strings ---
+
+      GetInfoSYS_DGW(Diag,_XYZSTAT_0,DGW_TEXT,"XYZSTAT","CHAN");
+      GetInfoSYS_DGW(Diag,_XYZSTAT_1,DGW_FILEPATH,"XYZSTAT","FILE");
+
+
+
+      // --- Destroy the dialogue ---
+
+      Destroy_DGW(Diag);
+
+  }
+
+
+   // --- Get filename ---
+
+   GetString_SYS("XYZSTAT","FILE",sFile);
+   if (iStrMin2_STR(sFile) == 0)
+      Abort_SYS(_("Output stats file name not given"));
+
+
+   // --- Get the start and end points ---
+
+   iSNum = iGetInt_SYS("XYZSTAT","SNUM");
+   if (iDUMMY == iSNum) iSNum = 0;
+
+   iENum = iGetInt_SYS("XYZSTAT","ENUM");
+   if (iDUMMY == iENum) iENum = 0;
+
+
+   // ---- Get channel string ---
+
+   GetString_SYS("XYZSTAT","CHAN",sInChStr);
+
+
+   // --- Build a list of names of channels displayed ---
+
+   if (iStrMin_STR(sInChStr) == 0) {
+      Strcpy_STR(sInChStr,"");
+
+      ChanVV = Create_VV(INT,0);
+      UnLock_EDB(EData);
+      iDispChanList_EDB(EData, ChanVV);
+      Data = Lock_EDB(EData);
+
+
+      iLenVV = iLength_VV(ChanVV);
+      for (i = 0; i < iLenVV; i++) {
+         iChan = iGetInt_VV(ChanVV,i);
+         GetChanName_DB(Data,(DB_SYMB)iChan,sChan);
+         Strcat_STR(sInChStr,sChan);
+         Strcat_STR(sInChStr,",");
+      }
+   }
+
+   // --- Tokenize the string ---
+
+   iTok = iTokens_STR(sInChStr,",");                // No of comma delimited tokens
+
+
+
+   // --- WA and ST---
+
+   hWA = Create_WA(sFile,0);
+
+
+   // --- Full line number ---
+
+   Puts_WA(hWA, _n("Database name:       "));
+   Puts_WA(hWA, sRelData);
+   NewLine_WA(hWA);
+
+   FormatDate_STR(rDate_SYS(), sTemp, 20, DATE_FORMAT_YYYYMMDD);
+   Puts_WA(hWA, _n("Date of calculation: "));
+   Puts_WA(hWA, sTemp);
+   NewLine_WA(hWA);
+   FormatTime_STR(rTime_SYS(), sTemp, 30, 19, TIME_FORMAT_COLON);
+   Substr_STR(sTemp, sTemp, 0, 11);
+   Puts_WA(hWA, _n("Time of calculation: "));
+   Puts_WA(hWA, sTemp);
+   NewLine_WA(hWA);
+   Puts_WA(hWA, "");
+   NewLine_WA(hWA);
+
+
+	// --- Get a LST of selected lines ---
+
+   hLineLST = Create_LST(256);
+   SelectedLineLST_DB(Data,hLineLST);
+	iTotLines = iSize_LST(hLineLST);
+
+
+   // ----------------------------------------------------------------------
+   // --- Print out X,Y stats ---
+   // ----------------------------------------------------------------------
+
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (XCh!=NULLSYMB && YCh!=NULLSYMB) {
+
+      // --- Initialize total distance ---
+
+      rTotlDist = 0.0;
+
+
+      // --- Lock the X and Y channel ---
+
+      LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+      // --- Get channel type and decimal places ---
+
+      iXChType = iGetChanType_DB(Data,XCh);
+      iXChDecimal = iGetChanDecimal_DB(Data,XCh);
+      if (iXChType <= 3) iXChDecimal = 0;
+
+
+      iYChType = iGetChanType_DB(Data,YCh);
+      iYChDecimal = iGetChanDecimal_DB(Data,YCh);
+      if (iYChType <= 3) iYChDecimal = 0;
+
+
+      // --- Skip if X/Y channel type is STRING ---
+
+      if ((iXChType > 0) && (iYChType > 0))
+      {
+
+         Puts_WA(hWA, _n("Line Number    X-minimum      X-maximum      Y-minimum      "));
+         Puts_WA(hWA, _n("Y-maximum      # of points Total distance"));
+         NewLine_WA(hWA);
+         Puts_WA(hWA, "-----------    ---------      ---------      ---------      ");
+         Puts_WA(hWA, "--------       ----------- --------------");
+         NewLine_WA(hWA);
+
+
+         // --- Go through all selected Lines ---
+
+         Progress_SYS(1);
+         ProgName_SYS(_("X/Y stats"),1);
+
+
+			// --- Treat X and Y independently; no refidding ---
+
+         DBReadX = Create_DBREAD(Data, hLineLST);
+         DBReadY = Create_DBREAD(Data, hLineLST);
+
+			iX = iAddChannel_DBREAD(DBReadX, XCh);
+			iY = iAddChannel_DBREAD(DBReadY, YCh);
+
+			XVV = GetVV_DBREAD(DBReadX, iX);
+			YVV = GetVV_DBREAD(DBReadY, iY);
+
+			iTotBlocksX = iGetNumberOfBlocksToProcess_DBREAD(DBReadX);
+			iTotBlocksY = iGetNumberOfBlocksToProcess_DBREAD(DBReadY);
+
+         hXST = Create_ST();
+         hYST = Create_ST();
+
+			iLine = 0;
+			rLastTotItemsX = 0.0;
+			rLastTotItemsY = 0.0;
+			while(1)
+			{
+
+				rMinX = rMAX;
+				rMinY = rMAX;
+				rMaxX = rMIN;
+				rMaxY = rMIN;
+
+				iBlockX = iGetNextBlock_DBREAD(DBReadX, iLine, iLineBlockX, iNLineBlocksX);
+				iBlockY = iGetNextBlock_DBREAD(DBReadY, iLine, iLineBlockY, iNLineBlocksY);
+				if(iBlockX == -1 || iBlockY == -1)
+					break;
+
+
+            // --- Line type and number ---
+
+            Line = (DB_SYMB) iGetInt_LST(hLineLST,1,iLine);
+            LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+            LineLabel_DB(Data,Line,sLine2,DB_LINE_LABEL_FORMAT_FULL);
+            UnLockSymb_DB(Data,Line);
+
+            Strcpy_STR(sLabel,_("X/Y stats on Line: "));
+	         Strcat_STR(sLabel,sLine2);
+		      ProgName_SYS(sLabel,0);
+
+				// --- X ---
+
+				iNL = iNLineBlocksX;
+				for(i = 0; i<iNL; i++)
+				{
+					if(i > 0)
+						iBlock = iGetNextBlock_DBREAD(DBReadX, iLine, iLineBlock, iNLineBlocks);
+
+					
+					// --- Update the Progress Bar ---
+
+				   ProgUpdateL_SYS(i,iNL);
+					if(iCheckStop_SYS() == 1)
+						Cancel_SYS();
+
+
+	            // --- Get Line-base X range ---
+
+					RangeDouble_VV(XVV, rMinXt, rMaxXt);
+
+					if(rMinXt != rDUMMY && rMinXt < rMinX)
+						rMinX = rMinXt;
+
+					if(rMaxXt != rDUMMY && rMaxXt > rMaxX)
+						rMaxX = rMaxXt;
+
+
+					// --- Accumulate full stats ---
+            
+					Statistics_VV(hXST, XVV);
+				}
+
+				// --- Y ---
+
+				iNL = iNLineBlocksY;
+				for(i = 0; i<iNL; i++)
+				{
+					if(i > 0)
+						iBlock = iGetNextBlock_DBREAD(DBReadY, iLine, iLineBlock, iNLineBlocks);
+
+					
+					// --- Update the Progress Bar ---
+
+				   ProgUpdateL_SYS(i,iNL);
+					if(iCheckStop_SYS() == 1)
+						Cancel_SYS();
+
+
+	            // --- Get Line-base Y range ---
+
+					RangeDouble_VV(YVV, rMinYt, rMaxYt);
+
+					if(rMinYt != rDUMMY && rMinYt < rMinY)
+						rMinY = rMinYt;
+
+					if(rMaxYt != rDUMMY && rMaxYt > rMaxY)
+						rMaxY = rMaxYt;
+
+
+					// --- Accumulate full stats ---
+            
+					Statistics_VV(hYST, YVV);
+				}
+
+
+				// --- Get the number of items for this line ---
+
+				rTotItemsX = rGetInfo_ST(hXST, ST_ITEMS);
+				rTotItemsY = rGetInfo_ST(hYST, ST_ITEMS);
+				rItemsX = rTotItemsX - rLastTotItemsX;
+				rItemsY = rTotItemsY - rLastTotItemsY;
+
+				rLastTotItemsX = rTotItemsX;
+				rLastTotItemsY = rTotItemsY;
+
+
+            // --- Build output string X ---
+
+            Strcpy_STR(sWALine, sLine2);     // Line number
+            iStrlen = iStrlen_STR(sWALine);
+            if (iStrlen < 16)
+               for (j = 1; j < (16 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+            if (rMinX != rMAX)
+               FormatR2_STR(rMinX, sTemp, 15, iXChDecimal);   // Minimum
+            else
+               Strcpy_STR(sTemp,"");
+            Strcat_STR(sWALine, sTemp);
+            iStrlen = iStrlen_STR(sTemp);
+            if (iStrlen < 15)
+               for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+            if (rMaxX != rMIN)
+               FormatR2_STR(rMaxX, sTemp, 15, iXChDecimal);   // Maximum
+            else
+               Strcpy_STR(sTemp,"");
+            Strcat_STR(sWALine, sTemp);
+            iStrlen = iStrlen_STR(sTemp);
+            if (iStrlen < 15)
+               for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+            // --- Build output string Y ---
+
+            if (rMinY != rMAX)
+               FormatR2_STR(rMinY, sTemp, 15, iYChDecimal);   // Minimum
+            else
+               Strcpy_STR(sTemp,"");
+            Strcat_STR(sWALine, sTemp);
+            iStrlen = iStrlen_STR(sTemp);
+            if (iStrlen < 15)
+               for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+            if (rMaxY != rMIN)
+               FormatR2_STR(rMaxY, sTemp, 15, iYChDecimal);   // Maximum
+            else
+               Strcpy_STR(sTemp,"");
+            Strcat_STR(sWALine, sTemp);
+            iStrlen = iStrlen_STR(sTemp);
+            if (iStrlen < 15)
+               for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+            if (rItemsY != rDUMMY)	// valid items?
+               FormatR_STR(rItemsY, sTemp, 20, 19);   // Maximum
+            else Strcpy_STR(sTemp,"");
+            Strcat_STR(sWALine, sTemp);
+            iStrlen = iStrlen_STR(sTemp);
+            if (iStrlen < 12)
+               for (j = 1; j <= (12 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+
+            // -- Get distance ---
+
+            rDist = rDUMMY;
+            Distline_DU(Data,Line,XCh,YCh,rDist);
+            rTotlDist += rDist;
+
+            if (rDist != rDUMMY)
+               FormatR_STR(rDist, sTemp, 15,13);   // distance
+            else Strcpy_STR(sTemp,"");
+            Strcat_STR(sWALine, sTemp);
+
+
+
+            // --- Output to file ---
+
+            Puts_WA(hWA, sWALine);  NewLine_WA(hWA);
+         }
+
+         
+			// --- Get X statistics of all lines ---
+
+         rDummies = rGetInfo_ST(hXST, ST_DUMMIES);
+         rItems = rGetInfo_ST(hXST, ST_ITEMS);
+         rMin = rGetInfo_ST(hXST, ST_MIN);
+         rMax = rGetInfo_ST(hXST, ST_MAX);
+
+
+         // --- Build output string ---
+
+         Strcpy_STR(sWALine, "ALL            ");
+
+         if (rMin != rDUMMY)
+            FormatR2_STR(rMin, sTemp, 15, iXChDecimal);   // Minimum
+         else
+            Strcpy_STR(sTemp,"");
+         Strcat_STR(sWALine, sTemp);
+         iStrlen = iStrlen_STR(sTemp);
+         if (iStrlen < 15)
+            for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+         if (rMax != rDUMMY)
+            FormatR2_STR(rMax, sTemp, 15, iXChDecimal);   // Maximum
+         else
+            Strcpy_STR(sTemp,"");
+         Strcat_STR(sWALine, sTemp);
+         iStrlen = iStrlen_STR(sTemp);
+         if (iStrlen < 15)
+            for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+         // --- Get Y statistics of all lines ---
+
+         rDummies = rGetInfo_ST(hYST, ST_DUMMIES);
+         rItems = rGetInfo_ST(hYST, ST_ITEMS);
+         rMin = rGetInfo_ST(hYST, ST_MIN);
+         rMax = rGetInfo_ST(hYST, ST_MAX);
+
+
+         // --- Append output string ---
+
+         if (rMin != rDUMMY)
+            FormatR2_STR(rMin, sTemp, 15, iYChDecimal);   // Minimum
+         else
+            Strcpy_STR(sTemp,"");
+         Strcat_STR(sWALine, sTemp);
+         iStrlen = iStrlen_STR(sTemp);
+         if (iStrlen < 15)
+            for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+         if (rMax != rDUMMY)
+            FormatR2_STR(rMax, sTemp, 15, iYChDecimal);   // Maximum
+         else
+            Strcpy_STR(sTemp,"");
+         Strcat_STR(sWALine, sTemp);
+         iStrlen = iStrlen_STR(sTemp);
+         if (iStrlen < 15)
+            for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+         if (rItems != rDUMMY)
+            FormatR_STR(rItems, sTemp, 20, 19);   // Maximum
+         else Strcpy_STR(sTemp,"");
+         Strcat_STR(sWALine, sTemp);
+         iStrlen = iStrlen_STR(sTemp);
+         if (iStrlen < 12)
+            for (j = 1; j <= (12 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+
+         // -- Get distance ---
+
+         if (rTotlDist != rDUMMY)
+            FormatR_STR(rTotlDist, sTemp, 15, 13);   // total distance
+         else Strcpy_STR(sTemp,"");
+         Strcat_STR(sWALine, sTemp);
+
+
+
+         // --- Output to file ---
+
+         Puts_WA(hWA, sWALine);  NewLine_WA(hWA);
+         NewLine_WA(hWA);
+         NewLine_WA(hWA);
+
+         // --- 100% ---
+
+         ProgUpdate_SYS(100);
+         Progress_SYS(0);
+      }
+
+      UnLockSymb_DB(Data, XCh);
+      UnLockSymb_DB(Data, YCh);
+
+		Destroy_VV(XVV);
+		Destroy_VV(YVV);
+		Destroy_DBREAD(DBReadX);
+		Destroy_DBREAD(DBReadY);
+   }
+
+
+
+   // ----------------------------------------------------------------------
+   // --- Print out other channels' stats ---
+   // ----------------------------------------------------------------------
+	
+	Progress_SYS(1);
+	ProgName_SYS("",1);
+
+   for (i=0; i < iTok; ++i) 
+   {
+		// --- Get channel ---
+
+		GetToken_STR(sInCh, sInChStr, i);
+
+
+		// --- Does the Input Channel Exist ? ---
+
+		if (!iExistChan_DB(Data, sInCh)) {
+			Strcat_STR(sMsg,sInCh);
+			Strcat_STR(sMsg," ");
+			continue;
+		}
+
+		InCh = FindChan_DB(Data,sInCh);
+
+		DBRead = Create_DBREAD(Data, hLineLST);
+		iCh = iAddChannel_DBREAD(DBRead, InCh);
+		iTotBlocks = iGetNumberOfBlocksToProcess_DBREAD(DBRead);
+
+		iColVA = iGetChanArraySize_DBREAD(DBRead, iCh);
+
+		// --- String type channels can contain numberic values as strings, so
+		//     they should NOT be skipped  ---
+
+		iChType = iGetChanType_DB(Data, InCh);
+
+		if(iChType<0)
+			iChDecimal = 2;
+		else if (iChType <= 3)
+			iChDecimal = 0;
+		else
+			iChDecimal = iGetChanDecimal_DB(Data,InCh);
+
+
+		iColVA = iGetColVA_DB(Data, InCh);
+
+		if(iColVA>1)
+		{
+			InVA = GetVA_DBREAD(DBRead, iCh);
+			iColVA++;
+		}
+		FullVV = GetVV_DBREAD(DBRead, iCh);
+		ColumnVV = CreateExt_VV(iChType, 0);
+
+
+		// --- Get, calculate and store the stats for all the lines, then print them out. For array channels it is much more
+		//     efficient to get the data once for a line and calculate the columns individually that it is to go through every line
+		//     for each column. ---
+
+		DummiesVA = Create_VA(REAL, iTotLines, iColVA);
+		ItemsVA = Create_VA(REAL, iTotLines, iColVA);
+		MinVA = Create_VA(REAL, iTotLines, iColVA);
+		MaxVA = Create_VA(REAL, iTotLines, iColVA);
+		MeanVA = Create_VA(REAL, iTotLines, iColVA);
+		DevVA = Create_VA(REAL, iTotLines, iColVA);
+		STVV = Create_VV(INT, iColVA);
+		STVVLine = Create_VV(INT, iColVA);
+		for(j=0; j<iColVA;j++)
+		{
+			hST = Create_ST();
+			hSTLine = Create_ST();
+			SetInt_VV(STVV, j, (int)hST);
+			SetInt_VV(STVVLine, j, (int)hSTLine);
+		}
+		hLineLabelLST = Create_LST(STR_DB_SYMBOL);
+
+		while(1)
+		{
+			// --- Start of a new line ---
+
+			iBlock = iGetNextBlock_DBREAD(DBRead, iLine, iLineBlock, iNLineBlocks);
+			if(iBlock == -1)
+				break;
+
+			// --- Line type and number ---
+
+			Line = (DB_SYMB) iGetInt_LST(hLineLST,1,iLine);
+			LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+			LineLabel_DB(Data,Line,sLine2,DB_LINE_LABEL_FORMAT_FULL);
+			UnLockSymb_DB(Data,Line);
+			AddItem_LST(hLineLabelLST, sLine2, "");
+
+				
+			// --- Update the Progress Bar ---
+
+			Printf_STR(sLabel, sizeof(sLabel), _("%s stats on Line: %s"), sSubCh, sLine2);
+
+			if(iNLineBlocks > PROG_BLOCKS)
+				ProgName_SYS(sLabel,1);
+			else
+			{
+				ProgName_SYS(sLabel,0);
+				ProgUpdateL_SYS(iLine, iTotLines);
+			}
+
+
+			// --- Reset stats for each column ---
+
+			for(k=0; k<iColVA; k++)
+			{
+				hSTLine = (ST)iGetInt_VV(STVVLine, k);
+				Reset_ST(hSTLine);
+			}
+
+
+			// --- Accumulate the stats over this lines' blocks ---
+
+			iNL = iNLineBlocks;
+			for(j = 0; j<iNL; j++)
+			{
+				if(iNL > PROG_BLOCKS)
+					ProgUpdateL_SYS(j, iNL);
+
+				if(iCheckStop_SYS() == 1)
+					Cancel_SYS();
+					
+				if(j > 0)
+					iBlock = iGetNextBlock_DBREAD(DBRead, iLine, iLineBlock, iNLineBlocks);
+			
+				for(k=0; k<iColVA; k++)
+				{
+					hST = (ST)iGetInt_VV(STVV, k);
+					hSTLine = (ST)iGetInt_VV(STVVLine, k);
+
+					if(k == 0)		// All the data
+					{
+						DataVV_ST(hST, FullVV);
+						DataVV_ST(hSTLine, FullVV);
+					}
+					else				// Single VA columns
+					{
+						GetVV_VA(InVA, k-1, VA_COL, ColumnVV);
+						DataVV_ST(hST, ColumnVV);
+						DataVV_ST(hSTLine, ColumnVV);							
+					}
+				}
+			}
+
+			// --- Save stats for this line ---
+
+			for(k=0; k<iColVA; k++)
+			{
+				hST = (ST)iGetInt_VV(STVVLine, k);
+
+				rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+				rItems = rGetInfo_ST(hST, ST_ITEMS);
+				rMin = rGetInfo_ST(hST, ST_MIN);
+				rMax = rGetInfo_ST(hST, ST_MAX);
+				rMean = rGetInfo_ST(hST, ST_MEAN);
+				rDev = rGetInfo_ST(hST, ST_STDDEV);
+
+				SetReal_VA(DummiesVA, iLine, k, rDummies);
+				SetReal_VA(ItemsVA, iLine, k, rItems);
+				SetReal_VA(MinVA, iLine, k, rMin);
+				SetReal_VA(MaxVA, iLine, k, rMax);
+				SetReal_VA(MeanVA, iLine, k, rMean);
+				SetReal_VA(DevVA, iLine, k, rDev);
+			}
+		}			
+
+
+		// --- Print out the results ---
+
+		for(k=0; k<iColVA; k++)
+		{
+			// --- Print out channel name ---
+
+			if(k==0)
+				Strcpy_STR(sSubCh, sInCh);
+			else
+				Printf_STR(sSubCh, sizeof(sSubCh), _n("%s[%d]"), sInCh, k-1);
+
+			NewLine_WA(hWA);
+			if(iColVA==1)
+			{
+				Puts_WA(hWA,_n("Channel:       "));
+				Puts_WA(hWA,sSubCh);
+			}
+			else if(k==0)
+			{
+				Puts_WA(hWA,_n("Averaged array channel: "));
+				Puts_WA(hWA,sSubCh);
+				NewLine_WA(hWA);
+				Puts_WA(hWA,_n("Number of elements:     "));
+				Printf_STR(sTemp, sizeof(sTemp), _n("%d"), iColVA-1);
+				Puts_WA(hWA,sTemp);
+			}
+			else
+			{
+				Puts_WA(hWA,_n("Channel element:        "));
+				Puts_WA(hWA,sSubCh);
+			}
+			NewLine_WA(hWA);
+
+			Puts_WA(hWA, _n("Line Number    Minimum        Maximum        Mean           "));
+			Puts_WA(hWA, _n("Std.dev.       # of points # of dummies"));
+			NewLine_WA(hWA);
+			Puts_WA(hWA, "------------   -------        -------        ----           ");
+			Puts_WA(hWA, "--------       ----------- ------------");
+			NewLine_WA(hWA);
+
+
+			// --- Go through all selected Lines ---
+
+			for (iLine=0;iLine<iTotLines;iLine++)
+			{
+				// --- Get statistics ---
+
+				rDummies = rGetReal_VA(DummiesVA, iLine, k);
+				rItems = rGetReal_VA(ItemsVA, iLine, k);
+				rMin = rGetReal_VA(MinVA, iLine, k);
+				rMax = rGetReal_VA(MaxVA, iLine, k);
+				rMean = rGetReal_VA(MeanVA, iLine, k);
+				rDev = rGetReal_VA(DevVA, iLine, k);
+
+
+				// --- Build output string ---
+
+				GetItem_LST(hLineLabelLST, 0, iLine, sLine2);
+
+				Strcpy_STR(sWALine, sLine2);     // Line number
+				iStrlen = iStrlen_STR(sLine2);
+				if (iStrlen < 16)
+					for (j = 1; j < (16 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+				if (rMin != rDUMMY)
+					FormatR2_STR(rMin, sTemp, 15, iChDecimal);   // Minimum
+				else
+					Strcpy_STR(sTemp,"");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+				if (rMax != rDUMMY)
+					FormatR2_STR(rMax, sTemp, 15, iChDecimal);   // Maximum
+				else
+					Strcpy_STR(sTemp,"");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+				if (rMean != rDUMMY)
+					FormatR2_STR(rMean, sTemp, 15, iChDecimal);   // Mean
+				else
+					Strcpy_STR(sTemp,"");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+				if (rDev != rDUMMY)
+					FormatR2_STR(rDev, sTemp, 15, iChDecimal);   // Stddev
+				else
+					Strcpy_STR(sTemp,"");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+				if (rItems != rDUMMY)
+					FormatR_STR(rItems, sTemp, 20, 19);   // number of points
+				else Strcpy_STR(sTemp,"");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 12)
+					for (j = 1; j <= (12 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+				if (rDummies != rDUMMY)
+					FormatR_STR(rDummies, sTemp, 20, 19);   // Maximum
+				else Strcpy_STR(sTemp,"");
+				Strcat_STR(sWALine, sTemp);
+
+
+				// --- Output to file ---
+
+				Puts_WA(hWA, sWALine);  NewLine_WA(hWA);
+			}
+
+			Printf_STR(sLabel, sizeof(sLabel), _("outputting %s stats on all lines"), sSubCh);
+			ProgName_SYS(sLabel,0);
+			ProgUpdateL_SYS(i*(iTotLines+1)+iTotLines,iTok*(iTotLines+1));
+
+			// --- Get statistics for all lines ---
+
+			hST = (ST)iGetInt_VV(STVV, k);
+
+			rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+			rItems = rGetInfo_ST(hST, ST_ITEMS);
+			rMin = rGetInfo_ST(hST, ST_MIN);
+			rMax = rGetInfo_ST(hST, ST_MAX);
+			rMean = rGetInfo_ST(hST, ST_MEAN);
+			rDev = rGetInfo_ST(hST, ST_STDDEV);
+
+
+			// --- Build output string ---
+
+			Strcpy_STR(sWALine, "ALL            ");
+
+			if (rMin != rDUMMY)
+				FormatR2_STR(rMin, sTemp, 15, iChDecimal);   // Minimum
+			else
+				Strcpy_STR(sTemp,"");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+			if (rMax != rDUMMY)
+				FormatR2_STR(rMax, sTemp, 15, iChDecimal);   // Maximum
+			else
+				Strcpy_STR(sTemp,"");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rMean != rDUMMY)
+				FormatR2_STR(rMean, sTemp, 15, iChDecimal);   // Mean
+			else
+				Strcpy_STR(sTemp,"");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rDev != rDUMMY)
+				FormatR2_STR(rDev, sTemp, 15, iChDecimal);   // Stddev
+			else
+				Strcpy_STR(sTemp,"");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rItems != rDUMMY)
+				FormatR_STR(rItems, sTemp, 20, 19);   // Maximum
+			else Strcpy_STR(sTemp,"");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 12)
+				for (j = 1; j <= (12 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rDummies != rDUMMY)
+					FormatR_STR(rDummies, sTemp, 20, 19);   // Maximum
+			else Strcpy_STR(sTemp,"");
+			Strcat_STR(sWALine, sTemp);
+
+
+			// --- Output to file ---
+
+			Puts_WA(hWA, sWALine);
+			NewLine_WA(hWA);
+			NewLine_WA(hWA);
+
+		}  // --- loop over columns in channel ---
+
+
+		// --- Destroy handles ---
+
+		for(j=0; j<iColVA;j++)
+		{
+			hST = (ST)iGetInt_VV(STVV, j);
+			hSTLine = (ST)iGetInt_VV(STVVLine, j);
+			Destroy_ST(hST);
+			Destroy_ST(hSTLine);
+		}
+
+		Destroy_VV(STVV);
+		Destroy_VV(STVVLine);
+
+		Destroy_VA(DummiesVA);
+		Destroy_VA(ItemsVA);
+		Destroy_VA(MinVA);
+		Destroy_VA(MaxVA);
+		Destroy_VA(MeanVA);
+		Destroy_VA(DevVA);
+
+		if (iColVA > 1)
+			Destroy_VA(InVA);
+		Destroy_VV(FullVV);
+		Destroy_VV(ColumnVV);
+
+		Destroy_DBREAD(DBRead);
+
+   }  // --- Loop over channels ---
+
+	// --- 100% ---
+
+	ProgUpdate_SYS(100);
+	Progress_SYS(0);
+
+   // --- Msg ---
+
+   if (iStrMin_STR(sMsg) > 0) {
+      Puts_WA(hWA, _n("The following channels: ")); NewLine_WA(hWA);
+      Printf_STR(sMsg2, sizeof(sMsg2), _("%s do not exist in the database."), sMsg);
+      Puts_WA(hWA, sMsg2);                       NewLine_WA(hWA);
+
+   }
+
+
+   // --- Save ---
+
+
+
+   Destroy_WA(hWA);
+   UnLock_EDB(EData);
+
+
+
+   // ------------------------------------------------------
+   // --- View the stats ---
+
+
+   // --- By default, show the log file ---
+
+   iShowLog = iGetInt_SYS("XYZSTAT","SHOWLOG");
+   if(iShowLog!=0) iShowLog = 1;       // Show by default
+   SetInt_SYS("XYZSTAT","SHOWLOG",1);  // Must set every time
+
+
+   if(iInteractive_SYS() && iShowLog) {
+
+      if (iFileSize_SYS(sFile) > 3) // 3 characters could be UTF-8 BOM only
+      {
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE",sFile);
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");
+      }
+   }
+}
+
+
+
+

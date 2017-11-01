@@ -1,0 +1,169 @@
+//===========================================================================
+NAME          = "Set cell profile/section options for an array channel"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Set cell profile/section options for an array channel.
+
+Parameters: 
+
+   VAPRFSCT.CHAN     VA channel section to colour
+           .OPTION   profile/section options. 
+        
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Array Channels"
+
+// Revision History:
+// v5.1.6: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "vaprfsct.gr"
+#include "vaprfsct.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     Ch;               // Channel Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+
+int i,iOption;
+
+string(STR_DB_SYMBOL) sCh;
+string(STR_DEFAULT) sMsg,sOption;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   
+   GetCurChan_EDB(EData,sCh);
+   Ch = GetCurChanSymb_EDB(EData);      
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- If current channel exists and is an array channel, set channel default. ---
+
+      if(iStrlen_STR(sCh)) {
+
+         LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+         if(iGetColVA_DB(Data, Ch) > 1) {
+
+            GetVAProfSectOption_DB(Data, Ch, sOption);
+
+            if(iStrcmp_STR(sOption,_n("Section"),STR_CASE_TOLERANT)==0)                   iOption=1;
+            else if(iStrcmp_STR(sOption,_n("Section and Profile"),STR_CASE_TOLERANT)==0)  iOption=2;
+            else                                                                      iOption=0;
+
+            SetString_SYS("VAPRFSCT","CHAN",sCh);
+            SetInt_SYS("VAPRFSCT","OPTION",iOption);
+         }
+   
+         UnLockSymb_DB(Data, Ch);
+      }
+
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("VAPRFSCT");
+
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_VAPRFSCT_0);
+      ArrayLST_DB(Data,List);
+      Sort_LST(List,0,0);
+     
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_VAPRFSCT_0,DGW_TEXT,     "VAPRFSCT","CHAN");
+      SetInfoSYS_DGW(Diag,_VAPRFSCT_1,DGW_LISTALIAS,"VAPRFSCT","OPTION");
+     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_VAPRFSCT_0,DGW_TEXT,     "VAPRFSCT","CHAN");
+      GetInfoSYS_DGW(Diag,_VAPRFSCT_1,DGW_LISTALIAS,"VAPRFSCT","OPTION");
+     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+     
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VAPRFSCT","CHAN",sCh);
+   iOption = iGetInt_SYS("VAPRFSCT","OPTION");
+
+   if(!iStrlen_STR(sCh))
+      Abort_SYS(_("VA channel not defined."));
+         
+
+   // --- Does the input channel exist ? ---
+
+   Ch = FindChan_DB(Data, sCh);
+   if(Ch==NULLSYMB)
+      Abort_SYS(_("channel does not exist."));
+
+
+   // --- Is it an array channel? ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   if(iGetColVA_DB(Data, Ch)<2) {
+      Printf_STR(sMsg, sizeof(sMsg), _("%s is not an array channel."), sCh);
+      Abort_SYS(sMsg);
+   }
+
+   
+   // --- Set the diaplay option ---
+
+   if(iOption==1)        Strcpy_STR(sOption,_n("Section"));
+   else if(iOption==2)   Strcpy_STR(sOption,_n("Section and Profile"));
+   else                  Strcpy_STR(sOption,_n("Profile"));
+
+   SetVAProfSectOption_DB(Data, Ch, sOption);
+
+
+   // --- Unlock ---
+
+   UnLockSymb_DB(Data, Ch);
+   UnLock_EDB(EData);
+
+}

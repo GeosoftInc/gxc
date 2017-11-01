@@ -1,0 +1,129 @@
+//===========================================================================
+NAME          = "Import AMIRA data files into Montaj database"
+#include <version.gxh>
+DESCRIPTION   = "
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/Amira"
+
+// Revision History:
+// v5.1.5: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "impamira.gr"
+#include "impamira.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DGW         Diag;
+WA          hWA;
+RA          hRA;
+
+int         i;
+
+string(GS_MAX_PATH) sFile;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+   if (iInteractive_SYS())
+   {
+      // --- Get Oasis Database ---
+
+      if (iHaveCurrent_EDB()) 
+      {
+         if (iDisplayQuestion_SYS(_("Import AMIRA files"),_("Import data into the current database ?"))==0)
+         {
+            if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)"))  Cancel_SYS();
+         }  
+      }
+      else
+      {
+        if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) Cancel_SYS();
+      }
+   }
+   
+   
+   // --- Get the current selection information
+
+   EData = Current_EDB();
+   Data  = Lock_EDB(EData);
+   
+
+   // --- Ready to run dialogues ---
+
+   if (iInteractive_SYS()) {
+   
+      Diag = Create_DGW("IMPAMIMP");
+   
+      SetInfoSYS_DGW(Diag,_IMPAMIMP_0,DGW_FILEPATH,"IMPAMIMP","FILE");     
+      
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    // He hit cancel
+
+      GetInfoSYS_DGW(Diag,_IMPAMIMP_0,DGW_FILEPATH,"IMPAMIMP","FILE");     
+
+   }         
+  
+ 
+   // --- Get Parameters ---
+  
+   GetString_SYS("IMPAMIMP","FILE",sFile);
+   
+   
+   // --- RA ---
+   
+   hRA = Create_RA(sFile);
+   if (iLen_RA (hRA) == 0)  Abort_SYS(_("The specified AMIRA file is empty."));
+   
+   
+   // --- Log WA ---
+   
+   hWA = Create_WA("_Amira.log",0);
+   
+   
+   // --- Ready to import ---
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Import AMIRA file"),1);
+   
+   ImportAMIRA_DU(Data,hRA,hWA);
+   
+   
+   // --- done ---
+
+   Progress_SYS(0);
+   
+   UnLock_EDB(EData);
+   Destroy_RA(hRA);
+   Destroy_WA(hWA);
+   
+   
+   if (iInteractive_SYS())
+   {
+      // --- display data ---
+   
+      DelLine0_EDB(EData);
+      LoadChan_EDB(EData,"X");
+      LoadChan_EDB(EData,"Y");
+      LoadChan_EDB(EData,"Z");
+      LoadAllChans_EDB(EData);
+   }
+   
+}

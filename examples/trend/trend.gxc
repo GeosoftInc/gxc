@@ -1,0 +1,272 @@
+//===========================================================================
+NAME          = "Trend a channel to a new channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "
+
+   Trend calculates an n'th order trend of a data channel
+   by (least square) best-fit polynomial. The trend is
+   then evaluated and either the trend, or the original data 
+   minus the grend is placed in a new channel.
+
+   TREND.IN       Input channel
+         OUT      Output trended Channel
+         RES      Output residual channel (input - trend)
+         ORDER    Order of the polynomial >=0 and <=9
+"
+// Revision History:
+// v7.1:   Made trend order items a list; added check and error message.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "trend.gr"
+#include "trend.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) 
+            sInCh,sOutCh,
+            sResCh,sOut;           // Channel Name
+int         iOrder;                // Trend Order
+int         iLines, iTotLines;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     InCh, OutCh;           // Channel Handles
+DB_SYMB     Line;
+DGW         Diag;
+LST         List;                  // list handle
+EXP         Exp;                   // expression
+int         i;                     // utility int
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data  = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("TrendForm");
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_TRENDFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_TRENDFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_TRENDFORM_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_TRENDFORM_0,DGW_TEXT,"Trend","IN");
+     SetInfoSYS_DGW(Diag,_TRENDFORM_1,DGW_TEXT,"Trend","OUT");
+     SetInfoSYS_DGW(Diag,_TRENDFORM_2,DGW_TEXT,"Trend","RES");
+     SetInfoSYS_DGW(Diag,_TRENDFORM_3,DGW_TEXT,"Trend","ORDER");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_TRENDFORM_0,DGW_TEXT,"Trend","IN");     
+     GetInfoSYS_DGW(Diag,_TRENDFORM_1,DGW_TEXT,"Trend","OUT");
+     GetInfoSYS_DGW(Diag,_TRENDFORM_2,DGW_TEXT,"Trend","RES");
+     GetInfoSYS_DGW(Diag,_TRENDFORM_3,DGW_TEXT,"Trend","ORDER");
+
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("Trend","IN",sInCh);
+   GetString_SYS("Trend","OUT",sOutCh);
+   GetString_SYS("Trend","RES",sResCh);
+   iOrder = iGetInt_SYS("Trend","ORDER");
+
+	if(iOrder<0 || iOrder>9)
+	   Abort_SYS(_("Trend order undefined or not in valid range 0-9."));
+	   
+
+   // --- Prepare to do the work ---
+                           
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   ProgName_SYS(_("Trend"),1);
+
+
+   // --- Do the Input & Trend Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sInCh)) 
+      Abort_SYS(_("Input Z channel does not exist."));
+   InCh = FindChan_DB(Data,sInCh);
+
+         
+   // --- Create and output channel if it does not exist ---
+
+   if (iStrMin_STR(sOutCh) != 0)
+      Strcpy_STR(sOut,sOutCh);
+   else if (iStrMin_STR(sResCh) != 0)
+      Strcpy_STR(sOut,sResCh);
+   else
+      Abort_SYS(_("An output channel was not specified."));
+
+   if (!iExistChan_DB(Data,sOut))
+      DupSymbNoLock_DB(Data, InCh, sOut);
+   OutCh = FindChan_DB(Data,sOut);
+
+         
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- first calculate the trend ---
+
+   Line = FirstSelLine_DB(Data);
+
+   while (iIsLineValid_DB(Data,Line))  {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Trend line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Apply the Trend Correction ---
+
+      Trend_DU(Data, Line, InCh, OutCh, iOrder );
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Trend channel"),"TREND;");
+
+
+   // --- Unlock the symbols ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- do we have to calculate a residual? ---
+
+   if (iStrMin_STR(sResCh) != 0) {
+
+      ProgName_SYS(_("Residual"),1);
+
+      // --- Create residual channel if it does not exist ---
+
+      if (!iExistChan_DB(Data,sResCh))
+         DupSymbNoLock_DB(Data, InCh, sResCh);
+      OutCh = FindChan_DB(Data,sResCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+      // --- Add maker ---
+
+      EasyMakerSymb_DB(Data,OutCh,_("Trend channel"),"TREND;");
+
+
+      // --- Unlock the symbols ---
+
+      UnLockSymb_DB(Data,OutCh);
+
+
+
+      // --- create expression ---
+
+      Exp = Create_EXP(Data,"$sResCh = $sInCh-$sOut;",128);
+
+
+      // --- go through the lines ---
+
+      Line = FirstSelLine_DB(Data);
+
+      iLines = 0;
+      while (iIsLineValid_DB(Data,Line))  {
+
+         // --- Update the Progress Bar ---
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Residual line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLines,iTotLines);
+
+
+         // --- apply expression ---
+
+         Math_DU(Data,Line,Exp);
+
+
+         // --- Advance to Next Line ---        
+
+         Line = NextSelLine_DB(Data, Line);
+         iLines++;
+
+      }
+
+      // --- destroy expression ---
+
+      Destroy_EXP(Exp);
+
+   }
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+}

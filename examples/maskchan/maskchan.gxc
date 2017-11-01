@@ -1,0 +1,190 @@
+//===========================================================================
+NAME          = "MASKCHAN GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Geostatistics Toolkit"
+
+DESCRIPTION   = "
+
+   Create a mask channel, initialize it to 1.
+
+   MASKCHAN.CHAN: Name for the mask channel.
+                  For use in scripts to set the name of the mask channel.
+
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v7.1.0: GX did not set Fid start, increment to reference channel values.
+// v5.1.4: New GX, based on CHMASK.
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DB          Data;
+EDB         EData;
+DB_SYMB     Line;
+DB_SYMB     MaskCh, Ch;
+VV          MaskVV;
+LST         Lst;
+
+string(STR_DB_SYMBOL) sMaskCh;
+string(STR_DEFAULT_LONG) sMsg;
+
+int         iLen;
+int         iLines;
+int         iTotLines;
+real        rFidStart, rFidIncr;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("MASKCHAN","CHAN",sMaskCh);
+   if(!iStrlen_STR(sMaskCh))
+      Strcpy_STR(sMaskCh, _n("Mask"));
+
+   SetString_SYS("MASKCHAN","CHAN","");
+
+   if (iExistChan_DB(Data,sMaskCh)) {
+
+      Printf_STR(sMsg, sizeof(sMsg), _("A mask channel with the name \"%s\" already exists."), sMaskCh);
+
+      Abort_SYS(sMsg);
+   }
+   
+
+   // --- Create the channel ---
+
+   MaskCh = CreateSymb_DB(Data,sMaskCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+   LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+     
+   // --- Set the mask channel class to "MASK" ---
+
+   SetRegSymbSetting_DB(Data, MaskCh, "CLASS", "MASK");
+
+
+   // --- Get a reference channel ---
+
+   Ch = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if(Ch == NULLSYMB) {
+
+      Lst = Create_LST(STR_DB_SYMBOL);
+
+      
+      // --- Get the first channel ---
+
+      SymbLST_DB(Data, Lst, DB_SYMB_CHAN);
+      if(iSize_LST(Lst) > 0) {
+         Ch = (DB_SYMB)iGetInt_LST(Lst, 1, 0);
+      }
+
+      Destroy_LST(Lst);
+   }
+
+   if(Ch!=NULLSYMB)
+      LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   MaskVV = CreateExt_VV(GS_LONG,0);
+
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating mask channel"),1);
+
+
+   // --- Go through all selected Lines ---
+
+
+   iTotLines = iCountSelLines_DB(Data);
+   iLines = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+      // --- Lock the line ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+      if(Ch!=NULLSYMB) 
+      {
+         iLen = iGetChannelLength_DB(Data,Line,Ch);
+         rFidStart = rGetFidStart_DB(Data,Line,Ch);
+         rFidIncr = rGetFidIncr_DB(Data,Line,Ch);
+         
+         if(rFidStart==rDUMMY) 
+				rFidStart = 0.0;
+			if(rFidIncr==rDUMMY)
+				rFidIncr = 1.0;         
+
+         SetLen_VV(MaskVV,iLen);                  
+         SetIntN_VV(MaskVV, 0, iLen, 1);
+         SetFidStart_VV(MaskVV, rFidStart);
+         SetFidIncr_VV(MaskVV, rFidIncr);
+
+         PutChanVV_DB(Data,Line,MaskCh,MaskVV);
+      }
+
+
+      // --- Associate and load the channel for group lines ---
+
+      if(iLineCategory_DB(Data, Line)==DB_CATEGORY_LINE_GROUP) 
+         AddAssociatedLoad_DB(Data, Line, MaskCh);
+
+
+      // --- Unlock the line ---
+
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Data, Line);
+      iLines++;
+
+   }
+   
+   // --- Destroy VV ---
+
+   Destroy_VV(MaskVV);
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+
+   // --- clean up ---
+
+   UnLockSymb_DB(Data,MaskCh);
+   if(Ch!=NULLSYMB)
+      UnLockSymb_DB(Data,Ch);
+   UnLock_EDB(EData);
+
+
+   // --- Load the channel ---
+
+   LoadChan_EDB(EData, sMaskCh);
+
+}

@@ -1,0 +1,249 @@
+//===========================================================================
+NAME          = "Apply filters to an FFT2D grid and inverse FFT2D back"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP/Step-By-Step Filtering"
+
+DESCRIPTION   = "
+
+Apply filters to an FFT2D grid and inverse FFT2D back.
+
+Parameters:
+
+    FFT2FLT.IN       - Name of the Input (*_trn.grd) file
+           .OUT      - Name of the Ouput grid file
+           .CON      - Name of the filter control file
+           .REF      - Name of the Reference (Original grid) file
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+RESOURCE = "fft2flt.gr"
+#include "fft2flt.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sTrnGrd,sOutGrd,sConFil,sRefGrd;      // File names
+string(STR_FILE) sRefFil;      // Name of reference file (_ref.bin)
+
+DGW         Diag;              // Dialogue handle
+
+IMG         IMGi;
+IMG         IMGo;
+IMG         IMGr;
+PG          PG1;
+PG          PG2;
+TR          TR1; 
+IPJ         IPJ1;
+
+int         i;       
+int         iFltInvOnly;       
+int         iFltOnly;       
+
+int         iNX,iNY,iNXe,iNYe,iXo,iYo;     // grid size
+real        rDx,rDy,rXo,rYo,rRot;          // grid info
+real        rXoe,rYoe;
+
+
+//===========================================================================
+//                            FFT2FLT CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFT2FLTForm");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFT2FLTFORM_0,DGW_FILEPATH,"FFT2FLT","IN");     
+      SetInfoSYS_DGW(Diag,_FFT2FLTFORM_1,DGW_FILEPATH,"FFT2FLT","OUT");     
+      SetInfoSYS_DGW(Diag,_FFT2FLTFORM_2,DGW_FILEPATH,"FFT2FLT","CON");    
+      SetInfoSYS_DGW(Diag,_FFT2FLTFORM_3,DGW_FILEPATH,"FFT2FLT","REF");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 3) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFT2FLTFORM_0,DGW_FILEPATH,"FFT2FLT","IN");     
+      GetInfoSYS_DGW(Diag,_FFT2FLTFORM_1,DGW_FILEPATH,"FFT2FLT","OUT");     
+      GetInfoSYS_DGW(Diag,_FFT2FLTFORM_2,DGW_FILEPATH,"FFT2FLT","CON");     
+      GetInfoSYS_DGW(Diag,_FFT2FLTFORM_3,DGW_FILEPATH,"FFT2FLT","REF");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FFT2FLT","IN", sTrnGrd);
+   GetString_SYS("FFT2FLT","OUT",sOutGrd);
+   GetString_SYS("FFT2FLT","CON",sConFil);
+   GetString_SYS("FFT2FLT","REF",sRefGrd);
+
+   // --- Check for null input and output channel strings ---
+
+   if (!iStrlen_STR(sTrnGrd))
+      Abort_SYS(_("Input transform grid name not specified"));
+
+   if (!iStrlen_STR(sOutGrd))
+      Abort_SYS(_("Output grid name not specified"));   
+
+   if (!iStrlen_STR(sConFil))
+      Abort_SYS(_("Filter Control File Name not specified"));   
+
+   iFltInvOnly=0;
+   if (i==1)   iFltInvOnly=1;
+
+   iFltOnly=0;
+   if (i==2)   iFltOnly=1;
+
+   rDx = 1.0;
+   rDy = 1.0;
+   rXo = 0.0;
+   rYo = 0.0;
+   rRot= 0.0;
+   rXoe = 0.0;
+   rYoe = 0.0;
+   
+
+   // --- Prepare to do the work ---
+
+   Progress_SYS(1);
+
+
+   // --- Get Info from input transform grid ---
+
+   IMGi = CreateFile_IMG(GS_FLOAT,sTrnGrd,IMG_FILE_READONLY);
+   GetInfo_IMG(IMGi,rDx,rDy,rXoe,rYoe,rRot);
+   iNXe = iNX_IMG(IMGi)-2;
+   iNYe = iNY_IMG(IMGi);
+   TR1 = Create_TR(1);    // iTOrder
+   GetTR_IMG(IMGi,TR1);
+   IPJ1 = Create_IPJ();
+   GetIPJ_IMG(IMGi,IPJ1);
+
+   if(iFltOnly==0 && iFltInvOnly==0) {   // Create sRefFil for grid bool
+   
+      if (!iStrlen_STR(sRefGrd))
+         Abort_SYS(_("Reference Grid Name not specified"));   
+      FileNamePart_STR(sRefGrd,sRefFil,STR_FILE_PART_NAME);
+      Strcat_STR(sRefFil,"_ref.bin");
+
+      IMGr = CreateFile_IMG(GS_FLOAT,sRefGrd,IMG_FILE_READONLY);
+      GetInfo_IMG(IMGr,rDx,rDy,rXo,rYo,rRot);
+      iNX = iNX_IMG(IMGr);
+      iNY = iNY_IMG(IMGr);
+      PG1 = Create_PG(iNY,iNX,GS_FLOAT);
+      GetPG_IMG(IMGr,PG1);
+      Destroy_IMG(IMGr);
+   
+      iYo = (iNYe-iNY)/2;
+      iXo = (iNXe-iNX)/2;
+      
+      PG2 = Create_PG(iNYe,iNXe,GS_FLOAT);
+      Dummy_PG(PG2);
+      CopySubset_PG(PG2,PG1,iYo,iXo,0,0,iNY,iNX);
+      RefFile_PGU(PG2,sRefFil);
+      Destroy_PG(PG1);
+      Destroy_PG(PG2);
+   }
+
+   // --- Get pager(PG1) from input grid ---
+   
+   PG1 = Create_PG(iNYe,iNXe+2,GS_FLOAT);
+   GetPG_IMG(IMGi,PG1);
+   Destroy_IMG(IMGi);
+      
+      
+   // --- FFT2 Filter ---
+
+   FilterPG_FFT2(PG1,sConFil,TR1,rDx,rDy,rRot);
+   
+   if(iFltOnly==1)  {
+
+      IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNXe+2,iNYe,sOutGrd);
+      SetInfo_IMG(IMGo,rDx,rDy,rXoe,rYoe,rRot);
+      SetTR_IMG(IMGo,TR1);
+      SetPG_IMG(IMGo,PG1);
+      SetIPJ_IMG(IMGo,IPJ1);
+      Destroy_IMG(IMGo);
+   
+   } else {
+
+      // --- Inverse FFT ---
+      
+      TransPG_FFT2(PG1,1);                       // FFT2_PG_INVERSE  1
+      ReAllocate_PG(PG1,iNYe,iNXe);
+
+      if(iFltInvOnly==1)  {
+
+         IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNXe,iNYe,sOutGrd);
+         SetInfo_IMG(IMGo,rDx,rDy,rXoe,rYoe,rRot);
+         SetTR_IMG(IMGo,TR1);
+         SetPG_IMG(IMGo,PG1);
+         SetIPJ_IMG(IMGo,IPJ1);
+         Destroy_IMG(IMGo);
+      
+      } else {
+
+         // --- Grid Bool ---
+
+         Bool_PGU(PG1,sRefFil);
+
+         PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+         CopySubset_PG(PG2,PG1,0,0,iYo,iXo,iNY,iNX);
+
+
+         // --- Grid Trend replace back---
+
+         ReAllocate_PG(PG1,iNY,iNX);
+         Trend_PGU(PG2,PG1,TR1,2,1,rXo,rYo,rDx,rDy);    // iTOpt=2 ReplaceBack, iTBase=1 EdgePoints, not used in ReplaceBack
+         Destroy_PG(PG2);
+             
+
+         // --- Output grid ---
+
+         IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNX,iNY,sOutGrd);
+         SetInfo_IMG(IMGo,rDx,rDy,rXo,rYo,rRot);
+         SetTR_IMG(IMGo,TR1);
+         SetPG_IMG(IMGo,PG1);
+         SetIPJ_IMG(IMGo,IPJ1);
+         Destroy_IMG(IMGo);
+      }
+   }
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+   Destroy_PG(PG1);
+   Destroy_TR(TR1);
+   Destroy_IPJ(IPJ1);
+
+   if (iFileExist_SYS(sRefFil))
+      iDeleteFile_SYS(sRefFil);
+
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sOutGrd,"Grid",1);
+      
+}

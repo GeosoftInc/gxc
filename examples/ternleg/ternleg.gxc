@@ -1,0 +1,356 @@
+//===========================================================================
+
+NAME          = "Ternary Color Legend"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Display Grid"
+
+DESCRIPTION   = "
+
+      TERNLEG.X         X location on map
+             .Y         Y location on map
+             .SIZE      triangle size in mm
+             .MODEL     \"RGB\", \"CMY\", \"RGB inverted\" or \"CMY inverted\"
+             .LABEL1    Red or Cyan label
+             .LABEL2    Green or Magenta label
+             .LABEL3    Blue or Yellow label
+"
+// Revision History
+// v8.4.0: Restore minimized map before digitizing.
+// v5.1.7: Made triangle equilateral.
+//         Adjusted colour slope so that central point at (127, 127, 127)
+//===========================================================================
+
+RESOURCE="ternleg.gr"
+#include "ternleg.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define N 40
+#define RGB    0
+#define RGBI   1
+#define CMY    2
+#define CMYI   3
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+
+int   iModel,i,iA,iB,iC,iAc,iBc,iCc,iCol,iMaxVal;
+real  rX,rY,rHeight,rTop,rColRes,rWidth,rDX,rDY;
+string(STR_DEFAULT_LONG) sFont,sLabel1,sLabel2,sLabel3,sModel;
+
+VV    VVx,VVy;
+DGW   Diag;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+	// --- A current map is required ---
+   
+	EMap = Current_EMAP();
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TERNLEG");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TERNLEG_0,DGW_LISTALIAS,"TERNLEG","MODEL");
+      SetInfoSYS_DGW(Diag,_TERNLEG_1,DGW_TEXT,"TERNLEG","LABEL1");
+      SetInfoSYS_DGW(Diag,_TERNLEG_2,DGW_TEXT,"TERNLEG","LABEL2");
+      SetInfoSYS_DGW(Diag,_TERNLEG_3,DGW_TEXT,"TERNLEG","LABEL3");
+      SetInfoSYS_DGW(Diag,_TERNLEG_4,DGW_TEXT,"TERNLEG","SIZE");
+
+
+      // --- Run the Dialogue ---
+
+      if(iRunDialogue_DGW(Diag)!=0)
+         Cancel_SYS(); 
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TERNLEG_0,DGW_LISTALIAS,"TERNLEG","MODEL");
+      GetInfoSYS_DGW(Diag,_TERNLEG_1,DGW_TEXT,"TERNLEG","LABEL1");
+      GetInfoSYS_DGW(Diag,_TERNLEG_2,DGW_TEXT,"TERNLEG","LABEL2");
+      GetInfoSYS_DGW(Diag,_TERNLEG_3,DGW_TEXT,"TERNLEG","LABEL3");
+      GetInfoSYS_DGW(Diag,_TERNLEG_4,DGW_TEXT,"TERNLEG","SIZE");
+
+
+      // --- Get the coordinates of a plot point ---
+
+		if (iGetWindowState_EMAP(EMap) == EMAP_WINDOW_MINIMIZE)
+			SetWindowState_EMAP(EMap, EMAP_WINDOW_RESTORE);
+
+      iSetCurrentView_EMAP(EMap,"*Base");
+      DisplayMessage_SYS(_("Locate Legend"),_("Click on the location for the bottom center of the legend triangle."));
+      rX = rY = 0.0;
+      if (iGetPoint_EMAP(EMap,_("Locate Legend..."),rX,rY)) Cancel_SYS(); 
+
+      SetReal_SYS("TERNLEG","X",rX);
+      SetReal_SYS("TERNLEG","Y",rY);
+
+   } else {
+
+      // --- Get box area ---
+
+      rX = rGetReal_SYS("TERNLEG","X");
+      rY = rGetReal_SYS("TERNLEG","Y");
+   }
+
+
+   GetString_SYS("TERNLEG","LABEL1",sLabel1);
+   GetString_SYS("TERNLEG","LABEL2",sLabel2);
+   GetString_SYS("TERNLEG","LABEL3",sLabel3);
+   rWidth = rGetReal_SYS("TERNLEG","SIZE");
+   GetString_SYS("TERNLEG","MODEL",sModel);
+
+
+   if (iStrcmp_STR(sModel,_n("RGB"),STR_CASE_TOLERANT)==0) {
+
+      iModel = RGB;
+      SetString_SYS("TERNLEG","MODEL","RGB");
+
+   } else if (iStrcmp_STR(sModel,_n("RGB inverted"),STR_CASE_TOLERANT)==0) {
+
+      iModel = RGBI;
+      SetString_SYS("TERNLEG","MODEL","RGB inverted");
+
+   } else if (iStrcmp_STR(sModel,_n("CMY"),STR_CASE_TOLERANT)==0) {
+
+      iModel = CMY;
+      SetString_SYS("TERNLEG","MODEL","CMY");
+
+   } else if (iStrcmp_STR(sModel,_n("CMY inverted"),STR_CASE_TOLERANT)==0) {
+
+      iModel = CMYI;
+      SetString_SYS("TERNLEG","MODEL","CMY inverted");
+
+   }
+
+
+   // --- Color resolution. We set up the legend so that the center spot is grey for 
+   //     both RGB and CMY. This means each colour must have 127 at that point.
+   //     The max value was originally set to 511, but the center spot is not half-way from the top of
+   //     the triangle to the bottom, it is 2/3 of the way, so the maximum colour value
+   //     at the corners is 3*128-1 = 383 ---
+
+   iMaxVal = 3*128 - 1;
+   rColRes = (real)iMaxVal/(real)(N-1);
+
+
+   // --- get VV's for triangle corners ---
+
+   VVx = Create_VV(REAL,3);
+   VVy = Create_VV(REAL,3);
+   SetLen_VV(VVx,3);
+   SetLen_VV(VVy,3);
+
+
+   // --- get the map ---
+
+   Map = Lock_EMAP(EMap);
+
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+
+   // --- create TERNLEG group ---
+
+   StartGroup_MVIEW(View,"Ternary_Legend",MVIEW_GROUP_NEW);
+
+
+   // --- add the maker ---
+
+   Maker_MVIEW(View,0,1,"TERNLEG",MAKER_GX,_("Ternary legend..."),"TERNLEG;");
+
+
+   // --- Get height from width ---
+
+   rHeight = 0.5*rSqrt_MATH(3.0)*rWidth;  // ratio of height to width of an equilateral triangle
+
+
+   // --- adjust Y to top of triangle ---
+
+   rY += rHeight;
+   
+   
+   rDX = rWidth/(real)N;
+   rDY = rHeight/(real)N;
+
+
+   // --- set line style ---
+
+   LineStyle_MVIEW(View,0,0.0);
+   LineThick_MVIEW(View,rWidth/500.0);
+   LineColor_MVIEW(View,0);
+
+
+   // --- draw the triangle legend. Start at the top of the triangle
+   //     and work down. "A" is iMaxVal at the top and 0 at the bottom.
+   //     B is at the bottom left and C is at the bottom right ---
+
+   for (iA=0;iA<N;iA++) {     
+
+
+      // --- bottom teeth ---
+
+      SetReal_VV(VVy,0,(rY - (rDY * (real)iA)));
+      SetReal_VV(VVy,1,(rY - (rDY * (real)(iA+1))));
+      SetReal_VV(VVy,2,(rY - (rDY * (real)(iA+1))));
+      rTop = rX - (rDX/2.0) * (real)iA;
+
+      for (iB=(N-iA-1),iC=(N-1),i=0;iB<N;iB++,iC--,i++) {
+
+
+         // --- color values ---
+
+         iAc = iMaxVal - (int)((real)iA * rColRes);
+         iBc = iMaxVal - (int)((real)iB * rColRes);
+         iCc = iMaxVal - (int)((real)iC * rColRes);
+
+
+         // --- clip ---
+
+         if (iAc > 255) iAc = 255;
+         if (iBc > 255) iBc = 255;
+         if (iCc > 255) iCc = 255;
+
+
+         // --- set line and fill colors ---
+
+         if ((iModel == CMY) || (iModel == RGBI))
+            iCol = iColorCMY_MVIEW(iAc,iBc,iCc);
+         else
+            iCol = iColorRGB_MVIEW(iAc,iBc,iCc);
+
+         FillColor_MVIEW(View,iCol);
+
+
+         // --- create triangle ---
+
+         SetReal_VV(VVx,0,(rTop + (rDX * (real)i)));
+         SetReal_VV(VVx,1,(rTop + (rDX * (real)i) + rDX/2.0));
+         SetReal_VV(VVx,2,(rTop + (rDX * (real)i) - rDX/2.0));
+         PolyLine_MVIEW(View,MVIEW_DRAW_POLYGON,VVx,VVy);
+
+      }
+
+
+      // --- top teeth ---
+
+      SetReal_VV(VVy,0,(rY - (rDY * (real)iA)));
+      SetReal_VV(VVy,1,(rY - (rDY * (real)iA)));
+      SetReal_VV(VVy,2,(rY - (rDY * (real)(iA+1))));
+
+      for (iB=(N-iA),iC=(N-1),i=0;iB<N;iB++,iC--,i++) {
+
+
+         // --- color values ---
+
+         iAc = iMaxVal - (int)((real)iA * rColRes);
+         iBc = iMaxVal - (int)((real)iB * rColRes);
+         iCc = iMaxVal - (int)((real)iC * rColRes);
+
+
+         // --- clip ---
+
+         if (iAc > 255) iAc = 255;
+         if (iBc > 255) iBc = 255;
+         if (iCc > 255) iCc = 255;
+
+
+         // --- set line and fill colors ---
+
+         if ((iModel == CMY) || (iModel == RGBI))
+            iCol = iColorCMY_MVIEW(iAc,iBc,iCc);
+         else
+            iCol = iColorRGB_MVIEW(iAc,iBc,iCc);
+
+         FillColor_MVIEW(View,iCol);
+
+
+         // --- create triangle ---
+
+         SetReal_VV(VVx,0,(rTop + (rDX * (real)i)));
+         SetReal_VV(VVx,1,(rTop + (rDX * (real)i) + rDX));
+         SetReal_VV(VVx,2,(rTop + (rDX * (real)i) + rDX/2.0));
+         PolyLine_MVIEW(View,MVIEW_DRAW_POLYGON,VVx,VVy);
+
+      }
+
+   }
+
+
+   // --- draw border on legend ---
+
+   SetLen_VV(VVx,4);
+   SetLen_VV(VVy,4);
+   SetReal_VV(VVy,0,rY);
+   SetReal_VV(VVy,1,rY - rHeight);
+   SetReal_VV(VVy,2,rY - rHeight);
+   SetReal_VV(VVy,3,rY);
+   SetReal_VV(VVx,0,rX);
+   SetReal_VV(VVx,1,rX+rWidth/2.0);
+   SetReal_VV(VVx,2,rX-rWidth/2.0);
+   SetReal_VV(VVx,3,rX);
+   LineThick_MVIEW(View,rWidth/250.0);
+   LineColor_MVIEW(View,C_BLACK);
+   PolyLine_MVIEW(View,MVIEW_DRAW_POLYLINE,VVx,VVy);
+
+
+   // --- set font characteristics --- 
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Arial"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   TextColor_MVIEW(View,C_BLACK);
+   rTop = rWidth/15.0;
+   TextSize_MVIEW(View,rTop);
+
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_CENTER);
+   Text_MVIEW(View,sLabel1,rX,rY+rTop*0.5);
+
+   TextRef_MVIEW(View,TEXT_REF_TOP_RIGHT);
+   Text_MVIEW(View,sLabel2,rX-rWidth/2.0-rTop*0.25,rY-rHeight);
+
+   TextRef_MVIEW(View,TEXT_REF_TOP_LEFT);
+   Text_MVIEW(View,sLabel3,rX+rWidth/2.0+rTop*0.25,rY-rHeight);
+
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+
+
+}

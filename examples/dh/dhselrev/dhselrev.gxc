@@ -1,0 +1,106 @@
+//===========================================================================
+NAME          = "Reverse Line Selection"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Line/Selections"
+
+DESCRIPTION   = "
+
+   Reverse current line selection in a Wholeplot database.
+
+"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DH          Drill;
+DB_SYMB     Line;             
+VV          LineVV;
+int         i,iLines;
+string(STR_DEFAULT)  sLine;
+
+string(STR_FILE) sDB;
+
+//===========================================================================
+//                             XLEVEL CODE
+//===========================================================================
+
+{
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Data = Lock_EDB(EData);
+   
+   if(!iIsWholeplot_DB(Data))
+      Abort_SYS(_("This GX runs only on registered drill-hole databases."));
+
+
+   // --- Create List VV ---
+
+   LineVV = Create_VV(-STR_DEFAULT, 0);
+   
+
+   // --- Save current selection --- 
+
+   i = 0;
+   Line = FirstSelLine_DB(Data);
+
+   while (iIsLineValid_DB(Data,Line)) {
+
+      // --- Get the linename and add it to the list ---
+
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sLine);
+      UnLockSymb_DB(Data, Line);
+
+      // --- Store selected lines in VV ---
+
+      SetString_VV(LineVV, i, sLine);
+        
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      i++;
+   }
+   
+
+   UnLock_EDB(EData);
+     
+   Drill = Create_DH(sDB);
+
+
+   // --- Select all holes ---
+
+   SelectAllHoles_DH(Drill);
+
+
+   // --- Deselect holes in LineVV ---  
+
+   iLines = iLength_VV(LineVV);
+   i = 0;
+   
+   for (i=0;i<iLines;i++) {
+   
+   
+      // --- Get the line symbol ---
+      
+      GetString_VV(LineVV,i,sLine);
+      SelectName_DH(Drill,sLine,0,1);
+   }
+   
+
+   // --- Done ---
+
+   Destroy_VV(LineVV);
+
+   Destroy_DH(Drill);
+}
+

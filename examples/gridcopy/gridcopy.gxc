@@ -1,0 +1,150 @@
+//===========================================================================
+NAME          = "Copy/convert grids"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+      GRIDCOPY.IN   Input grid
+              .OUT  Output grid
+              .ADDTOPROJECT - If 0, no files will be added to the project. Default is 1, and is reset to 1 after execution
+
+"
+// Revision History
+// v6.0.0: SJC: Add check and error message for bad colour grid conversion.
+//===========================================================================
+
+RESOURCE = "gridcopy.gr"
+#include "gridcopy.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+IMG        ImgI,ImgO;
+
+string(STR_FILE)  sIn, sOut, sInQual, sOutQual; 
+int iWarn;
+int i;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDCOPY");
+
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDCOPY_0,DGW_FILEPATH,"GRIDCOPY","IN");     
+      SetInfoSYS_DGW(Diag,_GRIDCOPY_1,DGW_FILEPATH,"GRIDCOPY","OUT");     
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();   
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDCOPY_0,DGW_FILEPATH,"GRIDCOPY","IN");     
+      GetInfoSYS_DGW(Diag,_GRIDCOPY_1,DGW_FILEPATH,"GRIDCOPY","OUT");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDCOPY","IN",sIn);
+   GetString_SYS("GRIDCOPY","OUT",sOut);
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sIn))
+      Abort_SYS(_("Input Grid  Not Specified!"));   
+      
+   if (!iStrlen_STR(sOut))
+      Abort_SYS(_("Output Grid Not Specified!")); 
+      
+
+   // --- Can convert a regular grid to a geosoft colour grid or vice-versa.
+   //     This only tests geosoft grids... ---
+   
+   FileNamePart_STR(sIn,sInQual,STR_FILE_PART_QUALIFIERS);
+   FileNamePart_STR(sOut,sOutQual,STR_FILE_PART_QUALIFIERS);
+   
+   iWarn = 0;
+   if(!iStrncmp_STR(sInQual,"GRD",3,STR_CASE_TOLERANT) 
+      && iStrcmp_STR(sInQual,"GRD;Type=Color",STR_CASE_TOLERANT)
+      && !iStrcmp_STR(sOutQual,"GRD;Type=color",STR_CASE_TOLERANT))
+      iWarn = 1;
+
+   if(!iStrncmp_STR(sOutQual,"GRD",3,STR_CASE_TOLERANT) 
+      && iStrcmp_STR(sOutQual,"GRD;Type=Color",STR_CASE_TOLERANT)
+      && !iStrcmp_STR(sInQual,"GRD;Type=Color",STR_CASE_TOLERANT))
+      iWarn = 1;
+      
+   if(iWarn && iInteractive_SYS()) {
+      if(!iDisplayQuestion_SYS(_("Color Grid Conversion"), _("Warning: Conversion between Geosoft Color grids and regular\r\nGeosoft grids can have unpredictable or nonsensical results.\r\nAre you sure you want to do this?")))
+         Cancel_SYS();
+   }
+      
+
+   // --- Create Images tied to the grids ---  
+   
+   ImgI = CreateFile_IMG(GS_DOUBLE,sIn,IMG_FILE_READONLY);
+   ImgO = CreateOutFile_IMG(GS_DOUBLE,sOut,ImgI);
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Copy/convert grids..."),1); 
+    
+   Copy_IMG(ImgI,ImgO);
+
+
+	// --- Destroy the Images ---
+
+	Destroy_IMG(ImgI);
+	Destroy_IMG(ImgO);
+
+
+	// --- If the progress bar is turned off before the IMG is
+	//     destroyed, the progress of the write to the output IMG
+	//     is not tracked! ---
+
+	Progress_SYS(0);
+
+
+	// --- Add this grid to the current project ---
+	
+	if (iInteractive_SYS())
+	{
+		DefaultInt_SYS("GRIDCOPY", "ADDTOPROJECT", 1);
+		i = iGetInt_SYS("GRIDCOPY","ADDTOPROJECT");
+		SetInt_SYS("GRIDCOPY", "ADDTOPROJECT", 1);
+	
+		if (i != 0)
+			iAddDocument_PROJ(sOut,"Grid",1);
+	}
+}

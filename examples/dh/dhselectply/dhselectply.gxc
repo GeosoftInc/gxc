@@ -1,0 +1,161 @@
+//===========================================================================
+
+NAME          = "Drill Hole - Select/deselect holes using a polygon/shape file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot/Select Holes"
+
+DESCRIPTION   = "
+         DHSELECTPLY.FILE     Polygon/shape file
+                    .SELECT   0:Deselect 1:Select
+                    .INSIDE   0:Inside   1:Outside
+                    .MODE     0:Append   1:New
+"
+// Revision History:
+// v6.1.0: New GX
+//===========================================================================
+
+RESOURCE = "dhselectply.gr"
+#include "dhselectply.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+PLY         Poly;                         // polygon object
+EDB         EData;
+DH          Drill;
+DGW         Diag;
+GIS         Gis;
+
+string(STR_FILE) sDB, sPLY, sLicClass;
+int i, iArcGIS, iSelect, iMode, iInside;
+
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, _n("ArcGIS"), STR_CASE_TOLERANT) == 0;
+
+   // --- Get current database and open Drill project. ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+
+   if(iInteractive_SYS()) {
+
+     if (!iArcGIS)
+     {
+        // --- Create the Dialogue ---
+
+        Diag = Create_DGW("DHSELECTPLY");
+
+
+        // --- Set any Defaults ---
+
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_0,DGW_FILEPATH,"DHSELECTPLY","FILE");    
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_1,DGW_LISTALIAS,"DHSELECTPLY","SELECT");     
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_2,DGW_LISTALIAS,"DHSELECTPLY","INSIDE");    
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_3,DGW_LISTALIAS,"DHSELECTPLY","MODE");     
+
+        
+        // --- Run the Dialogue ---
+
+        i = iRunDialogue_DGW(Diag);
+        if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+        // --- Get the Strings ---
+
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_0,DGW_FILEPATH,"DHSELECTPLY","FILE");    
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_1,DGW_LISTALIAS,"DHSELECTPLY","SELECT");     
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_2,DGW_LISTALIAS,"DHSELECTPLY","INSIDE");    
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_3,DGW_LISTALIAS,"DHSELECTPLY","MODE");     
+
+        // --- Destroy the Dialogue ---
+
+        Destroy_DGW(Diag);
+     } else {
+        // --- Create the Dialogue ---
+
+        Diag = Create_DGW("DHSELECTPLY_ESRI");
+
+
+        // --- Set any Defaults ---
+
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_0,DGW_FILEPATH,"DHSELECTPLY","FILE");    
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_1,DGW_LISTALIAS,"DHSELECTPLY","SELECT");     
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_2,DGW_LISTALIAS,"DHSELECTPLY","INSIDE");    
+        SetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_3,DGW_LISTALIAS,"DHSELECTPLY","MODE");     
+
+        
+        // --- Run the Dialogue ---
+
+        i = iRunDialogue_DGW(Diag);
+        if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+        // --- Get the Strings ---
+
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_0,DGW_FILEPATH,"DHSELECTPLY","FILE");    
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_1,DGW_LISTALIAS,"DHSELECTPLY","SELECT");     
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_2,DGW_LISTALIAS,"DHSELECTPLY","INSIDE");    
+        GetInfoSYS_DGW(Diag,_DHSELECTPLY_ESRI_3,DGW_LISTALIAS,"DHSELECTPLY","MODE");     
+
+        // --- Destroy the Dialogue ---
+
+        Destroy_DGW(Diag);
+     }
+   }
+
+   
+   // --- Get the paramters ---
+   
+   GetString_SYS("DHSELECTPLY","FILE", sPLY);
+   iSelect = iGetInt_SYS("DHSELECTPLY","SELECT");
+   iInside = iGetInt_SYS("DHSELECTPLY","INSIDE");
+   iMode = iGetInt_SYS("DHSELECTPLY","MODE");
+   
+   
+   // --- Validate ---
+   
+   if(!iStrlen_STR(sPLY))
+      Abort_SYS(_("File name must be specified"));
+      
+   if(iSelect!=0) iSelect = 1;   // Select by default
+   if(iInside!=1) iInside = 0;   // Inside by default
+   if(iMode!=1)   iMode = 0;     // append by default
+   
+   
+   // --- create polygon ---
+
+   Poly = Create_PLY();
+
+
+   if (!iArcGIS)
+      // --- Load the Data ---
+      LoadTable_PLY(Poly,sPLY);
+   else {
+      Gis = Create_GIS(sPLY, "",  GIS_TYPE_ARCVIEW);
+      LoadPLY_GIS(Gis, Poly);
+   }
+   
+   // --- Do the selection ---
+   
+   SelectPLY2_DH(Drill, Poly, iSelect, iInside, iMode);
+  
+   
+   // --- Clean up ---
+
+   Destroy_DH(Drill);
+   Destroy_PLY(Poly);
+
+}
+

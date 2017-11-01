@@ -1,0 +1,80 @@
+//===========================================================================
+NAME          = "CHIMERA histogram launch from a group"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = ""
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+int iNch,iNx,iNy,iX,iY,iCh;
+real rX,rY,rDx,rDy,rCx,rCy;
+string(STR_DB_SYMBOL) sCh;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_FILE) sData;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) Cancel_SYS();
+   
+   
+   // --- Add maker ---
+   
+   rX = rGetReal_SYS("CHHISPICK","X");
+   rY = rGetReal_SYS("CHHISPICK","Y");
+   rDx = rGetReal_SYS("CHHISPICK","DX");
+   rDy = rGetReal_SYS("CHHISPICK","DY");
+   iNx = iGetInt_SYS("CHHISPICK","NX");
+   iNy = iGetInt_SYS("CHHISPICK","NY");
+   iNch = iGetInt_SYS("CHHISPICK","NC");
+   
+   
+   // --- get cursor location ---
+
+   rCx = rCy = 0.0;   
+   GetCursor_EMAP(Current_EMAP(),rCx,rCy);
+   
+   
+   // --- work out reference ---
+   
+   iX = (int)((rCx-rX)/rDx);
+   iY = (int)(((rY+(real)iNy*rDy)-rCy)/rDy);
+   if ((iX < 0) || (iY < 0) || (iX >= iNx) || (iY >= iNy)) 
+      Abort_SYS(_("The cursor must be inside data area."));
+      
+   iCh = iY*iNx + iX;   
+
+
+   // --- channel names ---
+      
+   Strcpy_STR(sTemp,"C");
+   FormatI_STR(iCh,sCh,4); iStrMin_STR(sCh);
+   Strcat_STR(sTemp,sCh);
+   GetString_SYS("CHHISPICK",sTemp,sCh);
+   
+
+   // --- load database ---
+   
+   GetString_SYS("CHHISPICK","DATABASE",sData);
+   if (!iLoaded_EDB(sData)) Load_EDB(sData);
+   
+   
+   // --- launch histogram tool ---
+   
+   LaunchHistogram_CHIMERA(sData, sCh);
+   
+}

@@ -1,0 +1,274 @@
+//===========================================================================
+
+NAME          = "Grid a TIN"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+
+        TINGRID.FILE            Input TIN file.
+        TINGRID.GRID            Output file name
+        TINGRID.METHOD          0: Linear
+                                1: Natural Neighbour
+                                2: Nearest Neighbour
+        TINGRID.CELL            Grid cell size
+"
+// Revision History:
+// v6.0.0: Added nearest neighbour method.
+//         Set default units if units not set in DB.
+//===========================================================================
+
+RESOURCE = "tingrid.gr"
+#include "tingrid.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+DGW        Diag;
+VV         VVx, VVy, VVz, VVi;
+BF         Bf;
+TIN        Tin;
+IMG        Img;
+IPJ        hIPJ;
+PLY        Ply;
+
+int   i,iNodes,iNX,iNY,iX,iXMin,iXMax,iY,iYMin,iYMax,iMethod;
+real rCell,rXMin,rXMax,rYMin,rYMax,rX,rY,rF,rPrec;
+
+int iInt, iFirst;
+int iX1, iX2, iNX2;
+
+string(GS_MAX_PATH) sFile, sGrid, sUnits;
+string(STR_DEFAULT) sMsg;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TINGRID");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TINGRID_0,DGW_FILEPATH,"TINGRID","FILE");     
+      SetInfoSYS_DGW(Diag,_TINGRID_1,DGW_FILEPATH,"TINGRID","GRID");     
+      SetInfoSYS_DGW(Diag,_TINGRID_2,DGW_LISTALIAS,"TINGRID","METHOD");     
+      SetInfoSYS_DGW(Diag,_TINGRID_3,DGW_TEXT,"TINGRID","CELL");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TINGRID_0,DGW_FILEPATH,"TINGRID","FILE");     
+      GetInfoSYS_DGW(Diag,_TINGRID_1,DGW_FILEPATH,"TINGRID","GRID");     
+      GetInfoSYS_DGW(Diag,_TINGRID_2,DGW_LISTALIAS,"TINGRID","METHOD");     
+      GetInfoSYS_DGW(Diag,_TINGRID_3,DGW_TEXT,"TINGRID","CELL");
+
+      Destroy_DGW(Diag);
+      
+   }      
+         
+   // --- get input file ---
+
+   GetString_SYS("TINGRID","FILE",sFile);
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("Input TIN file name not specified"));
+
+   // --- get output grid file ---
+
+   GetString_SYS("TINGRID","GRID",sGrid);
+   if(!iStrlen_STR(sGrid))
+      Abort_SYS(_("Output grid file name not specified"));
+
+
+   // --- Get the method ---
+
+   iMethod = iGetInt_SYS("TINGRID","METHOD");
+   if(iMethod!=0 && iMethod!=2) iMethod = 1;   // default to Natural Neighbour
+
+
+   // --- Get cell size ---
+
+   rCell = rGetReal_SYS("TINGRID","CELL");
+   
+   // --- Get the TIN file ---
+
+   Bf = Create_BF(sFile, BF_READ);
+   Tin = CreateS_TIN(Bf);
+
+   // --- Is the TIN Z-valued? ---
+
+   if(!iIsZValued_TIN(Tin)) {
+      Abort_SYS(_("The TIN is not Z-Valued; cannot create grid."));
+   }
+
+   // --- Range the TIN ---
+
+   RangeXY_TIN(Tin,rXMin,rYMin,rXMax,rYMax);
+
+   // --- If a cell size has not been specified, create one
+   //     from the number of nodes and the extents ---
+
+   iNodes = iNodes_TIN(Tin);
+   if(rCell==rDUMMY) {
+      rCell = rSqrt_MATH((rXMax-rXMin)*(rYMax-rYMin)/(real)iNodes)/2.0;
+      rCell = rRound_MATH(2.0*rCell,1)/2.0;     // round it to 1.5 digits
+   }
+
+   // --- Round off the grid extents ---
+
+   iXMin = (int)(rXMin / rCell);
+   if(rXMin<0.0) iXMin--;
+   rXMin = (real)iXMin * rCell;
+
+   iYMin = (int)(rYMin / rCell);
+   if(rYMin<0.0) iYMin--;
+   rYMin = (real)iYMin * rCell;
+
+   iXMax = (int)(rXMax / rCell);
+   if(rXMax>0.0) iXMax++;
+   rXMax = (real)iXMax * rCell;
+
+   iYMax = (int)(rYMax / rCell);
+   if(rYMax>0.0) iYMax++;
+   rYMax = (real)iYMax * rCell;
+
+   iNX = iXMax - iXMin + 1;
+   iNY = iYMax - iYMin + 1;
+
+   // --- Create the grid ---
+
+   Img = CreateNewFile_IMG(GS_DOUBLE, 1, iNX, iNY, sGrid);
+   
+   SetInfo_IMG(Img, rCell, rCell, rXMin, rYMin, 0.0);
+
+   // --- Create position VVs ---
+
+   VVx = Create_VV(REAL,iNX);
+   VVy = Create_VV(REAL,iNX);
+   VVz = Create_VV(REAL,iNX);
+	VVi = Create_VV(REAL, 0);
+
+
+
+	Ply = Create_PLY();
+	GetConvexHull_TIN (Tin, Ply);
+	rPrec = 0.001 * rCell;
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating Grid"),1);
+
+   for(iY=0;iY<iNY;iY++) {
+
+      // --- Update the Progress Bar ---
+
+      Printf_STR(sMsg, sizeof(sMsg), _("Gridding row %d of %d."), iY+1, iNY);
+      ProgName_SYS(sMsg,0);
+
+      ProgUpdateL_SYS(iY,iNY);      
+      if(iCheckStop_SYS()) {
+         Abort_SYS(_("Gridding halted."));
+      }
+
+		// --- Calculate only points inside the convex hull ---
+		
+      rY = rYMin + (real)iY * rCell;
+
+		iClipLineInt_PLY(Ply, rXMin, rY, rXMax, rY, VVi, rPrec, iFirst);
+		iInt = iLength_VV(VVi);
+
+		if((iFirst == PLY_LINE_CLIP_OUTSIDE && iInt == 0) || iY == 0)		// No intersections, clips outside
+			continue;
+
+		iX1 = 0;			// Default values - grid all the points
+		iX2 = iNX-1;
+		if (iFirst == PLY_LINE_CLIP_INSIDE && iInt == 1)		// Line starts inside, ends at first intersection or the end of the line
+		{
+			iX2 = (int)rCeil_MATH(rGetReal_VV(VVi, 0) / rCell);
+		}
+		else if(iFirst == PLY_LINE_CLIP_OUTSIDE && iInt == 2)			// Line intersects, but starts and ends outside
+		{
+			iX1 = (int)rFloor_MATH(rGetReal_VV(VVi, 0) / rCell);
+			iX2 = (int)rCeil_MATH(rGetReal_VV(VVi, 1) / rCell);
+		}
+
+		if(iX1 < 0) iX1 = 0;
+		if(iX2 >= iNX) iX2 = iNX-1;
+		iNX2 = iX2 - iX1 + 1;
+
+		SetLen_VV(VVx, iNX2);
+		SetLen_VV(VVy, iNX2);
+
+		for(iX=0;iX<iNX2;iX++) 
+		{
+			rX = rXMin + (real)(iX1 + iX) * rCell;
+			SetReal_VV(VVx, iX, rX);
+		}
+      SetRealN_VV(VVy, 0, -1, rY);
+
+
+      if(iMethod==0)
+         LinearInterpVV_TIN(Tin, VVx, VVy, VVz);
+      else if(iMethod==1)
+         InterpVV_TIN(Tin, VVx, VVy, VVz);
+      else
+         NearestVV_TIN(Tin, VVx, VVy, VVz);
+	
+      WriteY_IMG(Img, iY, iX1, iNX2, VVz);      
+   }
+   
+   
+   // --- copy the IPJ to the grid ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_TIN(Tin,hIPJ);
+   
+   
+   // --- If the IPJ has no units, the following will set them from the
+   //     defaults; if they are already set, it will make no difference. ---
+   
+   GetUnits_IPJ(hIPJ, rF, sUnits);
+   SetUnits_IPJ(hIPJ, rF, sUnits);
+   
+   
+   SetIPJ_IMG(Img,hIPJ);
+   Destroy_IPJ(hIPJ);
+
+
+   // --- done ---
+
+   DestroyEx_BF(Bf);
+   Destroy_IMG(Img);
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_VV(VVz);
+   Destroy_TIN(Tin);
+
+   Progress_SYS(0);
+ 
+ 
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sGrid,"Grid",1);
+}

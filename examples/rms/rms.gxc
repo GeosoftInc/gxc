@@ -1,0 +1,154 @@
+//===========================================================================
+NAME          = "Import RMS binary flight data"
+#include <version.gxh>
+DESCRIPTION   = "
+   Import RMS blocked binary data file.  This GX requires an ASCII
+   template file that describes the RMD file format.  See IMPORTBB.I2
+   for a description and example.
+
+         RMS.DATA     : Input data file name
+            .TEMPLATE : Import template file name (.I2 assumed)
+            .LINE     : Optional Line name, blank for no line.
+            .FLIGHT   : Optional flight number.
+            .DATE     : Optional date.
+				.ERRORLOG : Optional error log file name.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v7.3.0: Added GX parameter to set name of error log file.
+// v5.1.3: Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "rms.gr"
+#include "rms.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+WA          Wa;               // Import log file
+
+int         i;                // Utility 
+
+string(STR_FILE) sData;
+string(STR_FILE) sTemplate, sErrlog;
+string(STR_DB_SYMBOL) sLine;
+int         iFlight;
+real        rDate;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("rms");
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_RMS_0,DGW_FILEPATH,"RMS","DATA");
+     SetInfoSYS_DGW(Diag,_RMS_1,DGW_FILEPATH,"RMS","TEMPLATE");
+     SetInfoSYS_DGW(Diag,_RMS_2,DGW_TEXT,"RMS","LINE");
+     SetInfoSYS_DGW(Diag,_RMS_3,DGW_TEXT,"RMS","FLIGHT");
+     SetInfoSYS_DGW(Diag,_RMS_4,DGW_TEXT,"RMS","DATE");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_RMS_0,DGW_FILEPATH,"RMS","DATA");
+     GetInfoSYS_DGW(Diag,_RMS_1,DGW_FILEPATH,"RMS","TEMPLATE");
+     GetInfoSYS_DGW(Diag,_RMS_2,DGW_TEXT,"RMS","LINE");
+     GetInfoSYS_DGW(Diag,_RMS_3,DGW_TEXT,"RMS","FLIGHT");
+     GetInfoSYS_DGW(Diag,_RMS_4,DGW_TEXT,"RMS","DATE");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("RMS","DATA",sData);
+   GetString_SYS("RMS","TEMPLATE",sTemplate);
+   if (iExistInt_SYS("RMS","FLIGHT"))
+      iFlight = iGetInt_SYS("RMS","FLIGHT");
+   else
+      iFlight = iDUMMY;
+   if (iExistString_SYS("RMS","DATE")) {
+      GetString_SYS("RMS","DATE",sLine);
+      rDate = rScanTime_STR(sLine,DATE_FORMAT_YYYYMMDD);
+   }
+   else
+      rDate = rDUMMY;
+   GetString_SYS("RMS","LINE",sLine);
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import RMS data"),1);
+
+   // --- import ---
+
+   GetString_SYS("RMS","ERRORLOG",sErrlog);
+   SetString_SYS("RMS","ERRORLOG", "");  // set every time
+
+	if(iStrlen_STR(sErrlog)==0)
+		Strcpy_STR(sErrlog, "ImportQA.log");
+
+
+	Wa = Create_WA(sErrlog, WA_NEW);
+   ImportBIN3_DU(Data,sData,sTemplate,sLine,iFlight,rDate,Wa);
+   
+   
+   // --- Save the name of the created line ---
+   
+   SetString_SYS("RMS", "CREATED_LINE", sLine);
+   
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+}

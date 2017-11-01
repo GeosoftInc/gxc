@@ -1,0 +1,167 @@
+//===========================================================================
+NAME          = "Copy a line"
+#include <version.gxh>
+DESCRIPTION   = "\r\n\
+    COPYLINE.IN       : Input line name to copy\r\n\
+            .OUT      : Output line name\r\n\
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Line Tools"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "copyline.gr"
+#include "copyline.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInLn,sOutLn;      // Line Names
+string(STR_DB_SYMBOL) sLine;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InLn,OutLn;        // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        i;                 // Utility int
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Get EDB Defaults ---
+
+      EData = Current_EDB();
+      GetCurLine_EDB(EData,sLine);
+      SetString_SYS("COPYLINE","IN",sLine);
+
+
+      // --- Get the Database ---
+
+      Data = Lock_EDB(EData);
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("COPYLINEForm");
+
+
+      // --- Set up input and output lists ---
+
+      List = GetList_DGW(Diag,_COPYLINEFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_LINE);
+      
+      List = GetList_DGW(Diag,_COPYLINEFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_LINE);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_COPYLINEFORM_0,DGW_TEXT,"COPYLINE","IN");     
+      SetInfoSYS_DGW(Diag,_COPYLINEFORM_1,DGW_TEXT,"COPYLINE","OUT");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_COPYLINEFORM_0,DGW_TEXT,"COPYLINE","IN");     
+      GetInfoSYS_DGW(Diag,_COPYLINEFORM_1,DGW_TEXT,"COPYLINE","OUT");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   } else {
+
+
+      // --- Get the Database ---
+
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+
+
+   }
+
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("COPYLINE","IN",sInLn);
+   GetString_SYS("COPYLINE","OUT",sOutLn);
+
+
+   // --- Does the Input Line Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInLn,DB_SYMB_LINE))
+      Abort_SYS(_("Input Line does not exist."));
+   InLn = FindSymb_DB(Data,sInLn,DB_SYMB_LINE);
+   
+
+   // --- Does the Ouput Line Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutLn,DB_SYMB_LINE)) {
+      OutLn = DupSymb_DB(Data,InLn,sOutLn);
+      UnLockSymb_DB(Data,OutLn);
+   }
+   else
+      OutLn = FindSymb_DB(Data,sOutLn,DB_SYMB_LINE);
+
+
+   // --- Lock the Line symbols ---
+
+   if (InLn == OutLn) Abort_SYS(_("Input and Output lines cannot be the same"));
+   LockSymb_DB(Data,InLn,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutLn,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   Progress_SYS(1);
+
+
+   // --- Update the Progress Bar ---
+
+   ProgName_SYS(_("Copy line "),1);
+
+   CopyLine_DU(Data,InLn,OutLn);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutLn,_("Copy Line"),"COPYLINE;");
+
+
+   // --- Unlock the Line symbol ---
+
+   UnLockSymb_DB(Data,InLn);
+   UnLockSymb_DB(Data,OutLn);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

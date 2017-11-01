@@ -1,0 +1,164 @@
+//===========================================================================
+NAME          = "Drill Hole - Export data to a SHP files."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Export"
+
+DESCRIPTION   = "
+
+   Export a Drill Hole project to SHP files.
+	
+   DHEXPSHP.FILE      SHP file name, .SHP assumed
+			  .EXPORT    0: Locations for all tables with attributes
+							 1: Traces with collar attributes
+           .SELECTED  SELECTED, ALL or LIST
+           .LIST      SHP separated hole list, used with
+                      the \"LIST\" option of DHEXPSHP.SELECTED 
+
+"
+// Revision History:
+// v7.2.1: Added option for traces with collar attributes.
+// v6.1.0: Created.
+//===========================================================================
+
+RESOURCE = "dhexpshp.gr"
+#include "dhexpshp.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sPrefix,sSelected;
+string(STR_FILE) sDB;
+string(STR_DH_HOLES) sHoles;
+
+int         i, iAll, iExport;
+
+EDB         EData;         // database handle
+DH          Drill;
+DGW         Diag;          // dialogue box
+LST         HoleLST;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DHEXPSHP");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DHEXPSHP_0,DGW_TEXT,"DHEXPSHP","PREFIX");     
+      SetInfoSYS_DGW(Diag,_DHEXPSHP_1,DGW_LISTALIAS,"DHEXPSHP","EXPORT");     
+      SetInfoSYS_DGW(Diag,_DHEXPSHP_2,DGW_LISTALIAS,"DHEXPSHP","SELECTED");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DHEXPSHP_0,DGW_TEXT,"DHEXPSHP","PREFIX");     
+      GetInfoSYS_DGW(Diag,_DHEXPSHP_1,DGW_LISTALIAS,"DHEXPSHP","EXPORT");     
+      GetInfoSYS_DGW(Diag,_DHEXPSHP_2,DGW_LISTALIAS,"DHEXPSHP","SELECTED");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("DHEXPSHP","PREFIX",sPrefix);
+   iExport = iGetInt_SYS("DHEXPSHP","EXPORT");
+   GetString_SYS("DHEXPSHP","SELECTED",sSelected);
+
+	if(iExport != 1) 
+	 iExport = 0;
+
+   // --- Exporting ALL the holes? ---
+   
+   iAll = 0;
+   if (iStrcmp_STR(sSelected,"ALL",STR_CASE_TOLERANT) == 0) iAll = 1;
+   
+   
+   if(iAll!=1) {
+   
+      // --- Do the channel selection by calling the DHCHANLST GX ---
+
+      SetString_SYS("DHHOLELST","DATA",sSelected);
+      SetString_SYS("DHHOLELST","GX","DHEXPSHP");
+      
+      if(iRunGX_SYS("DHHOLELST.GX")) Cancel_SYS();
+
+      GetString_SYS("DHHOLELST","HOLES", sHoles);
+   }
+   
+
+   // --- Get current database and open Drill project ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+
+   
+   // --- create LSTs to hold hole lists ---
+   
+   HoleLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   
+   // --- Get all the holes ---
+
+   HoleLST2_DH(Drill, HoleLST);
+
+
+   if(iAll!=1) {
+   
+      // --- Retrieve available selected holes ---
+
+      SelectCSVStringItems_LST(HoleLST, sHoles, HoleLST);
+   }
+
+   if(iSize_LST(HoleLST)==0)
+      Abort_SYS(_("No holes have been selected for export."));
+
+   
+   // --- export data ---
+
+   Progress_SYS(1);
+
+	if(iExport == 0)
+		ExportLST_DH(Drill, HoleLST, sPrefix,DH_EXP_SHP);   
+	else
+		ExportLST_DH(Drill, HoleLST, sPrefix,DH_EXP_SHP_TRACES);   
+
+   Destroy_DH(Drill);
+
+
+   // --- Put the current database back on top ---
+
+   MakeCurrent_EDB(EData);
+   
+   Progress_SYS(0);
+
+   Destroy_LST(HoleLST);
+}

@@ -1,0 +1,221 @@
+//===========================================================================
+NAME          = "Export selected map groups to a 3D DXF file"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+
+   Export selected map groups to an AutoCAD 3D DXF file.
+
+    EXPDXF3D.FILE     DXF file name.
+    EXPDXF3D.GROUPS   Comma-delimited groups to export (batch only)    
+"
+// Revision History:
+// v8.1.0: Same help link for both OM and TfA.
+// v7.1.0: Now allows export from a 3D view.
+// v6.2.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "EXPDXF3D.gr"
+#include "EXPDXF3D.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        EMap;             // Map handle
+MAP         Map;              // Map handle
+
+DGW         Diag;             // Dialogue handle
+
+
+MVIEW       View;             // Map View handle
+WA          hWA;
+LST         ViewLST, SelLST;
+
+int iArcGIS, iNGroups, iToks, i;
+string(STR_FILE) sDXFFile, sMap;
+string(STR_GROUP) sView, sGroup;
+string(STR_DEFAULT_LONG) sLicenseClass, sTok;
+string(4259840) sGroups; // Value is STR_GROUP * 4096 to avoid buffer overflow
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	// --- Select ---
+    GetLicenseClass_SYS(sLicenseClass);
+	iArcGIS = iStrcmp_STR(sLicenseClass, _n("ArcGIS"), STR_CASE_TOLERANT)==0;
+
+   // --- Get the current map, and the current view ---
+   
+   EMap = Current_EMAP();
+   if(!iScript_SYS())
+      GetCurrentView_EMAP(EMap, sView);
+   else {
+      GetString_SYS("EXPDXF3D","CURRENTVIEW",sView);      
+      if(!iStrlen_STR(sView)) 
+         Abort_SYS(_("EXPDXF3D.CURRENTVIEW must be set to run this GX in script mode"));
+   }
+   
+   GetName_EMAP(EMap, sMap);
+   
+
+   // --- Lock the map ---
+   
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map, sView, MVIEW_READ);
+   
+   
+   // --- Select the map groups to export ---
+   
+   ViewLST = Create_LST(4096);
+   SelLST = Create_LST(4096);
+   
+      
+   if(iInteractive_SYS())
+   {
+   
+      // --- Create a LST of the map groups. This lists all visible groups
+      //     that the DXF export can handle.  ---
+
+      if(iExportableDXF3DGroupsLST_MVU(View, ViewLST)==0) 
+      {
+			Abort_SYS(_("No exportable groups were found in the view."));      
+      }
+
+	// --- Select ---
+
+	if(iTwoPanelSelectionEx2_GUI(ViewLST, SelLST, GS_FALSE, GS_FALSE, _("Select Map Groups to Export"), "EXPDXF3D_GX_SELECT_MAP_GROUPS"))
+		Cancel_SYS();
+
+
+	// --- Reset current selection ---
+    
+		iNGroups = iSize_LST(SelLST);
+		for (i = 0; i < iNGroups; i++)
+		{
+			GetItem_LST(SelLST, LST_ITEM_NAME, i, sGroup);
+			ReplaceMatchString_STR(sGroup, _n(","), _n("commacharacter"));
+			SetItem_LST(SelLST, LST_ITEM_NAME, i, sGroup);
+		}
+
+	ConvertToCSVString_LST(SelLST, sGroups);
+
+	SetString_SYS("EXPDXF3D", "GROUPS", sGroups);
+   }
+
+
+   // --- Get the current selection ---
+      
+   GetString_SYS("EXPDXF3D", "GROUPS", sGroups);
+   if(!iStrlen_STR(sGroups)) 
+      Abort_SYS(_("No groups have been specified for export."));
+
+   ConvertFromCSVString_LST(SelLST, sGroups);
+   iNGroups = iSize_LST(SelLST);
+   if(iNGroups==0)
+      Abort_SYS(_("No groups have been specified for export."));
+      
+      
+   
+   // --- Are we running interactively ? ---
+   
+   if (iInteractive_SYS())
+   {
+   
+	// --- Create a default file name from the map or group name ---
+	if (iNGroups==1) 
+	{
+		Strcpy_STR(sDXFFile, "");
+		if(!iArcGIS)
+		{
+			// --- For a single group, append the group name to the map name to
+			//     create the DXF file name ---
+ 
+			FileNamePart_STR(sMap, sDXFFile, STR_FILE_PART_NAME);
+			Strcat_STR(sDXFFile, "_");
+		}
+		GetItem_LST(SelLST, 0, 0, sGroup);
+		iToks = iTokenize_STR(sGroup, "\n", "", "", "");
+		GetToken_STR(sTok, sGroup, 0);	
+		Strcat_STR(sDXFFile, sTok);
+		FileExt_STR(sDXFFile, "dxf", sDXFFile, FILE_EXT_FORCE);
+		SetString_SYS("EXPDXF3D","FILE", sDXFFile);         
+	}
+	else if(!iArcGIS)
+	{
+ 
+		// --- For multiple groups, just use the map name ---
+ 
+		FileExt_STR(sMap, "dxf", sDXFFile, FILE_EXT_FORCE);
+		SetString_SYS("EXPDXF3D","FILE", sDXFFile);         
+	}
+
+      
+      
+      
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("EXPDXF3D");
+      
+
+      // --- Put current values into the dialogue --
+
+      SetInfoSYS_DGW(Diag,_EXPDXF3D_0,DGW_FILEPATH, "EXPDXF3D","FILE");  
+      
+
+      // --- Run the Dialogue ---
+
+      if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+      
+
+      // --- Read the returned values from the dialogue ---
+	
+      GetInfoSYS_DGW(Diag,_EXPDXF3D_0,DGW_FILEPATH, "EXPDXF3D","FILE");
+      
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+                 
+   }
+
+   // --- Get and validate parameters ---
+
+   GetString_SYS("EXPDXF3D","FILE", sDXFFile);
+   if(!iStrlen_STR(sDXFFile))
+      Abort_SYS(_("No DXF file name has been defined."));
+      
+      
+   // --- Open the output DXF file handle ---
+   
+   hWA = CreateEx_WA(sDXFFile, WA_NEW, WA_ENCODE_RAW);      
+   
+   
+   // --- Do the export ---
+   
+   ExportDXF3D_MVU(View, SelLST, hWA);    
+   
+
+   // --- Clean up ---
+   
+   Destroy_MVIEW(View);
+   Destroy_LST(ViewLST);   
+   Destroy_LST(SelLST);
+   
+   Destroy_WA(hWA);
+
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);   
+   UnLock_EMAP(EMap);   
+}

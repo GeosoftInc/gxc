@@ -1,0 +1,57 @@
+//===========================================================================
+NAME          = "Pack all open maps"
+#include <version.gxh>
+DESCRIPTION   = "
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+// Revision History:
+// v5.1.6 New GX.
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+EMAP  EMap;
+LST   Lst;
+string(STR_FILE) sCurMap, sMap;
+int i, iNMaps;
+
+
+//===========================================================================
+
+{
+   // --- get the current map ---
+
+   EMap = Current_EMAP();
+   GetName_EMAP(EMap, sCurMap);
+
+
+   // --- Get list of all open maps ---
+
+   Lst = Create_LST(512);  // Maximum size for a list
+   iNMaps = iGetMapsLST_EMAP(Lst, EMAP_PATH_FULL);
+
+   if(iNMaps==0) Cancel_SYS();
+
+
+   // --- Call the PACKMAP GX to unpack each map ---
+
+   for(i=0;i<iNMaps;i++) 
+   {
+      GetItem_LST(Lst, 0, i, sMap);
+      EMap = Load_EMAP(sMap);
+   
+	  if (!iIsGrid_EMAP(EMap))
+		 iRunGX_SYS("packmap.gx");
+   }   
+   
+   
+   // --- reset the current map ---
+
+   Load_EMAP (sCurMap);
+}

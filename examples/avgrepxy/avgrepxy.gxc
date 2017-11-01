@@ -1,0 +1,249 @@
+//===========================================================================
+NAME          = "Average channel at repeated locations"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   AVGREPXY.CHANNEL    channel name
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History:
+// v6.4.0: Re-fid output VV to input VV (QA 10051).
+// v6.3.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "avgrepxy.gr"
+#include "avgrepxy.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCh, sXCh, sYCh;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch, ChX, ChY;
+DB_SYMB     Line;
+VV          ChVV, ChXVV, ChYVV, IndVV, OrdVV, OutVV;
+DGW         Diag;
+LST         List;                  // list handle
+int         i,iN;                  // utility int
+int         iLine,iTotLines;       // counters
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("AVGREPXY");
+
+
+     // --- Set up input list and remove the X and Y channels ---
+
+     List = GetList_DGW(Diag,_AVGREPXY_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     
+     GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+     GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+     i = iFindItem_LST(List,0,sXCh);
+     if(i!=-1) DelItem_LST(List,i);
+     i = iFindItem_LST(List,0,sYCh);
+     if(i!=-1) DelItem_LST(List,i);
+
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_AVGREPXY_0,DGW_TEXT,"AVGREPXY","CHANNEL");
+
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_AVGREPXY_0,DGW_TEXT,"AVGREPXY","CHANNEL");
+
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AVGREPXY","CHANNEL",sCh);
+
+
+   // --- Does the Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sCh))
+      Abort_SYS(_("Channel does not exist."));
+   Ch = FindChan_DB(Data,sCh);
+   
+   
+   // --- Get X and Y channels ---
+   
+   ChX = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   ChY = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if(ChX==NULLSYMB || ChY==NULLSYMB)
+      Abort_SYS(_("Current X and Y channels not found."));
+   
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ChX,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ChY,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- create VV ---
+
+   ChVV = Create_VV(REAL,0);
+   ChXVV = Create_VV(REAL,0);
+   ChYVV = Create_VV(REAL,0);
+   IndVV = Create_VV(INT,0);
+   OrdVV = Create_VV(INT,0);     // Preserve original order
+   OutVV = Create_VV(REAL,0); 
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Process line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);        
+
+
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,Ch,ChVV);
+      GetChanVV_DB(Data,Line,ChX,ChXVV);
+      GetChanVV_DB(Data,Line,ChY,ChYVV);           
+      
+      
+      // --- ReFid ---
+      
+      ReFidVV_VV(ChXVV, ChVV);
+      ReFidVV_VV(ChYVV, ChVV);
+
+
+      // --- Create an order VV ---
+      
+      iN = iLength_VV(ChVV);
+      InitIndex_VV(OrdVV, iN);
+
+
+      // --- Create index VV; sort by X, Y then index to preserve the
+      //     order of duplicated terms  ---
+      
+      SortIndex3_VV(ChXVV, ChYVV, OrdVV, IndVV, VV_SORT_ASCENDING, VV_SORT_ASCENDING, VV_SORT_ASCENDING);
+      
+      
+      // --- Sort the data ---
+      
+      IndexOrder_VV(IndVV, ChVV);
+      IndexOrder_VV(IndVV, ChXVV);
+      IndexOrder_VV(IndVV, ChYVV);
+      IndexOrder_VV(IndVV, OrdVV);
+      
+
+      // --- process ---
+
+      AverageRepeat2_VVU(ChXVV,ChYVV,ChVV);
+
+
+      // --- Revert to the original data order ---
+      
+      SetLen_VV(OutVV, iN);
+      ReFidVV_VV(OutVV, ChVV);   
+      IndexInsert_VV(OutVV, ChVV, OrdVV);
+      
+      
+      // --- Write the VV back to database ---
+
+      PutChanVV_DB(Data,Line,Ch,OutVV);
+
+
+      // --- Advance to Next Line ---    
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+
+   // --- Clean up ---
+
+   Destroy_VV(ChVV);
+   Destroy_VV(ChXVV);
+   Destroy_VV(ChYVV);
+   Destroy_VV(IndVV);
+   Destroy_VV(OrdVV);
+   Destroy_VV(OutVV);
+
+   UnLockSymb_DB(Data,Ch);
+   UnLockSymb_DB(Data,ChX);
+   UnLockSymb_DB(Data,ChY);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

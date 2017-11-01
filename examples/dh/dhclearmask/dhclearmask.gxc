@@ -1,0 +1,245 @@
+//===========================================================================
+NAME          = "Reset Mask channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot"
+
+DESCRIPTION   = "
+
+ DHCLEARMASK.MASK 	Mask channel - default is \"Mask\"
+            .SETTING:0: Set to dummy
+                     1: Set to 1. 
+            .SELECT: 0: Operate on all holes
+                     1: Operate on selected holes only.
+"
+// Revision History:
+// v7.0.0: Better mask channel listing using MaskChanLST_DB.
+// v6.1.0: New GX
+//===========================================================================
+
+RESOURCE = "DHCLEARMASK.gr"
+#include "DHCLEARMASK.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+DH         Drill;
+EDB        EData;
+DB         Data;
+DB_SYMB    Ch, MaskCh;   // Channel handles
+DB_SYMB    Line;       // Line handle
+DGW   Diag;
+VV    VVx, VVm;
+LST   List, LineLST;
+
+string(STR_FILE) sDB;
+string(STR_DB_SYMBOL) sMaskCh;
+string(STR_DEFAULT_LONG) sLabel, sMsg;
+int i, iMask, iNumAssays, iAssay, iSetting, iSelect, iTotLines;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Get current database and open Drill project. ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+   
+   
+   // --- Count the assay databases... must be at least one ---
+   
+   iNumAssays = iNumAssays_DH(Drill);
+   if(!iNumAssays)
+      Abort_SYS(_("There are no from-to or point databases loaded in the current project."));
+   
+
+   // --- Set default mask channel ---
+
+   GetString_SYS("DHCLEARMASK","MASK",sMaskCh);
+   if(!iStrlen_STR(sMaskCh)) {
+      if (iGlobal_SYS("WHOLEPLOT.MASK",sMaskCh) == 0) {
+         SetString_SYS("DHCLEARMASK","MASK",sMaskCh);
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DHCLEARMASK");
+
+
+      // --- Set up mask channel list ---
+
+      Data = hAssayDB_DH(Drill, 0);
+      List = GetList_DGW(Diag,_DHCLEARMASK_0);
+      MaskChanLST_DB(Data,List);
+      i = iFindItem_LST(List, LST_ITEM_NAME, "None");
+      if(i!=-1) DelItem_LST(List, i);
+      Sort_LST(List,0,0);
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_DHCLEARMASK_0,DGW_TEXT,     "DHCLEARMASK","MASK");
+      SetInfoSYS_DGW(Diag,_DHCLEARMASK_1,DGW_LISTALIAS,"DHCLEARMASK","SETTING");
+      SetInfoSYS_DGW(Diag,_DHCLEARMASK_2,DGW_LISTALIAS,"DHCLEARMASK","SELECT");
+     
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_DHCLEARMASK_0,DGW_TEXT,     "DHCLEARMASK","MASK");
+      GetInfoSYS_DGW(Diag,_DHCLEARMASK_1,DGW_LISTALIAS,"DHCLEARMASK","SETTING");
+      GetInfoSYS_DGW(Diag,_DHCLEARMASK_2,DGW_LISTALIAS,"DHCLEARMASK","SELECT");
+      
+    }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DHCLEARMASK","MASK",sMaskCh);    
+   iSetting = iGetInt_SYS("DHCLEARMASK","SETTING");
+   iSelect = iGetInt_SYS("DHCLEARMASK","SELECT");
+
+
+   // --- Set defaults ---
+   
+   if(iSetting!=0) iSetting = 1;       // default is to set value to 1
+   if(iSelect!=0) iSelect = 1;
+   
+   
+   // --- Mask channel must be specified ---
+
+   if(!iStrlen_STR(sMaskCh))
+      Abort_SYS(_("A Mask Channel must be specified."));
+
+
+   // --- get some objects ---
+
+   VVx = Create_VV(REAL,0);
+   VVm = Create_VV(INT,0);
+   LineLST = Create_LST(STR_DB_SYMBOL);
+
+
+   // --- Set mask channel value ---
+
+   iMask = 1;   
+   if(iSetting!=1) iMask = iDUMMY;
+   
+
+   // --- Loop over the assay databases ---
+   
+   Progress_SYS(1);
+   for(iAssay = 0; iAssay<iNumAssays; iAssay++) 
+   {
+   
+      Data = hAssayDB_DH(Drill, iAssay);
+      GetName_DB(Data, DB_NAME_FILE, sDB);
+   
+      
+      // --- Create or open mask channel ---
+      
+      if (!iExistChan_DB(Data,sMaskCh)) {
+         MaskCh = CreateSymb_DB(Data,sMaskCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+         SetRegSymbSetting_DB(Data,MaskCh,"CLASS","MASK");
+      }
+      else
+         MaskCh = FindChan_DB(Data,sMaskCh);
+      LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);     
+
+
+      // --- Get either the DH_From or the DH_Depth channel ---
+      
+      Ch = FindChan_DB(Data, "DH_From");
+      if(Ch==NULLSYMB)
+         Ch = FindChan_DB(Data, "DH_Depth");
+         
+      if(Ch==NULLSYMB) {
+         Printf_STR(sMsg, sizeof(sMsg), _("Unable to find either the DH_From or the DH_Depth channel in the database %s."), sDB);
+         Abort_SYS(sMsg);
+      }
+      LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+
+      // --- process lines ---
+
+      Clear_LST(LineLST);
+      if(iSelect!=1)
+         SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
+      else
+         SelectedLineLST_DB(Data, LineLST);
+
+
+      iTotLines = iSize_LST(LineLST);
+      ProgName_SYS(_("Processing"),1);
+      for(i=0; i<iTotLines; i++)
+      {
+
+         // --- get line symbol ---
+
+         Line = (DB_SYMB)iGetInt_LST(LineLST, 1, i);
+
+
+         // --- Update the Progress Bar ---
+
+         Strcpy_STR(sLabel,_("Processing "));
+         Strcat_STR(sLabel,sDB);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(i,iTotLines);
+
+
+         // --- Get data ---
+
+         GetChanVV_DB(Data,Line,Ch,VVx);
+         GetChanVV_DB(Data,Line,MaskCh,VVm);
+         ReFidVV_VV(VVm,VVx);
+
+       
+         // --- Set mask values ---
+
+         SetIntN_VV(VVm, 0, -1, iMask);
+
+
+         // --- Replace the data ---
+
+         PutChanVV_DB(Data,Line,MaskCh,VVm);
+
+      }
+
+
+      // --- Unlock the channel symbols ---
+
+      UnLockSymb_DB(Data,Ch);
+      UnLockSymb_DB(Data,MaskCh);
+   }
+   
+
+   // --- done ---
+
+   Destroy_SYS(VVx);
+   Destroy_SYS(VVm);
+   Destroy_LST(LineLST);
+   Destroy_DH(Drill);
+   
+   Progress_SYS(0);
+      
+}

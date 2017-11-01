@@ -1,0 +1,267 @@
+//===========================================================================
+NAME          = "Horizontal Colour Bar"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+"
+// Revision History:
+// v6.0:   Modified to plot the title text in the center of plot area.
+//         Fixed map locking problem in call to iGetPoint_EMAP
+// v5.1.8: New GX.
+//===========================================================================
+
+RESOURCE="VSTKCBAR.gr"
+#include "VSTKCBAR.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+ITR   Itr;
+DGW   Diag;
+LST   List;          // List handle
+
+string(GS_MAX_PATH)  sGroup,sAgg,sTitle,sSubTitle,sFont,sName;
+string(STR_GROUP)  sGrpName;
+string(8)   sHints;
+
+int   i,iDec;
+real  rAnn,rHeight,rWidth,rX,rY;
+real  rXmin,rXmax,rYmin,rYmax,rX1;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   // --- check for base view ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   if (!iExistView_MAP(Map,"*Base"))
+      Abort_SYS(_("A base view is required to use this GX."));
+   UnLock_EMAP(EMap);   
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("VSTKCBAR");
+
+      
+      // --- Set up lists ---
+  
+      List = GetList_DGW(Diag,_VSTKCBAR_0);
+      Map  = Lock_EMAP(EMap);
+      AGGList_MAP(Map,List,1);
+      UnLock_EMAP(EMap);
+      Sort_LST(List,0,0);
+
+
+      // --- Set default agg ---
+
+      if (iSize_LST(List) == 0)
+         Abort_SYS(_("There are no aggregates in the current map to plot a color bar."));
+      GetItem_LST(List,0,0,sAgg);
+      if (!iExistString_SYS("VSTKCBAR","AGG")) 
+         SetString_SYS("VSTKCBAR","AGG",sAgg);
+      
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_0,DGW_TEXT,"VSTKCBAR","AGG");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_1,DGW_TEXT,"VSTKCBAR","CLRBARHEIGHT");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_2,DGW_TEXT,"VSTKCBAR","CLRBARWIDTH");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_3,DGW_TEXT,"VSTKCBAR","CLRBARTITLE");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_4,DGW_TEXT,"VSTKCBAR","CLRBARSUBTITLE");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_5,DGW_TEXT,"VSTKCBAR","CLRBARANNSIZE");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_6,DGW_TEXT,"VSTKCBAR","CLRBARDECIMALS");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_7,DGW_TEXT,"VSTKCBAR","CLRBARXPOS");
+      SetInfoSYS_DGW(Diag,_VSTKCBAR_8,DGW_TEXT,"VSTKCBAR","CLRBARYPOS");
+
+
+      // --- Run the Dialogue ---
+
+      rX = 0.0;     // prevents warning message on compile
+      rY = 0.0;
+      do {
+         i = iRunDialogue_DGW(Diag);
+         if(i==-1)   Cancel_SYS(); 
+         if(i==2)    {
+
+            // --- set the base view ---
+
+            iSetCurrentView_EMAP(EMap,"*Base");
+
+            
+            // --- Get the coordinates of a user selected box ---
+
+            if (HINTS) 
+               DisplayMessage_SYS(_("Locate Color Bar"),_("Click on the location for the bottom left corner of the bar."));
+            if (iGetPoint_EMAP(EMap,_("Locate Color Bar..."),rX,rY))  Cancel_SYS();
+
+            SetReal_SYS("VSTKCBAR","CLRBARXPOS",rX);
+            SetReal_SYS("VSTKCBAR","CLRBARYPOS",rY);
+                                                
+            SetInfoSYS_DGW(Diag,_VSTKCBAR_7,DGW_TEXT,"VSTKCBAR","CLRBARXPOS");
+            SetInfoSYS_DGW(Diag,_VSTKCBAR_8,DGW_TEXT,"VSTKCBAR","CLRBARYPOS");
+         }
+      } while (i!=0);
+
+
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_0,DGW_TEXT,"VSTKCBAR","AGG");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_1,DGW_TEXT,"VSTKCBAR","CLRBARHEIGHT");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_2,DGW_TEXT,"VSTKCBAR","CLRBARWIDTH");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_3,DGW_TEXT,"VSTKCBAR","CLRBARTITLE");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_4,DGW_TEXT,"VSTKCBAR","CLRBARSUBTITLE");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_5,DGW_TEXT,"VSTKCBAR","CLRBARANNSIZE");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_6,DGW_TEXT,"VSTKCBAR","CLRBARDECIMALS");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_7,DGW_TEXT,"VSTKCBAR","CLRBARXPOS");
+      GetInfoSYS_DGW(Diag,_VSTKCBAR_8,DGW_TEXT,"VSTKCBAR","CLRBARYPOS");
+   }
+
+   GetString_SYS("VSTKCBAR","AGG",sAgg);
+   GetString_SYS("VSTKCBAR","CLRBARTITLE",sTitle);
+   GetString_SYS("VSTKCBAR","CLRBARSUBTITLE",sSubTitle);
+   iDec     = iGetInt_SYS("VSTKCBAR","CLRBARDECIMALS");
+   rAnn     = rGetReal_SYS("VSTKCBAR","CLRBARANNSIZE");
+   rHeight  = rGetReal_SYS("VSTKCBAR","CLRBARHEIGHT");
+   rWidth   = rGetReal_SYS("VSTKCBAR","CLRBARWIDTH");
+   rX       = rGetReal_SYS("VSTKCBAR","CLRBARXPOS");
+   rY       = rGetReal_SYS("VSTKCBAR","CLRBARYPOS");
+     
+     
+   // --- Validate parameters ---
+
+   if (iDec < 0)        {
+      iDec = 1;
+      SetInt_SYS("VSTKCBAR", "CLRBARDECIMALS",iDec);
+   }
+   if (rAnn==rDUMMY || rAnn <= 0.0)     {
+      rAnn = 1.5;
+      SetReal_SYS("VSTKCBAR", "CLRBARANNSIZE",rAnn);
+   }
+   if (rHeight==rDUMMY || rHeight <= 0.0)  {
+      rHeight = 1.0;
+      SetReal_SYS("VSTKCBAR", "CLRBARHEIGHT", rHeight);
+   }
+   if (rWidth==rDUMMY || rWidth <= 0.0)   {
+      rWidth  = 5.0;
+      SetReal_SYS("VSTKCBAR", "CLRBARWIDTH",  rWidth);
+   }
+   if (rX == rDUMMY)    {
+      rX = 5.0;
+      SetReal_SYS("VSTKCBAR","CLRBARXPOS",rX);
+   }
+   if (rY == rDUMMY)    {
+      rY = 45.0;
+      SetReal_SYS("VSTKCBAR","CLRBARYPOS",rY);
+   }
+
+   
+   // --- get the map ---
+   
+   Map  = Lock_EMAP(EMap);
+   
+   
+   // --- Creat ITR ---
+
+   Itr = CreateMap_ITR(Map,sAgg);
+
+   
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*base",MVIEW_WRITEOLD);
+
+
+   // --- create VSTKCBAR group ---
+
+   Strcpy_STR(sName,sAgg);
+   i = iTokens_STR(sName,"\\");
+   GetToken_STR(sGroup,sName,(i-1));
+
+   GenGroupName_STR(_n("ColorBar"),sGroup,"",sGrpName);
+   Strcpy_STR(sName,sGrpName);
+   StartGroup_MVIEW(View,sName,MVIEW_GROUP_NEW);
+
+
+   // --- add the maker ---
+
+   Maker_MVIEW(View,0,1,"VSTKCBAR",MAKER_GX,_("Horizontal Color Bar..."),"VSTKCBAR;");
+
+
+   // --- set font characteristics --- 
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Arial"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,C_BLACK);
+
+
+   // --- set line style ---
+
+   LineColor_MVIEW(View,C_BLACK);
+   LineStyle_MVIEW(View,0,0.0);
+   LineThick_MVIEW(View,rAnn/10.0);
+
+
+   // --- Draw Color Bar ---
+
+//   ColorBarHor_MVU(View,Itr,iDec,rAnn,rWidth,rHeight,rX,rY,COLORBAR_LABEL_HORIZONTAL);
+
+   ColorBar_MVU(View,Itr,iDec,rAnn,rHeight,rWidth,rX,rY);
+
+
+   // --- bottom center text ---
+
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+
+   
+   // --- Title ---
+
+   if (iStrlen_STR(sTitle)) {
+
+      TextSize_MVIEW(View,rAnn*1.25);
+      MeasureText_MVIEW(View,sTitle,rXmin,rYmin,rXmax,rYmax);
+      rX1 = rX - (rXmax-rXmin)/2.0;
+      Text_MVIEW(View,sTitle,rX1,(rY-rAnn*2.25));
+   }
+
+
+   // --- sub-title ---
+
+   if (iStrlen_STR(sSubTitle)) {
+
+      TextSize_MVIEW(View,rAnn);
+      MeasureText_MVIEW(View,sSubTitle,rXmin,rYmin,rXmax,rYmax);
+      rX1 = rX - (rXmax-rXmin)/2.0;
+      Text_MVIEW(View,sSubTitle,rX1,(rY-rAnn*4.0));
+   } 
+   
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);   
+}

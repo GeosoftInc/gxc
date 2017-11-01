@@ -1,0 +1,49 @@
+//===========================================================================
+NAME          = "Export a map to CGM (Computer Graphics Metafile)"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+
+   EXPORT_GX_RUN.FILE_NAME    File name
+                .OPTION_STR   Integrated options string
+      
+"
+
+//===========================================================================
+
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;      // Name of output plot file
+string(1000) sArguments;
+string(1000) sOptions;
+
+
+//===========================================================================
+//                           MAPTOCGM CODE
+//===========================================================================
+
+{
+   // --- Get Parameters ---
+
+   GetString_SYS("EXPORT_GX_RUN","FILE_NAME",sFile);
+   if(!iStrMin2_STR(sFile))
+      Abort_SYS(_("File name not specified!"));
+
+   GetString_SYS("EXPORT_GX_RUN","OPTION_STR",sOptions); 
+   UnQuote_STR(sFile);
+
+   Strcpy_STR(sArguments,"\"");
+   Strcat_STR(sArguments,sFile);
+   Strcat_STR(sArguments,"\" ");
+   Strcat_STR(sArguments,sOptions);
+   
+   iRun_SYS("plt2cgm.exe",sArguments,SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_WAIT);
+}

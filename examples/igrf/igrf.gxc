@@ -1,0 +1,580 @@
+//===========================================================================
+NAME          = "Compute IGRF/DGRF Channels"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/IGRF"
+
+DESCRIPTION   = "
+
+   Computes the IGRF or DGRF field strength, inclination and declination
+   from given longitude, latitude and optional elevation channels.  The
+   line date is used as the model date.
+
+Parameters:  
+       IGRF.LONG      -  Longitude input channel (-360 to 360 degrees)
+           .LAT       -  Latitude input channel  (-90 to 90 degrees)
+           .ELEV      -  Elevation: input channel OR single value (metres)
+           .MODEL     -  \"IGRF\" or \"DGRF\"
+           .YEAR      -  Model year (default is model year before date)
+           .DATE      -  Survey date: Single string YYYY/MM/DD OR Channel name OR Blank (to use line date)
+           .TOTAL     -  Output IGRF strength channel    (nT)
+           .INC       -  Output IGRF inclination channel (degrees)
+           .DEC       -  Output IGRF declination channel (degrees)
+"
+// Revision History:
+// v7.1:   QA 14912 Fixed for undefined FID start and increment values.
+// v6.4.2: QA 10960 Skip empty lines. Cleaned up IGRF and VV create/destroy.
+// v6.4.0: Check and set default Lat and Lon to the current Lat, Lon, 
+//         depending on the projection.
+// v5.1.5: Modified the survey date entry could be a single string or a channel name.
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "igrf.gr"
+#include "igrf.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sLonCh;                 // Channel Names          
+string(STR_DB_SYMBOL) sLatCh;                           
+string(STR_DB_SYMBOL) sElevCh;                          
+string(STR_DB_SYMBOL) sTotCh;
+string(STR_DB_SYMBOL) sIncCh;
+string(STR_DB_SYMBOL) sDecCh;
+string(STR_FILE) sFile;                  // Name of IGRF model file
+string(STR_DEFAULT_SHORT) sYear;                  // Year of IGRF model 
+
+IGRF        hIGRF;                  // Contains IGRF model data
+
+EDB         EData;
+DB          Data;                   // Database
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // List handle
+IPJ         hIPJ;
+
+DB_SYMB     LonCh;                  // Input longitude channel
+DB_SYMB     LatCh;                  // Input latitude channel
+DB_SYMB     ElevCh;                 // Input Elevation channel
+DB_SYMB     TotCh;                  // Total field strength IGRF channel
+DB_SYMB     IncCh;                  // Inclination strength IGRF channel
+DB_SYMB     DecCh;                  // Declination IGRF channel
+DB_SYMB     DateCh;                 // Date channel
+
+DB_SYMB     Line;                   // DB Line Handle
+                                     
+int         i;                      // Utility i
+int         iDatemode;              // Flags if single date string or date channel name entered
+int         iElmode;                // Flags if single elevation or elevation channel used in calculations
+int         iVVlonlen;              // length of longitude VV
+int         iVVlatlen;              // length of latitude VV
+int         iVVelevlen;             // length of elevation VV
+int         iVVmaxlen;
+int         iTflag;                 // flags if total field is to be output
+int         iIflag;                 // flags if inclination field is to be output
+int         iDflag;                 // flags if declination field is to be output
+int         iLines;                 // Number of Lines Processed
+int         iTotLines;              // Total Number of Lines to Process
+int         iYear;                  // IGRF model year
+                                    
+string(STR_DEFAULT_SHORT) sTemp;                  // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+VV          hVVel;                  // VV for elevation values
+VV          hVVlon;                 // VV for longitude
+VV          hVVlat;                 // VV for latitude
+VV          hVVtot;                 // VV for total field from IGRF
+VV          hVVinc;                 // VV for inclination from IGRF
+VV          hVVdec;                 // VV for declination from IGRF
+
+real        rFstart,rFinc;          // Fiducial information for VV's
+real        rDate,rD;               // Date of line
+real        rElev;                  // Single elevation from user
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Set default Long, Lat channels to the existing current X, Y if they
+   //     are defined as Geographic ---
+   
+   GetString_SYS("IGRF", "LONG", sLonCh);
+   GetString_SYS("IGRF", "LAT", sLatCh);
+   if(!iStrlen_STR(sLonCh) || !iExistChan_DB(Data, sLonCh) ||
+      !iStrlen_STR(sLatCh) || !iExistChan_DB(Data, sLatCh))
+   {
+      GetXYZChan_DB(Data, DB_CHAN_X, sLonCh);
+      GetXYZChan_DB(Data, DB_CHAN_Y, sLatCh);
+   
+      LonCh = FindChan_DB(Data,sLonCh);
+      LatCh = FindChan_DB(Data,sLatCh);
+      if(LonCh!=NULLSYMB && LatCh!=NULLSYMB)
+      {      
+         hIPJ = Create_IPJ();
+      
+         LOCK_R(Data,LonCh);
+         GetIPJ_DB(Data, LonCh, hIPJ);
+         UNLOCK(Data,LonCh);
+         
+         if(iSourceType_IPJ(hIPJ)==IPJ_TYPE_GCS)
+         {
+            SetString_SYS("IGRF", "LONG", sLonCh);
+            SetString_SYS("IGRF", "LAT", sLatCh);
+         }
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {  
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IGRFForm");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_IGRFFORM_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_IGRFFORM_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_IGRFFORM_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_IGRFFORM_5);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_IGRFFORM_6);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_IGRFFORM_7);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_IGRFFORM_8);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IGRFFORM_0,DGW_TEXT,"IGRF","MODEL");    
+      SetInfoSYS_DGW(Diag,_IGRFFORM_1,DGW_TEXT,"IGRF","YEAR");    
+      SetInfoSYS_DGW(Diag,_IGRFFORM_2,DGW_TEXT,"IGRF","DATE");    
+      SetInfoSYS_DGW(Diag,_IGRFFORM_3,DGW_TEXT,"IGRF","LONG");    
+      SetInfoSYS_DGW(Diag,_IGRFFORM_4,DGW_TEXT,"IGRF","LAT");     
+      SetInfoSYS_DGW(Diag,_IGRFFORM_5,DGW_TEXT,"IGRF","ELEV");
+      SetInfoSYS_DGW(Diag,_IGRFFORM_6,DGW_TEXT,"IGRF","TOTAL");    
+      SetInfoSYS_DGW(Diag,_IGRFFORM_7,DGW_TEXT,"IGRF","INC");    
+      SetInfoSYS_DGW(Diag,_IGRFFORM_8,DGW_TEXT,"IGRF","DEC");    
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IGRFFORM_0,DGW_TEXT,"IGRF","MODEL");    
+      GetInfoSYS_DGW(Diag,_IGRFFORM_1,DGW_TEXT,"IGRF","YEAR");    
+      GetInfoSYS_DGW(Diag,_IGRFFORM_2,DGW_TEXT,"IGRF","DATE");    
+      GetInfoSYS_DGW(Diag,_IGRFFORM_3,DGW_TEXT,"IGRF","LONG");    
+      GetInfoSYS_DGW(Diag,_IGRFFORM_4,DGW_TEXT,"IGRF","LAT"); 
+      GetInfoSYS_DGW(Diag,_IGRFFORM_5,DGW_TEXT,"IGRF","ELEV");    
+      GetInfoSYS_DGW(Diag,_IGRFFORM_6,DGW_TEXT,"IGRF","TOTAL");    
+      GetInfoSYS_DGW(Diag,_IGRFFORM_7,DGW_TEXT,"IGRF","INC");    
+      GetInfoSYS_DGW(Diag,_IGRFFORM_8,DGW_TEXT,"IGRF","DEC");    
+
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+
+   }
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+
+   GetString_SYS("IGRF","MODEL",sFile);  
+   Strcat_STR(sFile,".dat");
+
+
+   // --- Make the file name lower case ---
+
+   ToLower_STR(sFile);
+
+
+   // --- get date ---
+
+
+   GetString_SYS("IGRF","DATE",sTemp);  
+   iDatemode =1;
+   DateCh = NULLSYMB;
+   if (iStrMin_STR(sTemp) > 0) {
+  
+      // --- if the elevation channel does not exist, assume user tried to enter a single string ---
+
+      if (!iExistSymb_DB(Data,sTemp,DB_SYMB_CHAN))  
+      {  
+         // --- try to convert string to a date number ---          
+
+         rDate = rScanDate_STR(sTemp,DATE_FORMAT_YYYYMMDD);
+         if (rDate == rDUMMY)
+            Abort_SYS(_("Date value is not a Channel or valid number"));      
+         if (rDate < 1945.0) 
+            Abort_SYS(_("Date must be after 1945."));
+      } else {
+        
+         iDatemode = 0;
+         DateCh = FindSymb_DB(Data,sTemp,DB_SYMB_CHAN);
+      }
+
+   } else
+      rDate = rDUMMY;
+
+
+   // --- Get the input channel strings ---
+
+   GetString_SYS("IGRF","LONG",sLonCh);
+   GetString_SYS("IGRF","LAT",sLatCh);
+   GetString_SYS("IGRF","ELEV",sElevCh);   
+
+   // --- Get the input channel handles ---
+
+   if (!iExistSymb_DB(Data,sLonCh,DB_SYMB_CHAN))  
+      Abort_SYS(_("Longitude channel does not exist"));
+   else
+      LonCh = FindSymb_DB(Data,sLonCh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sLatCh,DB_SYMB_CHAN))  
+      Abort_SYS(_("Latitude channel does not exist"));
+   else
+      LatCh = FindSymb_DB(Data,sLatCh,DB_SYMB_CHAN);    
+  
+   // --- if the elevation channel does not exist, assume user tried to enter
+   //     a single value ---
+
+   if (!iExistSymb_DB(Data,sElevCh,DB_SYMB_CHAN))  
+   {  
+      // --- set flag - single elev, no channel value ---
+      
+      iElmode =1;
+      ElevCh = NULLSYMB;
+       
+      // --- try to convert string to a real number ---          
+
+      rElev = rScanR_STR(sElevCh);      
+      
+      // --- see if valid ---
+
+      if (rElev == rDUMMY)
+         Abort_SYS(_("Elevation value is not a Channel or valid number"));      
+   }
+   else
+   {
+      iElmode = 0;
+      ElevCh = FindSymb_DB(Data,sElevCh,DB_SYMB_CHAN);
+   }
+
+   // --- Get the IGRF year ---
+   
+   GetString_SYS("IGRF","Year",sYear);
+   if (iStrlen_STR(sYear))
+      iYear = iGetInt_SYS("IGRF","YEAR");
+   else
+      iYear = iDUMMY;
+ 
+   // --- Get the Output Channels ---
+ 
+   TotCh = NULLSYMB;
+   GetString_SYS("IGRF","TOTAL",sTotCh);
+   if (iStrlen_STR(sTotCh)) 
+   {
+      if (!iExistSymb_DB(Data,sTotCh,DB_SYMB_CHAN))  
+         TotCh = CreateSymb_DB(Data,sTotCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      else         
+         TotCh = FindSymb_DB(Data,sTotCh,DB_SYMB_CHAN);
+      iTflag = 1;
+   }
+   else
+   {
+      iTflag = 0;
+      TotCh = (DB_SYMB)(-2);
+   }
+
+   IncCh = NULLSYMB;
+   GetString_SYS("IGRF","INC",sIncCh);
+   if (iStrlen_STR(sIncCh))
+   {
+      if (!iExistSymb_DB(Data,sIncCh,DB_SYMB_CHAN))  
+         IncCh   = CreateSymb_DB(Data,sIncCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      else
+         IncCh = FindSymb_DB(Data,sIncCh,DB_SYMB_CHAN);
+      iIflag = 1;
+   }
+   else
+   {
+      iIflag = 0;
+      IncCh = (DB_SYMB)(-3);
+   }
+
+   DecCh = NULLSYMB;
+   GetString_SYS("IGRF","DEC",sDecCh);
+   if (iStrlen_STR(sDecCh)) 
+   {
+      if (!iExistSymb_DB(Data,sDecCh,DB_SYMB_CHAN))  
+         DecCh = CreateSymb_DB(Data,sDecCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_FLOAT);
+      else
+         DecCh = FindSymb_DB(Data,sDecCh,DB_SYMB_CHAN);
+      iDflag = 1;
+   }
+   else
+   {
+      iDflag = 0;
+      DecCh = (DB_SYMB)(-4);
+   }
+
+   // --- Ensure symbols are all different ---
+
+   if ( (LonCh == LatCh) || (LonCh == ElevCh) || (LonCh == TotCh) || (LonCh == IncCh) || (LonCh == DecCh) ||
+        (LatCh == ElevCh) || (LatCh == TotCh) || (LatCh == IncCh) || (LatCh == DecCh) ||
+        (ElevCh == TotCh) || (ElevCh == IncCh) || (ElevCh == DecCh) ||
+        (TotCh == IncCh) || (TotCh == DecCh) || 
+        (DecCh == IncCh) )
+      Abort_SYS(_("Input and Output channels must ALL be different."));
+
+
+   // --- create input and output VV's ---
+
+   hVVlon = Create_VV(REAL,0);
+   hVVlat = Create_VV(REAL,0);
+   hVVel  = Create_VV(REAL,0);
+   hVVtot = Create_VV(REAL,0);
+   hVVinc = Create_VV(REAL,0);
+   hVVdec = Create_VV(REAL,0);           
+
+       
+   // --- Lock channels ---
+
+   LockSymb_DB(Data,LonCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,LatCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);  
+   if (!(iDatemode))
+      LockSymb_DB(Data,DateCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   if (!(iElmode))
+      LockSymb_DB(Data,ElevCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   if (iTflag)
+      LockSymb_DB(Data,TotCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   if (iIflag)
+      LockSymb_DB(Data,IncCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   if (iDflag)
+      LockSymb_DB(Data,DecCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   // --- Prepare to do the work --- 
+
+   ProgName_SYS(_("IGRF Computation"),1);
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      Strcpy_STR(sLabel,_("Compute IGRF Line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- get the date of line ---
+
+      if (iDatemode==0)
+         rDate = rGetChanReal_DB(Data,Line,DateCh,0);
+
+      if (rDate == rDUMMY) {
+         rD = rLineDate_DB(Data,Line);
+         if (rD < 1945.0)
+            rD = rDate_SYS();
+      } else
+         rD = rDate;
+
+
+      // --- Get the longitude and latidude values into input VV's ---
+
+      GetChanVV_DB(Data,Line,LonCh,hVVlon);
+      GetChanVV_DB(Data,Line,LatCh,hVVlat);
+      iVVlonlen = iLength_VV(hVVlon);
+      iVVlatlen = iLength_VV(hVVlat);     
+
+      if(iVVlonlen==0 || iVVlatlen==0)
+      {
+         // --- Advance to Next Line ---        
+
+         UnLockSymb_DB(Data,Line);
+
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+         continue;
+      }
+         
+ 
+      // --- if using elevation channel get the elevation channel data
+      //     into input VV ---
+     
+      if (!(iElmode)) {
+         GetChanVV_DB(Data,Line,ElevCh,hVVel);
+         ReFidVV_VV( hVVel,hVVlon);
+      }
+      
+      // --- Get the largest VV length ---
+      
+      iVVlonlen = iLength_VV(hVVlon);
+      iVVlatlen = iLength_VV(hVVlat);     
+      if (!(iElmode))
+         iVVelevlen = iLength_VV(hVVel);
+      else
+         iVVelevlen = 0;           
+  
+      if (iVVlonlen > iVVlatlen)
+         iVVmaxlen = iVVlonlen;
+      else 
+         iVVmaxlen = iVVlatlen;      
+      if (iVVmaxlen < iVVelevlen)
+         iVVmaxlen = iVVelevlen;
+      
+      // --- set input VV's to max VV size ---
+
+      SetLen_VV(hVVlon,iVVmaxlen);
+      SetLen_VV(hVVlat,iVVmaxlen);
+      SetLen_VV(hVVel,iVVmaxlen);
+      
+
+      // --- Set the length of output VVs = length of largest input VV ---
+
+      SetLen_VV(hVVtot,iVVmaxlen);
+      SetLen_VV(hVVinc,iVVmaxlen);
+      SetLen_VV(hVVdec,iVVmaxlen);
+
+      
+      // --- Use the input VV fiducial information as the output VVs
+      //     fiducial information ---
+
+      rFstart = rGetFidStart_VV(hVVlon);
+      rFinc   = rGetFidIncr_VV(hVVlon);
+      
+      
+      // --- FID fix-up ---
+      
+      if(rFstart == rDUMMY) 
+			rFstart = 0.0;
+		if(rFinc == rDUMMY)
+		   rFinc = 1.0;
+
+      SetFidStart_VV(hVVtot,rFstart);
+      SetFidIncr_VV(hVVtot,rFinc);
+      SetFidStart_VV(hVVlon,rFstart);
+      SetFidIncr_VV(hVVlon,rFinc);
+      SetFidStart_VV(hVVlat,rFstart);
+      SetFidIncr_VV(hVVlat,rFinc);
+      SetFidStart_VV(hVVinc,rFstart);
+      SetFidIncr_VV(hVVinc,rFinc);
+      SetFidStart_VV(hVVdec,rFstart);
+      SetFidIncr_VV(hVVdec,rFinc);
+
+      // --- if using a single elevation, make elevation VV contain 
+      //     these values ---
+
+      if (iElmode)
+      {                    
+         for (i=0;i<iVVmaxlen;i++)
+            SetReal_VV(hVVel,i,rElev);        
+      }    
+
+      
+      // --- Compute the IGRF channel for this line ---
+
+      hIGRF = Create_IGRF(rD,iYear,sFile);   
+      CalcVV_IGRF(hIGRF,hVVel,hVVlon,hVVlat,hVVtot,hVVinc,hVVdec);      
+      Destroy_IGRF(hIGRF);
+      
+      
+      // --- Write the VVs back to the database ---
+
+      if (iTflag)
+         PutChanVV_DB(Data,Line,TotCh,hVVtot);
+      if (iIflag)
+         PutChanVV_DB(Data,Line,IncCh,hVVinc);
+      if (iDflag)
+         PutChanVV_DB(Data,Line,DecCh,hVVdec);
+
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+   }
+
+   // --- Add maker ---
+
+   if (TotCh != (DB_SYMB)(-2)) 
+      EasyMakerSymb_DB(Data,TotCh,_("IGRF/DGRF channels"),"IGRF;");
+   if (IncCh != (DB_SYMB)(-3)) 
+      EasyMakerSymb_DB(Data,IncCh,_("IGRF/DGRF channels"),"IGRF;");
+   if (DecCh != (DB_SYMB)(-4)) 
+      EasyMakerSymb_DB(Data,DecCh,_("IGRF/DGRF channels"),"IGRF;");
+
+
+
+   // --- unlock channels ---
+
+   UnLockSymb_DB(Data,LonCh);
+   UnLockSymb_DB(Data,LatCh);
+   if (DateCh != NULLSYMB) 
+      UnLockSymb_DB(Data,DateCh);
+   if (ElevCh != NULLSYMB) 
+      UnLockSymb_DB(Data,ElevCh);
+   if (TotCh != (DB_SYMB)(-2)) 
+      UnLockSymb_DB(Data,TotCh);
+   if (IncCh != (DB_SYMB)(-3)) 
+      UnLockSymb_DB(Data,IncCh);
+   if (DecCh != (DB_SYMB)(-4)) 
+      UnLockSymb_DB(Data,DecCh);
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}                                   

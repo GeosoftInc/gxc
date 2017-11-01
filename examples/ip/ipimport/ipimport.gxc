@@ -1,0 +1,1211 @@
+//===========================================================================
+NAME          = "Import IP Data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Import IP data into the database.
+
+    IP.IMPSOURCE : \"D\" Import from an instrument dump file
+                   \"F\" Import from Geosoft IPDATA format file
+                   \"R\" Import from Geosoft IPRED format file
+                   \"S\" Import from Scintrex GDF file
+                   \"ZFLD\" Import from Zonge FLD file
+                   \"ZAVG\" Import from Zonge AVG file
+                   \"ZAVGW\" Import from Zonge AVG (CRAVGW) file
+                   \"I2X\"  Import from Interpex I2X file
+    
+    Dump File Import:     
+    IP.DUMPFILE       Name of the file to import
+    IP.INSTRUMENT     Instrument dump to read
+    IP.IMPORT_MODE    0: Overwrite, 1: Append
+
+    IPDATA Import:
+    IP.IPDATAFILE      Name of the file to import
+    IP.IPIMPCHAN       Name of array channel to create
+    IP.IPIMPCHAN2      Optional second array channel (for frequency domain only)
+
+    IPRED Import:
+    IP.IPREDFILE      Name of the file to import
+    IP.IPREDCHAN      Name of channel to create
+
+    Scintrex Import:
+    IP.SGDFFILE
+
+    Zonge Imports:
+    IP.ZFLDFILE
+    IP.ZAVGFILE
+    IP.STNSCALE
+"
+// Revision History:
+// v7.4.0: Added Instrumentation GDD import.
+// v6.4.0: Append mode should apply to all imports.
+//         Fixed typo in distant electrodes message for DPDP surveys.
+// v6.3.0: Added append option, fixed progress bar.
+// v6.1.0: IPRED import now merges files if possible.
+// v5.1.6: Added support for Iris Elrec-Pro.
+// v5.1.3: Using "Current" X, Y and Z channels
+//         Unload all channels before loading, X, Y then all channels
+//         Add Phoenix V2 dump file import.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPIMPORT.gr"
+#include "IPIMPORT.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define DONE              -1
+#define MAIN               0
+#define IMPORT_DUMP        1
+#define GEOSOFT_IPDATA     2
+#define GEOSOFT_IPRED      3
+#define SCINTREX           4
+#define ZONGE_FLD          5
+#define ZONGE_AVG          6
+#define INTERPEX_I2X       7
+#define INSTRUMENTATION_GDD 8
+#define ZONGE_AVGW          9
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+
+int         i;                // Utility 
+int			iDiag;			  // Dialog ID
+
+string(STR_FILE) sFile;
+string(STR_MULTI_FILE) sFiles;
+string(STR_DB_SYMBOL) sChan, sChan2, sXCh, sYCh, sZCh, sCurLine;
+string(STR_DEFAULT_SHORT) sSource;
+string(STR_DEFAULT_LONG) sMsg;
+int  iSystem, iDone, iFiles, iScale, iArray, iType, iExt, iAppend, iSupressXYZ;
+int  iMaxChans, iMaxLines;
+real rLine, rPosMult;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get Oasis Database ---
+
+   if (iInteractive_SYS()) 
+	{
+		iMaxChans = iGetInt_SYS("IPIMPORT", "MAXCHANS");
+		if(iMaxChans == iDUMMY)
+			iMaxChans = 200;
+		
+		iMaxLines = iGetInt_SYS("IPIMPORT", "MAXLINES");
+		if(iMaxLines == iDUMMY)
+			iMaxLines = 1000;
+
+		SetInt_SYS("CREATE", "CHANNELS", iMaxChans);
+		SetInt_SYS("CREATE", "LINES", iMaxLines);
+
+      if (iHaveCurrent_EDB()) {
+
+         if (iDisplayQuestion_SYS(_("Import Database"),_("Import data into the current database ?"))==0)
+         {
+            if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)"))  Cancel_SYS();
+         }  
+
+      } else {
+        if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) Cancel_SYS();
+      }
+
+		SetInt_SYS("IPIMPORT", "MAXCHANS", iGetInt_SYS("CREATE", "CHANNELS"));
+		SetInt_SYS("IPIMPORT", "MAXLINES", iGetInt_SYS("CREATE", "LINES"));
+   }
+   
+   // --- get database ---
+   
+   EData = Current_EDB();
+   GetCurLine_EDB(EData, sCurLine);
+
+
+   // --- Import mode default: overwrite ---
+   
+   iAppend = 0;
+   
+   
+   // --- Are we running interactively ? ---
+
+   iDone = 0;
+   if(iInteractive_SYS())
+   {
+      iDiag = MAIN;
+ 
+      while (iDiag != DONE)
+      {
+         switch(iDiag)
+         {
+            case MAIN:
+               // --- Create the Dialogue ---
+               Diag = Create_DGW("IPIMPORT");
+
+               // --- Set any Defaults ---
+               SetInfoSYS_DGW(Diag,_IPIMPORT_0,DGW_LISTALIAS,"IP","IMPSOURCE");
+               SetInfoSYS_DGW(Diag,_IPIMPORT_1,DGW_LISTALIAS,"IP","IMPORT_MODE");
+
+               // --- Run the Dialogue ---
+               i = iRunDialogue_DGW(Diag);
+               if (i != 0) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings ---
+               GetInfoSYS_DGW(Diag,_IPIMPORT_0,DGW_LISTALIAS,"IP","IMPSOURCE");
+               GetInfoSYS_DGW(Diag,_IPIMPORT_1,DGW_LISTALIAS,"IP","IMPORT_MODE");
+
+               // --- Destroy the Dialogue ---
+               Destroy_DGW(Diag);
+
+               // --- Get the system type ---
+
+               GetString_SYS("IP","IMPSOURCE",sSource);
+               
+               if(!iStrcmp_STR(sSource,"D",STR_CASE_TOLERANT)) {    // Dump File
+                  iDiag = IMPORT_DUMP;
+               }
+               else if(!iStrcmp_STR(sSource,"F",STR_CASE_TOLERANT)) {    // IPDATA File
+                  iDiag = GEOSOFT_IPDATA;
+               }
+               else if(!iStrcmp_STR(sSource,"R",STR_CASE_TOLERANT)) {    // IPRED File
+                  iDiag = GEOSOFT_IPRED;
+               }
+               else if(!iStrcmp_STR(sSource,"S",STR_CASE_TOLERANT)) {    // Scintrex GDF File
+                  iDiag = SCINTREX;
+               }
+               else if(!iStrcmp_STR(sSource,"ZFLD",STR_CASE_TOLERANT)) {    // Zonge FLD file
+                  iDiag = ZONGE_FLD;
+               }
+               else if(!iStrcmp_STR(sSource,"ZAVG",STR_CASE_TOLERANT)) {    // Zonge AVG file
+                  iDiag = ZONGE_AVG;
+               }
+               else if(!iStrcmp_STR(sSource,"ZAVGW",STR_CASE_TOLERANT)) {    // Zonge AVG (CRAVGW) file
+                  iDiag = ZONGE_AVGW;
+               }
+               else if(!iStrcmp_STR(sSource,"I2X",STR_CASE_TOLERANT)) {    // Interpex I2X format
+                  iDiag = INTERPEX_I2X;
+               }
+               else if(!iStrcmp_STR(sSource,"GDD",STR_CASE_TOLERANT)) {    // Instrumentation GDD format
+                  iDiag = INSTRUMENTATION_GDD;
+               }
+               else 
+                  Abort_SYS(_("I'm lost"));
+               
+               break;
+            case IMPORT_DUMP:
+               Diag = Create_DGW("IPIMPORT1");
+
+               // --- Set any Defaults ---
+               SetInfoSYS_DGW(Diag,_IPIMPORT1_0,DGW_FILEPATH,"IP","DUMPFILE");
+               SetInfoSYS_DGW(Diag,_IPIMPORT1_1,DGW_LISTALIAS,"IP","INSTRUMENT");
+
+               // --- Run the Dialogue ---
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();    // He hit cancel
+               if (i == 999)
+               {
+                  iDiag = MAIN;
+                  break;
+               }
+
+               // --- Get the Strings ---
+               GetInfoSYS_DGW(Diag,_IPIMPORT1_0,DGW_FILEPATH,"IP","DUMPFILE");
+               GetInfoSYS_DGW(Diag,_IPIMPORT1_1,DGW_LISTALIAS,"IP","INSTRUMENT");
+
+               // --- Destroy the Dialogue ---
+               Destroy_DGW(Diag);
+
+               // --- Some dump files lack required information ---
+               iSystem = iGetInt_SYS("IP","INSTRUMENT");
+               
+               // --- Iris Elrec-2 : Need array type, line direction ---
+               if(iSystem == IP_SYS_IP2) {
+
+                  while(1) {
+
+                     Diag = Create_DGW("IPIMPORT7");
+
+                     SetInfoSYS_DGW(Diag,_IPIMPORT7_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT7_1,DGW_LISTALIAS,"IP","LINEDIR");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT7_2,DGW_LISTALIAS,"IP","UNITS");
+            
+                     i = iRunDialogue_DGW(Diag);
+                     if (i==-1) Cancel_SYS();    // He hit cancel
+                     if (i == 999)
+                     {
+                        iDiag = IMPORT_DUMP;
+                        Destroy_DGW(Diag);
+                        break;
+                     }
+
+                     GetInfoSYS_DGW(Diag,_IPIMPORT7_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT7_1,DGW_LISTALIAS,"IP","LINEDIR");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT7_2,DGW_LISTALIAS,"IP","UNITS");
+
+                     Destroy_DGW(Diag);
+
+                     if(i==2) {  // Distant Electrodes
+                        
+                        iArray = iGetInt_SYS("IP","ARRAYTYPE");
+                        if(iArray==IP_ARRAY_DPDP)
+                        {
+                           DisplayMessage_SYS(_("Distant Electrodes"),_("There are no distant electrodes for Dipole-Dipole Arrays."));
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_PLDP) {
+                  
+                           Diag = Create_DGW("IPIMPORT9A");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_GRAD) {
+
+                           Diag = Create_DGW("IPIMPORT9C");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_0,DGW_TEXT,"IP","T1X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_1,DGW_TEXT,"IP","T1Y");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_2,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_3,DGW_TEXT,"IP","T2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9C_0,DGW_TEXT,"IP","T1X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9C_1,DGW_TEXT,"IP","T1Y");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9C_2,DGW_TEXT,"IP","T2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9C_3,DGW_TEXT,"IP","T2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else
+                           Abort_SYS(_("I'm lost"));
+                     }
+                     iDiag = DONE;
+                     break;
+                  }
+
+               }
+               else if(iSystem == IP_SYS_IP6) {
+
+                  Diag = Create_DGW("IPIMPORT10");
+
+                  SetInfoSYS_DGW(Diag,_IPIMPORT10_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT10_1,DGW_TEXT,"IP","LINEMULT");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT10_2,DGW_TEXT,"IP","STATMULT");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT10_3,DGW_LISTALIAS,"IP","UNITS");
+            
+                  i = iRunDialogue_DGW(Diag);
+                  if (i==-1) Cancel_SYS();    // He hit cancel
+                  if (i == 999)
+                  {
+                     iDiag = IMPORT_DUMP;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  GetInfoSYS_DGW(Diag,_IPIMPORT10_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT10_1,DGW_TEXT,"IP","LINEMULT");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT10_2,DGW_TEXT,"IP","STATMULT");      
+                  GetInfoSYS_DGW(Diag,_IPIMPORT10_3,DGW_LISTALIAS,"IP","UNITS");
+
+                  Destroy_DGW(Diag);
+                  
+                  iDiag = DONE;
+               }
+               else if(iSystem == IP_SYS_IP10) {
+
+                  Diag = Create_DGW("IPIMPORT12");
+
+                  SetInfoSYS_DGW(Diag,_IPIMPORT12_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT12_1,DGW_TEXT,"IP","LINEMULT");
+            
+                  i = iRunDialogue_DGW(Diag);
+                  if (i==-1) Cancel_SYS();    // He hit cancel
+                  if (i == 999)
+                  {
+                     iDiag = IMPORT_DUMP;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  GetInfoSYS_DGW(Diag,_IPIMPORT12_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT12_1,DGW_TEXT,"IP","LINEMULT");
+
+                  Destroy_DGW(Diag);
+                  
+                  iDiag = DONE;
+               }
+               else if(iSystem == IP_SYS_ELREC_PRO) {
+
+                  Diag = Create_DGW("IPIMPORT15");
+
+                  SetInfoSYS_DGW(Diag,_IPIMPORT15_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT15_1,DGW_LISTALIAS,"IP","UNITS");
+            
+                  i = iRunDialogue_DGW(Diag);
+                  if (i==-1) Cancel_SYS();    // He hit cancel
+                  if (i == 999)
+                  {
+                     iDiag = IMPORT_DUMP;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  GetInfoSYS_DGW(Diag,_IPIMPORT15_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT15_1,DGW_LISTALIAS,"IP","UNITS");
+
+                  Destroy_DGW(Diag);
+                  
+                  iDiag = DONE;
+               }
+               else if(iSystem == IP_SYS_SYSCALR2) {
+
+                  // --- Need line direction ---
+
+                  Diag = Create_DGW("IPIMPORT6");
+
+                  SetInfoSYS_DGW(Diag,_IPIMPORT6_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT6_1,DGW_LISTALIAS,"IP","UNITS");
+            
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();    // He hit cancel
+                  if (i == 999)
+                  {
+                     iDiag = IMPORT_DUMP;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  GetInfoSYS_DGW(Diag,_IPIMPORT6_0,DGW_LISTALIAS,"IP","LINEDIR");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT6_1,DGW_LISTALIAS,"IP","UNITS");
+
+                  Destroy_DGW(Diag);
+
+                  iDiag = DONE;
+               }
+               else if(iSystem == IP_SYS_IPR11) {
+
+                  while(1) {
+
+                     Diag = Create_DGW("IPIMPORT8");
+
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_1,DGW_TEXT,"IP","ASEP");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_2,DGW_LISTALIAS,"IP","LINEDIR");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_3,DGW_LISTALIAS,"IP","LINESENSE");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_4,DGW_TEXT,"IP","LINEMULT");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_5,DGW_TEXT,"IP","STATMULT");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_6,DGW_TEXT,"IP","MINN");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT8_7,DGW_LISTALIAS,"IP","UNITS");
+            
+                     i = iRunDialogue_DGW(Diag);
+                     if (i==-1) Cancel_SYS();    // He hit cancel
+                     if (i == 999)
+                     {
+                        iDiag = IMPORT_DUMP;
+                        Destroy_DGW(Diag);
+                        break;
+                     }
+
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_1,DGW_TEXT,"IP","ASEP");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_2,DGW_LISTALIAS,"IP","LINEDIR");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_3,DGW_LISTALIAS,"IP","LINESENSE");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_4,DGW_TEXT,"IP","LINEMULT");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_5,DGW_TEXT,"IP","STATMULT");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_6,DGW_TEXT,"IP","MINN");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT8_7,DGW_LISTALIAS,"IP","UNITS");
+
+                     Destroy_DGW(Diag);
+
+                     if(i==2) {  // Distant Electrodes
+                        
+                        iArray = iGetInt_SYS("IP","ARRAYTYPE");
+                        if(iArray==IP_ARRAY_DPDP)
+                        {
+                           DisplayMessage_SYS(_("Distant Electrodes"),_("There are no distant electrodes for Dipole-Dipole Arrays."));
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_PLDP) {
+                  
+                           Diag = Create_DGW("IPIMPORT9A");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_GRAD) {
+
+                           Diag = Create_DGW("IPIMPORT9C");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_0,DGW_TEXT,"IP","T1X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_1,DGW_TEXT,"IP","T1Y");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_2,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_3,DGW_TEXT,"IP","T2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_0,DGW_TEXT,"IP","T1X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9C_1,DGW_TEXT,"IP","T1Y");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9C_2,DGW_TEXT,"IP","T2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9C_3,DGW_TEXT,"IP","T2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else
+                           Abort_SYS(_("I'm lost"));
+                     }
+
+                     iDiag = DONE;
+                     break;
+                  }  // End of IPR-11
+               }
+               else if(iSystem == IP_SYS_IPR12) {
+
+                  Diag = Create_DGW("IPIMPORT13");
+
+                  SetInfoSYS_DGW(Diag,_IPIMPORT13_0,DGW_LISTALIAS,"IP","IPR12WIN");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT13_1,DGW_LISTALIAS,"IP","LINEDIR");
+            
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();    // He hit cancel
+                  if (i == 999)
+                  {
+                     iDiag = IMPORT_DUMP;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  GetInfoSYS_DGW(Diag,_IPIMPORT13_0,DGW_LISTALIAS,"IP","IPR12WIN");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT13_1,DGW_LISTALIAS,"IP","LINEDIR");
+
+                  Destroy_DGW(Diag);
+
+                  iDiag = DONE;
+               }
+               else if(iSystem == IP_SYS_PHOENIX) {
+
+                  while(1) {
+
+                     Diag = Create_DGW("IPIMPORT11");
+
+                     SetInfoSYS_DGW(Diag,_IPIMPORT11_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT11_1,DGW_LISTALIAS,"IP","LINESENSE");
+            
+                     i = iRunDialogue_DGW(Diag);
+                     if (i==-1) Cancel_SYS();    // He hit cancel
+                     if (i == 999)
+                     {
+                        iDiag = IMPORT_DUMP;
+                        Destroy_DGW(Diag);
+                        break;
+                     }
+
+                     GetInfoSYS_DGW(Diag,_IPIMPORT11_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT11_1,DGW_LISTALIAS,"IP","LINESENSE");
+
+                     Destroy_DGW(Diag);
+
+                     if(i==2) {  // Distant Electrodes
+                        
+                        iArray = iGetInt_SYS("IP","ARRAYTYPE");
+                        if(iArray==IP_ARRAY_DPDP)
+                        {
+                           DisplayMessage_SYS(_("Distant Electrodes"),_("There are no distant electrodes for Dipole-Dipole Arrays."));
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_PLDP) {
+                  
+                           Diag = Create_DGW("IPIMPORT9A");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_PLPL) {
+
+                           Diag = Create_DGW("IPIMPORT9B");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_1,DGW_TEXT,"IP","T2Y");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_2,DGW_TEXT,"IP","R2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_3,DGW_TEXT,"IP","R2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_1,DGW_TEXT,"IP","T2Y");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9B_2,DGW_TEXT,"IP","R2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9B_3,DGW_TEXT,"IP","R2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else
+                           Abort_SYS(_("I'm lost"));
+                     }
+                     iDiag = DONE;
+                     break;
+                  }  // End of PHOENIX V4-V5
+               }
+               else if(iSystem == IP_SYS_PHOENIX_V2) {
+
+                  while(1) {
+
+                     Diag = Create_DGW("IPIMPORT14");
+
+                     SetInfoSYS_DGW(Diag,_IPIMPORT14_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT14_1,DGW_TEXT,"IP","ASEP");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT14_2,DGW_TEXT,"IP","LINENUM");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT14_3,DGW_LISTALIAS,"IP","LINEDIR");
+                     SetInfoSYS_DGW(Diag,_IPIMPORT14_4,DGW_LISTALIAS,"IP","UNITS");
+            
+                     i = iRunDialogue_DGW(Diag);
+                     if (i==-1) Cancel_SYS();    // He hit cancel
+                     if (i == 999)
+                     {
+                        iDiag = IMPORT_DUMP;
+                        Destroy_DGW(Diag);
+                        break;
+                     }
+
+                     GetInfoSYS_DGW(Diag,_IPIMPORT14_0,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT14_1,DGW_TEXT,"IP","ASEP");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT14_2,DGW_TEXT,"IP","LINENUM");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT14_3,DGW_LISTALIAS,"IP","LINEDIR");
+                     GetInfoSYS_DGW(Diag,_IPIMPORT14_4,DGW_LISTALIAS,"IP","UNITS");
+
+                     Destroy_DGW(Diag);
+
+                     if(i==2) {  // Distant Electrodes
+                        
+                        iArray = iGetInt_SYS("IP","ARRAYTYPE");
+                        if(iArray==IP_ARRAY_DPDP)
+                        {
+                           DisplayMessage_SYS(_("Distant Electrodes"),_("There are no distant electrodes for Dipole-Dipole Arrays."));
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_PLDP) {
+                  
+                           Diag = Create_DGW("IPIMPORT9A");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_0,DGW_TEXT,"IP","T2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9A_1,DGW_TEXT,"IP","T2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else if(iArray==IP_ARRAY_PLPL) {
+
+                           Diag = Create_DGW("IPIMPORT9B");
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_1,DGW_TEXT,"IP","T2Y");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_2,DGW_TEXT,"IP","R2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_3,DGW_TEXT,"IP","R2Y");
+
+                           i = iRunDialogue_DGW(Diag);
+                           if (i==-1) Cancel_SYS();    // He hit cancel
+
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_0,DGW_TEXT,"IP","T2X");
+                           SetInfoSYS_DGW(Diag,_IPIMPORT9B_1,DGW_TEXT,"IP","T2Y");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9B_2,DGW_TEXT,"IP","R2X");
+                           GetInfoSYS_DGW(Diag,_IPIMPORT9B_3,DGW_TEXT,"IP","R2Y");
+
+                           Destroy_DGW(Diag);
+
+                           continue;
+                        }
+                        else
+                           Abort_SYS(_("I'm lost"));
+                     }
+                     iDiag = DONE;
+                     break;
+                  }  // End of PHOENIX V2
+               } 
+               else 
+               {
+                  // --- Nothing more to do ---
+
+                  iDiag = DONE;
+                  break;
+               }         // End of dump file imports
+               break;
+            case GEOSOFT_IPDATA:
+               // --- Create the Dialogue ---
+               Diag = Create_DGW("IPIMPORT2");
+
+               // --- Set any Defaults ---
+               SetInfoSYS_DGW(Diag,_IPIMPORT2_0,DGW_FILEPATH,"IP","IPDATAFILE");
+               SetInfoSYS_DGW(Diag,_IPIMPORT2_1,DGW_TEXT,"IP","IPIMPCHAN");
+               SetInfoSYS_DGW(Diag,_IPIMPORT2_2,DGW_TEXT,"IP","IPIMPCHAN2");
+
+               // --- Run the Dialogue ---
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();    // He hit cancel
+               if (i == 999)
+               {
+                  iDiag = MAIN;
+                  Destroy_DGW(Diag);
+                  break;
+               }
+
+               // --- Get the Strings ---
+               GetInfoSYS_DGW(Diag,_IPIMPORT2_0,DGW_FILEPATH,"IP","IPDATAFILE");
+               GetInfoSYS_DGW(Diag,_IPIMPORT2_1,DGW_TEXT,"IP","IPIMPCHAN");
+               GetInfoSYS_DGW(Diag,_IPIMPORT2_2,DGW_TEXT,"IP","IPIMPCHAN2");
+
+               // --- Destroy the Dialogue ---
+               Destroy_DGW(Diag);
+
+               iDiag = DONE;
+               break;
+            case GEOSOFT_IPRED:
+               // --- Create the Dialogue ---
+               Diag = Create_DGW("IPIMPORT2A");
+
+               // --- Set any Defaults ---
+               SetInfoSYS_DGW(Diag,_IPIMPORT2A_0,DGW_FILEPATH,"IP","IPREDFILE");
+               SetInfoSYS_DGW(Diag,_IPIMPORT2A_1,DGW_TEXT,"IP","IPREDCHAN");
+
+               // --- Run the Dialogue ---
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();    // He hit cancel
+               if (i == 999)
+               {
+                  iDiag = MAIN;
+                  Destroy_DGW(Diag);
+                  break;
+               }
+
+               // --- Get the Strings ---
+               GetInfoSYS_DGW(Diag,_IPIMPORT2A_0,DGW_FILEPATH,"IP","IPREDFILE");
+               GetInfoSYS_DGW(Diag,_IPIMPORT2A_1,DGW_TEXT,"IP","IPREDCHAN");
+
+               // --- Destroy the Dialogue ---
+               Destroy_DGW(Diag);
+
+               iDiag = DONE;
+               break;
+            case SCINTREX:
+               // --- Create the Dialogue ---
+               Diag = Create_DGW("IPIMPORT3");
+
+               // --- Set any Defaults ---
+               SetInfoSYS_DGW(Diag,_IPIMPORT3_0,DGW_FILEPATH,"IP","SGDFFILE");
+
+               // --- Run the Dialogue ---
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();    // He hit cancel
+               if (i == 999)
+               {
+                  iDiag = MAIN;
+                  Destroy_DGW(Diag);
+                  break;
+               }
+
+               // --- Get the Strings ---
+               GetInfoSYS_DGW(Diag,_IPIMPORT3_0,DGW_FILEPATH,"IP","SGDFFILE");
+
+               // --- Destroy the Dialogue ---
+               Destroy_DGW(Diag);
+
+               iDiag = DONE;
+               break;
+            
+				case ZONGE_FLD:
+            
+				   // --- Create the Dialogue ---
+               Diag = Create_DGW("IPIMPORT4");
+
+               // --- Set any Defaults ---
+               SetInfoSYS_DGW(Diag,_IPIMPORT4_0,DGW_FILEPATH,"IP","ZFLDFILE");
+               SetInfoSYS_DGW(Diag,_IPIMPORT4_1,DGW_LISTALIAS,"IP","STNSCALE");
+               SetInfoSYS_DGW(Diag,_IPIMPORT4_2,DGW_TEXT,"IP","ZPOSMULT");
+
+               // --- Run the Dialogue ---
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();    // He hit cancel
+               if (i == 999)
+               {
+                  iDiag = MAIN;
+                  Destroy_DGW(Diag);
+                  break;
+               }
+
+               // --- Get the Strings ---
+               GetInfoSYS_DGW(Diag,_IPIMPORT4_0,DGW_FILEPATH,"IP","ZFLDFILE");
+               GetInfoSYS_DGW(Diag,_IPIMPORT4_1,DGW_LISTALIAS,"IP","STNSCALE");
+               GetInfoSYS_DGW(Diag,_IPIMPORT4_2,DGW_TEXT,"IP","ZPOSMULT");
+
+               // --- Destroy the Dialogue ---
+               Destroy_DGW(Diag);
+               
+               iDiag = DONE;
+               break;
+            
+				case ZONGE_AVG:
+               while(1) 
+               {
+                  // --- Create the Dialogue ---
+                  Diag = Create_DGW("IPIMPORT5");
+
+                  // --- Set any Defaults ---
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5_0,DGW_FILEPATH,"IP","ZAVGFILE");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5_1,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5_2,DGW_TEXT,"IP","ZLINENUM");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5_3,DGW_LISTALIAS,"IP","LINEDIR");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5_4,DGW_LISTALIAS,"IP","STNSCALE");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5_5,DGW_TEXT,"IP","ZPOSMULT");
+
+                  // --- Run the Dialogue ---
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();    // He hit cancel
+                  if (i == 999)
+                  {
+                     iDiag = MAIN;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  // --- Get the Strings ---
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5_0,DGW_FILEPATH,"IP","ZAVGFILE");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5_1,DGW_LISTALIAS,"IP","ARRAYTYPE");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5_2,DGW_TEXT,"IP","ZLINENUM");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5_3,DGW_LISTALIAS,"IP","LINEDIR");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5_4,DGW_LISTALIAS,"IP","STNSCALE");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5_5,DGW_TEXT,"IP","ZPOSMULT");
+
+                  // --- Destroy the Dialogue ---
+                  Destroy_DGW(Diag);
+
+                  // --- Validate line number ---
+                  iType = iGetInt_SYS("IP","ARRAYTYPE");
+                  if(iType!=IP_ARRAY_GRAD) {
+               
+                     rLine = rGetReal_SYS("IP","ZLINENUM");
+                     if(rLine==rDUMMY) {
+                        DisplayMessage_SYS(_("Avg Import"),_("A line number is required."));
+                        continue;
+                     }
+                  }
+
+                  iDiag = DONE;
+                  break;
+               }
+               break;
+            
+				case ZONGE_AVGW:
+               while(1) 
+               {
+                  // --- Create the Dialogue ---
+                  Diag = Create_DGW("IPIMPORT5B");
+
+                  // --- Set any Defaults ---
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5B_0,DGW_FILEPATH,"IP","ZAVGWFILE");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5B_1,DGW_LISTALIAS,"IP","LINEDIR");
+                  SetInfoSYS_DGW(Diag,_IPIMPORT5B_2,DGW_LISTALIAS,"IP","STNSCALE");
+						SetInfoSYS_DGW(Diag,_IPIMPORT5B_3,DGW_TEXT,"IP","ZPOSMULT");
+
+                  // --- Run the Dialogue ---
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();    // He hit cancel
+                  if (i == 999)
+                  {
+                     iDiag = MAIN;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  // --- Get the Strings ---
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5B_0,DGW_FILEPATH,"IP","ZAVGWFILE");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5B_1,DGW_LISTALIAS,"IP","LINEDIR");
+                  GetInfoSYS_DGW(Diag,_IPIMPORT5B_2,DGW_LISTALIAS,"IP","STNSCALE");
+						GetInfoSYS_DGW(Diag,_IPIMPORT5B_3,DGW_TEXT,"IP","ZPOSMULT");
+
+                  // --- Destroy the Dialogue ---
+                  Destroy_DGW(Diag);
+
+                  iDiag = DONE;
+                  break;
+               }
+               break;
+            
+				case INTERPEX_I2X:
+               // --- Run the IPIMP1RESIX GX ---
+               iRunGX_SYS("ipimp1resix");
+               iDiag = DONE;
+
+               Exit_SYS();
+               break;
+
+				case INSTRUMENTATION_GDD:
+            
+				   // --- Create the Dialogue ---
+               Diag = Create_DGW("IPIMPORTGDD");
+
+               // --- Set any Defaults ---
+               SetInfoSYS_DGW(Diag,_IPIMPORTGDD_0,DGW_FILEPATH,"IP","GDDFILE");
+
+               // --- Run the Dialogue ---
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();    // He hit cancel
+               if (i == 999)
+               {
+                  iDiag = MAIN;
+                  Destroy_DGW(Diag);
+                  break;
+               }
+
+               // --- Get the Strings ---
+               GetInfoSYS_DGW(Diag,_IPIMPORTGDD_0,DGW_FILEPATH,"IP","GDDFILE");
+
+               // --- Destroy the Dialogue ---
+               Destroy_DGW(Diag);
+               
+               iDiag = DONE;
+               break;
+            
+
+            default:
+               Abort_SYS(_("I'm lost"));
+        } //End switch
+      } // End while
+   }
+
+   // --- Lock the database ---
+      
+   Data = Lock_EDB(EData);
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+   
+   
+   // --- Set append mode? ---
+   
+   iAppend = iGetInt_SYS("IP","IMPORT_MODE");
+   if(iAppend!=1) iAppend = 0;
+         
+   SetImportMode_IP(Ip, iAppend);
+   SetImportLine_IP(Ip, sCurLine); // used by ProsysII import.
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","IMPSOURCE",sSource);
+      
+   if(!iStrcmp_STR(sSource,"D",STR_CASE_TOLERANT)) {    // Dump File
+
+      GetString_SYS("IP","DUMPFILE",sFiles);
+
+      iSystem = iGetInt_SYS("IP","INSTRUMENT");
+
+      // --- Get Path ---
+   
+      Progress_SYS(1);
+      ProgName_SYS(_("Importing"), 1);   
+      iFiles = iCountTokens_STR(sFiles,"|");   
+      for(i=0; i<iFiles; i++)  
+      {
+         GetMFile_STR(sFiles,sFile,i);  
+         
+         Strcpy_STR(sMsg, _("Importing "));
+         Strcat_STR(sMsg, sFile);
+         ProgName_SYS(sMsg, 0);
+         ProgUpdateL_SYS(i,iFiles);
+         if(iCheckStop_SYS()) Cancel_SYS();
+         
+         ImportDump_IP(Ip, iSystem, Data, sFile);
+      }
+   }
+   else if(!iStrcmp_STR(sSource,"F",STR_CASE_TOLERANT)) {     // IPDATA file
+
+      GetString_SYS("IP","IPDATAFILE",sFiles);
+      GetString_SYS("IP","IPIMPCHAN",sChan);
+      GetString_SYS("IP","IPIMPCHAN2",sChan2);
+
+      // --- Get Path ---
+   
+      Progress_SYS(1);
+      ProgName_SYS(_("Importing"), 1);      
+      iFiles = iCountTokens_STR(sFiles,_n("|"));   
+      for(i=0; i<iFiles; i++)  
+      {
+         GetMFile_STR(sFiles,sFile,i);  
+
+         Strcpy_STR(sMsg, _("Importing "));
+         Strcat_STR(sMsg, sFile);
+         ProgName_SYS(sMsg, 0);
+         ProgUpdateL_SYS(i,iFiles);
+         if(iCheckStop_SYS()) Cancel_SYS();
+         
+         ImportIPDATA2_IP(Ip, Data, sFile, sChan, sChan2);
+      }
+
+   }
+   else if(!iStrcmp_STR(sSource,"R",STR_CASE_TOLERANT)) {     // IPRED file
+
+      GetString_SYS("IP","IPREDFILE",sFiles);
+      GetString_SYS("IP","IPREDCHAN",sChan);
+
+      iExt = FALSE;
+      if(!iStrlen_STR(sChan)) iExt = TRUE;
+
+      // --- Get Path ---
+   
+      Progress_SYS(1);
+      ProgName_SYS(_("Importing"), 1);   
+      iFiles = iCountTokens_STR(sFiles,"|");
+      for(i=0; i<iFiles; i++)  
+      {
+         GetMFile_STR(sFiles,sFile,i);  
+
+         Strcpy_STR(sMsg, _("Importing "));
+         Strcat_STR(sMsg, sFile);
+         ProgName_SYS(sMsg, 0);
+         ProgUpdateL_SYS(i,iFiles);
+         if(iCheckStop_SYS()) Cancel_SYS();
+         
+
+         // --- If no channel name is provided, get it from the file name extension ---
+
+         if(iExt)
+            FileNamePart_STR(sFile, sChan, STR_FILE_PART_EXTENSION);
+         ImportMergeIPRED_IP(Ip, Data, sFile, sChan);
+      }
+
+   }
+   else if(!iStrcmp_STR(sSource,"S",STR_CASE_TOLERANT)) {     // SGDF file
+
+      GetString_SYS("IP","SGDFFILE",sFiles);
+      
+      Progress_SYS(1);
+      ProgName_SYS(_("Importing"), 1);   
+      iFiles = iCountTokens_STR(sFiles,"|");
+      for(i=0; i<iFiles; i++)  
+      {
+         GetMFile_STR(sFiles,sFile,i);
+
+         Strcpy_STR(sMsg, _("Importing "));
+         Strcat_STR(sMsg, sFile);
+         ProgName_SYS(sMsg, 0);
+         ProgUpdateL_SYS(i,iFiles);
+         if(iCheckStop_SYS()) Cancel_SYS();
+         
+         ImportSGDF_IP(Ip, Data, sFile);
+      }
+
+   }
+   else if(!iStrcmp_STR(sSource,"ZFLD",STR_CASE_TOLERANT) ||
+           !iStrcmp_STR(sSource,"ZAVG",STR_CASE_TOLERANT) ||
+			  !iStrcmp_STR(sSource,"ZAVGW",STR_CASE_TOLERANT)) {     // Zonge files
+
+		iScale = iGetInt_SYS("IP","STNSCALE");
+		if(iScale<0 || iScale>3)
+			Abort_SYS(_("Invalid argument for line & station scaling"));
+		if(iScale==3) 
+			Abort_SYS(_("File-based line & station scaling not yet implemented"));
+
+		if(iScale==2) 
+		{
+			rPosMult = rGetReal_SYS("IP","ZPOSMULT");
+			if(rPosMult==rDUMMY) 
+				Abort_SYS(_("No line, station number multiplier defined for import"));
+		}
+
+      if(!iStrcmp_STR(sSource,"ZFLD",STR_CASE_TOLERANT)) {
+ 
+          // --- Get Path ---
+   
+         GetString_SYS("IP","ZFLDFILE",sFiles);
+         iFiles = iCountTokens_STR(sFiles,"|");
+   
+         Progress_SYS(1);
+         ProgName_SYS(_("Importing"), 1);   
+         for(i=0; i<iFiles; i++)  
+         {
+            GetMFile_STR(sFiles,sFile,i);  
+            
+            Strcpy_STR(sMsg, _("Importing "));
+            Strcat_STR(sMsg, sFile);
+            ProgName_SYS(sMsg, 0);
+            ProgUpdateL_SYS(i,iFiles);
+            if(iCheckStop_SYS()) Cancel_SYS();
+            
+            ImportZongeFLD_IP(Ip, Data, sFile, iScale, rPosMult);
+         }
+      }
+      else {     // Zonge AVG or CRAVGW file
+
+			if(!iStrcmp_STR(sSource,"ZAVG",STR_CASE_TOLERANT))
+			{         
+				iType = iGetInt_SYS("IP","ARRAYTYPE");
+				if(iType!=IP_ARRAY_GRAD) {
+         
+					rLine = rGetReal_SYS("IP","ZLINENUM");
+					if(rLine==rDUMMY) 
+						Abort_SYS(_("No line number defined for import"));
+				}
+	         GetString_SYS("IP","ZAVGFILE",sFiles);
+			}
+			else
+			{
+	         GetString_SYS("IP","ZAVGWFILE",sFiles);
+			}
+
+         iFiles = iCountTokens_STR(sFiles,"|");
+   
+         Progress_SYS(1);
+         ProgName_SYS(_("Importing"), 1);   
+         for(i=0; i<iFiles; i++)  
+         {
+            GetMFile_STR(sFiles,sFile,i);  
+            
+            Strcpy_STR(sMsg, _("Importing "));
+            Strcat_STR(sMsg, sFile);
+            ProgName_SYS(sMsg, 0);
+            ProgUpdateL_SYS(i,iFiles);
+            if(iCheckStop_SYS()) Cancel_SYS();
+                     
+            ImportZongeAVG_IP(Ip, Data, sFile, rLine, iScale, rPosMult);
+         }
+      }
+   }
+   else if(!iStrcmp_STR(sSource,"GDD",STR_CASE_TOLERANT)) {     // Instrumentation GDD file
+
+      GetString_SYS("IP","GDDFILE",sFiles);
+      
+      Progress_SYS(1);
+      ProgName_SYS(_("Importing"), 1);   
+      iFiles = iCountTokens_STR(sFiles,"|");
+      for(i=0; i<iFiles; i++)  
+      {
+         GetMFile_STR(sFiles,sFile,i);
+
+         Strcpy_STR(sMsg, _("Importing "));
+         Strcat_STR(sMsg, sFile);
+         ProgName_SYS(sMsg, 0);
+         ProgUpdateL_SYS(i,iFiles);
+         if(iCheckStop_SYS()) Cancel_SYS();
+         
+         ImportInstrumentationGDD_IP(Ip, Data, sFile);
+      }
+
+   }
+   else 
+      Abort_SYS(_("Invalid IP Data Source - Use \"D\" \"I\" or \"F\" for IP.IMPSOURCE"));
+
+
+   // --- Get current X, Y, and Z channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   // Query to see if this routine was invoked from the Import3D GX.
+   iSupressXYZ = 0;
+   if (iExistInt_SYS("IP", "IPIMPORT3D") == 1)
+      iSupressXYZ = iGetInt_SYS("IP", "IPIMPORT3D");
+   
+   
+   // --- display data ---
+   
+   DelLine0_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+   if (iSupressXYZ == 0)
+   {
+      LoadChan_EDB(EData, sXCh);
+      LoadChan_EDB(EData, sYCh);
+      LoadChan_EDB(EData, sZCh);
+   }
+   LoadChan_EDB(EData,"IP");
+   LoadChan_EDB(EData,"IP_Avg");
+   LoadChan_EDB(EData,"TN");
+   if (iSupressXYZ == 0)
+      LoadChan_EDB(EData,"N");
+   LoadAllChans_EDB(EData);
+   if (iSupressXYZ == 1)
+   {
+      UnLoadChan_EDB(EData, sXCh);
+      UnLoadChan_EDB(EData, sYCh);
+      UnLoadChan_EDB(EData, sZCh);
+      UnLoadChan_EDB(EData, "N");
+      UnLoadChan_EDB(EData, "Stn");
+      UnLoadChan_EDB(EData, "Topo");
+      // Reset back to 0, will be set to 1 next time Import3D is called.
+      SetInt_SYS("IP", "IPIMPORT3D", 0);
+   }
+   DelLine0_EDB(EData);
+     
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+   
+}

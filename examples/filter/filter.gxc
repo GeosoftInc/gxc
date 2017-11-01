@@ -1,0 +1,239 @@
+//===========================================================================
+NAME          = "Apply a convolution filter"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "
+
+  Apply a convolution filter to a file.  The filter can be defined
+  in a filter file or in a comma delimited string.
+
+    FILTER.IN       : Name of the Input Channel
+          .OUT      : Name of the Ouput Channel
+          .FILE     : Filter file name
+          .FILTER   : OR a filter string, comma delimited
+"
+
+//===========================================================================
+
+RESOURCE = "filter.gr"
+#include "filter.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;     // Channel Names
+string(STR_FILE) sFile;            // Filter file name
+string(STR_DEFAULT_LONG) sFilter;          // Filter
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh,OutCh;        // Channel handles
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+FILTER     Filter;            // Filter
+int        i;                 // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iErr;
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FILTER");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_FILTER_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_FILTER_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      iErr = 0;
+      do {
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_FILTER_0,DGW_TEXT,"FILTER","IN");     
+         SetInfoSYS_DGW(Diag,_FILTER_1,DGW_TEXT,"FILTER","OUT");     
+         SetInfoSYS_DGW(Diag,_FILTER_2,DGW_FILEPATH,"FILTER","FILE");    
+         SetInfoSYS_DGW(Diag,_FILTER_3,DGW_TEXT,"FILTER","FILTER");    
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+         // --- Get the Strings and replace in INI ---
+
+         GetInfoSYS_DGW(Diag,_FILTER_0,DGW_TEXT,"FILTER","IN");     
+         GetInfoSYS_DGW(Diag,_FILTER_1,DGW_TEXT,"FILTER","OUT");     
+         GetInfoSYS_DGW(Diag,_FILTER_2,DGW_FILEPATH,"FILTER","FILE"); 
+         GetInfoSYS_DGW(Diag,_FILTER_3,DGW_TEXT,"FILTER","FILTER"); 
+
+		   GetString_SYS("FILTER","FILE",sFile);
+			GetString_SYS("FILTER","FILTER",sFilter);
+
+         if (iStrMin_STR(sFilter) == 0 && iStrlen_STR(sFile) == 0) {
+            DisplayMessage_SYS(_("Error"),_("The GX requires a filter file or a filter string."));
+            iErr = 1;
+         } else
+            iErr = 0;            
+
+      } while (iErr);
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FILTER","IN",sInCh);
+   GetString_SYS("FILTER","OUT",sOutCh);
+   GetString_SYS("FILTER","FILE",sFile);
+   GetString_SYS("FILTER","FILTER",sFilter);
+
+
+   // --- get the filter ---
+
+   if (iStrMin2_STR(sFilter) > 0)
+      Filter = Create_FLT(sFilter);
+   else
+      Filter = Load_FLT(sFile);
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))  
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+
+   // --- Does the Output Channel Exist ? ---
+
+   if (iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN) == 0)
+      DupSymbNoLock_DB(Data,InCh,sOutCh);       // Create it 
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+
+
+   // --- must be different channels ---
+
+   if (InCh == OutCh)
+      Abort_SYS(_("Input and output channels must be different."));
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- Make sure channels are of same size ---
+   
+   if (iGetColVA_DB(Data, InCh) != iGetColVA_DB(Data, OutCh))
+      Abort_SYS(_("Input and output channels are different in array sizes."));
+   
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Filter line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+
+
+      // --- apply filter ---
+
+      Filter_DU(Data,Line,InCh,OutCh,Filter);
+
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Filter"),"FILTER;");
+
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- destroy the filter ---
+
+   Destroy_FLT(Filter);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+	
+	// --- Load the channel ---
+
+	if (iScript_SYS() == 0)
+		LoadChan_EDB( EData, sOutCh );
+}

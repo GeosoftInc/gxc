@@ -1,0 +1,702 @@
+//===========================================================================
+NAME          = "Extract standards"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport/Standards"
+
+DESCRIPTION   = " 
+   CHIMERA.ASSAY  assay database to process
+   CHIMERA.STANDARDS_DIRECTORY directory to put databases
+"
+
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.4.1: For multi-line databases, assign a single sequence number (QA 10255).
+// v5.1.8: New option to specify a standards directory.
+//         Force standards DB to front.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chstnd.gr"
+#include "chstnd.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         ELabDB,EStDB;
+DB          LabDB,StDB;
+DB_SYMB     LabLn,StLn;
+
+DB_SYMB     LabCh;
+DB_SYMB     LabStCh;
+DB_SYMB     LabSampleCh;
+DB_SYMB     LabOrderCh;
+DB_SYMB     LabLabCh; 
+DB_SYMB     LabBatchCh;
+DB_SYMB     LabWeightCh;
+
+DB_SYMB     StCh;
+DB_SYMB     StSampleCh;
+DB_SYMB     StOrderCh;
+DB_SYMB     StLabCh; 
+DB_SYMB     StBatchCh;
+DB_SYMB     StWeightCh;
+DB_SYMB     StSeqCh;
+
+DGW         Diag;
+VV          LabChVV;
+VV          StChVV;
+WA          Wa;
+LST         StdLST, LineLST;
+
+string(STR_FILE) sLabDB, sStandardDir, sReportFile;
+string(STR_FILE) sStDB, sCurline;
+string(STR_DB_SYMBOL) sSt,sCurSt,sChan, sChan2, sLine;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_DEFAULT) sLabel, sSymb;
+string(STR_DEFAULT) sVal;
+
+int   i,iChans,iSt,iProcess,iLab,iSeq,iN,iVal,iNStd,iNewDB;
+int   iLine;             // Number of Lines Processed
+int   iTotLines;         // Total Number of Lines to Process
+
+real rFidStart, rFidIncr;
+
+//===========================================================================
+// MACROS
+//===========================================================================
+
+#define CREATE_CHAN(A,B,C,D) \
+   if (iExistChan_DB(D,A)) B = FindChan_DB(D,A);\
+   else B = CreateSymb_DB(D,A,DB_SYMB_CHAN,DB_OWN_SHARED,C);\
+   LockSymb_DB(D,B,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   
+#define MOVE_REAL_DATA(A,B) {\
+	if(iLab < iGetChannelLength_DB(LabDB, LabLn, A))\
+		SetChanReal_DB(StDB,StLn,B,iSt,rGetChanReal_DB(LabDB,LabLn,A,iLab));\
+	else\
+		SetChanReal_DB(StDB,StLn,B,iSt,rDUMMY);\
+}
+
+#define MOVE_INT_DATA(A,B) {\
+	if(iLab < iGetChannelLength_DB(LabDB, LabLn, A))\
+		SetChanInt_DB(StDB,StLn,B,iSt,iGetChanInt_DB(LabDB,LabLn,A,iLab));\
+	else\
+		SetChanInt_DB(StDB,StLn,B,iSt,iDUMMY);\
+}
+
+#define MOVE_STR_DATA(A,B) {\
+	if(iLab < iGetChannelLength_DB(LabDB, LabLn, A)) {\
+		GetChanStr_DB(LabDB,LabLn,A,iLab,sTemp,sizeof(sTemp)); SetChanStr_DB(StDB,StLn,B,iSt,sTemp);\
+	} else {\
+		SetChanStr_DB(StDB,StLn,B,iSt,"");\
+	}\
+}
+   
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      // --- get database names ---
+
+      Diag = Create_DGW("chstnd");
+      
+      SetInfoSYS_DGW(Diag,_CHSTND_0,DGW_FILEPATH,"CHIMERA","ASSAY");
+      SetInfoSYS_DGW(Diag,_CHSTND_1,DGW_FILEPATH,"CHIMERA","STANDARDS_DIRECTORY");
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_CHSTND_0,DGW_FILEPATH,"CHIMERA","ASSAY");
+      GetInfoSYS_DGW(Diag,_CHSTND_1,DGW_FILEPATH,"CHIMERA","STANDARDS_DIRECTORY");
+
+      Destroy_DGW(Diag);
+      
+   }      
+   
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("CHIMERA","ASSAY",sLabDB);
+   GetString_SYS("CHIMERA","STANDARDS_DIRECTORY",sStandardDir);
+   GetString_SYS("CHSTND", "REPORTFILE", sReportFile);
+   
+   if(iStrlen_STR(sStandardDir)) {
+      if(!iDirExist_SYS(sStandardDir)) {
+         
+         Printf_STR(sTemp, sizeof(sTemp), _("The specified directory for the standards databases: %s does not exist."), sStandardDir);
+         Abort_SYS(sTemp);
+      }
+   }
+
+
+   ELabDB = Load_EDB(sLabDB);
+   
+   
+   // --- Prepare to do the work ---
+
+   LabDB  = Lock_EDB(ELabDB);
+
+
+   // --- Create a LST for the selected lines. This list is ordered. ---
+
+   LineLST = Create_LST(STR_DB_SYMBOL);
+   SelectedLineLST_DB(LabDB, LineLST);
+   iTotLines = iSize_LST(LineLST);
+   if(iTotLines==0)
+      Abort_SYS(_("There are no lines selected in the assay database."));
+
+
+   // --- Init standards database no empty ---
+
+   Strcpy_STR(sStDB, "");
+
+
+   Progress_SYS(1);
+
+   
+   // --- Create a report log for warnings ---
+   if(iStrlen_STR(sReportFile) == 0) 
+      Strcpy_STR(sReportFile, "chstnd.log");
+         
+   Wa = Create_WA(sReportFile, WA_NEW);
+
+   // --- get standards channel symbol ---
+      
+   if (!iExistChan_DB(LabDB,"Standard"))
+      Abort_SYS(_("A \"Standard\" channel is required in the lab database."));
+   LabStCh = FindChan_DB(LabDB,"Standard");
+
+
+   // --- sort database by standards ---
+    
+   UnLock_EDB(ELabDB); 
+   SetString_SYS("SORTALL","CHANNEL","Standard");
+   SetString_SYS("SORTALL","ORDER","DESCENDING");
+   SetString_SYS("SORTALL","READONLY","YES");
+   if (iRunGX_SYS("sortal") != 0) 
+      Abort_SYS(_("Initial sort of assay database on the \"Standard\" channel failed"));
+   LabDB = Lock_EDB(ELabDB); 
+
+
+   // --- get/create/lock required channels ---
+      
+   CREATE_CHAN("Sample",LabSampleCh,-16,LabDB)
+   CREATE_CHAN("Order" ,LabOrderCh ,DB_CATEGORY_CHAN_LONG,LabDB)
+   CREATE_CHAN("Lab_ID",LabLabCh   ,-16,LabDB)
+   CREATE_CHAN("Batch" ,LabBatchCh ,-16,LabDB)
+   CREATE_CHAN("Weight",LabWeightCh,DB_CATEGORY_CHAN_FLOAT,LabDB)
+   LockSymb_DB(LabDB,LabStCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- create VV's to hold channel lists ---
+      
+   LabChVV = Create_VV(INT,0);
+   StChVV  = Create_VV(INT,0);
+
+
+   // --- Create a LST to hold the EDB objects of the Std databases. This
+   //     is used to load the channels at the end ---
+
+   StdLST = Create_LST(64);
+
+
+   // --- Turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS("",1);
+   
+
+   // --- Go through all selected Lines ---
+
+   iSeq = iDUMMY;    // init sequence value to dummy so it is set just once.
+   for(iLine=0;iLine<iTotLines;iLine++)
+   {        
+      
+      // --- Number extracted this line ---
+
+      iNStd = 0;
+
+
+      // --- Get the line name and symbol ---
+      
+      GetItem_LST(LineLST, 0, iLine, sLine);      
+      GetItem_LST(LineLST, 1, iLine, sSymb);      
+      LabLn = (DB_SYMB)iScanI_STR(sSymb);
+
+      
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(LabDB,LabLn,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      Strcpy_STR(sLabel,_("Extracting Standards from line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+      if(iCheckStop_SYS()) Cancel_SYS();
+                        
+
+      // --- get the first standard ---
+
+      iLab = 0;
+      GetChanStr_DB(LabDB,LabLn,LabStCh,iLab,sSt,sizeof(sSt));
+      if (iStrMin2_STR(sSt) == 0) {
+         
+         Printf_STR(sLabel, sizeof(sLabel), _("%s: No standard samples."), sLine);
+         Puts_WA(Wa, sLabel);
+         NewLine_WA(Wa);
+
+      } else {
+            
+         // --- while still processing standards ---
+         
+         while ((iStrMin2_STR(sSt) != 0) && 
+                (iStrcmp_STR(sSt,"*",STR_CASE_TOLERANT) != 0) ) {
+          
+
+            iProcess = TRUE;
+            iNewDB = FALSE;   
+
+  			   TrimSpace_STR(sSt, STR_TRIMBOTH);
+
+            Strcpy_STR(sStDB,sSt);
+            FileExt_STR(sSt,"gdb",sStDB,FILE_EXT_FORCE);
+
+            if(iValidFileName_SYS(sStDB)==0) {
+               Printf_STR(sTemp, sizeof(sTemp), _("Check the string element in STANDARD channel, \"%s\" is not a valid file name!"), sStDB);
+               Abort_SYS(sTemp);
+            }
+                        
+            
+            // --- Look in a special directory? ---
+           
+            if(iStrlen_STR(sStandardDir)) {
+               
+               FileCombineParts_STR("", sStandardDir, sSt, "gdb", "", sStDB);
+                           
+               if(iFileExist_SYS(sStDB)==0)
+                  iNewDB = 1;
+
+            }
+            else {
+               
+
+               // --- open standards database ---
+            
+               Strcpy_STR(sStDB,sSt);
+               FileExt_STR(sSt,"gdb",sStDB,FILE_EXT_FORCE);
+
+               iNewDB = iFindPathNameEx_SYS(sStDB,FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_USER_TEMP,sStDB);
+            }
+            
+            
+            // --- if can't find standards database, create one ---
+             
+            if (iNewDB) {
+            
+                        
+               // --- new database required ---
+            
+               Printf_STR(sTemp, sizeof(sTemp), _("%s does not exist. Do you want to create it?"), sStDB);
+               if (iInteractive_SYS())
+                  iProcess = iDisplayQuestion_SYS(_("Standard database not found"),sTemp);
+               else
+                  iProcess = TRUE;
+                  
+               
+               // --- if process new database, create it using lab as model ---
+                     
+               if (iProcess) {
+               
+               
+                  // --- create database ---
+                           
+                  CreateEx_DB(sStDB,
+                            5,
+                            500,
+                            1000,
+                            10,
+                            100,
+                            "SUPER",
+                            "",
+                            1024);
+                            
+                  EStDB = Load_EDB(sStDB);
+                  StDB = Lock_EDB(EStDB);
+                                                                       
+                  Printf_STR(sLabel, sizeof(sLabel), _("Created standards database %s."), sStDB);
+                  Puts_WA(Wa, sLabel);
+                  NewLine_WA(Wa);
+
+
+                  // --- create ASSAY channel list from lab database ---
+                  
+                  iChans = iClassChanList_DB(LabDB,LabChVV,"ASSAY");
+                  SetLen_VV(StChVV,iChans);
+                  
+                  for (i=0;i<iChans;i++) {
+                  
+                     // --- Add it to standards database ---
+                        
+                     LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+                     StCh = DupSymbAcross_DB(LabDB,StDB,LabCh);
+                     SetInt_VV(StChVV,i,(int)StCh);
+                        
+                  }
+                  
+               }
+               
+                  
+            } else {
+            
+            
+               // --- standard database exists ---
+            
+               EStDB  = Load_EDB(sStDB);
+               StDB   = Lock_EDB(EStDB);
+               
+               
+               // --- create lab channel list from standard database ---
+               
+               iChans = iClassChanList_DB(StDB,StChVV,"ASSAY");
+               SetLen_VV(LabChVV,iChans);
+               
+               for (i=0;i<iChans;i++) {
+               
+                  LabCh = (DB_SYMB)iGetInt_VV(StChVV,i);
+
+                  // --- Is it in the lab? ---
+                     
+                  GetSymbName_DB(StDB,LabCh,sTemp);
+                  if (iExistChan_DB(LabDB,sTemp)) {
+                     
+                     // --- it's in the lab database, add it to lab list ---
+                        
+                     LabCh = FindChan_DB(LabDB,sTemp);
+                     SetInt_VV(LabChVV,i,(int)LabCh);
+                        
+                        
+                  } else {
+                     
+                     
+                     // --- not in lab database, don't process ---
+                        
+                     SetInt_VV(LabChVV,i,(int)NULLSYMB);
+                     SetInt_VV(StChVV,i,(int)NULLSYMB);
+                        
+                  }                                          
+               }                  
+            }
+                  
+            
+            // --- if have a standards database, process it ---
+            
+            if (iProcess) {
+            
+               
+               // --- get line ---
+               
+               UnLock_EDB(EStDB);
+               if (iInteractive_SYS()) 
+                  StLn  = GetCurLineSymb_EDB(EStDB);      
+      
+                     
+               // --- sort by sequence ---
+              
+               SetString_SYS("SORTALL","CHANNEL","Seq");
+               SetString_SYS("SORTALL","ORDER","ASCENDING");
+               SetString_SYS("SORTALL","READONLY","YES");
+               if (iRunGX_SYS("sortal") > 0) 
+                  Abort_SYS(_("Sort by sequence on standards database failed"));
+
+               ProgName_SYS(sLabel,0);
+               ProgUpdateL_SYS(iLine,iTotLines);               
+      
+               
+               // --- get/create/lock required channels ---
+               
+               StDB  = Lock_EDB(EStDB);
+               if (!iInteractive_SYS()) {
+                  GetString_SYS("CHSTND", "CURLINE", sCurline);   
+                  StLn = FindSymb_DB(StDB, sCurline, DB_SYMB_LINE);
+               }
+               
+               CREATE_CHAN("Seq"   ,StSeqCh,DB_CATEGORY_CHAN_LONG,StDB)
+               CREATE_CHAN("Batch" ,StBatchCh ,-16,StDB)
+               CREATE_CHAN("Sample",StSampleCh,-16,StDB)
+               CREATE_CHAN("Order" ,StOrderCh ,DB_CATEGORY_CHAN_LONG,StDB)
+               CREATE_CHAN("Lab_ID",StLabCh   ,-16,StDB)
+               CREATE_CHAN("Weight",StWeightCh,DB_CATEGORY_CHAN_FLOAT,StDB)
+               
+               
+               // --- lock assay data ---
+               
+               for (i=0;i<iChans;i++) {
+               
+                  LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+                  if (LabCh != NULLSYMB) {
+                     LockSymb_DB(LabDB,LabCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                     StCh = (DB_SYMB)iGetInt_VV(StChVV,i);
+                     LockSymb_DB(StDB,StCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  }
+               }
+               
+               
+               // --- go to last standard entry ---
+
+               iSt = iGetChannelLength_DB(StDB,StLn,StSampleCh);
+               
+               
+               // --- Read/set sequence number.  Do this just once, so that
+               //     all standards from this run of the GX get the same
+               //     sequence number ---
+               
+               if(iSeq==iDUMMY)
+               {
+                  if (iSt > 0) 
+                  {
+                     iSeq = iGetChanInt_DB(StDB,StLn,StSeqCh,iSt-1);
+                     if (iSeq == iDUMMY) 
+                        iSeq = 1;
+                     else   
+                        iSeq++;
+                  } else
+                     iSeq = 1;
+               }
+                           
+               
+               // --- while current sample is the same standard, process ---
+               
+               Strcpy_STR(sCurSt,sSt);
+               while (iStrcmp_STR(sCurSt,sSt,STR_CASE_TOLERANT) == 0) {
+               
+               
+                  // --- set sequence ---
+                  
+                  SetChanInt_DB(StDB,StLn,StSeqCh,iSt,iSeq);
+                  
+               
+                  // --- add required non-assay channels if they exist ---
+                     
+                  MOVE_STR_DATA(LabSampleCh,StSampleCh)
+                  MOVE_INT_DATA(LabOrderCh ,StOrderCh)      
+                  MOVE_STR_DATA(LabLabCh   ,StLabCh)      
+                  MOVE_STR_DATA(LabBatchCh ,StBatchCh)      
+                  MOVE_REAL_DATA(LabWeightCh,StWeightCh)
+            
+                           
+                  // --- move assay data ---
+                  
+                  for (i=0;i<iChans;i++) {
+                     LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+                     if (LabCh != NULLSYMB) {
+                        StCh = (DB_SYMB)iGetInt_VV(StChVV,i);
+                        MOVE_REAL_DATA(LabCh,StCh)
+                     }
+                  }
+                  
+                  
+                  // --- remove standard record ---
+                  
+                  rFidStart = rGetFidStart_DB(LabDB, LabLn, LabStCh);
+                  rFidIncr  = rGetFidIncr_DB(LabDB, LabLn, LabStCh);
+
+                  ModFidRange_DU(LabDB,LabLn,rFidStart,rFidIncr,0,1,DU_MODFID_DELETE);
+                  iNStd++;
+                  
+                  // --- get the next standard ---
+                  
+                  GetChanStr_DB(LabDB,LabLn,LabStCh,iLab,sSt,sizeof(sSt));
+                  TrimSpace_STR(sSt, STR_TRIMBOTH);
+                  
+                  iSt++;
+                  
+               }
+               
+               
+               // --- unlock ---
+               
+               UnLockSymb_DB(StDB,StSampleCh );
+               UnLockSymb_DB(StDB,StOrderCh  );
+               UnLockSymb_DB(StDB,StLabCh    );
+               UnLockSymb_DB(StDB,StBatchCh  );
+               UnLockSymb_DB(StDB,StWeightCh );
+               UnLockSymb_DB(StDB,StSeqCh );
+               for (i=0;i<iChans;i++) {
+                  StCh = (DB_SYMB)iGetInt_VV(StChVV,i);
+                  if (StCh != NULLSYMB) {
+                     UnLockSymb_DB(StDB,StCh);
+                     LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+                     UnLockSymb_DB(LabDB,LabCh);
+                  }                  
+               }
+               UnLock_EDB(EStDB);
+               
+               
+               // --- Add the Std database EDB object to the list of those processed ---
+
+               iVal = (int)EStDB;
+               FormatI_STR(iVal, sVal, 20);
+               AddUniqueItem_LST(StdLST, sCurSt, sVal);
+               
+               
+            } else {
+            
+            
+               // --- skip these standards ---
+               
+               Strcpy_STR(sCurSt,sSt);
+               while (iStrcmp_STR(sCurSt,sSt,STR_CASE_TOLERANT) == 0) {
+               
+                  // --- get the next standard ---
+                  
+                  GetChanStr_DB(LabDB,LabLn,LabStCh,iLab,sSt,sizeof(sSt));
+                  TrimSpace_STR(sSt, STR_TRIMBOTH);
+                  
+                  iLab++;
+                  
+               }
+            
+            }
+            
+         }
+
+
+         // --- Output number of standards extracted ---
+
+         FormatI_STR(iNStd, sVal, 10);
+         if(iNStd==1) 
+            
+            Printf_STR(sLabel, sizeof(sLabel), _("%s: %s standard extracted."), sLine, sVal);
+         else
+            Printf_STR(sLabel, sizeof(sLabel), _("%s: %s standards extracted."), sLine, sVal);
+            
+         Puts_WA(Wa, sLabel);
+         NewLine_WA(Wa);
+         
+      }      
+      
+         
+      // --- Advance to Next Line ---    
+
+      UnLockSymb_DB(LabDB,LabLn);
+   }
+
+
+   // --- clean up ---
+      
+   UnLockSymb_DB(LabDB,LabStCh);
+   UnLockSymb_DB(LabDB,LabSampleCh);
+   UnLockSymb_DB(LabDB,LabOrderCh );
+   UnLockSymb_DB(LabDB,LabLabCh   );
+   UnLockSymb_DB(LabDB,LabBatchCh );
+   UnLockSymb_DB(LabDB,LabWeightCh);
+   UnLock_EDB(ELabDB);
+
+
+   // --- display data ---
+      
+   iN = iSize_LST(StdLST);
+   for(i=0;i<iN;i++) {
+   
+      GetItem_LST(StdLST, 1, i, sVal);
+      EStDB = (EDB)iScanI_STR(sVal);
+                     
+      UnLoadAllChans_EDB(EStDB);
+      LoadChan_EDB(EStDB,"Seq" );
+      LoadChan_EDB(EStDB,"Batch" );
+      LoadChan_EDB(EStDB,"Sample");
+      LoadChan_EDB(EStDB,"Order" );
+      LoadChan_EDB(EStDB,"Lab_ID");
+      LoadChan_EDB(EStDB,"Weight");
+      LoadAllChans_EDB(EStDB);
+   }
+
+
+   // --- re-sort database by sample, except if it is 
+   //   a Wholeplot-type database with a "DH_FROM" channel in it,
+   //   in which case sort by that ---
+
+   Load_EDB(sLabDB);
+   LabDB  = Lock_EDB(ELabDB);
+    
+   Strcpy_STR(sChan, _n("Sample"));
+   Strcpy_STR(sChan2, "");
+
+   if(iExistChan_DB(LabDB, "DH_FROM"))
+      Strcpy_STR(sChan, "DH_FROM");
+   if(iExistChan_DB(LabDB, "DUPLICATE"))
+      Strcpy_STR(sChan2, "DUPLICATE");
+
+   UnLock_EDB(ELabDB);
+
+   if(iStrlen_STR(sChan2)) {
+
+      SetString_SYS("SORTALL2","CHANNEL1",sChan);
+      SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+      SetString_SYS("SORTALL2","CHANNEL2",sChan2);
+      SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+      SetString_SYS("SORTALL2","READONLY","YES");
+      if (iRunGX_SYS("sortal2") != 0) 
+         Abort_SYS(_("Final re-sort of lab database failed"));
+   }
+   else {
+
+      SetString_SYS("SORTALL","CHANNEL",sChan);
+      SetString_SYS("SORTALL","ORDER","ASCENDING");
+      SetString_SYS("SORTALL","READONLY","YES");
+      if (iRunGX_SYS("sortal") != 0) 
+         Abort_SYS(_("Final re-sort of lab database failed"));
+   }
+
+
+   // --- Bring the standards database back to the front ---
+
+   if(iStrlen_STR(sStDB)) {
+      EStDB = Load_EDB(sStDB);
+      MakeCurrent_EDB(EStDB);
+   }
+   
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+
+   // --- Display log file, if warnings were issued. ---
+
+   Destroy_WA(Wa);
+
+      
+   if (iInteractive_SYS()) {      
+     
+      // --- Anything to display ---
+
+      if (iFileSize_SYS("chstnd.log")>3) // 3 characters could be UTF-8 BOM only
+      {
+             
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE","chstnd.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }      
+   } 
+
+   
+}

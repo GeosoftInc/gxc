@@ -1,0 +1,130 @@
+//===========================================================================
+NAME          = "Import USGS POST binary data"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Import USGS POST Binary Format data.
+
+     IMPOST.DATA  : Input data file name
+
+   See HELP \"VIEWGX IMPOST -h\" for a description of the binary format.
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/USGS"
+
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "impost.gr"
+#include "impost.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+
+int         i;                // Utility 
+
+string(STR_FILE) sData;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- get the database ---
+      
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IMPOSTForm");
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IMPOSTFORM_0,DGW_FILEPATH,"IMPOST","DATA");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IMPOSTFORM_0,DGW_FILEPATH,"IMPOST","DATA");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+   }   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IMPOST","DATA",sData);
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import USGS POST File"),1);
+   
+
+   // --- import ---
+
+   ImportUSGSPost_DU(Data,sData);
+
+
+   // --- get current X, Y channels ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   
+   // --- unlock and delete line 0 ---
+
+   UnLock_EDB(EData);
+   if (iInteractive_SYS()) {
+      
+      DelLine0_EDB(EData);
+      LoadChan_EDB(EData,"ID");
+      LoadChan_EDB(EData,sXCh);
+      LoadChan_EDB(EData,sYCh);
+      LoadAllChans_EDB(EData);
+      
+   }
+   
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+   
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+}

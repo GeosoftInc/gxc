@@ -1,0 +1,1108 @@
+//===========================================================================
+NAME          = "Import an ArcView Shape file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Import an ArcView shape file (and its related data).
+
+IMPORTARC.FILE    ArcView shape file
+IMPORTARC.DBOUT   0: Current database, 1: New database, 2: Do not import, 3: Current database with shape database(s), 4: New database with shape database(s)
+IMPORTARC.DB      New database name (if shape database is selected _Shapes will be appended to this name for it)
+IMPORTARC.MAPOUT  0: Current map, 1: New Map, 2: Do not import
+
+Current Map:
+IMPORTARC.VIEW     		0: Current data view, 1: 3D View    
+IMPORTARC.VIEW3DNAME    Name of 3D view to import into in scripting mode (defaults to 3D)
+New Maps:
+IMPORTARC.MAP      New map name
+IMPORTARC.MAPSCALE New map scale (optional) for new maps, 2D views.
+IMPORTARC.ORIENT   0:Plan map, 1:N-S section, 2:E-W section
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v7.1.0: Change how 3D imports are handled (only from within 3D viewer, but supports scripting with name)
+//         Consolidated 2D map creation into new CreateMap2D_GIS function.
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v6.3.0: Import 2D/3D SHP files to 2D or 3D views.
+//         Added ESRI options.
+//         Default map/database names set from single files' names.
+// v6.0.0: Read and apply projection from PRJ file
+// v5.1.4: Projections manually set on import if enabled in Settings.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "importarc.gr"
+#include "importarc.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+EDB         EDataShp;         // Shape Database handle
+DB          DataShp;          // Shape Database handle
+
+DB_SYMB     XCh;              // Channel Handle
+DB_SYMB     YCh;              // Channel Handle
+DB_SYMB     NewXCh;
+DB_SYMB     NewYCh;
+DB_SYMB     Line;
+
+EMAP        EMap;             // Map handle
+MAP         Map;              // Map handle
+
+MVIEW       MView;            // Map View handle
+IPJ         hIPJ;					// Projection handle
+IPJ         hViewIPJ;
+IPJ         hDatabaseIPJ;
+IPJ         hTempIPJ;
+GIS         hGIS;             // GIS handle
+LST         FileLST;          // Files
+LST         PlaneLST; 
+LST         SourceLST;
+LST         DatumFromLST;
+LST         LDTLST;
+LST         LDTLST2;
+LST         SourceLSTDatabase;
+LST         DatumFromLSTDatabase;
+LST         LDTLSTDatabase;
+LST         LDTLST2Database;
+PJ          hPJ;
+
+VV          VV2D,VV3D,VVGIS;
+
+DGW         Diag;             // Dialogue handle
+
+string(STR_FILE) sDataFile, sFName, sDir, sVol, sDB, sDBShp, sTemp, sInfo, sShpName;
+string(STR_MULTI_PATH) sFiles;
+string(STR_DEFAULT_SHORT) sName;
+string(STR_DEFAULT_SHORT) sTempNewXChanName, sTempNewYChanName;
+string(STR_DEFAULT_LONG) sMsg, s1, s2, s3, s4, s5;
+string(STR_VIEW) s3DView, sView;
+int iDB, iNewDBDone, iDBShp, iExpDBShp, iNewMap, iIsMapData, iIsDBData, iN2D, iN3D;
+int iFile,iFiles,iOrient,iOrientation,iIsShapeFile3D,i3D,iNewMapCreated,iDefaultIPJ,i,j;
+int iFields, iNewDBLines, iNewDBChannels;
+int iSameDatumButDifferentCS;
+
+real rXMin, rXMax, rYMin, rYMax, rZMin, rZMax;
+real rPlaneZ, rAbsZMin, rAbsZMax, rScale;
+int iHaveDisplayArea, iPlane;
+int iIsESRI;
+int iDatumsAreDiff;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Running inside ArcView? ---
+   
+   iIsESRI = iIsESRI_DH();
+   
+   
+	// --- Are we running interactively ? ---
+
+	if (iInteractive_SYS())
+	{
+		i3D = 0;
+		if (iHaveCurrent_EMAP())
+		{
+			EMap = Current_EMAP();
+			i3D = iIs3DView_EMAP(EMap);
+		}
+
+		if(i3D)
+		{
+
+			// --- Create the Dialogue ---
+
+			Diag = Create_DGW("IMPORTARC_3D");
+
+
+			// --- Put current values into the dialogue --
+
+			SetInfoSYS_DGW(Diag,_IMPORTARC_3D_0,DGW_FILEPATH, "IMPORTARC","FILES");  
+
+
+			// --- Run the Dialogue ---
+
+			if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();                       
+
+			// --- Read the returned values from the dialogue ---
+
+			GetInfoSYS_DGW(Diag,_IMPORTARC_3D_0,DGW_FILEPATH, "IMPORTARC","FILES");
+
+
+			// --- Destroy the Dialogue ---
+
+			Destroy_DGW(Diag);
+		}
+		else
+		{
+			// --- Create the Dialogue ---
+
+			Diag = Create_DGW("IMPORTARC");
+
+
+			// --- Put current values into the dialogue --
+
+			SetInfoSYS_DGW(Diag,_IMPORTARC_0,DGW_FILEPATH, "IMPORTARC","FILES");  
+			SetInfoSYS_DGW(Diag,_IMPORTARC_1,DGW_LISTALIAS, "IMPORTARC","DBOUT");  
+			SetInfoSYS_DGW(Diag,_IMPORTARC_2,DGW_LISTALIAS, "IMPORTARC","MAPOUT");  
+
+
+	         // --- Hide map option in ESRI ---
+
+			 if (iIsESRI)
+	            SetInfo_DGW(Diag,_IMPORTARC_2,DGW_HIDE, "1");
+
+
+
+			// --- Run the Dialogue ---
+
+			if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();                       
+
+			// --- Read the returned values from the dialogue ---
+
+			GetInfoSYS_DGW(Diag,_IMPORTARC_0,DGW_FILEPATH, "IMPORTARC","FILES");
+			GetInfoSYS_DGW(Diag,_IMPORTARC_1,DGW_LISTALIAS, "IMPORTARC","DBOUT");  
+			GetInfoSYS_DGW(Diag,_IMPORTARC_2,DGW_LISTALIAS, "IMPORTARC","MAPOUT");  
+
+
+			// --- Destroy the Dialogue ---
+
+			Destroy_DGW(Diag);
+		}      
+	}
+
+	// --- Get and validate parameters ---
+
+	GetString_SYS("IMPORTARC","FILES", sFiles);
+	iFiles = iCountTokens_STR(sFiles,"|");
+
+
+	// --- Transfer all files to a LST ---
+
+	FileLST = Create_LST(2*STR_FILE);
+	for (iFile=0;iFile<iFiles;iFile++) 
+	{      
+		// --- get the file ---
+
+		GetMFile_STR(sFiles,sDataFile,iFile);
+		AddItem_LST(FileLST, sDataFile, "");
+	}
+
+
+	iIsMapData = FALSE;
+	iIsDBData = FALSE;
+
+
+	// --- Handle 3D ---
+
+	if (iInteractive_SYS())
+	{
+		SetInt_SYS("IMPORTARC", "VIEW", i3D);
+		if (i3D)
+		{
+			Get3DViewName_EMAP(EMap, s3DView);
+			SetString_SYS("IMPORTARC", "VIEW3DNAME", s3DView);
+		}
+	}
+	else
+	{
+		i3D = iGetInt_SYS("IMPORTARC", "VIEW");
+		if (i3D != 1 && i3D != 0) 
+			i3D = 0;  // Default to current view
+		if (i3D)
+		{
+			GetString_SYS("IMPORTARC", "VIEW3DNAME", s3DView);
+			if (iStrlen_STR(s3DView) == 0)
+				Strcpy_STR(s3DView, "3D");
+		}
+	}
+
+	if(i3D)
+	{
+		iDB = 2;    // No DB import.
+		iNewMap = 0;
+	}
+	else 
+	{
+		iDB = iGetInt_SYS("IMPORTARC","DBOUT");
+		if(iDB<0 || iDB>4)
+			Abort_SYS(_("Invalid import option for data"));
+
+		iNewDBDone = 0;
+		iDBShp = 0;
+		if (iDB == 3 || iDB == 4)
+		{
+			iDBShp = 1;
+			iDB = iDB - 3;
+		}
+
+        if (iIsESRI)
+			iNewMap = 2;
+		else
+		{
+			iNewMap = iGetInt_SYS("IMPORTARC","MAPOUT");
+			if(iNewMap<0 || iNewMap>2)
+				Abort_SYS(_("Invalid import option for map"));
+		}
+	}
+
+
+	if(iInteractive_SYS() && iNewMap==1)  // New map 
+	{
+		Diag = Create_DGW("IMPORTARCNEW");
+		SetInfoSYS_DGW(Diag,_IMPORTARCNEW_0,DGW_LISTALIAS, "IMPORTARC","ORIENT");  
+		SetInfoSYS_DGW(Diag,_IMPORTARCNEW_1,DGW_TEXT,      "IMPORTARC","MAPSCALE");           
+
+		if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+
+		GetInfoSYS_DGW(Diag,_IMPORTARCNEW_0,DGW_LISTALIAS, "IMPORTARC","ORIENT");  
+		GetInfoSYS_DGW(Diag,_IMPORTARCNEW_1,DGW_TEXT,      "IMPORTARC","MAPSCALE");           
+		Destroy_DGW(Diag);
+	}
+
+
+	// --- Get map parameters ---
+
+	if(i3D)
+		iOrientation = 3;
+	else 
+	{
+		rScale = rGetReal_SYS("IMPORTARC","MAPSCALE");
+		iOrientation = iGetInt_SYS("IMPORTARC","ORIENT");
+		if(iOrientation<0 || iOrientation>2) iOrientation = 0;
+	}
+
+
+	// --- Create a LST for planes in a 3D view ---
+
+	PlaneLST = Create_LST(STR_VIEW);
+
+	rAbsZMax = rMIN;
+	rAbsZMin = rMAX;
+
+	iOrient = IPJ_ORIENT_PLAN;
+	iNewMapCreated = FALSE;
+	iHaveDisplayArea = FALSE;
+	iDefaultIPJ = FALSE;
+
+	VVGIS = Create_VV(GS_INT, 0);
+	VV2D = Create_VV(GS_INT, 0);
+	VV3D = Create_VV(GS_INT, 0);
+	iN2D = 0;
+	iN3D = 0;
+
+	iDatumsAreDiff = 0;
+	hTempIPJ = Create_IPJ();
+
+
+	// --- Determine some good defaults for if a new database will be created ---
+	iNewDBLines = iFiles + 200; // Leave some room
+	iNewDBChannels = 50;
+
+	// --- When plotting to a 3D view, put all 2D SHP files last; then, if we need
+	//     to create a new default 2D drawing plane, we can put it on top, after
+	//     finding the Z range of all the 3D SHP files ---
+
+	for (iFile=0;iFile<iFiles;iFile++) 
+	{   
+
+		// --- get the file ---
+
+		GetItem_LST(FileLST, 0, iFile, sDataFile);
+
+		// --- Create the GIS object ---
+
+		hGIS = Create_GIS(sDataFile,sInfo,GIS_TYPE_ARCVIEW);
+
+		iFields = iNumAttribs_GIS(hGIS);
+		if (iFields + 50 > iNewDBChannels)
+			iNewDBChannels = iFields + 50;
+
+		// --- Get the shape file's projection info. ---
+
+		hIPJ = GetIPJ_GIS(hGIS);   
+
+		if (iInteractive_SYS() && IPJ_TYPE_NONE == iSourceType_IPJ(hIPJ))
+		{
+			Strcpy_STR(sMsg, _("The shape file does not contain a defined coordinate system. Please specify one to assign to the shape file or leave as unknown."));
+			DisplayMessage_SYS(_("Unknown Coordinate System Warning"), sMsg);
+
+			// --- Run the CoordSysWizard ---
+
+			if(iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("ArcView Shape File"), sDataFile)==0)
+				SetIPJ_GIS(hGIS, hIPJ);   
+			else
+				Cancel_SYS();
+		}
+
+		if (0 != iFile && 0 == iDatumsAreDiff && 0 == iCompareDatums_IPJ(hIPJ, hTempIPJ))
+			iDatumsAreDiff = 1;
+
+		if (0 == iFile)
+			Copy_IPJ(hIPJ, hTempIPJ);
+
+		Destroy_IPJ(hIPJ);
+
+
+		// --- Is it a 3D SHP file? ---
+
+		if (iIsSHPFile3D_GIS(hGIS))
+		{
+			SetInt_VV(VV3D, iN3D, (int)hGIS);
+			iN3D = iN3D + 1;
+		}
+		else
+		{
+			SetInt_VV(VV2D, iN2D, (int)hGIS);
+			iN2D = iN2D + 1;
+		}
+	}
+	Copy_VV(VVGIS, VV3D);
+	Append_VV(VVGIS, VV2D);
+
+	Destroy_IPJ(hTempIPJ);
+
+
+	if (1 == iInteractive_SYS() && 1 == iDatumsAreDiff && (1 == iNewMap || 1 == iDB))
+	{
+		Strcpy_STR(sMsg, _("You are attemping to import shapes files with differing datums into a NEW map/database. Please start by importing just one of these shape files, to establish which datum your new data view/channels will be using."));
+		DisplayMessage_SYS(_("Differing Datums"), sMsg);
+
+		Cancel_SYS();
+	}
+
+
+	// --- Perform datum reprojection ---
+
+	SourceLST = Create_LST(100);
+	DatumFromLST = Create_LST(100);
+	LDTLST = Create_LST(4096);
+	LDTLST2 = Create_LST(4096);
+
+	if (0 == iNewMap)
+	{
+		if (iHaveCurrent_EMAP())
+		{
+			// --- Ensure we have a base map and that we are not working with grid documents ---
+   
+			if (!i3D && iRunGX_SYS("sclmap") != 0) 
+				Cancel_SYS();
+
+			EMap = Current_EMAP();
+			Map  = Lock_EMAP(EMap);
+			MView = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
+			hViewIPJ = Create_IPJ();
+			GetIPJ_MVIEW(MView, hViewIPJ);
+
+			for (iFile = 0; iFile < iFiles; iFile++) 
+			{
+				hGIS = (GIS) iGetInt_VV(VVGIS, iFile);
+				hIPJ = GetIPJ_GIS(hGIS);   
+
+				if (IPJ_TYPE_NONE != iSourceType_IPJ(hIPJ) && IPJ_TYPE_NONE != iSourceType_IPJ(hViewIPJ) && 0 == iCompareDatums_IPJ(hIPJ, hViewIPJ))
+				{
+					AddItem_LST(LDTLST, "1", "");
+
+					GetItem_LST(FileLST, 0, iFile, sDataFile);
+					FileNamePart_STR(sDataFile, sDataFile, STR_FILE_PART_NAME); 
+					AddItem_LST(SourceLST, sDataFile, sDataFile);
+
+					GetName_IPJ(hIPJ, IPJ_NAME_DATUM, sTemp);
+					AddItem_LST(DatumFromLST, sTemp, sTemp);
+				}
+				else
+				{
+					AddItem_LST(LDTLST, "0", "");
+				}
+
+				Destroy_IPJ(hIPJ);         
+			}
+
+			if (iSize_LST(SourceLST) > 0)
+			{
+				if (0 == iGCSDatumWarningSHPEx_GUI(SourceLST, DatumFromLST, LDTLST2, MView)) 
+				{
+					for (i = 0; i < iSize_LST(LDTLST2); i++) 
+					{
+						for (j = 0; j < iSize_LST(LDTLST); j++) 
+						{
+							GetItem_LST(LDTLST, 0, j, sTemp);
+							if (0 == iStrcmp_STR(sTemp, "1", STR_CASE_TOLERANT))
+							{
+								GetItem_LST(LDTLST2, 0, i, sTemp);
+								SetItem_LST(LDTLST, LST_ITEM_NAME, j, sTemp);
+								break;
+							}
+						}
+					}
+				}
+				else
+				{
+					for (i = 0; i < iSize_LST(LDTLST); i++) 
+						SetItem_LST(LDTLST, LST_ITEM_NAME, i, "0");
+				}
+			}
+
+			Destroy_IPJ(hViewIPJ);
+			Destroy_MVIEW(MView);
+			UnLock_EMAP(EMap);
+		}
+	}
+
+
+	SourceLSTDatabase = Create_LST(100);
+	DatumFromLSTDatabase = Create_LST(100);
+	LDTLSTDatabase = Create_LST(4096);
+	LDTLST2Database = Create_LST(4096);
+
+	if (0 == iDB)
+	{
+		if (iHaveCurrent_EDB())
+		{
+			EData = Current_EDB();
+			GetName_EDB(EData, sDB);
+			Data = Lock_EDB(EData);
+			
+			
+			// --- Save database name for scripting ---
+			
+			SetString_SYS("IMPORTARC", "DB", sDB);
+			
+
+			// --- Set up current X, Y channels ---
+			
+			XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+			YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+
+			if (NULLSYMB != XCh && NULLSYMB != YCh)
+			{
+				hDatabaseIPJ = Create_IPJ();
+				GetIPJ_DB(Data, XCh, hDatabaseIPJ);
+
+				if (IPJ_TYPE_NONE != iSourceType_IPJ(hDatabaseIPJ)) 
+				{
+					for (iFile = 0; iFile < iFiles; iFile++) 
+					{
+						hGIS = (GIS) iGetInt_VV(VVGIS, iFile);
+						hIPJ = GetIPJ_GIS(hGIS);   
+
+						if (IPJ_TYPE_NONE != iSourceType_IPJ(hIPJ) && IPJ_TYPE_NONE != iSourceType_IPJ(hDatabaseIPJ) && 0 == iCompareDatums_IPJ(hIPJ, hDatabaseIPJ))
+						{
+							AddItem_LST(LDTLSTDatabase, "1", "");
+
+							GetItem_LST(FileLST, 0, iFile, sDataFile);
+							IFileNamePart_STR(sDataFile, sDataFile, sizeof(sDataFile), STR_FILE_PART_NAME); 
+							AddItem_LST(SourceLSTDatabase, sDataFile, sDataFile);
+
+							GetName_IPJ(hIPJ, IPJ_NAME_DATUM, sTemp);
+							AddItem_LST(DatumFromLSTDatabase, sTemp, sTemp);
+						}
+						else
+						{
+							AddItem_LST(LDTLSTDatabase, "0", "");
+						}
+
+						Destroy_IPJ(hIPJ);         
+					}
+
+					if (iSize_LST(SourceLSTDatabase) > 0)
+					{
+						if (0 == iGCSDatumWarningSHPDBEx_GUI(SourceLSTDatabase, DatumFromLSTDatabase, LDTLST2Database, Data)) 
+						{
+							for (i = 0; i < iSize_LST(LDTLST2Database); i++) 
+							{
+								for (j = 0; j < iSize_LST(LDTLSTDatabase); j++) 
+								{
+									GetItem_LST(LDTLSTDatabase, 0, j, sTemp);
+									if (0 == iStrcmp_STR(sTemp, "1", STR_CASE_TOLERANT))
+									{
+										GetItem_LST(LDTLST2Database, 0, i, sTemp);
+										SetItem_LST(LDTLSTDatabase, LST_ITEM_NAME, j, sTemp);
+										break;
+									}
+								}
+							}
+						}
+						else
+						{
+							for (i = 0; i < iSize_LST(LDTLSTDatabase); i++) 
+								SetItem_LST(LDTLSTDatabase, LST_ITEM_NAME, i, "0");
+						}
+					}
+				}
+			}
+
+			UnLock_EDB(EData);
+		}
+	}
+
+
+	for (iFile=0;iFile<iFiles;iFile++) 
+	{   
+		hGIS = (GIS) iGetInt_VV(VVGIS, iFile);
+
+		GetFileName_GIS(hGIS, sDataFile);
+
+		// --- Is it a 3D SHP file? ---
+
+		iIsShapeFile3D = iIsSHPFile3D_GIS(hGIS);
+
+
+		hIPJ = GetIPJ_GIS(hGIS);   
+
+		// --- Was an LDT set from the datum reprojection? ---
+
+		if (iSize_LST(SourceLST) > 0)
+		{
+			GetItem_LST(LDTLST, 0, iFile, sTemp);
+			if (0 != iStrcmp_STR(sTemp, "0", STR_CASE_TOLERANT))
+			{
+				GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5); 
+				GetItem_LST(LDTLST, 0, iFile, sTemp);
+				SetGXF_IPJ(hIPJ, s1, s2, s3, s4, sTemp); 
+
+				SetIPJ_GIS(hGIS, hIPJ);   
+			}
+		}
+
+
+		// --- New/Current map ---
+
+		if(i3D || iNewMap!=2) 
+		{
+			// --- Get the range of data for the map ---
+
+			rXMin = rDUMMY;   // eliminate compiler warnings
+			rXMax = rDUMMY;
+			rYMin = rDUMMY;
+			rYMax = rDUMMY;
+			rZMin = rDUMMY;
+			rZMax = rDUMMY;
+			
+			// --- turn on progress ---
+			Progress_SYS(1);
+			ProgName_SYS(_("Ranging ArcView data"),1);
+			GetRange_GIS(hGIS,rXMin,rXMax,rYMin,rYMax,rZMin,rZMax);
+
+			if(rXMin == rDUMMY &&
+				rXMax == rDUMMY &&
+				rYMin == rDUMMY &&
+				rYMax == rDUMMY) 
+				iIsMapData = FALSE;   // nothing to import
+			else
+				iIsMapData = TRUE;
+				
+			if(rZMin != rDUMMY && rZMin < rAbsZMin) rAbsZMin = rZMin;
+			if(rZMax != rDUMMY && rZMax > rAbsZMax) rAbsZMax = rZMax;
+		}
+
+		if(iIsMapData) 
+		{     
+			if (iNewMap==1 && !iNewMapCreated)
+			{
+				if(iInteractive_SYS()) 
+				{   
+
+					// --- Set the output map name based on the SHP file name, for
+					//     single-file imports, otherwise force the user to enter the name ---
+
+					Strcpy_STR(sShpName, "");
+					if(iFiles==1)
+					{
+						// --- Get the new map name ---
+
+						FileNamePart_STR(sDataFile, sShpName, STR_FILE_PART_NAME);                  
+					}
+					SetString_SYS("IMPORTARC","MAP",sShpName);
+
+					while(TRUE) 
+					{
+						Diag = Create_DGW("IMPORTARCMAP");
+
+						SetInfoSYS_DGW(Diag,_IMPORTARCMAP_0,DGW_FILEPATH, "IMPORTARC","MAP");  
+						if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+						GetInfoSYS_DGW(Diag,_IMPORTARCMAP_0,DGW_FILEPATH, "IMPORTARC","MAP");
+						Destroy_DGW(Diag);
+
+						// --- open the map and set up views ---
+
+						GetString_SYS("IMPORTARC","MAP",sShpName);
+						if (iLoaded_EMAP(sShpName)) {
+							UnLoad_EMAP(sShpName);
+						}
+
+						break;
+
+					}  // End While
+				}  // End if interactive
+
+
+				// --- Get the map name ---
+
+				GetString_SYS("IMPORTARC","MAP",sShpName);
+				if(!iStrlen_STR(sShpName)) 
+					Abort_SYS(_("Output map name not specified."));
+
+
+				// --- Unload and delete existing map ---   
+
+				if(iFileExist_SYS(sShpName))
+				{
+					if (iLoaded_EMAP(sShpName)) UnLoad_EMAP(sShpName);
+					iDeleteFile_SYS(sShpName);         
+				}
+
+
+				// --- Create the new map ---
+
+				CreateMap2D_GIS(hGIS, sShpName, rScale, hIPJ, iOrientation);
+
+
+				// --- Load the new map ---
+
+				Load_EMAP(sShpName);
+
+
+				// --- Don't do it again ---
+
+				iNewMapCreated = TRUE;      
+
+			} // end if(iNewMap==1 && !iNewMapCreated)        
+
+
+			// --- Get Map ---
+
+			EMap = Current_EMAP();
+			Map  = Lock_EMAP(EMap);
+
+
+			// --- If importing to a 3D view, see if this is a 3D view (test needed for scripting) ---
+
+			if(i3D) 
+			{
+				// --- Get the 3D view ---
+
+				MView = Create_MVIEW(Map, s3DView, MVIEW_WRITEOLD);
+				Strcpy_STR(sView, s3DView);
+
+				if (!iIsView3D_MVIEW(MView))
+				{
+					Printf_STR(sTemp, sizeof(sTemp), _("Importing to 3D View '%s' but it is not a 3D View"), s3DView);
+					Abort_SYS(sTemp);
+				}
+			}
+			else 
+			{
+				// --- Get the current data view ---
+
+				MView = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
+				GetName_MVIEW(MView, sView);
+			}
+
+			// --- If this is not a new map, set the working IPJ to the GIS IPJ ---
+
+			if(!iNewMap)
+			{			
+				ClearOrientation_IPJ(hIPJ);
+				ClearWarp_IPJ(hIPJ);
+				
+				SetWorkingIPJ_MVIEW(MView, hIPJ);				
+			}
+			
+
+
+			// --- If importing a 2D SHP file into a 3D view, ensure there is
+			//     a default plane. If this situation occurs, the 3D SHP files will
+			//     have already been imported, and we can place a new plane above them. ---
+
+			if(i3D && iIsShapeFile3D==0 && iSize_LST(PlaneLST)==0)
+			{
+				ListPlanes_MVIEW(MView, PlaneLST);
+				if(iSize_LST(PlaneLST)==0)
+				{
+
+					// --- Put the plane a little above the highest Z ---
+
+					if (rAbsZMax != rMIN && rAbsZMin != rMAX)
+						rPlaneZ = rAbsZMax + 0.1*(rAbsZMax - rAbsZMin);
+					else
+						rPlaneZ = 0.0;
+
+
+					// --- But if it looks like we can put it on zero, and zero
+					//     is still above the objects, put it there. ---
+
+					if(rPlaneZ > 0.0 && 0.0 > rAbsZMax)
+						rPlaneZ = 0.0;
+
+					iPlane = iCreatePlane_MVIEW(MView,"Plane2D");               
+					SetPlaneEquation_MVIEW(MView, iPlane, 0.0, 0.0, 0.0, 0.0, 0.0, rPlaneZ, 1.0, 1.0, 1.0);
+					SetDefPlane_MVIEW(MView, "Plane2D");
+				}
+			}
+
+
+			// --- import the map ---
+
+			Progress_SYS(1);
+			ProgName_SYS(_("Import Shape file map data"),1);
+			LoadMAP_GIS(hGIS, MView);
+			Progress_SYS(0);      
+
+
+			// --- Destroy the view ---
+
+			Destroy_MVIEW(MView);
+			UnLock_EMAP(EMap);
+
+		} // end if iIsMapData
+
+
+		// --- Database import ---
+
+		if(iDB!=2) 
+		{
+			if (!iNewDBDone)
+			{
+				if(iDB == 1) 
+				{   // --- get new database ---
+					GetString_SYS("IMPORTARC","DB",sDB);
+					if (iInteractive_SYS())
+					{
+						Strcpy_STR(sDB, "");
+						if(iFiles==1)
+						{
+							// --- Get the new database name ---
+
+							FileNamePart_STR(sDataFile, sDB, STR_FILE_PART_NAME);                  
+							Strcat_STR(sDB,".gdb");
+						}
+						SetString_SYS("IMPORTARC","DB",sDB);
+
+						Diag = Create_DGW("IMPORTARCDB");
+
+						SetInfoSYS_DGW(Diag,_IMPORTARCDB_0,DGW_FILEPATH, "IMPORTARC","DB");  
+						if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+						GetInfoSYS_DGW(Diag,_IMPORTARCDB_0,DGW_FILEPATH, "IMPORTARC","DB");
+						Destroy_DGW(Diag);
+					}
+
+					// --- Get and validate the new database name ---
+
+					GetString_SYS("IMPORTARC","DB",sDB);
+					if (iLoaded_EDB(sDB) == 1) UnLoad_EDB(sDB);
+
+					// --- Use values determined earlier for good limit defaults (this may still fail as attributes is not necessarily the same across, but is an improvement ---
+					Create_DB(sDB,iNewDBLines,iNewDBChannels,iNewDBLines+iNewDBChannels+20,10,100,"SUPER","");
+
+					EData = Load_EDB(sDB);
+					iNewDBDone = 1;    // import to current database from now on
+				}
+				else
+				{
+					// import to current database
+
+					if(iInteractive_SYS())
+						EData = Current_EDB();
+					else 
+					{
+						GetString_SYS("IMPORTARC","DB",sDB);
+						EData = Load_EDB(sDB);         
+					}
+				}
+			}
+
+			// --- import the data ---
+
+			Data = Lock_EDB(EData);
+
+			Progress_SYS(1);
+			ProgName_SYS(_("Import Shape file GDB data"),1);
+			LoadGDB_GIS(hGIS, Data);
+
+			if (iDBShp)
+			{
+				FileNamePart_STR (sDB, sFName, STR_FILE_PART_NAME);
+				FileNamePart_STR(sDataFile, sShpName, STR_FILE_PART_NAME);
+				// --- If names do not match or more than one file use shaopenames in GDB name(s) too ---
+				if (iFiles > 1 || iStrcmp_STR(sShpName, sFName, STR_CASE_TOLERANT) != 0)
+				{
+					Strcat_STR(sFName,"_");
+					Strcat_STR(sFName,sShpName);
+				}
+				Strcat_STR(sFName,"_Shapes");
+				FileNamePart_STR (sDB, sDir, STR_FILE_PART_DIRECTORY);
+				FileNamePart_STR (sDB, sVol, STR_FILE_PART_VOLUME);
+				FileCombineParts_STR (sVol, sDir, sFName, "gdb", "", sDBShp);
+
+				// --- Only for non-point and only if user would like to overwrite ---
+				iExpDBShp = !iIsSHPFilePoint_GIS(hGIS);
+
+				if (iExpDBShp)
+				{
+					if (iLoaded_EDB(sDBShp) == 1) UnLoad_EDB(sDBShp);
+
+					// --- Determine good limits ---
+					iNewDBChannels = iNumAttribs_GIS(hGIS) + 50;
+					iNewDBLines = iNumShapes_GIS(hGIS) + 200;
+
+					Create_DB(sDBShp,iNewDBLines,iNewDBChannels,iNewDBLines+iNewDBChannels+20,10,100,"SUPER","");
+
+					EDataShp = Load_EDB(sDBShp);
+					DataShp = Lock_EDB(EDataShp);
+					LoadShapesGDB_GIS(hGIS, DataShp);
+
+					// --- set the data's projection ---
+
+					if (iSourceType_IPJ(hIPJ)!=IPJ_TYPE_NONE) 
+					{
+						XCh = GetXYZChanSymb_DB(DataShp, DB_CHAN_X);
+						if (XCh==NULLSYMB)
+							Abort_SYS(_("The current X channel does not exist."));
+
+						YCh = GetXYZChanSymb_DB(DataShp, DB_CHAN_Y);
+						if (YCh==NULLSYMB)
+							Abort_SYS(_("The current Y channel does not exist."));
+
+						SetIPJ_DB(DataShp, XCh, YCh, hIPJ);
+					}
+
+					Line=FirstSelLine_DB(DataShp);
+					UnLock_EDB(EDataShp);
+					LoadAllChans_EDB(EDataShp);
+					DelLine0_EDB(EDataShp);
+					GotoLine_EDB(EDataShp, Line);
+				}
+			}
+			iIsDBData = TRUE;
+			Progress_SYS(0);
+
+			// --- Datum reprojection? ---
+
+			iSameDatumButDifferentCS = 0;
+
+			if (iSize_LST(SourceLSTDatabase) > 0)
+			{
+				GetItem_LST(LDTLSTDatabase, 0, iFile, sTemp);
+				if (0 != iStrcmp_STR(sTemp, "0", STR_CASE_TOLERANT))
+				{
+					GetChanName_DB(Data, XCh, sTempNewXChanName);
+					GetChanName_DB(Data, YCh, sTempNewXChanName);
+					Strcat_STR(sTempNewXChanName, "_tempnew");
+					Strcat_STR(sTempNewYChanName, "_tempnew");
+
+					if (NULLSYMB == FindChan_DB(Data, sTempNewXChanName) && NULLSYMB == FindChan_DB(Data, sTempNewYChanName))
+					{
+						// --- Create temporary X/Y channels to store the new projected values ---
+
+						NewXCh = CreateSymb_DB(Data, sTempNewXChanName, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+						NewYCh = CreateSymb_DB(Data, sTempNewYChanName, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+
+						// --- Get the selected LDT, set this LDT in the SHP's IPJ, and create a PJ from the SHP's IPJ to the database's IPJ ---
+
+						GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5); 
+						GetItem_LST(LDTLSTDatabase, 0, iFile, sTemp);
+						SetGXF_IPJ(hIPJ, s1, s2, s3, s4, sTemp); 
+						hPJ = CreateIPJ_PJ(hIPJ, hDatabaseIPJ);
+
+						// --- Get the SHP's line ---
+
+						FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME);
+						Line = FindSymb_DB(Data, sName, DB_SYMB_LINE);
+
+						// --- Reproject to the temporary new channels ---
+
+						LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+						LockSymb_DB(Data, XCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+						LockSymb_DB(Data, YCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+						LockSymb_DB(Data, NewXCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+						LockSymb_DB(Data, NewYCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+						ProjectData_DU(Data, Line, XCh, YCh, NewXCh, NewYCh, hPJ);
+
+						// --- Copy over projected values to X/Y and then delete the temporary channels --- 
+
+						CopyData_DB(Data, Line, NewXCh, XCh);
+						CopyData_DB(Data, Line, NewYCh, YCh);
+						DeleteSymb_DB(Data, NewXCh);
+						DeleteSymb_DB(Data, NewYCh);
+
+						UnLockSymb_DB(Data, XCh);
+						UnLockSymb_DB(Data, YCh);
+						UnLockSymb_DB(Data, Line);
+
+						Destroy_PJ(hPJ); 
+					}
+				}
+				else if (0 == iCoordinateSystemsAreTheSame_IPJ(hIPJ, hDatabaseIPJ))
+				{
+					iSameDatumButDifferentCS = 1;
+				}
+			}
+			else if (0 == iDB && hDatabaseIPJ != (IPJ)0 && 0 == iCoordinateSystemsAreTheSame_IPJ(hIPJ, hDatabaseIPJ))
+			{
+				iSameDatumButDifferentCS = 1;
+			}
+			else
+			{
+				// --- set the data's projection ---
+
+				if (iSourceType_IPJ(hIPJ)!=IPJ_TYPE_NONE) 
+				{
+					XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+					if (XCh==NULLSYMB)
+						Abort_SYS(_("The current X channel does not exist."));
+
+					YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+					if (YCh==NULLSYMB)
+						Abort_SYS(_("The current Y channel does not exist."));
+
+					SetIPJ_DB(Data, XCh, YCh, hIPJ);
+				}
+			}
+
+
+			// --- SHP datum and database datum are the same; however their IPJs are different. So in this case, we still we want to
+			// --- reproject the SHP IPJ into the database IPJ (similar to what we did above for when the datums are different).
+
+			if (1 == iSameDatumButDifferentCS)
+			{
+				GetChanName_DB(Data, XCh, sTempNewXChanName);
+				GetChanName_DB(Data, YCh, sTempNewXChanName);
+				Strcat_STR(sTempNewXChanName, "_tempnew");
+				Strcat_STR(sTempNewYChanName, "_tempnew");
+
+				if (NULLSYMB == FindChan_DB(Data, sTempNewXChanName) && NULLSYMB == FindChan_DB(Data, sTempNewYChanName))
+				{
+					// --- Create temporary X/Y channels to store the new projected values ---
+
+					NewXCh = CreateSymb_DB(Data, sTempNewXChanName, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+					NewYCh = CreateSymb_DB(Data, sTempNewYChanName, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+
+					// --- Create a PJ from the SHP's IPJ to the database's IPJ ---
+
+					hPJ = CreateIPJ_PJ(hIPJ, hDatabaseIPJ);
+
+					// --- Get the SHP's line ---
+
+					FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME);
+					Line = FindSymb_DB(Data, sName, DB_SYMB_LINE);
+
+					// --- Reproject to the temporary new channels ---
+
+					LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+					LockSymb_DB(Data, XCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+					LockSymb_DB(Data, YCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+					LockSymb_DB(Data, NewXCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+					LockSymb_DB(Data, NewYCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+					ProjectData_DU(Data, Line, XCh, YCh, NewXCh, NewYCh, hPJ);
+
+					// --- Copy over projected values to X/Y and then delete the temporary channels --- 
+
+					CopyData_DB(Data, Line, NewXCh, XCh);
+					CopyData_DB(Data, Line, NewYCh, YCh);
+					DeleteSymb_DB(Data, NewXCh);
+					DeleteSymb_DB(Data, NewYCh);
+
+					UnLockSymb_DB(Data, XCh);
+					UnLockSymb_DB(Data, YCh);
+					UnLockSymb_DB(Data, Line);
+
+					Destroy_PJ(hPJ); 
+				}
+			}
+
+
+			// --- release database ---
+
+			UnLock_EDB(EData);
+
+
+			// --- display data ---
+
+			DelLine0_EDB(EData);
+
+			FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME);
+			SetCurLine_EDB(EData,sName);
+
+			LoadAllChans_EDB(EData);
+			DelLine0_EDB(EData);
+
+		}
+
+		// --- Destroy objects ---
+
+		Destroy_IPJ(hIPJ);
+		Destroy_GIS(hGIS);         
+
+	}  // End loop over files
+
+
+	if (SourceLST)
+		Destroy_LST(SourceLST);
+
+	if (DatumFromLST)
+		Destroy_LST(DatumFromLST);
+
+	if (LDTLST)
+		Destroy_LST(LDTLST);
+
+	if (LDTLST2)
+		Destroy_LST(LDTLST2);
+
+	if (SourceLSTDatabase)
+		Destroy_LST(SourceLSTDatabase);
+
+	if (DatumFromLSTDatabase)
+		Destroy_LST(DatumFromLSTDatabase);
+
+	if (LDTLSTDatabase)
+		Destroy_LST(LDTLSTDatabase);
+
+	if (LDTLST2)
+		Destroy_LST(LDTLST2Database);
+
+	if (hDatabaseIPJ)
+		Destroy_IPJ(hDatabaseIPJ);
+
+	// --- progress off ---
+
+	Progress_SYS(0);
+
+	// --- Destroy objects ---
+
+	if(iInteractive_SYS()) 
+	{
+		if(!iIsMapData && !iIsDBData) 
+		{
+			if(iDB!=2 && iNewMap!=2) {
+				DisplayMessage_SYS(_("ArcView Import"),_("There was no map or database data to import."));
+			}
+			else if(iDB!=2) {
+				DisplayMessage_SYS(_("ArcView Import"),_("There was no database data to import."));
+			}
+			else if(iNewMap!=2) {
+				DisplayMessage_SYS(_("ArcView Import"),_("There was no map data to import."));
+			}
+		}
+	}
+}
+

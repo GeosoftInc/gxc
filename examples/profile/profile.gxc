@@ -1,0 +1,450 @@
+//===========================================================================
+
+NAME          = "Profile line plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Surface Mapping/Survey Lines"
+
+DESCRIPTION   = "
+
+      PROFILE.CHANNEL      channel to profile
+             .COLOR        line color
+             .THICKNESS    line thickness 
+             .STYLE        line style number (0-5)
+             .PITCH        line pitch
+             .SCALE        vertical scale in units/mm 
+             .PFILCOL      positive fill color
+             .NFILCOL      negative fill color
+             .BASE         profile base level, blank for line minimum
+             .LOG          logarithm plotting option: 0 linear (default), 1 log, 2 log/linear
+             .LOGBASE      log base
+             .SMOOTH       smmoth curved line option: 0 no (default), 1 yes
+             .GAP          maximum down-line gap
+             .JOIN         1 - join line ends
+                           0 - do not join line ends
+             .PLOTORDER    1 - plot lines in reverse order.
+"
+// Revision History:
+// v8.3:   Add support for VA plotting and colours.
+// v6.3.0: Sort lines before plotting.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "profile.gr"
+#include "profile.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sLineColor,sPosFillColor,sNegFillColor;
+string(STR_DB_SYMBOL) sLine,sChan,sLabel;
+string(STR_GROUP) sGroup;
+string(STR_GROUP) sGrpName;
+string(STR_FILE) sITR;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     XCh,YCh,ZCh; // Channel handles
+DB_SYMB     Line;        // Line handle
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+DGW         Diag;
+LST         List,LineLST;
+LPT         LinePat;
+VV          VVx,VVy,VVz;
+VA          VAz;
+REG         MapReg;
+IPJ         hIPJ;
+ITR         hITRva;
+int         i,iVA,iNVA,iTotLines,iColor;
+int         iJoin,iUp,iLen,iStyle,iLog,iSmooth,iOrder,iArrayColors;
+real        rStart,rIncr,rPitch;
+real        rSmm,rSpj,rScale,rGap,rBase,rLogBase;
+real        rVangle,rThickness;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("Profile");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_PROFILE_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      EMap = Current_EMAP();
+      Map  = Lock_EMAP(EMap);
+
+      LinePat = GetLPT_MAP(Map);
+      List = GetList_DGW(Diag,_PROFILE_8);
+      GetLST_LPT(LinePat,List);
+
+      UnLock_EMAP(EMap);
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_PROFILE_0 ,DGW_TEXT,     "PROFILE","CHANNEL");
+      SetInfoSYS_DGW(Diag,_PROFILE_1 ,DGW_TEXT,     "PROFILE","SCALE");
+      SetInfoSYS_DGW(Diag,_PROFILE_2 ,DGW_TEXT,     "PROFILE","BASE");
+      SetInfoSYS_DGW(Diag,_PROFILE_3 ,DGW_LISTALIAS,"PROFILE","LOG");
+      SetInfoSYS_DGW(Diag,_PROFILE_4 ,DGW_TEXT,     "PROFILE","LOGBASE");
+      SetInfoSYS_DGW(Diag,_PROFILE_5 ,DGW_LISTALIAS,"PROFILE","SMOOTH");
+      SetInfoSYS_DGW(Diag,_PROFILE_6 ,DGW_TEXT,     "PROFILE","COLOR");
+      SetInfoSYS_DGW(Diag,_PROFILE_7 ,DGW_TEXT,     "PROFILE","THICKNESS");
+      SetInfoSYS_DGW(Diag,_PROFILE_8 ,DGW_LISTALIAS,"PROFILE","STYLE");
+      SetInfoSYS_DGW(Diag,_PROFILE_9 ,DGW_TEXT,     "PROFILE","PITCH");
+      SetInfoSYS_DGW(Diag,_PROFILE_10,DGW_TEXT,     "PROFILE","PFILCOL");
+      SetInfoSYS_DGW(Diag,_PROFILE_11,DGW_TEXT,     "PROFILE","NFILCOL");
+      SetInfoSYS_DGW(Diag,_PROFILE_12,DGW_TEXT,     "PROFILE","GAP");
+      SetInfoSYS_DGW(Diag,_PROFILE_13,DGW_LISTALIAS,"PROFILE","JOIN");
+      SetInfoSYS_DGW(Diag,_PROFILE_14,DGW_LISTALIAS,"PROFILE","PLOTORDER");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) == 1) Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_PROFILE_0 ,DGW_TEXT,     "PROFILE","CHANNEL");
+      GetInfoSYS_DGW(Diag,_PROFILE_1 ,DGW_TEXT,     "PROFILE","SCALE");
+      GetInfoSYS_DGW(Diag,_PROFILE_2 ,DGW_TEXT,     "PROFILE","BASE");
+      GetInfoSYS_DGW(Diag,_PROFILE_3 ,DGW_LISTALIAS,"PROFILE","LOG");
+      GetInfoSYS_DGW(Diag,_PROFILE_4 ,DGW_TEXT,     "PROFILE","LOGBASE");
+      GetInfoSYS_DGW(Diag,_PROFILE_5 ,DGW_LISTALIAS,"PROFILE","SMOOTH");
+      GetInfoSYS_DGW(Diag,_PROFILE_6 ,DGW_TEXT,     "PROFILE","COLOR");
+      GetInfoSYS_DGW(Diag,_PROFILE_7 ,DGW_TEXT,     "PROFILE","THICKNESS");
+      GetInfoSYS_DGW(Diag,_PROFILE_8 ,DGW_LISTALIAS,"PROFILE","STYLE");
+      GetInfoSYS_DGW(Diag,_PROFILE_9 ,DGW_TEXT,     "PROFILE","PITCH");
+      GetInfoSYS_DGW(Diag,_PROFILE_10,DGW_TEXT,     "PROFILE","PFILCOL");
+      GetInfoSYS_DGW(Diag,_PROFILE_11,DGW_TEXT,     "PROFILE","NFILCOL");
+      GetInfoSYS_DGW(Diag,_PROFILE_12,DGW_TEXT,     "PROFILE","GAP");
+      GetInfoSYS_DGW(Diag,_PROFILE_13,DGW_LISTALIAS,"PROFILE","JOIN");
+      GetInfoSYS_DGW(Diag,_PROFILE_14,DGW_LISTALIAS,"PROFILE","PLOTORDER");
+      
+   }
+   
+   
+   // --- get current map ---
+   
+   EMap = Current_EMAP();
+   Map  = Lock_EMAP(EMap);
+   MapReg = GetREG_MAP(Map);
+   
+
+   // --- get parameters ---
+
+   GetString_SYS("PROFILE","CHANNEL",sChan);
+   GetString_SYS("PROFILE","COLOR",sLineColor);
+   GetString_SYS("PROFILE","PFILCOL",sPosFillColor);
+   GetString_SYS("PROFILE","NFILCOL",sNegFillColor);
+
+   rThickness = 1.0; 
+   if (iExistReal_SYS("PROFILE","THICKNESS"))
+   {
+      rThickness = rGetReal_SYS("PROFILE","THICKNESS");
+      if ((rThickness == rDUMMY) || (rThickness <= 0.0))
+         Abort_SYS(_("Profile line thickness must be > 0.0"));
+   }
+    
+   iStyle = 0;
+   if (iExistInt_SYS("PROFILE","STYLE"))
+   {
+      iStyle = iGetInt_SYS("PROFILE","STYLE");
+      if ((iStyle == iDUMMY) || (iStyle < 0))
+         Abort_SYS(_("Profile line style number must be >= 0."));
+   }
+
+   rPitch = 1.0;
+   if (iExistReal_SYS("PROFILE","PITCH"))
+   {
+      rPitch = rGetReal_SYS("PROFILE","PITCH");
+      if ((rPitch == rDUMMY) || (rPitch <= 0.0))
+       Abort_SYS(_("Profile line pitch must be > 0.0"));
+
+   }
+
+   rScale = 1.0;
+   if (iExistReal_SYS("PROFILE","SCALE"))
+   {
+      rScale = rGetReal_SYS("PROFILE","SCALE");
+      if ((rScale == 0.0) || (rScale == rDUMMY)) 
+         Abort_SYS(_("Profile scale must be any real number other than 0.0"));
+   }  
+  
+   rBase = rDUMMY;
+   if (iExistReal_SYS("PROFILE","BASE"))
+   {
+      rBase   = rGetReal_SYS("PROFILE","BASE");
+      if (rBase == rDUMMY) 
+         Abort_SYS(_("Profile base must be a real number."));
+   }
+
+   iLog = 0;
+   if (iExistInt_SYS("PROFILE","LOG"))
+   {
+      iLog = iGetInt_SYS("PROFILE","LOG");
+      if ((iLog < 0) || (iLog > 2))
+         Abort_SYS(_("Log option must be 0, 1 or 2."));
+   }  
+  
+   rLogBase = 1.0;
+   if (iExistReal_SYS("PROFILE","LOGBASE"))
+   {
+      rLogBase = rGetReal_SYS("PROFILE","LOGBASE");
+      if ((rLogBase <= 0.0) || (rLogBase == rDUMMY)) 
+         Abort_SYS(_("Log base must be greater than 0.0"));
+   }  
+  
+   iSmooth = 0;
+   if (iExistInt_SYS("PROFILE","SMOOTH"))
+   {
+      iSmooth = iGetInt_SYS ("PROFILE","SMOOTH");
+      if ((iSmooth != 0) && (iSmooth != 1))
+         Abort_SYS(_("Smooth line option must be 1 (yes) or 0 (no)."));
+   }
+
+   rGap = rDUMMY;
+   if (iExistReal_SYS("PROFILE","GAP"))
+   {
+      rGap = rGetReal_SYS("PROFILE","GAP");
+      if ( (rGap == rDUMMY) || (rGap < 0.0)) 
+         Abort_SYS(_("Maximum down-line gap must be a real number >= 0.0"));
+   } 
+         
+   iJoin = 1;
+   if (iExistInt_SYS("PROFILE","JOIN"))
+   {
+      iJoin = iDUMMY;
+      iJoin = iGetInt_SYS ("PROFILE","JOIN");
+      if ((iJoin != 0) && (iJoin != 1))
+         Abort_SYS(_("Join to line ends must be 1 (yes) or 0 (no), or blank."));
+   }
+   
+   iOrder = 1;
+   if (iExistInt_SYS("PROFILE","PLOTORDER"))
+   {
+      iOrder = iDUMMY;
+      iOrder = iGetInt_SYS ("PROFILE","PLOTORDER");
+      if ((iOrder != 0) && (iOrder != 1))
+         Abort_SYS(_("Plot order must be 1 (reverse) or 0 (plot in order), or blank."));
+   }
+
+   // --- vertical line info ---
+
+   Get_REG(MapReg,"MAP.UP_DIRECTION",sLabel,sizeof(sLabel));
+   if (iStrcmp_STR(sLabel,_n("left"),STR_CASE_TOLERANT) == 0)
+      iUp = -1;
+   else
+      iUp = 1;
+
+   rVangle = rDUMMY;   
+   GetReal_REG(MapReg,"MAP.UP_ANGLE",rVangle);
+   if (rVangle == rDUMMY)
+      rVangle = 67.5;
+
+
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+   ZCh = FindChan_DB(Data,sChan);
+   if (ZCh==NULLSYMB)
+      Abort_SYS(_("The data channel does not exist."));
+
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+
+   // --- Handle Projections ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,hIPJ);
+   SetWorkingIPJ_MVIEW(View,hIPJ);
+   
+
+   // --- create profile group ---
+
+   GetName_DB(Data,DB_NAME_FILE,sGroup);
+   FileNamePart_STR(sGroup,sGroup,STR_FILE_PART_NAME);
+   GenGroupName_STR("PROFILE",sGroup,sChan,sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- add maker ---
+
+   EasyMaker_MVIEW(View,_("New profile"),"PROFILE;");
+
+
+   // --- set plotting parameters ---
+
+   SetThinRes_MVIEW(View,0.0);
+   rSmm = rScaleMM_MVIEW(View);
+   rSpj = rScalePjMM_MVIEW(View);
+
+
+   // --- set line characteristics ---
+
+   LineColor_MVIEW(View,iColor_MVIEW(sLineColor));
+   LineThick_MVIEW(View,rThickness*rSmm);
+   LineStyle_MVIEW(View,iStyle,rPitch*rSmm);
+
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   VVz = Create_VV(REAL,0);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+	// --- Number of profiles ---
+
+	iNVA = iGetColVA_DB(Data, ZCh);
+   VAz = Create_VA(REAL,0,iNVA);
+
+
+   if(iNVA > 1) 
+	{
+      GetVAProfColorFile_DB(Data, ZCh, sITR);
+
+
+		// --- Default to color.tbl ---
+
+		if(iStrlen_STR(sITR) == 0)
+			Strcpy_STR(sITR, "colour.tbl");
+
+      if(!iFindPathNameEx_SYS(sITR, FIND_LOCAL_GEOSOFT,
+                           GEO_DIRECTORY_TBL, sITR)) 
+		{
+         hITRva = CreateFile_ITR(sITR);
+
+         // --- Set ITR ranges from 0 to 1 so indices for the
+         //     profile columns, when normalized by the number
+         //     of columns, can be mapped to individual colours. ---
+
+         Linear_ITR(hITRva, 0.0, 1.0, rDUMMY);
+         iArrayColors = TRUE;
+      }
+	}
+
+
+
+   // --- Draw lines ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, LineLST);
+   iTotLines = iSize_LST(LineLST);
+
+   Progress_SYS(1);
+
+   for(i=0;i<iTotLines;i++)
+   {
+
+      if(iOrder==1)
+         GetSymbItem_LST(LineLST,iTotLines-i-1,sLine,Line);
+      else
+         GetSymbItem_LST(LineLST,i,sLine,Line);
+
+      if(!iIsLineValid_DB(Data, Line)) continue;
+      
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Drawing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLine,0);
+      ProgUpdateL_SYS(i,iTotLines);
+
+
+      // --- Get X, Y and Z ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+      GetChanVA_DB(Data,Line,ZCh,VAz);
+
+
+      // --- resample X, Y to Z ---
+
+      rStart = rGetFidStart_VA(VAz);
+      rIncr  = rGetFidIncr_VA(VAz);
+      iLen   = iLen_VA(VAz);
+      ReFid_VV(VVx,rStart,rIncr,iLen);
+      ReFid_VV(VVy,rStart,rIncr,iLen);
+
+		for(iVA = 0; iVA<iNVA; iVA++)
+		{
+			GetVV_VA(VAz, iVA, VA_COL, VVz);
+			if(iArrayColors)
+			{
+				iColor = iColorValue_ITR(hITRva, (real)iVA/(real)iNVA);
+			   LineColor_MVIEW(View,iColor);
+			}
+
+			// --- Draw the line ---
+
+			ProfilePlotEx_MVU(View,VVx,VVy,VVz,rVangle,iUp,rGap,rBase,rSpj/rScale,iJoin,
+									iLog,rLogBase,iSmooth,sPosFillColor,sNegFillColor);
+		}
+   }
+   Progress_SYS(0);
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,ZCh);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   Destroy_IPJ(hIPJ);
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+}

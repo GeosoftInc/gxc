@@ -1,0 +1,254 @@
+//===========================================================================
+NAME          = "E3WINDOW.GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "euler"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Window Results"
+DESCRIPTION   = "
+    Window Euler solutions based on depth, solution errors or X,Y location.
+
+Parameters:
+
+     EULER3D.SOLUTIONS : Solution list
+     E3WINDOW.CHAN   : Windowing channel
+     EULER3D.MASK    : Mask channel
+             .MIN    : Lower window limit
+             .MAX    : Upper window limit
+             .MODE   : Append mask (0) set values outside range to dummy.
+                     : Preset mask  (1) set all values to 1, before masking
+             .REMOVE: Yes (1) - Apply
+"
+// Revision History:
+// v5.1.5: New GX based on UXWINDOW.GX
+//===========================================================================
+// ***NOTE*** Changes to this GX should be made in parallel with UXWINDOW.GX
+//===========================================================================
+
+//===========================================================================
+
+RESOURCE = "E3WINDOW.gr"
+#include "E3WINDOW.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define GET_CHAN(A,B,C)       \
+   if (!iExistSymb_DB(Data,A,DB_SYMB_CHAN))     \
+      B = CreateSymb_DB(Data,A,DB_SYMB_CHAN, DB_OWN_SHARED, C);   \
+   else                                                           \
+      B = FindSymb_DB(Data,A,DB_SYMB_CHAN);                       \
+   LockSymb_DB(Data,B,DB_LOCK_READWRITE,DB_WAIT_INFINITY);        \
+   AddAssociatedLoad_DB(Data,Solutions,B);                          \
+   if (iGetChanProtect_DB(Data,B) == DB_CHAN_PROTECTED)            \
+      SetChanProtect_DB(Data,B,DB_CHAN_UNPROTECTED);              
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         Diag;                // dialogue handle
+LST         List;                // list of channel names
+
+EDB         EData;
+DB          Data;                // name of database to window
+DB_SYMB     Solutions;                // Solutions handle
+DB_SYMB     XCh,DCh,MaskCh;            
+VV          XVV,DVV,MVV;
+
+string(STR_DB_SYMBOL) sChan, sMask;
+string(STR_DEFAULT_SHORT) sMin,sMax; // data window limits (as strings)
+real        rMin,rMax;           //                    (as reals)
+string(STR_DB_SYMBOL) sSolutions;     
+
+int         iLenVV;
+int         iMode;               // add or reset windowing option
+
+//===========================================================================
+//                          MAIN PROGRAM CODE
+//===========================================================================
+
+{
+   // --- Get handle to current database ---
+
+   EData=Current_EDB();
+   Data = Lock_EDB(EData);
+
+   if (iInteractive_SYS())
+   {
+      // --- Define dialogue windows ---
+
+      Diag = Create_DGW("E3WINDOW");
+
+
+      // --- Solution lists ---
+
+      List = GetList_DGW(Diag,_E3WINDOW_0);
+      ClassGroupLST_DB(Data,List,"Targets");
+      Sort_LST(List,0,0);
+
+      // --- Data channel list ---
+
+      List = GetList_DGW(Diag,_E3WINDOW_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      
+      // --- Mask channel list ---
+
+      List = GetList_DGW(Diag,_E3WINDOW_2);
+      ClassChanLST_DB(Data,List,"MASK");
+
+                                       
+      // --- Set defaults from last window ---
+      
+      SetInfoSYS_DGW(Diag,_E3WINDOW_0,DGW_TEXT,"EULER3D","SOLUTIONS");
+      SetInfoSYS_DGW(Diag,_E3WINDOW_1,DGW_TEXT,"E3WINDOW","CHAN");
+      SetInfoSYS_DGW(Diag,_E3WINDOW_2,DGW_TEXT,"EULER3D","MASK");
+      SetInfoSYS_DGW(Diag,_E3WINDOW_3,DGW_TEXT,"E3WINDOW","MIN");
+      SetInfoSYS_DGW(Diag,_E3WINDOW_4,DGW_TEXT,"E3WINDOW","MAX");
+      SetInfoSYS_DGW(Diag,_E3WINDOW_5,DGW_LISTALIAS,"E3WINDOW","MODE");
+
+
+      // --- Run dialogue --- 
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+
+      // --- Get values from dialogue ---
+
+      GetInfoSYS_DGW(Diag,_E3WINDOW_0,DGW_TEXT,"EULER3D","SOLUTIONS");
+      GetInfoSYS_DGW(Diag,_E3WINDOW_1,DGW_TEXT,"E3WINDOW","CHAN");
+      GetInfoSYS_DGW(Diag,_E3WINDOW_2,DGW_TEXT,"EULER3D","MASK");
+      GetInfoSYS_DGW(Diag,_E3WINDOW_3,DGW_TEXT,"E3WINDOW","MIN");
+      GetInfoSYS_DGW(Diag,_E3WINDOW_4,DGW_TEXT,"E3WINDOW","MAX");
+      GetInfoSYS_DGW(Diag,_E3WINDOW_5,DGW_LISTALIAS,"E3WINDOW","MODE");
+
+   }
+
+   // --- Get Solutions number ---
+
+   GetString_SYS("EULER3D","SOLUTIONS",sSolutions);
+   if (!iExistSymb_DB(Data,sSolutions,DB_SYMB_LINE))
+      Abort_SYS(_("The specified solution list does not exist"));
+   Solutions = FindSymb_DB(Data,sSolutions,DB_SYMB_LINE);
+
+
+   // --- Get channel to window on ---
+
+   GetString_SYS("E3WINDOW","CHAN",sChan);
+   if (!iExistSymb_DB(Data,sChan,DB_SYMB_CHAN))
+      Abort_SYS(_("Data channel does not exist"));
+   DCh=FindSymb_DB(Data,sChan,DB_SYMB_CHAN);
+   LockSymb_DB(Data,DCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Get mask channel ---
+
+   GetString_SYS("EULER3D","MASK",sMask);
+   GET_CHAN(sMask,MaskCh, DB_CATEGORY_CHAN_BYTE)
+
+
+   // --- Get minimum and maximum values ---
+
+   GetString_SYS("E3WINDOW","MIN",sMin);
+   if (iStrMin_STR(sMin) != 0)
+      rMin = rGetReal_SYS("E3WINDOW","MIN");
+   else
+      rMin = rMIN;
+   GetString_SYS("E3WINDOW","MAX",sMax);
+   if (iStrMin_STR(sMax) != 0)
+      rMax = rGetReal_SYS("E3WINDOW","MAX");
+   else
+      rMax = rMAX;
+
+   if(rMax<rMin) 
+      Abort_SYS(_("Max value must be greater than or equal to min value."));
+
+
+   // --- Get window mode setting ---
+
+   iMode = iGetInt_SYS("E3WINDOW","MODE");
+   if ((iMode != 0) && (iMode != 1))
+      Abort_SYS(_("Mode setting is invalid"));
+
+
+   // --- Get X channel ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+
+   // --- Create VVs ---
+
+   XVV = Create_VV(REAL,0);
+   DVV = Create_VV(REAL,0);
+   MVV = CreateExt_VV(GS_BYTE, 0);
+
+         
+   // --- Get data and refid ---
+
+   GetChanVV_DB(Data,Solutions,XCh,XVV);
+   GetChanVV_DB(Data,Solutions,DCh,DVV);
+   GetChanVV_DB(Data,Solutions,MaskCh,MVV);
+
+   ReFidVV_VV(DVV, XVV);
+   ReFidVV_VV(MVV, XVV);
+
+
+   // --- If using reset mask mode, begin by setting all mask values to 1; otherwise,
+   //     begin by masking all data values where the mask is a dummy ---
+   
+   iLenVV = iLength_VV(MVV);
+   if(iMode==1) 
+      SetIntN_VV(MVV, 0, -1, 1);
+   else
+      Mask_VVU(DVV, MVV);
+
+
+   // --- Set mask based on data ranges ---
+
+   DummyRange_VVU(DVV, rMin, rMax, FALSE, TRUE);
+
+   
+   // --- Mask back to the mask channel ---
+
+   Mask_VVU(MVV, DVV);
+
+
+   // --- Put back the mask channel ---
+
+   PutChanVV_DB(Data,Solutions,MaskCh,MVV);
+
+
+   // --- Done - clean up and exit ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,DCh);
+   UnLockSymb_DB(Data,MaskCh);
+
+
+   Destroy_VV(XVV);
+   Destroy_VV(DVV);
+   Destroy_VV(MVV);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("E3WINDOW GX (Refine solution list based on channel values)"), FALSE);
+   AddComment_DB(Data, "Solution list", sSolutions, TRUE);
+   AddComment_DB(Data, "Channel with results", sChan, TRUE);
+   AddComment_DB(Data, "Mask channel", sMask, TRUE);
+   AddComment_DB(Data, "Mask results less than", sMin, TRUE);
+   AddComment_DB(Data, "and greater than", sMax, TRUE);
+   AddIntComment_DB(Data, _n("Masking mode"), iMode, TRUE);
+
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+}

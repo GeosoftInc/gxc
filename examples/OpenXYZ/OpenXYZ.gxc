@@ -1,0 +1,201 @@
+//===========================================================================
+NAME          = "Open an XYZ data file into a new database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+DESCRIPTION   = "
+   Open an XYZ data file into a new database
+
+    OpenXYZ.FILE     : Input data file name
+    OpenXYZ.LINES    : Number of Lines
+    OpenXYZ.CHANNELS : Number of Channels
+    
+"
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "OpenXYZ.gr"
+#include "OpenXYZ.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         hDGW;             // Dialogue handle
+
+int         i;                
+int         iLines;           
+int         iChannels;        
+int         iBlobs;           
+int         iErase;           
+
+
+string(STR_FILE) sXYZ,sDB,sTemplate;
+string(STR_DEFAULT_LONG) sPr;
+string(STR_DEFAULT_SHORT) sExt;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      // --- Create the Dialogue ---
+
+      hDGW = Create_DGW("OPENXYZ");
+      SetInfoSYS_DGW(hDGW,_OPENXYZ_0,DGW_FILEPATH,"OPENXYZ","FILE");
+      i = iRunDialogue_DGW(hDGW);
+      if (i == -1) Cancel_SYS();
+      GetInfoSYS_DGW(hDGW,_OPENXYZ_0,DGW_FILEPATH,"OPENXYZ","FILE");
+      Destroy_DGW(hDGW);
+
+   } 
+      
+
+   // --- check file name ---
+   
+   GetString_SYS("OPENXYZ","FILE",sXYZ);
+   FileNamePart_STR(sXYZ,sExt,STR_FILE_PART_EXTENSION);
+   
+   
+   // --- XYZ of GDB? ---
+   
+   if (iStrcmp_STR(sExt,"XYZ",STR_CASE_TOLERANT)==0) {
+   
+   
+      // --- create template ---
+
+      FileExt_STR(sXYZ,"i0",sTemplate,FILE_EXT_FORCE);
+      GenXYZTemp_DU(sXYZ,sTemplate);
+      
+      
+      // --- create database ---
+   
+      FileExt_STR(sXYZ,"gdb",sDB,FILE_EXT_FORCE);
+      if (iFileExist_SYS(sDB)) {
+      
+         Printf_STR(sPr, sizeof(sPr), _("The XYZ file will be opened in a new GDB file named <%s>. This file already exists. Overwrite?"), sDB);
+         if (!iDisplayQuestion_SYS(_("GDB file exists"),sPr))
+            Cancel_SYS();
+            
+         UnLoad_EDB(sDB);            
+      }
+      
+
+      // --- Ask for Database Size ---
+
+      if (iInteractive_SYS()) 
+      {
+          // --- Create the Dialogue ---
+
+          hDGW = Create_DGW("CreateDB");
+
+
+          // --- Set any Defaults ---
+                            
+          SetInfoSYS_DGW(hDGW,_CREATEDB_0,DGW_TEXT,"OPENXYZ","LINES");
+          SetInfoSYS_DGW(hDGW,_CREATEDB_1,DGW_TEXT,"OPENXYZ","CHANNELS");
+
+
+          // --- Run the Dialogue ---
+
+          i = iRunDialogue_DGW(hDGW);
+          if (i==-1) Cancel_SYS();
+
+
+          // --- Get the Strings ---
+
+          GetInfoSYS_DGW(hDGW,_CREATEDB_0,DGW_TEXT,"OPENXYZ","LINES");
+          GetInfoSYS_DGW(hDGW,_CREATEDB_1,DGW_TEXT,"OPENXYZ","CHANNELS");
+
+          Destroy_DGW(hDGW);
+      }
+      
+      
+      // --- Get Lines and Channels ---
+      
+      iLines    = iGetInt_SYS("OPENXYZ","LINES");
+      iChannels = iGetInt_SYS("OPENXYZ","CHANNELS");
+      
+      if ( (iLines <= 0) || (iLines == iDUMMY) )
+         iLines = 200;
+        
+      if ( (iChannels <= 0) || (iChannels == iDUMMY) )
+         iChannels = 64;
+      
+      iBlobs = iLines+iChannels+100;
+      iErase = (int)(  ((real)(iLines*iChannels)) *0.05 );
+      if (iErase < 100)   iErase = 100;
+      if (iErase > 10000) iErase = 10000;
+
+
+      // --- Create Database ---
+      
+      CreateComp_DB(sDB,
+                    iLines,
+                    iChannels,
+                    iBlobs,
+                    10,
+                    iErase,
+                    "SUPER",
+                    "",
+                    1024,
+                    DB_COMP_SIZE);
+
+
+      // --- Load Database ---
+                    
+      EData = Load_EDB(sDB);
+      Data = Lock_EDB(EData);
+      
+
+      // --- load data ---             
+     
+      Progress_SYS(1);
+      ProgName_SYS(_("Loading XYZ"),1);
+      ImportXYZ_DU(Data,DU_IMPORT_REPLACE,sXYZ,sTemplate);
+      Progress_SYS(0);
+      
+      
+      // --- Get current X, Y channels ---
+
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+      
+      UnLock_EDB(EData);
+      DelLine0_EDB(EData);
+      LoadChan_EDB(EData,sXCh);
+      LoadChan_EDB(EData,sYCh);
+      LoadAllChans_EDB(EData);
+      iRunGX_SYS("chanpoff.gx");
+      
+   } else if (iStrcmp_STR(sExt,"GDB",STR_CASE_TOLERANT)==0) {
+   
+      // --- its a GDB, just open the database ---
+      
+      Load_EDB(sXYZ);
+   
+   } else
+   
+      Abort_SYS(_("Must be an XYZ or GDB file."));
+      
+}

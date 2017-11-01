@@ -1,0 +1,367 @@
+//===========================================================================
+NAME          = "Import a Surpac string file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Import a Surpac string or dtm file.
+
+    IMPSURPAC.FILES   Surpac string file(s), delimited with '|'.
+    IMPSURPAC.MAPOUT  0: Current map, 1: New Map
+    Current Map:
+      IMPSURPAC.VIEW     	0: Current data view, 1: 3D View    
+      IMPSURPAC.VIEW3DNAME Name of 3D view to import into in scripting mode (defaults to 3D)
+
+    New Maps:
+      IMPSURPAC.MAP      New map name
+      IMPSURPAC.MAPSCALE New map scale (optional) for new maps, 2D views.
+      IMPSURPAC.ORIENT   0:Plan map, 1:N-S section, 2:E-W section
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map/Import"
+
+// Revision History:
+// v7.1.0: Change how 3D imports are handled (only from within 3D viewer, but supports scripting with name)
+//         Consolidated 2D map creation into new CreateMap2D_GIS function.
+// v6.3.0: Call GetDisplayAreaRaw_EMAP only in interactive mode.
+//         Couldn't import to current 3D view.
+//         Added ESRI options.
+// v6.2.0: New GX based on IMPSURPAC.GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IMPSURPAC.gr"
+#include "IMPSURPAC.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        EMap;             // Map handle
+MAP         Map;              // Map handle
+
+MVIEW       MView;            // Map View handle
+IPJ         hIPJ;					// Projection handles
+GIS         hGIS;             // GIS handle
+LST         FileLST;          // Files
+
+DGW         Diag;             // Dialogue handle
+
+string(STR_GROUP) sGrpName;
+string(STR_FILE) sDataFile,sInfo,sMap,sExt,sTemp;
+string(STR_GROUP) sGroup, sName;
+int iRet, iNewMap, iOrientation;
+
+real rScale;
+string(STR_VIEW) s3DView, sView;
+string(STR_MULTI_PATH) sFiles;
+int iFile,iFiles,iOrient,i3D,iNewMapCreated;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+		i3D = 0;
+		if (iHaveCurrent_EMAP())
+		{
+		   EMap = Current_EMAP();
+			i3D = iIs3DView_EMAP(EMap);
+		}
+
+      if(i3D)
+      {
+      
+         // --- Put current values into the dialogue --
+
+         Diag = Create_DGW("IMPSURPAC_3D");
+         SetInfoSYS_DGW(Diag,_IMPSURPAC_3D_0,DGW_FILEPATH, "IMPSURPAC","FILES");  
+         
+
+         // --- Run the Dialogue ---
+
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();
+         
+
+         // --- Read the returned values from the dialogue ---
+   	
+         GetInfoSYS_DGW(Diag,_IMPSURPAC_3D_0,DGW_FILEPATH, "IMPSURPAC","FILES");
+         Destroy_DGW(Diag);
+      }
+      else 
+      {
+      
+         // --- Put current values into the dialogue --
+
+         Diag = Create_DGW("IMPSURPAC");
+         SetInfoSYS_DGW(Diag,_IMPSURPAC_0,DGW_FILEPATH, "IMPSURPAC","FILES");  
+         
+
+         // --- Run the Dialogue ---
+
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();
+         
+
+         // --- Read the returned values from the dialogue ---
+   	
+         GetInfoSYS_DGW(Diag,_IMPSURPAC_0,DGW_FILEPATH, "IMPSURPAC","FILES");
+         Destroy_DGW(Diag);
+      
+
+
+         // --- Set map target ---
+         
+         SetInt_SYS("IMPSURPAC","MAPOUT", iRet);   // 0: Current map, 1: New map
+         iNewMap = iRet;
+			if(iNewMap==1)  // New map 
+         {
+            Diag = Create_DGW("IMPSURPACNEW");
+            SetInfoSYS_DGW(Diag,_IMPSURPACNEW_0,DGW_LISTALIAS, "IMPSURPAC","ORIENT");  
+            SetInfoSYS_DGW(Diag,_IMPSURPACNEW_1,DGW_TEXT,      "IMPSURPAC","MAPSCALE");           
+            
+            if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_IMPSURPACNEW_0,DGW_LISTALIAS, "IMPSURPAC","ORIENT");  
+            GetInfoSYS_DGW(Diag,_IMPSURPACNEW_1,DGW_TEXT,      "IMPSURPAC","MAPSCALE");           
+            Destroy_DGW(Diag);
+         }
+      }
+   }
+   
+
+   // --- Get and validate parameters ---
+
+   GetString_SYS("IMPSURPAC","FILES", sFiles);
+   iFiles = iCountTokens_STR(sFiles,"|");
+
+   // --- Handle 3D ---
+
+	if (iInteractive_SYS())
+	{
+		SetInt_SYS("IMPSURPAC", "VIEW", i3D);
+		if (i3D)
+		{
+			Get3DViewName_EMAP(EMap, s3DView);
+			SetString_SYS("IMPSURPAC", "VIEW3DNAME", s3DView);
+		}
+	}
+	else
+	{
+		i3D = iGetInt_SYS("IMPSURPAC", "VIEW");
+		if (i3D != 1 && i3D != 0) 
+			i3D = 0;  // Default to current view
+		if (i3D)
+		{
+			GetString_SYS("IMPSURPAC", "VIEW3DNAME", s3DView);
+			if (iStrlen_STR(s3DView) == 0)
+				Strcpy_STR(s3DView, "3D");
+		}
+   }
+
+   
+   if(i3D)
+   {
+      iNewMap = 0;   
+      iOrientation = 3;
+   }
+   else {
+      iNewMap = iGetInt_SYS("IMPSURPAC","MAPOUT");
+      if(iNewMap!=0 && iNewMap!=1)
+         Abort_SYS(_("Invalid map import option"));
+
+      rScale = rGetReal_SYS("IMPSURPAC","MAPSCALE");
+      iOrientation = iGetInt_SYS("IMPSURPAC","ORIENT");
+      if(iOrientation<0 || iOrientation>2) iOrientation = 0;
+   }
+
+   
+   // --- Transfer all files to a LST ---
+
+   FileLST = Create_LST(2*STR_FILE);
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {      
+      // --- get the file ---
+      
+      GetMFile_STR(sFiles,sDataFile,iFile);
+      AddItem_LST(FileLST, sDataFile, "");
+   }
+   
+   
+   iOrient = IPJ_ORIENT_PLAN;
+   iNewMapCreated = FALSE;
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {   
+   
+      // --- get the file ---
+      
+      GetItem_LST(FileLST, 0, iFile, sDataFile);        
+
+      
+      // --- Create the GIS object ---
+
+      hGIS = Create_GIS(sDataFile,sInfo,GIS_TYPE_SURPAC);
+      
+      
+		// --- Get the GIS IPJ ---      
+            
+      hIPJ = GetIPJ_GIS(hGIS);
+
+
+      // --- New Map ---
+
+      if(iNewMap && !iNewMapCreated)
+      { 
+         GetString_SYS("IMPSURPAC","MAP",sMap);
+         if (iStrlen_STR(sMap) == 0)
+         {
+            // --- Get the new map name ---
+
+            FileNamePart_STR(sDataFile, sMap, STR_FILE_PART_NAME);
+            SetString_SYS("IMPSURPAC","MAP",sMap);
+         }
+         
+         if(iInteractive_SYS()) {   
+
+            while(TRUE) {
+
+               Diag = Create_DGW("IMPSURPACMAP");
+
+               SetInfoSYS_DGW(Diag,_IMPSURPACMAP_0,DGW_FILEPATH, "IMPSURPAC","MAP");  
+               if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+               GetInfoSYS_DGW(Diag,_IMPSURPACMAP_0,DGW_FILEPATH, "IMPSURPAC","MAP");
+               Destroy_DGW(Diag);
+
+               // --- open the map and set up views ---
+
+               GetString_SYS("IMPSURPAC","MAP",sMap);
+               if (iLoaded_EMAP(sMap)) {
+                  if (iDisplayQuestion_SYS(_("Map is open"), _("Replace currently open map?")))
+                     UnLoad_EMAP(sMap);
+                  else
+                     continue;
+               }
+
+               break;
+
+            }  // End While
+         }
+   
+
+			// --- Get the map name ---
+			   
+         GetString_SYS("IMPSURPAC","MAP",sMap);
+         if(!iStrlen_STR(sMap)) 
+            Abort_SYS(_("Output map name not specified."));
+
+   
+			// --- Unload and delete existing map ---   
+			         
+         if(iFileExist_SYS(sMap))
+         {
+	         if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+		      iDeleteFile_SYS(sMap);         
+		   }
+         
+
+			// --- Create the new map ---
+			
+			CreateMap2D_GIS(hGIS, sMap, rScale, hIPJ, iOrientation);
+			
+			
+			// --- Load the new map ---
+
+			Load_EMAP(sMap);
+
+
+			// --- Don't do it again ---
+						
+         iNewMapCreated = TRUE;      
+         
+      } // end if(iNewMap && !iNewMapCreated)        
+      
+
+      // --- Get Map ---
+
+      EMap = Current_EMAP();
+
+
+      // --- Lock Map ---
+
+      Map  = Lock_EMAP(EMap);
+
+
+	   // --- If importing to a 3D view, see if this is a 3D view (test needed for scripting) ---
+	   
+	   if(i3D) 
+	   {
+		   // --- Get the 3D view ---
+		        
+		   MView = Create_MVIEW(Map, s3DView, MVIEW_WRITEOLD);
+		   Strcpy_STR(sView, s3DView);
+
+			if (!iIsView3D_MVIEW(MView))
+			{
+					Printf_STR(sTemp, sizeof(sTemp), _("Importing to 3D View '%s' but it is not a 3D View"), s3DView);
+		      Abort_SYS(sTemp);
+	   	}
+	   }
+	   else 
+		{
+		   // --- Get the current data view ---
+		        
+		   MView = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
+		   GetName_MVIEW(MView, sView);
+		}
+
+
+		// --- If this is not a new map, set the working IPJ to the GIS IPJ ---
+      
+      if(!iNewMap)
+			SetWorkingIPJ_MVIEW(MView, hIPJ);
+
+
+      // --- Set the group name ---
+
+      FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME);
+      FileNamePart_STR(sDataFile, sExt, STR_FILE_PART_EXTENSION);
+      if(!iStrcmp_STR(sExt, "dtm", STR_CASE_TOLERANT))
+         GenGroupName_STR("Surpac",sName,"dtm",sGrpName);
+      else
+         GenGroupName_STR("Surpac",sName,"",sGrpName);
+      Strcpy_STR(sGroup,sGrpName);
+      SetThinRes_MVIEW(MView,-1.0);
+      StartGroup_MVIEW (MView, sGroup, MVIEW_GROUP_NEW);
+
+
+      // --- import the map ---
+
+      Progress_SYS(1);
+      ProgName_SYS(_("Import Surpac Map Data"),1);
+      LoadMAP_GIS(hGIS, MView);
+      Progress_SYS(0);      
+
+
+      // --- Destroy the view ---
+
+      Destroy_MVIEW(MView);
+      UnLock_EMAP(EMap);
+      
+      // --- Destroy objects ---
+
+      Destroy_IPJ(hIPJ);
+      Destroy_GIS(hGIS);         
+   }   
+}

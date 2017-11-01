@@ -1,0 +1,254 @@
+//===========================================================================
+NAME          = "Export to Interpex RESIX2DI I2X format file(s)."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP/Export"
+
+DESCRIPTION   = "
+   Export to Interpex RESIX2DI I2X format file(s) from current lines.
+
+    IP.I2X_RES_DATA           : Resistivity data   (required)
+    IP.I2X_IP_DATA            : IP data            (optional)
+    IP.I2X_RES_IMAGE_MODEL    : Image model data   (optional)
+    IP.I2X_IP_IMAGE_MODEL                          (optional)
+    IP.I2X_RES_IMAGE_SYNTH    : Synthetic model data  (optional)
+    IP.I2X_IP_IMAGE_SYNTH                          (optional)
+    IP.I2X_RES_IMAGE_POLY     : Polygon model data (optional)
+    IP.I2X_IP_IMAGE_POLY                           (optional)
+    IP.I2X_LINES              : Line selections:
+                                 A : All lines
+                                 S : Selected lines
+                                 D : Displayed line
+"
+// Revision History:
+// v6.1.4: Not all channel lists were being loaded.
+//         Removed some non-applicable items from the channel list like "Topo".
+// v5.1.4: In script mode, you can specify which directory to create the new file
+// v5.1.3: Using "Current" X, Y and Z channels - WinnowChanList2_IP.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPEXPRESIX.gr"
+#include "IPEXPRESIX.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+DB_SELECT   Select;           // current selection mode
+DB_SYMB     Line;             // Line Handle
+LST         ChLST;
+
+int         i, iN;                // Utility 
+
+string(STR_DB_SYMBOL) sLine, sCurLine;
+string(STR_DEFAULT_SHORT) sLines;
+string(STR_DB_SYMBOL) sResData, sResModel, sResSynth, sResPoly, sChan;
+string(STR_DB_SYMBOL) sIPData, sIPModel, sIPSynth, sIPPoly;
+string(STR_DEFAULT) sLabel;
+string(STR_FILE) sFile, sDir;
+int iLines, iTotLines;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();
+   
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPEXPRESIX");
+
+      // --- Create channel list ---
+      
+      ChLST = Create_LST(STR_DB_SYMBOL+20);
+      SymbLST_DB(Data,ChLST,DB_SYMB_CHAN);
+      WinnowChanList2_IP(ChLST, Data);
+      Sort_LST(ChLST,0,0);
+      
+      
+      // --- Remove more obviously wrong channels from the LST ---
+      
+      iN = iSize_LST(ChLST);
+      for(i=iN-1;i>=0;i--)
+      {
+         GetItem_LST(ChLST, LST_ITEM_NAME, i, sChan);
+         if(iStrcmp_STR(sChan, _n("ArrayType"), STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, _n("Control"), STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, _n("Cycle"), STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, "I", STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, _n("Topo"), STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, _n("Pulse"), STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, _n("Mode"), STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, _n("DipoleNo"), STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, "M", STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, "MF", STR_CASE_TOLERANT)==0 ||
+            iStrcmp_STR(sChan, _n("Trigger"), STR_CASE_TOLERANT)==0)
+            DelItem_LST(ChLST, i);
+       }
+            
+
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_0), ChLST);
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_1), ChLST);
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_2), ChLST);
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_3), ChLST);
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_4), ChLST);
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_5), ChLST);
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_6), ChLST);
+      Copy_LST(GetList_DGW(Diag,_IPEXPRESIX_7), ChLST);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_0,DGW_TEXT,"IP","I2X_RES_DATA");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_1,DGW_TEXT,"IP","I2X_IP_DATA");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_2,DGW_TEXT,"IP","I2X_RES_IMAGE_MODEL");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_3,DGW_TEXT,"IP","I2X_IP_IMAGE_MODEL");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_4,DGW_TEXT,"IP","I2X_RES_IMAGE_SYNTH");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_5,DGW_TEXT,"IP","I2X_IP_IMAGE_SYNTH");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_6,DGW_TEXT,"IP","I2X_RES_POLY");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_7,DGW_TEXT,"IP","I2X_IP_POLY");
+      SetInfoSYS_DGW(Diag,_IPEXPRESIX_8,DGW_LISTALIAS,"IP","I2X_LINES");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_0,DGW_TEXT,"IP","I2X_RES_DATA");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_1,DGW_TEXT,"IP","I2X_IP_DATA");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_2,DGW_TEXT,"IP","I2X_RES_IMAGE_MODEL");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_3,DGW_TEXT,"IP","I2X_IP_IMAGE_MODEL");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_4,DGW_TEXT,"IP","I2X_RES_IMAGE_SYNTH");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_5,DGW_TEXT,"IP","I2X_IP_IMAGE_SYNTH");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_6,DGW_TEXT,"IP","I2X_RES_POLY");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_7,DGW_TEXT,"IP","I2X_IP_POLY");
+      GetInfoSYS_DGW(Diag,_IPEXPRESIX_8,DGW_LISTALIAS,"IP","I2X_LINES");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   } 
+  
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","I2X_RES_DATA",sResData);
+   if(!iStrlen_STR(sResData))
+      Abort_SYS(_("No Resistivity Data channel specified"));
+   
+   GetString_SYS("IP","I2X_IP_DATA",sIPData);
+   GetString_SYS("IP","I2X_RES_IMAGE_MODEL",sResModel);
+   GetString_SYS("IP","I2X_IP_IMAGE_MODEL",sIPModel);
+   GetString_SYS("IP","I2X_RES_IMAGE_SYNTH",sResSynth);
+   GetString_SYS("IP","I2X_IP_IMAGE_SYNTH",sIPSynth);
+   GetString_SYS("IP","I2X_RES_POLY",sResPoly);
+   GetString_SYS("IP","I2X_IP_POLY",sIPPoly);
+
+   GetString_SYS("IP","I2X_LINES",sLines);
+   if (!iInteractive_SYS()) 
+      GetString_SYS("IPEXPRESIX","DIR",sDir);
+
+   
+   ToUpper_STR(sLines);
+
+   // --- Do the line selection ---
+
+   Select = GetSelect_DB(Data);
+   if(iCharComp_STR(sLines,"D")) {
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+      Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+   }
+   else if(iCharComp_STR(sLines,"A")) {
+      Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Exporting line:"),1);
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sLine);
+      Strcpy_STR(sLabel,_("Exporting line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+      // --- Create export file name ---
+      if (!iInteractive_SYS()) {
+         Strcpy_STR(sFile,sDir);
+         Strcat_STR(sFile,sLine);
+      }
+      else 
+         Strcpy_STR(sFile,sLine);
+      Strcat_STR(sFile,".i2x");
+
+      // --- export ---
+
+      ExportI2X_IP(Ip, Data, sFile, sLine, sResData, sIPData, sResModel, sIPModel, 
+                    sResSynth, sIPSynth, sResPoly, sIPPoly);
+
+      UnLockSymb_DB(Data,Line);
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Restore the line selection ---
+
+   SetSelect_DB(Data, Select);
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);   
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+   
+}

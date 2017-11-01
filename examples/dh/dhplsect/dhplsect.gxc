@@ -1,0 +1,696 @@
+//===========================================================================
+NAME          = "Drill hole: plot section on plan map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot"
+
+DESCRIPTION   = "
+   Plot the trace of the section on the plan map.
+   If there is a swing, it is indicated by an arrow.
+"
+// Revision History
+// v7.1   Fixed problems with stacked sections - QA 14507.
+//        Set working IPJ from project IPJ - QA 12294
+// v6.1.0 ArcGIS implementation.
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhplsect.gr"
+#include "dhplsect.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW      Diag;
+EDB      EData;
+DH       Drill;
+MAP      Map;
+EMAP     EMap;
+REG      MapReg;
+MVIEW    View;
+LST      List;
+LPT      Lpt;
+IPJ      hProjectIPJ;
+SBF      hMapSBF;
+BF       hMapBF;
+LST      FileList;
+
+int i, iD, iJob, iNSec, iStyle, iType, iLoaded, iPlot, iArcGIS;
+
+real rAz, rAzDeg, rLen, rRefX, rRefY, rSwing, rTol, rX, rX0, rX1, rY, rY0, rY1;
+real rDXl, rDXw, rDYl, rDYw, rX2, rX3, rX4, rY2, rY3, rY4, rThick, rBit;
+real rScaleMM, rXOff, rYOff, rCos, rSin, rF, rSize, rALen, rAWid;
+real rXOff2, rYOff2, rXa, rXb, rYa, rYb;
+real rX1s, rX2s, rX3s, rX4s, rY1s, rY2s, rY3s, rY4s, rXOffs, rYOffs;
+real rSinSwing, rBotE, rTopE, rH, rOff, rEInt, rNInt;
+real rScale, rStackScale;
+                             
+string(STR_FILE) sMap, sSHP, sSectID, sTag, sLayerGroup, sPlan, sSection, sBuff, sFont;
+string(STR_DEFAULT_SHORT) sExt, sString;
+string(STR_DEFAULT_SHORT) sColour;
+string(STR_DEFAULT_LONG) sDesc;
+string(STR_DEFAULT_LONG) sLicClass;
+string(STR_FILE) sDB;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, _n("ArcGIS"), STR_CASE_TOLERANT) == 0;
+
+
+	// --- Open the target project; need to get the IPJ ---
+	
+   // --- Get DB/DH ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+   Drill  = Create_DH(sDB);
+   	
+   hProjectIPJ = Create_IPJ();
+   GetIPJ_DH(Drill, hProjectIPJ);
+   
+   Destroy_DH(Drill);
+   
+
+   // --- Create Line pattern resource ---
+
+   Lpt = Create_LPT();
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      if (!iArcGIS)
+         Diag = Create_DGW("DHPLSECT");
+      else
+         Diag = Create_DGW("DHPLSECT_ESRI");
+   
+      if (!iArcGIS)
+      {
+         List = GetList_DGW(Diag,_DHPLSECT_4);
+         GetLST_LPT(Lpt, List);
+
+         SetInfoSYS_DGW(Diag,_DHPLSECT_0,DGW_FILEPATH, "DHPLSECT","PLANMAP");
+         SetInfoSYS_DGW(Diag,_DHPLSECT_1,DGW_FILEPATH, "DHPLSECT","SECTION");
+         SetInfoSYS_DGW(Diag,_DHPLSECT_2,DGW_LISTALIAS,"DHPLSECT","PLOT");
+         SetInfoSYS_DGW(Diag,_DHPLSECT_3,DGW_TEXT,     "DHPLSECT","COLOUR");
+         SetInfoSYS_DGW(Diag,_DHPLSECT_4,DGW_LISTALIAS,"DHPLSECT","LINETYPE");
+         SetInfoSYS_DGW(Diag,_DHPLSECT_5,DGW_TEXT,     "DHPLSECT","LINEWIDTH");
+      } else {
+         SetInfoSYS_DGW(Diag,_DHPLSECT_ESRI_0,DGW_FILEPATH, "DHPLSECT","SECTION");
+         SetInfoSYS_DGW(Diag,_DHPLSECT_ESRI_1,DGW_FILEPATH, "DHPLSECT","SHAPE");
+         SetInfoSYS_DGW(Diag,_DHPLSECT_ESRI_2,DGW_LISTALIAS,"DHPLSECT","PLOT");
+      }
+      
+      iD = iRunDialogue_DGW(Diag);
+      if (iD == -1) Cancel_SYS();
+
+      if (!iArcGIS) 
+      {
+         GetInfoSYS_DGW(Diag,_DHPLSECT_0,DGW_FILEPATH, "DHPLSECT","PLANMAP");
+         GetInfoSYS_DGW(Diag,_DHPLSECT_1,DGW_FILEPATH, "DHPLSECT","SECTION");
+         GetInfoSYS_DGW(Diag,_DHPLSECT_2,DGW_LISTALIAS,"DHPLSECT","PLOT");
+         GetInfoSYS_DGW(Diag,_DHPLSECT_3,DGW_TEXT,     "DHPLSECT","COLOUR");
+         GetInfoSYS_DGW(Diag,_DHPLSECT_4,DGW_LISTALIAS,"DHPLSECT","LINETYPE");
+         GetInfoSYS_DGW(Diag,_DHPLSECT_5,DGW_TEXT,     "DHPLSECT","LINEWIDTH");
+      } else {
+         GetInfoSYS_DGW(Diag,_DHPLSECT_ESRI_0,DGW_FILEPATH, "DHPLSECT","SECTION");
+         GetInfoSYS_DGW(Diag,_DHPLSECT_ESRI_1,DGW_FILEPATH, "DHPLSECT","SHAPE");
+         GetInfoSYS_DGW(Diag,_DHPLSECT_ESRI_2,DGW_LISTALIAS,"DHPLSECT","PLOT");
+      }
+
+      Destroy_DGW(Diag);             
+
+
+   }
+   
+   
+   // -- Get the parameters ---
+   
+   if (!iArcGIS) 
+   {
+      GetString_SYS("DHPLSECT","PLANMAP",sPlan);
+      if(!iStrlen_STR(sPlan)) 
+         Abort_SYS(_("No plan map specified"));
+   } 
+
+   GetString_SYS("DHPLSECT","SECTION",sSection);
+   if(!iStrlen_STR(sSection)) 
+      Abort_SYS(_("No section job or map specified"));
+
+   if (!iArcGIS)
+   {
+      GetString_SYS("DHPLSECT","COLOUR",sColour);
+      if(!iStrlen_STR(sColour)) 
+         Abort_SYS(_("No plotting colour specified"));
+
+      iStyle = iGetInt_SYS("DHPLSECT","LINETYPE");
+      if(iStyle==iDUMMY) 
+         Abort_SYS(_("No plotting line type specified"));
+
+      rThick = rGetReal_SYS("DHPLSECT","LINEWIDTH");
+      if(rThick==rDUMMY) 
+         Abort_SYS(_("No plotting line width specified"));
+   } else {
+      Strcpy_STR(sColour, "K");
+      iStyle = 0;
+      rThick = 0.5;
+   }
+
+   iPlot = iGetInt_SYS("DHPLSECT","PLOT");
+   if(iPlot==iDUMMY) 
+      Abort_SYS(_("No section trace type specified"));
+   
+   // --- See if it's a section job or a section map ---
+
+   FileNamePart_STR(sSection, sExt, STR_FILE_PART_EXTENSION);
+   
+   iJob = 1;
+   if(!iStrcmp_STR(sExt,"MAP",STR_CASE_TOLERANT)) iJob = 0;
+
+   // --- For Jobs, open the file and extract the required paramters ---
+
+   if(iJob==1) {
+      
+      ClearGroupParm_SYS("DH");
+      LoadParm_SYS(sSection, "DH");
+
+      iType = iGetInt_SYS("DH", "PLOT_TYPE");
+
+      if(iType==DH_PLOT_PLAN) {
+
+         Printf_STR(sBuff, sizeof(sBuff), _("%s is a plan job, not a section job."), sSection);
+         Abort_SYS(sBuff);
+
+      }
+      else if (iType!=DH_PLOT_SECTION && iType!=DH_PLOT_SECTION_STACK) {
+         Printf_STR(sBuff, sizeof(sBuff), _("%s is not a valid section job."), sSection);
+         Abort_SYS(sBuff);
+      }
+
+      rRefX = rGetReal_SYS("DH","EAST");
+      rRefY = rGetReal_SYS("DH","NORTH");
+      rLen = rGetReal_SYS("DH","SECLENGTH");
+      rAzDeg = rGetReal_SYS("DH","AZIMUTH");
+      rTol   = rGetReal_SYS("DH","TOLERANCE");
+
+      rSwing = rGetReal_SYS("DH","SWING");
+      iNSec  = iGetInt_SYS("DH","NSEC");
+
+      rTopE  = rGetReal_SYS("DH","STOPE");
+      rBotE  = rGetReal_SYS("DH","SBOTE");
+      GetString_SYS("DH","DESC",sDesc);
+
+      rEInt = rGetReal_SYS("DH","EINT");
+      rNInt = rGetReal_SYS("DH","NINT");
+
+      if (iType==DH_PLOT_SECTION)
+         GetString_SYS("DH","ESRI_MAP_SECT_LAYER_TAG",sTag);
+      else
+         GetString_SYS("DH","ESRI_MAP_SSECT_LAYER_TAG",sTag);
+         
+      
+      // --- For stacked section plots, adjust the length by the ratio of the
+      //     regular map scale to the stacked section scale ---
+      
+      rScale = rGetReal_SYS("DH", "SCALE");
+      rStackScale = rGetReal_SYS("DH", "STACKED_SECTION_SCALE");
+      if(iType==DH_PLOT_SECTION_STACK && rScale!=rDUMMY && rStackScale!=rDUMMY)
+			rLen *= rStackScale / rScale;
+               
+      
+   }
+   else {
+
+      if(!iLoaded_EMAP(sSection)) {
+         iLoaded = FALSE;
+         Map = Create_MAP(sSection, MAP_WRITEOLD); 
+      }
+      else {
+         EMap = Load_EMAP(sSection);
+         Map = Lock_EMAP(EMap);
+         iLoaded = TRUE;
+      }
+      MapReg = GetREG_MAP(Map);
+
+      GetInt_REG(MapReg, "DH_TYPE",   iType);
+
+      if(iType==DH_PLOT_PLAN) {
+         Printf_STR(sBuff, sizeof(sBuff), _("%s is a plan map, not a section map."), sSection);
+         Abort_SYS(sBuff);
+
+      }
+      else if (iType!=DH_PLOT_SECTION && iType!=DH_PLOT_SECTION_STACK) {
+         Printf_STR(sBuff, sizeof(sBuff), _("%s is not a valid section map."), sSection);
+         Abort_SYS(sBuff);
+      }
+
+      GetReal_REG(MapReg, "DH_EAST",   rRefX);
+      GetReal_REG(MapReg, "DH_NORTH",  rRefY);
+      GetReal_REG(MapReg, "DH_SECLN",  rLen);
+      GetReal_REG(MapReg, "DH_SECAZ",  rAzDeg);
+      GetReal_REG(MapReg, "DH_STOL",   rTol);
+      GetReal_REG(MapReg, "DH_SWING",  rSwing);
+      GetReal_REG(MapReg, "DH_STOPE",  rTopE);
+      GetReal_REG(MapReg, "DH_SBOTE",  rBotE);
+      Get_REG(MapReg, "DH_DESC",   sDesc, 72);
+      
+      GetInt_REG(MapReg, "DH_NSEC", iNSec);
+      if(iNSec==iDUMMY) iNSec = 1;
+      
+      rEInt = rGetReal_SYS("DH","EINT");
+      rNInt = rGetReal_SYS("DH","NINT");
+      
+   
+      if(iLoaded) UnLock_EMAP(EMap);   
+
+   }
+
+   // --- Verify the parameters
+
+   if(iJob==1) {
+      if(rRefX==rDUMMY || rRefY==rDUMMY) 
+         Abort_SYS(_("Invalid section reference point in job."));         
+      if(iNSec==iDUMMY || iNSec<=0)
+         Abort_SYS(_("Invalid number of sections in job."));         
+   }
+   if(iJob==0) {
+      if(rRefX==rDUMMY || rRefY==rDUMMY) 
+         Abort_SYS(_("Invalid section reference point in map."));         
+   }
+   if(rLen==rDUMMY || rLen<=0.0) 
+      Abort_SYS(_("Undefined or invalid section length."));
+   if(rAzDeg==rDUMMY) 
+      Abort_SYS(_("Undefined section azimuth."));
+   if(rTol==rDUMMY) 
+      Abort_SYS(_("Undefined section thickness."));
+   if(rSwing==rDUMMY) 
+      Abort_SYS(_("Undefined section swing."));
+
+   // --- Get the label for the plot ---
+
+   SetString_SYS("DHPLSECT", "DESC",sDesc);
+   if (!iArcGIS && iInteractive_SYS()) {
+
+      // --- Create the Label Dialogue ---
+
+      Diag = Create_DGW("DHPLSECT1");
+
+      SetInfoSYS_DGW(Diag,_DHPLSECT1_0,DGW_TEXT, "DHPLSECT","DESC");
+
+      iD = iRunDialogue_DGW(Diag);
+      if (iD == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_DHPLSECT1_0,DGW_TEXT, "DHPLSECT","DESC");
+
+      Destroy_DGW(Diag);             
+
+   }
+   GetString_SYS("DHPLSECT", "DESC",sDesc);
+
+      // --- Convert azimuth to radians ---
+
+   rAz = rAzDeg / 57.29577951;
+
+   rCos = rCos_MATH(rAz);
+   rSin = rSin_MATH(rAz);
+
+
+   // --- Calculate travel of REFX, REFY (at right angles to the azimuth) ---
+      
+
+   rDXw = 2.0 * rTol * rCos;
+   rDYw = 2.0 * rTol * rSin;
+
+   rDXl = rLen * rSin;
+   rDYl = rLen * rCos;
+
+   if (!iArcGIS)
+      EMap = Load_EMAP(sPlan);
+   else 
+   {
+      TempFileExt_SYS("map", sMap);
+
+      SetString_SYS("DEFMAP","MAP",sMap);
+      SetString_SYS("DEFMAP","MAPSCALE","");
+
+      // --- Set the projection and range ---
+
+      hMapSBF = hGetSYS_SBF();
+      hMapBF = CreateSBF_BF(hMapSBF,"_xyrange.ipj",BF_READWRITE_NEW);
+      Serial_IPJ(hProjectIPJ,hMapBF);
+      DestroyEx_BF(hMapBF);
+      Destroy_SBF(hMapSBF);
+
+      // --- Determine a rough region for the map  ---
+     
+      if (rRefX - (real) rDXl - (real) (iNSec - 1) * rEInt < rRefX + (real) rDXl + (real) (iNSec - 1) * rEInt)
+      {  
+         SetReal_SYS("XYRANGE","MIN_X",rRefX - (real) rDXl - (real) (iNSec - 1) * rEInt - 1.0);
+         SetReal_SYS("XYRANGE","MAX_X",rRefX + (real) rDXl + (real) (iNSec - 1) * rEInt + 1.0);
+      } else {  
+         SetReal_SYS("XYRANGE","MAX_X",rRefX - (real) rDXl - (real) (iNSec - 1) * rEInt + 1.0);
+         SetReal_SYS("XYRANGE","MIN_X",rRefX + (real) rDXl + (real) (iNSec - 1) * rEInt - 1.0);
+      }
+
+      if (rRefY - (real) rDYl - (real) (iNSec - 1) * rNInt < rRefY + (real) rDYl + (real) (iNSec - 1) * rNInt)
+      {
+         SetReal_SYS("XYRANGE","MAX_Y",rRefY + (real) rDYl + (real) (iNSec - 1) * rNInt + 1.0);
+         SetReal_SYS("XYRANGE","MIN_Y",rRefY - (real) rDYl - (real) (iNSec - 1) * rNInt - 1.0);
+      } else {
+         SetReal_SYS("XYRANGE","MIN_Y",rRefY + (real) rDYl + (real) (iNSec - 1) * rNInt - 1.0);
+         SetReal_SYS("XYRANGE","MAX_Y",rRefY - (real) rDYl - (real) (iNSec - 1) * rNInt + 1.0);
+      }
+
+      // --- Create the new map ---
+       
+      if (iRunGX_SYS("defmap.gx"))
+         Cancel_SYS();
+         
+      EMap = Load_EMAP(sMap);
+   }
+
+   // --- check for base view ---
+
+   Map = Lock_EMAP(EMap);
+   if (!iExistView_MAP(Map,"data"))
+      Abort_SYS(_("The data view is not present in the plan map."));  
+
+   // --- Get data view ---
+  
+   View = Create_MVIEW(Map,"data",MVIEW_WRITEOLD);
+	
+	
+	// --- Set the working IPJ to the drill project's IPJ ---
+	
+   SetWorkingIPJ_MVIEW(View, hProjectIPJ);
+   
+	
+   // --- Turn on the group clipping (off for ArcGIS) ---
+
+   if (!iArcGIS)
+      GroupClipMode_MVIEW(View, CLIP_ON);
+   else
+      GroupClipMode_MVIEW(View, CLIP_OFF);
+
+
+	if(iArcGIS)  // --- group name after the job name, or user preference ---
+	{
+      GetString_SYS("DHPLSECT","SHAPE",sSHP);
+      if(iStrlen_STR(sSHP) > 0)
+			FileNamePart_STR(sSHP, sLayerGroup, STR_FILE_PART_NAME);
+      else
+		{
+			FileNamePart_STR(sSection, sLayerGroup, STR_FILE_PART_NAME);
+			if (iStrlen_STR(sTag)>0) 
+			{
+				Strcat_STR(sLayerGroup, "_");
+				Strcat_STR(sLayerGroup, sTag);
+			}
+		}
+	}
+	else     // --- Set a group name as the section ID ---
+	{
+		GetSectionID_DH(rAzDeg, rRefX, rRefY, sSectID);
+		if (iType==DH_PLOT_SECTION)
+			Strcpy_STR(sLayerGroup, "S");
+		else if (iType==DH_PLOT_SECTION_STACK) 
+			Strcpy_STR(sLayerGroup, "STK");
+		Strcat_STR(sLayerGroup, sSectID);
+		if (iStrlen_STR(sTag)>0) 
+		{
+			Strcat_STR(sLayerGroup, "_");
+			Strcat_STR(sLayerGroup, sTag);
+		}
+	}
+
+   StartGroup_MVIEW(View,sLayerGroup,MVIEW_GROUP_NEW);
+
+   // --- Set attributes ---
+   
+   rScaleMM = rScaleMM_MVIEW(View);
+
+   rSize = 2.0;   // text size in mm
+   if(rSize*rScaleMM > rTol) rSize = 0.8*rTol/rScaleMM;
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW(sColour));
+   FillColor_MVIEW(View,iColor_MVIEW(sColour));
+   LineColor_MVIEW(View,iColor_MVIEW(sColour));
+   TextAngle_MVIEW(View,90.0-rAzDeg);
+   TextSize_MVIEW(View, rSize*rScaleMM);
+   LineStyle_MVIEW(View, iStyle, 10.0 * rScaleMM);
+   LineThick_MVIEW(View, rThick * rScaleMM);
+
+   // --- Calculate text offset from the corner ---
+
+   rXOff = -rSize*rScaleMM * rSin;     // moves away from the section
+   rYOff = -rSize*rScaleMM * rCos;
+
+   rXOff2 = 0.5*rSize*rScaleMM * rCos;    // so lines up with center trace
+   rYOff2 = -0.5*rSize*rScaleMM * rSin;
+   
+   
+   // --- Plot each section individually. ---
+
+   for(i=0;i<iNSec;i++) {
+
+      rX = rRefX + (real)i * rEInt;
+      rY = rRefY + (real)i * rNInt;
+
+      rX1 = rX - 0.5*rDXw - 0.5*rDXl;
+      rY1 = rY + 0.5*rDYw - 0.5*rDYl;
+
+      rX2 = rX - 0.5*rDXw + 0.5*rDXl;
+      rY2 = rY + 0.5*rDYw + 0.5*rDYl;
+
+      rX3 = rX + 0.5*rDXw + 0.5*rDXl;
+      rY3 = rY - 0.5*rDYw + 0.5*rDYl;
+
+      rX4 = rX + 0.5*rDXw - 0.5*rDXl;
+      rY4 = rY - 0.5*rDYw - 0.5*rDYl;
+
+      if(i==0) {     // Save first section starting corner
+   
+         rX0 = rX1;
+         rY0 = rY1;
+      }
+
+      if(iPlot==0) {
+         
+         Line_MVIEW(View, rX1, rY1, rX4, rY4);
+         Line_MVIEW(View, rX2, rY2, rX3, rY3);
+         Line_MVIEW(View, 0.5*(rX1+rX4), 0.5*(rY1+rY4), 0.5*(rX2+rX3), 0.5*(rY2+rY3));
+
+      }
+      else {
+
+         Line_MVIEW(View, rX1, rY1, rX2, rY2);
+         Line_MVIEW(View, rX2, rY2, rX3, rY3);
+         Line_MVIEW(View, rX3, rY3, rX4, rY4);
+         Line_MVIEW(View, rX4, rY4, rX1, rY1);
+
+      }
+
+      // --- For single sections with a swing, plot the outline of the bottom of the section
+
+      if(iNSec==1 && rSwing != 0.0) {
+
+         rH = rTopE - rBotE;     // Height of section
+         rSinSwing = rSin_MATH(rSwing/57.29577951);
+         rOff = rH * rSinSwing;
+
+         rXOffs = rOff * -rCos;
+         rYOffs = rOff * -rSin;
+
+         rX1s = rX1 + rXOffs;
+         rX2s = rX2 + rXOffs;
+         rX3s = rX3 + rXOffs;
+         rX4s = rX4 + rXOffs;
+
+         rY1s = rY1 + rYOffs;
+         rY2s = rY2 + rYOffs;
+         rY3s = rY3 + rYOffs;
+         rY4s = rY4 + rYOffs;
+
+         // --- Plot vertical sides of section  (or the vertical center sides) ---
+
+         LineStyle_MVIEW(View, 3, 5.0*rScaleMM); // dotted line
+         LineThick_MVIEW(View, 0.5 * rThick * rScaleMM);
+
+         // plot corner edges - don' plot hidden lines
+
+         if(rSinSwing>0.0) {
+            Line_MVIEW(View, rX1, rY1, rX2s, rY2s);
+            Line_MVIEW(View, rX4, rY4, rX3s, rY3s);
+         }
+         else {
+            Line_MVIEW(View, rX2, rY2, rX1s, rY1s);
+            Line_MVIEW(View, rX3, rY3, rX4s, rY4s);
+         }
+
+         // --- Plot the bottom of the section
+
+         LineStyle_MVIEW(View, 4, 5.0*rScaleMM); // dashed line
+
+         Line_MVIEW(View, rX1s, rY1s, rX2s, rY2s);
+         if(iPlot==1) Line_MVIEW(View, rX2s, rY2s, rX3s, rY3s);
+         Line_MVIEW(View, rX3s, rY3s, rX4s, rY4s);
+         if(iPlot==1) Line_MVIEW(View, rX4s, rY4s, rX1s, rY1s);
+
+         if(iPlot==0) {
+
+            rXa = 0.5*(rX1s + rX2s);
+            rXb = 0.5*(rX3s + rX4s);
+            rYa = 0.5*(rY1s + rY2s);
+            rYb = 0.5*(rY3s + rY4s);
+            Line_MVIEW(View, rXa, rYa, rXb, rYb);
+         }
+      }
+   }
+
+   // -- restore line thickness ---
+
+   LineThick_MVIEW(View, rThick * rScaleMM);
+
+   // --- Plot labels ---
+
+   if (!iArcGIS && iNSec>1) {      
+   
+      for(i=1;i<=iNSec;i++) {
+
+         // --- (rX0, rY0) is the starting corner of the section ---
+
+         rF = 1.1;
+         if(i>9) rF = 1.9;
+
+         rX = rX0 + ((real)i-1.0) * rEInt + rF*rXOff + rXOff2;
+         rY = rY0 + ((real)i-1.0) * rNInt + rF*rYOff + rYOff2;
+
+         FormatI_STR(i,sString,3);      
+         Text_MVIEW(View, sString, rX, rY);
+      }   
+   }
+
+   // --- Plot the source file name (local) ---
+
+   if(!iArcGIS && iStrlen_STR(sDesc)) {
+   
+      rBit = 0.1*rSize;
+      if(rBit < rThick) rBit = rThick;
+
+      rXOff = rBit*rScaleMM * (rCos + rSin);
+      rYOff = rBit*rScaleMM * (rCos - rSin);
+
+      TextRef_MVIEW(View, TEXT_REF_TOP_LEFT);
+      Text_MVIEW(View, sDesc, rX0 + rXOff, rY0 + rYOff);
+   }
+
+   // --- Plot a  half-arrow on the starting corner ---
+
+   LineStyle_MVIEW(View, 1, 0.0);
+
+   // --- Make it 2cm, or a fraction of the length, whichever is smaller ---
+
+   rALen = 20.0;   // text size in mm
+   if(rALen*rScaleMM > 0.2*rLen) rALen = 0.2*rLen/rScaleMM;
+   rAWid = 5.0;
+   if(rAWid*rScaleMM > 0.6*rTol) rAWid = 0.6*rTol/rScaleMM;
+
+   if(rAWid > 0.3*rALen) rAWid = 0.3*rALen;
+
+   rALen = rALen * rScaleMM;  // convert to view units
+   rAWid = rAWid * rScaleMM;
+
+   rDXw = -rAWid * rCos;
+   rDYw = rAWid * rSin;
+
+   rDXl = rALen * rSin;
+   rDYl = rALen * rCos;
+
+   rX = rX0;
+   rY = rY0;
+
+   rX1 = rX + rDXw*0.4;
+   rY1 = rY + rDYw*0.4;
+   Line_MVIEW(View, rX, rY, rX1, rY1);
+
+   rX2 = rX1 + 0.65*rDXl;
+   rY2 = rY1 + 0.65*rDYl;   
+   Line_MVIEW(View, rX1, rY1, rX2, rY2);
+
+   rX1 = rX2 + rDXw*0.6;
+   rY1 = rY2 + rDYw*0.6;
+   Line_MVIEW(View, rX1, rY1, rX2, rY2);
+
+   rX2 = rX1 + 0.35*rDXl - rDXw;
+   rY2 = rY1 + 0.35*rDYl - rDYw;
+   Line_MVIEW(View, rX1, rY1, rX2, rY2);
+   Line_MVIEW(View, rX2, rY2, rX, rY);
+
+   Destroy_LPT(Lpt);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   if (iArcGIS) 
+   {
+      UnLoad_EMAP(sMap);
+
+		
+		// --- Get user-defined shape file name? --- 
+		
+      GetString_SYS("DHPLSECT","SHAPE",sSHP);
+      if(iStrlen_STR(sSHP)==0)  // Not defined, use layer group (input job name)
+      {
+			GetDirectory_SYS(SYS_DIR_LOCAL, sSHP);
+			Strcat_STR(sSHP,sLayerGroup); 
+		}
+		else 
+		{
+			//--- Use the local directory if none is defined ---
+			
+			FileNamePart_STR(sSHP, sBuff, STR_FILE_PART_DIRECTORY);
+			if(iStrlen_STR(sBuff)==0)
+			{
+				Strcpy_STR(sBuff, sSHP);
+				GetDirectory_SYS(SYS_DIR_LOCAL, sSHP);
+				Strcat_STR(sSHP,sBuff); 
+			}
+		}
+		FileExt_STR(sSHP, "shp", sSHP, FILE_EXT_FORCE);
+
+      FileList = Create_LST(STR_FILE);
+
+      MapViewToShape_ARCMAP(sMap, "Data", sSHP, FileList);
+      iDeleteFile_SYS(sMap);
+
+       // --- Iterate over the list of names ---
+
+      for (i=0; i< iSize_LST(FileList); i++)
+      {
+         GetItem_LST(FileList, 0, i, sSHP);
+         LoadShape_ARCMAP(sSHP, "", "");
+      }    	 
+   }
+}
+
+

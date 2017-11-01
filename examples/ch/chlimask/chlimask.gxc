@@ -1,0 +1,243 @@
+//===========================================================================
+NAME          = "CHLIMASK GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+
+   Window data from a code channel.
+
+"
+// Revision History:
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+// v5.1.4: Added this GX to the Geophysical Stats package
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chlimask.gr"
+#include "chlimask.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Line;
+DB_SYMB     LithCh,MaskCh;
+LST         List;
+DGW         Diag;
+VV          MaskVV,LithVV;
+
+string(STR_DB_SYMBOL) sLithCh,sMask,sLine;
+string(1024) sTemp,sLith;
+
+int         i;
+int         iChType;
+int         iLines;
+int         iTotLines;
+int         iAppend;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get Default Mask Channel if required, and if it exists, and if it is
+   //     not set to "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0 &&
+       iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 && iExistChan_DB(Data,sMask))
+            SetString_SYS("CHLIMASK","MASK",sMask);
+      }
+   }
+
+      
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the dialogue ---
+
+      Diag = Create_DGW("CHLIMASK");
+
+      // --- Set up channel list ---
+
+      List = GetList_DGW(Diag,_CHLIMASK_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_CHLIMASK_2);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+      // --- Remove "None" from the list ---
+
+      i = iFindItem_LST(List,0, "None");
+      if(i!=-1) DelItem_LST(List, i);
+
+
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_CHLIMASK_0,DGW_TEXT,"CHLIMASK","LITHCH");
+      SetInfoSYS_DGW(Diag,_CHLIMASK_1,DGW_TEXT,"CHLIMASK","LITH");
+      SetInfoSYS_DGW(Diag,_CHLIMASK_2,DGW_TEXT,"CHLIMASK","MASK");
+      SetInfoSYS_DGW(Diag,_CHLIMASK_3,DGW_LISTALIAS,"CHLIMASK","APPEND");
+
+      // --- Run the dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1) Cancel_SYS();    // He hit cancel
+
+      // --- Get the strings ---
+
+      GetInfoSYS_DGW(Diag,_CHLIMASK_0,DGW_TEXT,"CHLIMASK","LITHCH");
+      GetInfoSYS_DGW(Diag,_CHLIMASK_1,DGW_TEXT,"CHLIMASK","LITH");
+      GetInfoSYS_DGW(Diag,_CHLIMASK_2,DGW_TEXT,"CHLIMASK","MASK");
+      GetInfoSYS_DGW(Diag,_CHLIMASK_3,DGW_LISTALIAS,"CHLIMASK","APPEND");
+
+  
+      // --- Destroy the dialogue ---
+
+      Destroy_DGW(Diag);
+  }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHLIMASK","LITHCH",sLithCh);
+   GetString_SYS("CHLIMASK","MASK",sMask);
+   GetString_SYS("CHLIMASK","LITH",sLith);
+   iAppend = iGetInt_SYS("CHLIMASK","APPEND");
+
+
+   // --- Mask channel must be specified ---
+
+   if(!iStrlen_STR(sMask) || !iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))
+      Abort_SYS(_("A Mask Channel must be specified."));
+
+
+   // --- Get code channel ---
+   
+   if (!iExistChan_DB(Data,sLithCh))
+   {
+      Printf_STR(sTemp, sizeof(sTemp), _("The current data database does not have the code channel '%s' as specified."), sLithCh);
+      Abort_SYS(sTemp);
+   }
+   LithCh = FindChan_DB(Data,sLithCh);
+   LockSymb_DB(Data,LithCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Get mask channel ---
+   
+   if (iExistChan_DB(Data,sMask))
+   {
+      MaskCh = FindChan_DB(Data,sMask);
+      if (iAppend == 1) {
+         LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE ,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data,MaskCh);
+         MaskCh = CreateSymb_DB(Data,sMask,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      }
+   } else 
+      MaskCh = CreateSymb_DB(Data,sMask,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+   LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   // --- Set the mask channel class to "MASK" ---
+
+   SetRegSymbSetting_DB(Data, MaskCh, "CLASS", "MASK");
+
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Window from code"),1);
+
+
+   // --- Go through all selected Lines ---
+
+
+   iTotLines = iCountSelLines_DB(Data);
+   iLines = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Get the line label
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,7);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Get lithology channel to VV --
+
+      iChType = iGetChanType_DB(Data,LithCh);
+      LithVV = CreateExt_VV(iChType,0);
+
+      GetChanVV_DB(Data,Line,LithCh,LithVV);
+
+
+      // --- Creat mask channel ---
+
+
+      iChType = iGetChanType_DB(Data,MaskCh);
+      MaskVV = CreateExt_VV(iChType,0);
+
+      GetChanVV_DB(Data,Line,MaskCh,MaskVV);
+      ReFidVV_VV(MaskVV,LithVV);
+
+
+      // --- Mask  ---
+
+      MaskStr_VV(MaskVV,LithVV,sLith);
+
+
+      // --- Put MaskVV back to channel ---
+
+      PutChanVV_DB(Data,Line,MaskCh,MaskVV);
+
+
+
+      // --- Destroy VV ---
+
+      Destroy_VV(LithVV);
+      Destroy_VV(MaskVV);
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Data, Line);
+
+   }
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+
+   // --- clean up ---
+
+   UnLockSymb_DB(Data,MaskCh);
+   UnLockSymb_DB(Data,LithCh);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

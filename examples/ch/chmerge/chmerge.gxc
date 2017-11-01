@@ -1,0 +1,574 @@
+//===========================================================================
+
+NAME          = "Merge survey information with Assay database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport"
+
+DESCRIPTION   = "\
+
+   CHIMERA.SURVEY       The lookup database name, must contain \"Sample\",
+                        channel.
+          .ASSAY        The lab assay database to merge.                       
+
+"
+// Revision History:
+// v6.3.1: If "D0" lines are not found, use the current lines.
+// v6.2.0: Removed double locking of Lab DB.
+//         Better exit if call to Lookupdbch.gx fails.
+// v6.0.0: Replace usage of TB class with calls to LOOKUPDBCH GX, because
+//         TB didn't work with very large numbers of channels, or data
+//         totalling more than 4096 characters per row.
+// v5.1.8: Display assay database channels in preferred order
+//         Delete temp "_sample" channels.
+// v5.1.7: Fix bug in sorting of duplicate samples in the lab assay database.
+//         Use EDIT GX for display of log file.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "chmerge.gr"
+#include "chmerge.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+#define REPORT_FILE "chmerge.txt"
+
+string(STR_FILE) sXY,sLab, sLine;
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(1024) sTemp1, sErrMsg;               // Error message
+string(STR_FILE) sTempFile,sReport;     // temp file
+string(STR_DB_SYMBOL) sCh, sXCh, sYCh;     // Channel name
+string(16) sViewReport, sAliasFlag;
+
+EDB         ELab,EXY;
+DB          Lab,XY;
+DGW         Diag;                  // Dialogue handle
+DB_SYMB     SampleCh,OtherCh,Ch,XCh,YCh;   // Channel Handles
+DB_SYMB     XYLine;                // XY Line Handle
+DB_SYMB     LabLine;               // Lab Line Handle
+DB_SYMB     CurLine;
+VV          ChVV;                  // Channel name ID
+VV          XVV,YVV,StVV;          // Data
+WA          ErrWA;
+LST         ChLst, Lst;
+
+
+int         i,iChan,iErr,iType,iLen,iN;
+real        r;
+int         iInteractive;  
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   
+   //if (!iInteractive_SYS())
+   //   Abort_SYS(_("This GX will only run interactively."));
+      
+   if (iInteractive_SYS()) {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHMERGE");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_CHMERGE_0,DGW_FILEPATH,"CHIMERA","ASSAY");     
+      SetInfoSYS_DGW(Diag,_CHMERGE_1,DGW_FILEPATH,"CHIMERA","SURVEY");     
+      SetInfoSYS_DGW(Diag,_CHMERGE_2,DGW_TEXT,"CHIMERA","VIEWREPORT");     
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_CHMERGE_0,DGW_FILEPATH,"CHIMERA","ASSAY");     
+      GetInfoSYS_DGW(Diag,_CHMERGE_1,DGW_FILEPATH,"CHIMERA","SURVEY");     
+      GetInfoSYS_DGW(Diag,_CHMERGE_2,DGW_TEXT,"CHIMERA","VIEWREPORT");     
+
+      GetInfo_DGW(Diag,_CHMERGE_2,DGW_LISTALIAS,sAliasFlag);
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+      // --- Turn On Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Load locations"),1);
+
+
+   // --- Get Parameters ---
+   
+   GetString_SYS("CHMERGE","REPORT",sReport);
+   GetString_SYS("CHIMERA","SURVEY",sXY);
+   GetString_SYS("CHIMERA","ASSAY",sLab);
+   GetString_SYS("CHIMERA","VIEWREPORT",sViewReport);
+   
+   if (iStrlen_STR(sReport)==0)
+      Strcpy_STR(sReport,REPORT_FILE);
+   
+   
+   // --- sort databases ---
+   
+   SetString_SYS("SORTALL","CHANNEL","sample");
+   SetString_SYS("SORTALL","ORDER","ASCENDING");
+   SetString_SYS("SORTALL","READONLY","YES");
+
+   Load_EDB(sLab);
+   iRunGX_SYS("sortal");
+   
+   Load_EDB(sXY);
+   iRunGX_SYS("sortal");
+   
+   
+   // --- get databases ---
+   
+   Load_EDB(sXY);
+   EXY = Current_EDB();
+   XY = Lock_EDB(EXY);
+   Load_EDB(sLab);
+   ELab = Current_EDB();
+   Lab = Lock_EDB(ELab);
+   
+
+   // --- Get current X, Y channels from the XY database ---
+
+   GetXYZChan_DB(XY,  DB_CHAN_X, sXCh);
+   GetXYZChan_DB(XY,  DB_CHAN_Y, sYCh);
+
+
+   // --- Does the reference channel Exist ? ---
+
+   if (!iExistChan_DB(Lab,"sample"))
+   {
+      Printf_STR(sTemp1, sizeof(sTemp1), _("SAMPLE channel does not exist in the database '%s'."), sLab);
+      Abort_SYS(sTemp1);
+   }
+   SampleCh = FindChan_DB(Lab,"sample");
+
+   if (!iExistChan_DB(XY,"sample"))
+   {
+      Printf_STR(sTemp1, sizeof(sTemp1), _("SAMPLE channel does not exist in the database '%s'."), sXY);
+      Abort_SYS(sTemp1);
+   }
+
+
+   // --- Create survey database channel list ---
+
+   ChLst = Create_LST(2*STR_DB_SYMBOL);
+   SymbLST_DB(XY, ChLst, DB_SYMB_CHAN);
+
+
+   // --- Release the databases ---
+
+   UnLock_EDB(EXY);
+   UnLock_EDB(ELab);
+
+
+   // --- Call LOOKUPDBCH GX for each channel in the survey database ---
+
+   SetString_SYS("LOOKUPDBCH","REFCH",  "Sample");  
+   SetString_SYS("LOOKUPDBCH","DB" ,sXY);
+   SetInt_SYS("LOOKUPDBCH","LOOKUP", VV_LOOKUP_EXACT);
+
+   Load_EDB(sLab);
+
+   iChan = iSize_LST(ChLst);
+   for (i=0;i<iChan;i++) {
+
+      // --- Get channel name ---
+      
+      GetItem_LST(ChLst, 0, i, sCh);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Processing channel: "));
+      Strcat_STR(sLabel,sCh);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(i,iChan);
+
+
+      // --- skip the sample channel ---
+
+      if (iStrcmp_STR(sCh,_n("sample"),STR_CASE_TOLERANT) == 0) continue;
+         
+
+      // --- lookup ---
+
+      SetString_SYS("LOOKUPDBCH","DATACH", sCh);  
+
+      
+      // --- Run the GX ---
+      SetInteractive_SYS(0);
+      if(iRunGX_SYS("lookupdbch.gx")!=0) Cancel_SYS();
+      SetInteractive_SYS(iInteractive);
+
+   }
+
+   LoadAllChans_EDB(ELab);
+   
+   
+   // === error checking ===
+   
+   iDeleteFile_SYS(sReport);   
+   ErrWA = Create_WA(sReport,0);
+   iFindPathNameEx_SYS(sReport,FIND_LOCAL,GEO_DIRECTORY_USER_TEMP,sTempFile);
+   iErr = FALSE;
+   
+   NewLine_WA(ErrWA);
+   Puts_WA(ErrWA,_("Location merge error report")); NewLine_WA(ErrWA);
+   Puts_WA(ErrWA,"==========================="); NewLine_WA(ErrWA);
+   FormatDate_STR(rDate_SYS(),sLabel,12,DATE_FORMAT_YYYYMMDD); iStrMin_STR(sLabel);
+   Puts_WA(ErrWA,sLabel); Puts_WA(ErrWA," ");
+   FormatTime_STR(rTime_SYS(),sLabel,12,0,TIME_FORMAT_COLON); iStrMin_STR(sLabel);
+   Puts_WA(ErrWA,sLabel);
+   NewLine_WA(ErrWA);
+   NewLine_WA(ErrWA);
+   
+   
+   // --- get sample station ---
+   
+   if (iInteractive)
+      CurLine = GetCurLineSymb_EDB(ELab);   
+   
+   Lab = Lock_EDB(ELab);
+   
+   if (!iInteractive) {
+      GetString_SYS("CHMERGE", "ACURLINE", sLine);   
+      CurLine = FindSymb_DB(Lab, sLine, DB_SYMB_LINE);
+   }
+   
+   // --- Get the line "D0", or, if it does not exist, use the current line ---
+   
+   LabLine = FindSymb_DB(Lab,"D0",DB_SYMB_LINE);
+   if(LabLine==NULLSYMB) 
+      LabLine = CurLine;
+   
+   SampleCh = FindChan_DB(Lab,"sample");
+   
+   LockSymb_DB(Lab,SampleCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   iType = iGetChanType_DB(Lab,SampleCh);
+   ChVV = CreateExt_VV(iType,0);
+   GetChanVV_DB(Lab,LabLine,SampleCh,ChVV);
+   UnLockSymb_DB(Lab,SampleCh);
+   
+   iLen = iLength_VV(ChVV);
+   if (iLen >= 2) {
+   
+      GetString_VV(ChVV,0,sTemp1);             
+      for (i=1;i<iLen;i++) {
+      
+         GetString_VV(ChVV,i,sLabel);
+         
+         
+         // --- report if labels match ---
+         
+         if (iStrcmp_STR(sTemp1,sLabel,STR_CASE_SENSITIVE) == 0) {
+            
+            FormatI_STR(i,sTemp1,4); 
+            iStrMin_STR(sTemp1);
+            
+            Printf_STR(sErrMsg, sizeof(sErrMsg), _("%s sample is repeated at record %s"), sLabel, sTemp1);
+            Puts_WA(ErrWA,sErrMsg); 
+
+            NewLine_WA(ErrWA);
+            iErr = TRUE;
+            
+         }
+         
+         Strcpy_STR(sTemp1,sLabel);
+         
+      }
+      
+   }
+   
+
+   // --- Use same current XY channels as in the XY database. These
+   //     channels will all have been copied, and should exist in the lab database. ---
+
+   SetXYZChan_DB(Lab, DB_CHAN_X, sXCh);
+   SetXYZChan_DB(Lab, DB_CHAN_Y, sYCh);
+   
+
+   // --- missing locations ---
+   
+   XVV = Create_VV(REAL,0);
+   XCh = GetXYZChanSymb_DB(Lab, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Lab,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   GetChanVV_DB(Lab,LabLine,XCh,XVV);
+   UnLockSymb_DB(Lab,XCh);
+   
+   YVV = Create_VV(REAL,0);
+   YCh = GetXYZChanSymb_DB(Lab, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+   LockSymb_DB(Lab,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   GetChanVV_DB(Lab,LabLine,YCh,YVV);
+   UnLockSymb_DB(Lab,YCh);
+   
+
+   // --- get standards ---
+   
+   OtherCh = FindChan_DB(Lab,"standard");
+   if (OtherCh != NULLSYMB) {   
+      LockSymb_DB(Lab,OtherCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      StVV = CreateExt_VV(-2,0);
+      GetChanVV_DB(Lab,LabLine,OtherCh,StVV);
+      UnLockSymb_DB(Lab,OtherCh);
+   }
+   
+   NewLine_WA(ErrWA);   
+   for (i=0;i<iLen;i++) {
+   
+   
+      // --- ignore standards ---
+      
+      if (OtherCh != NULLSYMB) {
+         GetString_VV(StVV,i,sTemp);
+         if (iStrMin_STR(sTemp) != 0) continue;
+      }
+            
+      r = rGetReal_VV(XVV,i);
+      if (r != rDUMMY)
+         r = rGetReal_VV(YVV,i);
+            
+            
+      if (r == rDUMMY) {
+      
+         GetString_VV(ChVV,i,sLabel);
+         FormatI_STR(i,sTemp1,4); 
+         iStrMin_STR(sTemp1);
+         
+         Printf_STR(sErrMsg, sizeof(sErrMsg), _("%s sample missing location at record %s"), sLabel, sTemp1);
+         Puts_WA(ErrWA,sErrMsg); 
+         NewLine_WA(ErrWA);
+         iErr = TRUE;
+         
+      }
+            
+   }
+   
+   Destroy_VV(XVV);
+   Destroy_VV(YVV);
+   if (OtherCh != NULLSYMB)
+      Destroy_VV(StVV);
+   
+   
+   // --- Locations missing stations. Do reverse lookup to see which
+   //     Locations in the survey database were not used in the assay database.
+   
+   // --- Make a copy of the "Sample" channel in the assay database ---
+
+   SampleCh = FindChan_DB(Lab,"sample");
+   if (!iExistChan_DB(Lab,"_sample"))
+      DupSymbNoLock_DB(Lab,SampleCh,"_sample");
+
+   UnLock_EDB(ELab);
+   
+   SetString_SYS("COPY", "FROM", "sample");
+   SetString_SYS("COPY", "TO", "_sample");
+   SetReal_SYS("COPY", "DECIMATE", 1.0);
+   SetReal_SYS("COPY", "FIDSTART", rDUMMY);
+   SetReal_SYS("COPY", "FIDINCR", rDUMMY);
+
+   Load_EDB(sLab);
+   SetInteractive_SYS(0);
+   iRunGX_SYS("copy.gx");
+
+
+
+   // --- Do the lookup ---
+
+   SetString_SYS("LOOKUPDBCH","REFCH",  "Sample");  
+   SetString_SYS("LOOKUPDBCH","DB" ,sLab);
+   SetString_SYS("LOOKUPDBCH","DATACH", "_sample");
+
+      
+   // --- Run the GX ---
+
+   Load_EDB(sXY);
+   iRunGX_SYS("lookupdbch.gx");
+   SetInteractive_SYS(iInteractive);
+
+   
+   // --- get the two sample channels ---
+   if (iInteractive)
+      CurLine = GetCurLineSymb_EDB(EXY);   
+   XY = Lock_EDB(EXY);
+   
+   if (!iInteractive) {
+      GetString_SYS("CHMERGE", "SCURLINE", sLine);   
+      CurLine = FindSymb_DB(XY, sLine, DB_SYMB_LINE);
+   }
+   
+   XYLine = FindSymb_DB(XY,"D0",DB_SYMB_LINE);
+   if (XYLine == NULLSYMB) XYLine = CurLine;
+
+   SampleCh = FindChan_DB(XY,"sample");
+   Ch = FindChan_DB(XY,"_sample");
+
+   LockSymb_DB(XY,SampleCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   GetChanVV_DB(XY,XYLine,SampleCh,ChVV);
+   UnLockSymb_DB(XY,SampleCh);
+   
+   XVV = Create_VV(-10,0);
+   LockSymb_DB(XY,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   GetChanVV_DB(XY,XYLine,Ch,XVV);
+   UnLockSymb_DB(XY,Ch);
+   
+
+   NewLine_WA(ErrWA);   
+   iLen = iLength_VV(ChVV);
+   for (i=0;i<iLen;i++) {
+   
+      GetString_VV(XVV,i,sLabel);
+            
+      if (iStrMin_STR(sLabel) == 0) {
+   
+         GetString_VV(ChVV,i,sTemp1);
+         
+         Printf_STR(sErrMsg, sizeof(sErrMsg), _("%s location is missing a sample at record %d"), sTemp1, i);
+         Puts_WA(ErrWA,sErrMsg); 
+         NewLine_WA(ErrWA);
+         iErr = TRUE;
+         
+      }
+            
+   }
+   
+   Destroy_VV(ChVV);
+   Destroy_VV(XVV);
+
+
+   // --- Delete the "_sample" channels ---
+
+   Ch = FindChan_DB(XY,"_sample");
+   if(Ch!=NULLSYMB) {
+      LockSymb_DB(XY,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(XY, Ch);
+   }
+
+   Lab = Lock_EDB(ELab);
+   Ch = FindChan_DB(Lab,"_sample");
+   if(Ch!=NULLSYMB) {
+      LockSymb_DB(Lab,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(Lab, Ch);
+   }
+   
+
+   // --- Unlock the channel symbol ---
+
+   UnLock_EDB(EXY);
+   UnLock_EDB(ELab);
+   
+   
+   // --- Re-sort databases, because
+   //     the sort process above can separate the Duplicate values.
+   //     The assay database's order channel can be used to put it 
+   //     back together.
+
+   SetString_SYS("SORTALL","CHANNEL","Order");
+   SetString_SYS("SORTALL","ORDER","ASCENDING");
+   SetString_SYS("SORTALL","READONLY","YES");
+
+   Load_EDB(sLab);
+   iRunGX_SYS("sortal");
+
+   
+   // --- Survey database does not have an order channel, so the
+   //     best that can be done is to sort by Duplicate, then Sample.
+   //     Unfortuntately, this puts the duplicates at the end, but preserves
+   //     everything else. ---
+   
+   SetString_SYS("SORTALL2","CHANNEL1","Duplicate");
+   SetString_SYS("SORTALL2","CHANNEL2","sample");
+   SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+   SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+   SetString_SYS("SORTALL2","READONLY","YES");
+
+   Load_EDB(sXY);
+   iRunGX_SYS("sortal2");
+   
+
+   // --- Reset the channel display order to the preferred one. Use only the currently loaded channels ---
+
+   ELab = Load_EDB(sLab);
+
+   Lst = Create_LST(2*STR_DB_SYMBOL);
+
+   if(iInteractive) {
+      iDispChanLST_EDB(ELab, Lst);     // get currently loaded channels
+
+      Lab = Lock_EDB(ELab);
+
+      OrderedChannelLST_CHIMERA(Lab, Lst);
+
+      UnLock_EDB(ELab);
+      iN = iSize_LST(Lst);
+      if(iN > 0) {
+         UnLoadAllChans_EDB(ELab);
+
+         for(i=0;i<iN; i++) {
+            GetItem_LST(Lst, 0, i, sCh);
+            LoadChan_EDB(ELab, sCh);
+         }
+      }
+      Destroy_LST(Lst);
+   }
+
+   // --- report no errors ---
+   
+   if (!iErr) {
+      Puts_WA(ErrWA,_("There are no errors.")); 
+      NewLine_WA(ErrWA);
+   }
+   
+   Destroy_WA(ErrWA);
+
+
+   if (iInteractive_SYS()) {
+
+      if (0 == iStrcmp_STR(sViewReport, _n("Yes"), STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))
+      {
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE",sReport);
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+
+      }
+   }
+         
+
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+}

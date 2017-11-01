@@ -1,0 +1,48 @@
+//===========================================================================
+NAME          = "Un-load a channel from the open database editor"
+#include <version.gxh>
+DESCRIPTION   = "
+   Un-loads a channel from the displayed database editor.
+   
+      UNLOADCHAN.CHAN  channel to remove from the spreadsheet.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+RESOURCE = "unloadchan.gr"
+#include "unloadchan.grh"
+#include <all.gxh>
+EDB eDB;
+DGW hDGW;
+LST hLST;
+string(DB_SYMB_NAME_SIZE) sChan;
+{
+   if (iHaveCurrent_EDB()) {
+   
+      eDB = Current_EDB();
+      
+      // --- Are we running interactively ? ---
+
+      if (iInteractive_SYS()) {
+
+         hDGW = Create_DGW("unloadchan");
+         
+         hLST = GetList_DGW(hDGW,_UNLOADCHAN_0);
+         iDispChanLST_EDB(eDB,hLST);
+         
+         SetInfoSYS_DGW(hDGW,_UNLOADCHAN_0,DGW_TEXT,"UNLOADCHAN","CHANNEL");         
+         
+         if (iRunDialogue_DGW(hDGW) != 0) 
+            Cancel_SYS();
+
+         GetInfoSYS_DGW(hDGW,_UNLOADCHAN_0,DGW_TEXT,"UNLOADCHAN","CHANNEL");     
+
+         Destroy_DGW(hDGW);
+         
+      }
+      
+      GetString_SYS("UNLOADCHAN","CHANNEL",sChan);
+      UnLoadChan_EDB(Current_EDB(),sChan);
+   }
+}

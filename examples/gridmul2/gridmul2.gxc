@@ -1,0 +1,151 @@
+//===========================================================================
+NAME          = "GRIDMUL2"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+Multiply two grids together.
+
+Parameters:
+
+        GRIDMUL2.IN1     First input grid.
+                .IN2     Second input grid.                          
+                .OUT     Output product grid.
+                
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+RESOURCE = "gridmul2.gr"
+#include "gridmul2.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;        // Dialogue handle
+
+int        i;           // utility int
+
+string(STR_FILE)  sIn1;      // Name of first input grid 
+string(STR_FILE)  sIn2;      // Name of second input grid 
+string(STR_FILE)  sOut;      // Name of output grid
+
+IMG         IMGIN1;     // Image for the first input grid
+IMG         IMGIN2;     // Image for the second input grid
+IMG         IMGOUT;     // Image for the output grid
+IEXP        IEXP0;      // Image expression to multiply IN1 by IN2
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDMUL2Form");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDMUL2FORM_0,DGW_FILEPATH,"GRIDMUL2","IN1");     
+      SetInfoSYS_DGW(Diag,_GRIDMUL2FORM_1,DGW_FILEPATH,"GRIDMUL2","IN2");     
+      SetInfoSYS_DGW(Diag,_GRIDMUL2FORM_2,DGW_FILEPATH,"GRIDMUL2","OUT");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // User hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDMUL2FORM_0,DGW_FILEPATH,"GRIDMUL2","IN1");     
+      GetInfoSYS_DGW(Diag,_GRIDMUL2FORM_1,DGW_FILEPATH,"GRIDMUL2","IN2");     
+      GetInfoSYS_DGW(Diag,_GRIDMUL2FORM_2,DGW_FILEPATH,"GRIDMUL2","OUT");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDMUL2","IN1",sIn1);
+   GetString_SYS("GRIDMUL2","IN2",sIn2);
+   GetString_SYS("GRIDMUL2","OUT",sOut);
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sIn1))
+      Abort_SYS(_("First Input Grid Not Specified!"));
+
+   if (!iStrlen_STR(sIn2))
+      Abort_SYS(_("Second Input Grid Not Specified!"));
+      
+   if (!iStrlen_STR(sOut))
+      Abort_SYS(_("Output Grid File Name Not Specified!"));   
+
+    
+   
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   IMGIN1 = CreateFile_IMG(GS_DOUBLE,sIn1,IMG_FILE_READONLY);
+   IMGIN2 = CreateFile_IMG(GS_DOUBLE,sIn2,IMG_FILE_READONLY);
+   IMGOUT = CreateOutFile_IMG(GS_DOUBLE,sOut,IMGIN1); 
+   InheritIMG_IMG(IMGIN2,IMGIN1);
+
+   ProgName_SYS(_("Multiplying grids..."),1);
+
+   // --- Multiply grids ---
+
+   IEXP0 = Create_IEXP();
+   AddGrid_IEXP(IEXP0,IMGIN1,"In1");
+   AddGrid_IEXP(IEXP0,IMGIN2,"In2");
+   AddGrid_IEXP(IEXP0,IMGOUT,"Out");
+
+   DoFormula_IEXP(IEXP0,"Out = In1 * In2;",1024);
+
+
+   // --- Destroy the Images ---
+   
+   Destroy_IEXP(IEXP0);
+   Destroy_IMG(IMGIN1);
+   Destroy_IMG(IMGIN2);
+   Destroy_IMG(IMGOUT);
+        
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sOut,"Grid",1);
+   
+}

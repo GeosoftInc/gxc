@@ -1,0 +1,89 @@
+//===========================================================================
+NAME          = "Edit the comment block of a map"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Edit the comment block of a map.  The comment block is an RTF or  text
+   file which can be edited with the Windows Wordpad application.
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        eMAP; 
+MAP         hMap;  
+
+BF          hBF,hBFs;
+SBF         hSBF;    
+
+int i;
+
+#define MAPCMNT_RTF "Map_Comments.rtf"
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   Progress_SYS(1);
+   
+
+   // --- Get map ---
+
+   eMAP = Current_EMAP();
+   hMap = Lock_EMAP(eMAP);
+
+
+   // --- get comment RTF ---
+
+   hBF  = Create_BF(MAPCMNT_RTF,BF_READWRITE_NEW);
+   hSBF = hGetMAP_SBF(hMap);
+   if (iExistFile_SBF(hSBF,MAPCMNT_RTF)) {
+      hBFs = CreateSBF_BF(hSBF,MAPCMNT_RTF,BF_READ);
+      Copy_BF(hBFs,hBF);
+      DestroyEx_BF(hBFs);
+   }
+   DestroyEx_BF(hBF);
+   
+
+   // --- edit file ---
+   
+   SetString_SYS("EDIT","FILE",MAPCMNT_RTF);
+   SetString_SYS("EDIT","WAIT","Wait");
+   SetString_SYS("EDIT","CHILD","Yes");
+   i = iRunGX_SYS("edit");
+   SetString_SYS("EDIT","FILE","");
+   SetString_SYS("EDIT","WAIT","");
+   SetString_SYS("EDIT","CHILD","");
+   if (i < 0) Cancel_SYS();
+   if (i > 0) Abort_SYS(_("Unable to edit file."));
+
+
+   // --- put file back into map ---
+
+   hBF = Create_BF(MAPCMNT_RTF,BF_READ);
+   hBFs = CreateSBF_BF(hSBF,MAPCMNT_RTF,BF_READWRITE_NEW);
+   Copy_BF(hBF,hBFs);
+   DestroyEx_BF(hBFs);
+   SetDestroyStatus_BF(hBF,BF_DELETE);
+   DestroyEx_BF(hBF);
+   Destroy_SBF(hSBF);
+   
+
+   // --- Done ---
+
+   UnLock_EMAP(eMAP);
+
+}

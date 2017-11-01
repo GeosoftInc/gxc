@@ -1,0 +1,99 @@
+//===========================================================================
+NAME          = "Validate location database."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Locations"
+
+DESCRIPTION   = "
+
+   GRTESTLOC.DELETE_IF_INVALID : Set to 1 to delete if invalid in scripts
+    
+   If the location database exists, and is not valid, will prompt for
+   it to be deleted.
+   
+   This is a utility GX called from gravity GXs which require a location
+   database.
+
+"
+// Revision History:
+// v6.0.0: New GX
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         eDB;                  // Database
+DB          hDB;                  // Database
+REG         hWorkREG, hDataREG;
+
+string(STR_FILE) sDB;
+string(STR_DEFAULT_SHORT) sType;
+int i,iNew,iDelete;
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- Get delete flag. Must set every call ---
+   
+   iDelete = iGetInt_SYS("GRTESTLOC", "DELETE_IF_INVALID");
+   if(iDelete!=1) iDelete = 0;
+   SetInt_SYS("GRTESTLOC", "DELETE_IF_INVALID", 0);
+   
+
+   // --- get workspace REG and parameters ---
+   
+   hWorkREG = Create_REG(156);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sDB,sizeof(sDB));
+   
+   
+   // --- Is the location database actually set up correctly? ---
+   
+   hDataREG = Create_REG(256);
+   if(iFileExist_SYS(sDB)) {
+   
+      // --- load the database ---
+      
+      eDB = Load_EDB(sDB);
+      hDB = Lock_EDB(eDB);         
+   
+      GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+      GetString_REG(hDataREG,"GRAVRED.TYPE",sType);
+      
+      iNew = 0;
+      if(iStrcmp_STR(sType, _n("Location"), STR_CASE_TOLERANT) != 0) {
+     
+         if(iInteractive_SYS()) { 
+            i = iDisplayQuestion_SYS(sDB,_("The location database does not appear to be set up correctly.  Create new?"));
+            if (i) iNew = TRUE;         
+         }
+         else {         
+            iNew = iDelete;
+         }
+      }
+      UnLock_EDB(eDB);
+      
+      if(iNew) {
+         UnLoad_EDB(sDB);
+         iDeleteFile_SYS(sDB);
+      }
+   }   
+   
+   Destroy_REG(hWorkREG);
+   Destroy_REG(hDataREG);
+}

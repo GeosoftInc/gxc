@@ -1,0 +1,780 @@
+//===========================================================================
+NAME          = "Import a MapInfo TAB file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Import a MapInfo TAB file (and its related data and feature data).
+
+    IMPORTMI.TAB     MapInfo TAB file(s)
+    IMPORTMI.DBOUT   \"New\" or \"Current\" database, or don't import
+    IMPORTMI.DB      New database name(s)
+    IMPORTMI.MAPOUT  \"New\" or \"Current\" map, or don't import
+    IMPORTMI.MAP     New map name
+    IMPORTMI.MAPSCALE   New map scale (optional)
+    
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v7.1.0: Enabled 3D Viewer specific functionality.
+// v6.3.0: Enabled ArcGIS specific functionality.
+// v6.3.0: Range data for new map based on all input TABS, not just first one.
+// v6.2.0: Refresh output map name in interactive mode using current tab file name.
+// v6.0.0: Multiple-files string size predef used.
+// v6.0.0: Supports embedded ALG and ERS files.
+// v5.1.8: Previous fix not enabled on import to existing maps - also puts to back.
+// v5.1.7: Images  were not being clipped to data view.
+// v5.1.6: Using MakeProjected_IPJ function instead of creating default
+//         projection locally.
+// v5.1.3: Using "Current" X and Y channels
+//         Corrected GXF string format for Lambert projection
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "importmi.gr"
+#include "importmi.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+
+EMAP        EMap;             // Map handle
+MAP         Map;              // Map handle
+
+MVIEW       MView;            // Map View handle
+IPJ         hIPJ;             // Projection handle
+IPJ         hIPJLL;
+PJ          hPJ;
+GIS         hGIS, hGIS2;      // GIS handle
+AGG         Agg;              // AGG handle
+
+DB_SYMB     XCh;              // Channel Handle
+DB_SYMB     YCh;              // Channel Handle
+DB_SYMB     LatCh;
+DB_SYMB     LonCh;
+DB_SYMB     Line;
+
+DGW         Diag;             // Dialogue handle
+
+BF          hBF;              // Output stream for IPJ
+SBF         hSBF;             // SBF Object
+
+string(STR_GROUP) sAgg;
+string(STR_FILE) sTab,sTab2,sDB,sInfo,sFile,sMap;
+string(STR_DEFAULT_SHORT) sName;
+int iDB, iMap, iIsMapData, iIsDBData, iLLtoXY;
+
+real  rMinLon;  // Minimum Longitude of map area (ground units)
+real  rMaxLon;  // Maximum Longitude of map area (ground units)
+real  rMinLat;   // Minimum Latitude of map area (ground units)
+real  rMaxLat;   // Maximum Latitude of map area (ground units) 
+
+real rXMin, rXMax, rYMin, rYMax, rZMin, rZMax, rScale, rDx, rDy;
+real rXMn, rXMx, rYMn, rYMx, rZMn, rZMx;
+string(STR_DEFAULT_SHORT) sMinX, sMinY, sMaxX, sMaxY, sStr;
+string(STR_FILE) sFDrive, sFDir, sFName, sFExt, sBuff;
+string(STR_DB_SYMBOL) sLine;
+string(STR_MULTI_FILE) sTabs;
+int i,iTab,iTabs;
+
+int         i3D;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running inside 3D Viewer ---
+   i3D = 0;
+   if (iHaveCurrent_EMAP())
+   {
+		// --- Ensure we have a map and that we are not drawing on grid documents ---
+	   
+	   if (iRunGX_SYS("sclgrd") == -1) 
+		  Cancel_SYS();
+		  
+
+      EMap = Current_EMAP();
+      i3D = iIs3DView_EMAP(EMap);
+   }
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IMPORTMI");
+      
+
+      // --- Put current values into the dialogue --
+
+      SetInfoSYS_DGW(Diag,_IMPORTMI_0,DGW_FILEPATH, "IMPORTMI","TAB");  
+
+      if (!i3D)
+      {
+         SetInfoSYS_DGW(Diag,_IMPORTMI_1,DGW_LISTALIAS, "IMPORTMI","DBOUT");  
+         SetInfoSYS_DGW(Diag,_IMPORTMI_2,DGW_LISTALIAS, "IMPORTMI","MAPOUT");  
+         SetInfoSYS_DGW(Diag,_IMPORTMI_3,DGW_TEXT,      "IMPORTMI","MAPSCALE");  
+      } else {
+         SetInfo_DGW(Diag,_IMPORTMI_1,DGW_HIDE, "1");  
+         SetInfo_DGW(Diag,_IMPORTMI_2,DGW_HIDE, "1");  
+         SetInfo_DGW(Diag,_IMPORTMI_3,DGW_HIDE, "1");  
+      }
+      
+      // --- Run the Dialogue ---
+
+      if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+      
+
+      // --- Read the returned values from the dialogue ---
+	
+      GetInfoSYS_DGW(Diag,_IMPORTMI_0,DGW_FILEPATH, "IMPORTMI","TAB");
+      GetInfoSYS_DGW(Diag,_IMPORTMI_1,DGW_LISTALIAS, "IMPORTMI","DBOUT");  
+      GetInfoSYS_DGW(Diag,_IMPORTMI_2,DGW_LISTALIAS, "IMPORTMI","MAPOUT");  
+      GetInfoSYS_DGW(Diag,_IMPORTMI_3,DGW_TEXT,      "IMPORTMI","MAPSCALE");  
+      
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+   
+   // --- Get and validate parameters ---
+
+   GetString_SYS("IMPORTMI","TAB", sTabs);
+   iTabs = iCountTokens_STR(sTabs,"|");
+   GetString_SYS("IMPORTMI","DB", sDB);
+   GetString_SYS("IMPORTMI","MAP", sMap);
+
+   if (i3D)
+   {
+      // --- Never import database, always to current map and use default scale) ---
+      iDB = 2;
+      iMap = 0;
+      rScale = rDUMMY;
+   }
+   else
+   {      
+      rScale = rGetReal_SYS("IMPORTMI","MAPSCALE");
+
+      GetString_SYS("IMPORTMI","DBOUT", sStr);
+      if (iCharComp_STR(sStr,"C") || iCharComp_STR(sStr,"0"))
+         iDB = 0;
+      else if (iCharComp_STR(sStr,"N") || iCharComp_STR(sStr,"1"))
+         iDB = 1;
+      else if (iCharComp_STR(sStr,"D") || iCharComp_STR(sStr,"2"))
+         iDB = 2;
+      else {
+         Abort_SYS(_("Invalid database import option"));
+      }
+
+      GetString_SYS("IMPORTMI","MAPOUT", sStr);
+      if (iCharComp_STR(sStr,"C") || iCharComp_STR(sStr,"0"))
+         iMap = 0;
+      else if (iCharComp_STR(sStr,"N") || iCharComp_STR(sStr,"1"))
+         iMap = 1;
+      else if (iCharComp_STR(sStr,"D") || iCharComp_STR(sStr,"2"))
+         iMap = 2;
+      else
+         Abort_SYS(_("Invalid map import option"));
+   }
+
+   // --- See if this is a raster tab file ---
+
+   iIsMapData = FALSE;
+   iIsDBData = FALSE;
+
+   for (iTab=0;iTab<iTabs;iTab++) {
+   
+      // --- get the tab file ---
+      
+      GetMFile_STR(sTabs,sTab,iTab);
+      
+      if (iIsMIRasterTabFile_GIS(sTab)) {
+
+         // --- See if import to a map is requested ---
+
+         if(iMap==2) {
+            Abort_SYS(_("The requested TAB file opens a raster image, but import to a map was not requested."));
+         }
+
+         // --- Get the Raster file information ---
+
+         hIPJ = Create_IPJ();
+
+         ScanMIRasterTabFile_GIS(sTab, sFile, hIPJ);
+      
+         // --- Restore the full path to the file name from the TAB file ---
+
+         FileNamePart_STR (sTab,  sFDrive, STR_FILE_PART_VOLUME);
+         FileNamePart_STR (sTab,  sFDir,   STR_FILE_PART_DIRECTORY);
+         FileNamePart_STR (sFile, sFName,  STR_FILE_PART_NAME);
+         FileNamePart_STR (sFile, sFExt,   STR_FILE_PART_EXTENSION);
+         FileCombineParts_STR(sFDrive,sFDir,sFName,sFExt,"",sFile);
+      
+
+         // --- Create the IMG ---
+
+         if(iStrcmp_STR(sFExt,"ECW",STR_CASE_TOLERANT)==0)
+            Strcat_STR(sFile, "(ECW)");
+         else if (iStrcmp_STR(sFExt,"ERS",STR_CASE_TOLERANT)==0)
+            Strcat_STR(sFile, "(ERM)");
+         else if (iStrcmp_STR(sFExt,"ALG",STR_CASE_TOLERANT)==0)
+            Strcat_STR(sFile, "(ERM;type=PlugIn;T=0)");
+         else
+            Strcat_STR(sFile, "(IMG)");
+
+         if (iMap==1) {
+      
+            // --- Remove the warp and serialize IPJ ---
+   
+            ClearWarp_IPJ(hIPJ);
+            hSBF = hGetSYS_SBF();
+            hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READWRITE_NEW);
+            Serial_IPJ(hIPJ,hBF);
+            DestroyEx_BF(hBF);
+            Destroy_SBF(hSBF);
+    
+            // --- range the grid ---
+      
+            SetString_SYS("IMGRANGE","FILE",sFile);
+            if (iRunGX_SYS("imgrange.gx"))
+               Abort_SYS(_("Failed to determine grid range."));
+
+            if (iInteractive_SYS() || iStrlen_STR(sMap) == 0)
+            {
+               // --- Get the new map name. For raster images, there is no MAPINFO .MAP file
+               //     to worry about.  ---
+
+               FileNamePart_STR(sTab, sMap, STR_FILE_PART_NAME);
+               Strcat_STR(sMap,"_geosoft.map");
+               SetString_SYS("IMPORTMI","MAP",sMap);
+            }
+            
+            if(iInteractive_SYS()) {   
+            
+               while(TRUE) {
+         
+
+                  Diag = Create_DGW("IMPORTMIMAP");
+      
+                  SetInfoSYS_DGW(Diag,_IMPORTMIMAP_0,DGW_FILEPATH, "IMPORTMI","MAP");  
+                  if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+                  GetInfoSYS_DGW(Diag,_IMPORTMIMAP_0,DGW_FILEPATH, "IMPORTMI","MAP");
+                  Destroy_DGW(Diag);
+            
+                  GetString_SYS("IMPORTMI","MAP",sMap);
+
+                  // --- open the map and set up views ---
+
+                  if (iLoaded_EMAP(sMap)) {
+                     if (iDisplayQuestion_SYS(_("Map is open"),_("Replace currently open map?")))
+                        UnLoad_EMAP(sMap);                    
+                     else
+                        continue;
+                  }
+
+                  break;
+               }
+            }
+
+            // --- Set the name for DEFMAP ---
+
+            GetString_SYS("IMPORTMI","MAP",sMap);
+            if(iFileExist_SYS(sMap) && !iLoaded_EMAP(sMap)) {
+               if(iIsMIMapFile_GIS(sMap))
+                  Abort_SYS(_("Cannot overwrite MapInfo MAP file"));
+            }
+
+            SetString_SYS("DEFMAP","MAP",sMap);
+            SetReal_SYS("DEFMAP","MAPSCALE",rScale);
+            
+
+            // --- run DEFMAP ---      
+         
+            if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+            iDeleteFile_SYS(sMap);
+            if (!iInteractive_SYS()) {
+               SetInteractive_SYS(1);
+               if (iRunGX_SYS("defmap.gx")) Cancel_SYS();
+               SetInteractive_SYS(0);   
+            } else 
+               if (iRunGX_SYS("defmap.gx")) Cancel_SYS();
+
+            // --- Clear the name for DEFMAP ---
+
+            SetString_SYS("DEFMAP","MAP","");
+            
+
+            // --- import any more maps to this map ---
+	  
+            iMap = 0;
+               
+         }
+
+         // --- get the map ---
+
+         EMap = Current_EMAP();
+         Map = Lock_EMAP(EMap);
+
+         // --- create aggregate ---
+
+         Agg = Create_AGG();
+
+         // --- add grid to the agg ---
+
+         Progress_SYS(1);
+         ProgName_SYS(_("Layer"),1);
+         LayerIMG_AGG(Agg,sFile,0,"colour.tbl",rDUMMY);
+         Progress_SYS(0);
+
+         // --- open data view ---
+
+         MView = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+         // --- put the AGG in the view ---
+
+         ToLower_STR(sFName);
+         GenGroupName_STR("AGG", sFName, "", sAgg);
+         
+         Aggregate_MVIEW(MView,Agg,sAgg);
+   
+
+         // --- clip the aggregate group ---
+   
+         MarkAllGroups_MVIEW(MView,0);
+         MarkGroup_MVIEW(MView,sAgg,1);
+         ClipMarkedGroups_MVIEW(MView,CLIP_ON);
+         MarkAllGroups_MVIEW(MView,0);
+
+         
+         // --- add a maker ---
+
+         StartGroup_MVIEW(MView,sAgg,MVIEW_GROUP_APPEND);
+         Maker_MVIEW(MView,0,1,"importmi",MAKER_GX,_("New image..."),"IMPORTMI;");
+
+   
+         // --- done ---
+
+         Destroy_IPJ(hIPJ);
+         Destroy_AGG(Agg);
+         Destroy_MVIEW(MView);
+         UnLock_EMAP(EMap);      
+
+         iIsMapData = TRUE;
+         
+         
+      } else {      
+
+      
+         // --- Create the GIS object ---
+
+         hGIS = Create_GIS(sTab,sInfo,GIS_TYPE_MAPINFO);
+         hIPJ = GetIPJ_GIS(hGIS);
+         
+
+         // --- serialize IPJ ---
+   
+         hSBF = hGetSYS_SBF();
+         hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READWRITE_NEW);
+         Serial_IPJ(hIPJ,hBF);
+         DestroyEx_BF(hBF);
+         Destroy_SBF(hSBF);
+    
+   
+         // --- New map ---
+
+         if (iMap!=2) {
+
+            // --- Get the range of data for the map ---
+
+            rXMin = rDUMMY;   // eliminate compiler warnings
+            rXMax = rDUMMY;
+            rYMin = rDUMMY;
+            rYMax = rDUMMY;
+            rZMin = rDUMMY;
+            rZMax = rDUMMY;
+
+            // --- turn on progress ---
+
+            Progress_SYS(1);
+            ProgName_SYS(_("Ranging MapInfo data"),1);
+
+            GetRange_GIS(hGIS,rXMin,rXMax,rYMin,rYMax,rZMin,rZMax);
+
+            if(rXMin == rDUMMY &&
+               rXMax == rDUMMY &&
+               rYMin == rDUMMY &&
+               rYMax == rDUMMY) {
+
+               iIsMapData = FALSE;   // nothing to import
+            }
+            else
+               iIsMapData = TRUE;
+         }
+       
+         if (iMap!=2 && iIsMapData) {     
+      
+            if (iMap!=1)
+            {
+               // --- progress off ---
+               Progress_SYS(0);
+            }
+            else 
+            {
+   
+               // --- If there are more maps, get their ranges and expand the full range to include them.
+               //     TODO: Adjust for different projections (just assumes they are the same right now). ---
+               
+               for(i=iTab+1;i<iTabs;i++)
+               {
+                  GetMFile_STR(sTabs,sTab2,i);
+                  if(!iIsMIRasterTabFile_GIS(sTab2)) 
+                  {
+                     hGIS2 = Create_GIS(sTab2,sInfo,GIS_TYPE_MAPINFO);
+                     GetRange_GIS(hGIS2,rXMn,rXMx,rYMn,rYMx,rZMn,rZMx);
+                     if(rXMn!=rDUMMY && rXMn<rXMin) rXMin = rXMn;
+                     if(rXMx!=rDUMMY && rXMx>rXMax) rXMax = rXMx;
+                     if(rYMn!=rDUMMY && rYMn<rYMin) rYMin = rYMn;
+                     if(rYMx!=rDUMMY && rYMx>rYMax) rYMax = rYMx;
+                     Destroy_GIS(hGIS2);
+                  }
+               }
+               
+   
+               // --- progress off ---
+
+               Progress_SYS(0);
+
+
+               // --- increase size by 1% ---
+         
+
+               rDx = rXMax - rXMin;
+               rDy = rYMax - rYMin;
+               rXMin -= rDx * 0.01;
+               rXMax += rDx * 0.01;
+               rYMin -= rDy * 0.01;
+               rYMax += rDy * 0.01;
+
+               FormatR_STR(rXMin,sMinX,14,8);
+               FormatR_STR(rYMin,sMinY,14,8);
+               FormatR_STR(rXMax,sMaxX,14,8);
+               FormatR_STR(rYMax,sMaxY,14,8);
+
+               SetString_SYS("XYRANGE","MIN_X",sMinX);
+               SetString_SYS("XYRANGE","MIN_Y",sMinY);
+               SetString_SYS("XYRANGE","MAX_X",sMaxX);
+               SetString_SYS("XYRANGE","MAX_Y",sMaxY);
+
+               if (iInteractive_SYS() || iStrlen_STR(sMap) == 0)
+               {
+                  // --- Get the new map name ---
+
+                  FileNamePart_STR(sTab, sMap, STR_FILE_PART_NAME);
+                  Strcat_STR(sMap,"_geosoft.map");
+                  SetString_SYS("IMPORTMI","MAP",sMap);
+               }
+               
+               if(iInteractive_SYS()) {   
+
+                  while(TRUE) {
+
+                     Diag = Create_DGW("IMPORTMIMAP");
+      
+                     SetInfoSYS_DGW(Diag,_IMPORTMIMAP_0,DGW_FILEPATH, "IMPORTMI","MAP");  
+                     if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+                     GetInfoSYS_DGW(Diag,_IMPORTMIMAP_0,DGW_FILEPATH, "IMPORTMI","MAP");
+                     Destroy_DGW(Diag);
+
+                     // --- open the map and set up views ---
+
+                     GetString_SYS("IMPORTMI","MAP",sMap);
+                     if (iLoaded_EMAP(sMap)) {
+                        if (iDisplayQuestion_SYS(_("Map is open"),_("Replace currently open map?")))
+                           UnLoad_EMAP(sMap);
+                        else
+                           continue;
+                     }
+
+                     // --- See if the specified Map file already exists in the same
+                     //     directory as the TAB file. If so, it is probably a MAPINFO .MAP
+                     //     file, which should NOT be overwritten! ---
+
+                     if(iFileExist_SYS(sMap)) {
+                        if(iIsMIMapFile_GIS(sMap)) {
+
+                           Strcpy_STR(sBuff,_("WARNING!: The specified map file is an existing MapInfo map file. Overwriting it will prevent access to the MapInfo data. "));
+                           DisplayMessage_SYS(_("Oasis montaj/MapInfo Map File Conflict Warning"), sBuff);
+                           continue;
+                        }
+                     }
+
+                     break;
+
+                  }  // End While
+               }
+         
+               GetString_SYS("IMPORTMI","MAP",sMap);
+               if(iFileExist_SYS(sMap) && !iLoaded_EMAP(sMap)) {
+                  if(iIsMIMapFile_GIS(sMap))
+                     Abort_SYS(_("Cannot overwrite MapInfo MAP file"));
+               }
+               
+
+               // --- Set the name for DEFMAP ---
+
+               SetString_SYS("DEFMAP","MAP",sMap);
+               SetReal_SYS("DEFMAP","MAPSCALE",rScale);
+               
+
+               // --- run DEFMAP ---      
+         
+               if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+                  iDeleteFile_SYS(sMap);
+               if (!iInteractive_SYS()) {
+                  SetInteractive_SYS(1);
+                  if (iRunGX_SYS("defmap.gx")) Cancel_SYS();
+                  SetInteractive_SYS(0);   
+               } else 
+                  if (iRunGX_SYS("defmap.gx")) Cancel_SYS();
+
+               // --- Clear the name for DEFMAP ---
+
+               SetString_SYS("DEFMAP","MAP","");
+               
+               
+               // --- import any more maps to this map ---
+	     
+               iMap = 0;
+               
+            }
+             
+
+            // --- Lock Map ---
+
+            EMap = Current_EMAP();
+            Map  = Lock_EMAP(EMap);
+   
+
+            // --- turn on progress ---
+
+            Progress_SYS(1);
+            ProgName_SYS(_("Import MapInfo data"),1);
+
+            // --- Create an MVIEW ---
+
+            MView = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
+
+            // --- Set the view IPJ ---
+
+            SetWorkingIPJ_MVIEW(MView, hIPJ);
+
+            // --- If it is a Lat-Long projection, need to project data ---
+
+            iLLtoXY = FALSE;
+            if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_GCS && iDB!=2) {
+                  
+               // --- Save the Lat-Long projection ---
+
+               hIPJLL = Create_IPJ();
+               Copy_IPJ(hIPJ, hIPJLL);
+
+
+               // --- set up default projection ---
+   
+               rMinLon = rXMin;
+               rMinLat = rYMin;
+               rMaxLon = rXMax;
+               rMaxLat = rYMax;
+            
+               hIPJ = Create_IPJ();
+
+               MakeProjected_IPJ(hIPJ, rMinLon, rMinLat, rMaxLon, rMaxLat);
+
+               iLLtoXY = TRUE;
+                  
+            }
+
+
+            // --- import the map ---
+
+            LoadMAP_GIS(hGIS, MView);
+
+
+            // --- Destroy the view ---
+   
+            Destroy_MVIEW(MView);
+
+            UnLock_EMAP(EMap);
+
+         }
+
+    
+         if (iDB!=2) {
+
+            if (iDB==1) {   // --- new database ---
+
+               if (iInteractive_SYS()) {
+               
+                  FileNamePart_STR(sTab, sDB, STR_FILE_PART_NAME);
+                  Strcat_STR(sDB,".gdb");
+                  
+                  Diag = Create_DGW("IMPORTMIDB");
+                  SetInfo_DGW(Diag,_IMPORTMIDB_0,DGW_TEXT, sTab);  
+                  SetInfo_DGW(Diag,_IMPORTMIDB_1,DGW_FILEPATH, sDB);  
+                  if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+                  GetInfo_DGW(Diag,_IMPORTMIDB_1,DGW_FILEPATH, sDB);
+                  Destroy_DGW(Diag);
+                  
+               }
+               
+                  
+               // --- Get and validate the new database name ---
+
+               if (iLoaded_EDB(sDB) == 1) UnLoad_EDB(sDB);
+
+               Create_DB(sDB,10,256,10+128+20,10,100,"SUPER","");
+
+               EData = Load_EDB(sDB);
+               Data  = Lock_EDB(EData);
+               
+               
+               // --- set ---
+               
+               SetString_SYS("IMPORTMI","DB",sDB);
+               
+               
+               // --- import any more databases to this database ---
+	     
+               iDB = 0;
+               
+               
+            } else if (iDB==0) {    
+            
+            
+               // --- import to current database ---
+         
+               EData = Current_EDB();
+               Data  = Lock_EDB(EData);
+
+            }
+            
+   
+            // --- import the data ---
+
+            LoadGDB_GIS(hGIS, Data);
+         
+            iIsDBData = TRUE;
+
+
+            // --- If Lat-Long, create Lat and Lon channels, and project the
+            //     data into X and Y ---
+
+            XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+            if (XCh==NULLSYMB)
+               Abort_SYS(_("The current X channel does not exist."));
+
+            YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+            if (YCh==NULLSYMB)
+               Abort_SYS(_("The current Y channel does not exist."));
+
+            if(iLLtoXY) {
+
+               hPJ = CreateIPJ_PJ((IPJ)0, hIPJ);
+
+               LatCh = FindSymb_DB(Data,"Lat",DB_SYMB_CHAN);
+               if(LatCh == NULLSYMB)
+                  LatCh = DupSymb_DB(Data, YCh, "Lat");
+               else
+                  LockSymb_DB(Data, LatCh, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+               LonCh = FindSymb_DB(Data,"Lon",DB_SYMB_CHAN);
+               if(LonCh == NULLSYMB)
+                  LonCh = DupSymb_DB(Data, XCh, "Lon");
+               else
+                  LockSymb_DB(Data, LonCh, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+               LockSymb_DB(Data, XCh, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+               LockSymb_DB(Data, YCh, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+               
+               // --- The data is imported to a line created using the
+               //     database name ---
+               
+               FileNamePart_STR(sTab, sName, STR_FILE_PART_NAME);
+               GenValidLineSymb_DB(sName, sLine, sizeof(sLine));
+               
+               Line = FindSymb_DB(Data, sLine, DB_SYMB_LINE);
+               LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+               CopyData_DB(Data,Line,XCh,LonCh);
+               CopyData_DB(Data,Line,YCh,LatCh);
+
+               ProjectData_DU(Data, Line, LonCh, LatCh, XCh, YCh, hPJ);
+
+               // --- Associate and Load the channels for this group ---
+
+               if(iLineCategory_DB(Data, Line)==DB_CATEGORY_LINE_GROUP) {
+                  AddAssociatedLoad_DB(Data, Line, LatCh);
+                  AddAssociatedLoad_DB(Data, Line, LonCh);
+               }
+
+               UnLockSymb_DB(Data,Line);
+
+               SetIPJ_DB(Data, LonCh, LatCh, hIPJLL);
+
+               UnLockSymb_DB(Data,XCh);
+               UnLockSymb_DB(Data,YCh);
+               UnLockSymb_DB(Data,LatCh);
+               UnLockSymb_DB(Data,LonCh);
+
+               Destroy_IPJ(hIPJLL);
+               Destroy_PJ(hPJ);
+
+            }
+
+            
+
+            SetIPJ_DB(Data, XCh, YCh, hIPJ);
+
+            UnLock_EDB(EData);
+
+
+            // --- display data ---
+
+            DelLine0_EDB(EData);
+            SetCurLine_EDB(EData,sName);
+            LoadAllChans_EDB(EData);
+            DelLine0_EDB(EData);
+         }
+
+         // --- progress off ---
+   
+         Progress_SYS(0);
+         
+
+         // --- Destroy objects ---
+
+         Destroy_IPJ(hIPJ);
+         Destroy_GIS(hGIS);
+         
+      }
+      
+   }
+   
+}

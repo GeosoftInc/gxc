@@ -1,0 +1,220 @@
+//===========================================================================
+NAME          = "Export map group line work to a Datamine string file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/PopupMap/Export"
+
+DESCRIPTION   = "
+
+   Export map group line work to a Datamine string file.
+
+    EXPDATAMINE.FILE     Datamine string file name.
+    EXPDATAMINE.GROUPS   Comma-delimited groups to export (batch only)    
+"
+// Revision History:
+// v6.2.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "EXPDATAMINESTR.gr"
+#include "EXPDATAMINESTR.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        EMap;             // Map handle
+MAP         Map;              // Map handle
+
+DGW         Diag;             // Dialogue handle
+
+
+MVIEW       View;             // Map View handle
+LST         ViewLST, SelLST;
+
+int iNGroups;
+string(STR_FILE) sFile, sStringFile, sMap;
+string(STR_VIEW) sView, sGroup;
+string(4096) sGroups;
+string(STR_DEFAULT) sMsg;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the current map, and the current view ---
+   
+   EMap = Current_EMAP();
+   if(!iScript_SYS())
+      GetCurrentView_EMAP(EMap, sView);
+   else {
+      GetString_SYS("EXPDATAMINE","CURRENTVIEW",sView);      
+      if(!iStrlen_STR(sView)) 
+         Abort_SYS(_("EXPDATAMINE.CURRENTVIEW must be set to run this GX in script mode"));
+   }
+   GetName_EMAP(EMap, sMap);
+   
+
+   // --- Lock the map ---
+   
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map, sView, MVIEW_READ);
+   
+   
+   // --- Cannot export from a 3D map yet ---
+   
+   if(iIsView3D_MVIEW(View))
+      Abort_SYS(_("Export from 3D views is not currently available."));
+      
+
+   // --- Select the map groups to export ---
+   
+   ViewLST = Create_LST(64);
+   SelLST = Create_LST(64);
+   
+      
+   if(iInteractive_SYS())
+   {
+   
+      // --- Create a LST of the map groups ---
+
+      if(iListGroups_MVIEW(View, ViewLST, MVIEW_GROUP_LIST_VISIBLE)==0) 
+         Abort_SYS(_("No groups found in the current view."));      
+      
+      
+      // --- Get the current selection ---
+      
+      GetString_SYS("EXPDATAMINE", "GROUPS", sGroups);
+      ConvertFromCSVString_LST(SelLST, sGroups);
+      
+      
+      // --- Select ---
+      
+      if(iTwoPanelSelection_GUI(ViewLST, SelLST, _("Select Map Groups to Export")))
+         Cancel_SYS();
+      
+      
+      // --- Reset current selection ---
+         
+      ConvertToCSVString_LST(SelLST, sGroups);
+      SetString_SYS("EXPDATAMINE", "GROUPS", sGroups);
+         
+   }
+
+
+   // --- Get the current selection ---
+      
+   GetString_SYS("EXPDATAMINE", "GROUPS", sGroups);
+   if(!iStrlen_STR(sGroups)) 
+      Abort_SYS(_("No groups have been specified for export."));
+      
+   ConvertFromCSVString_LST(SelLST, sGroups);
+   iNGroups = iSize_LST(SelLST);
+   if(iNGroups==0)
+      Abort_SYS(_("No groups have been specified for export."));
+      
+      
+   // --- Create a default STR file name from the map or group name ---
+   
+   if(iNGroups==1) {
+   
+      // --- For a single group, append the group name to the map name to
+      //     create the Datamine file name ---
+      
+      FileNamePart_STR(sMap, sStringFile, STR_FILE_PART_NAME);
+      Strcat_STR(sStringFile, "_");
+      GetItem_LST(SelLST, 0, 0, sGroup);
+      Strcat_STR(sStringFile, sGroup);
+      FileExt_STR(sStringFile, "dm", sStringFile, FILE_EXT_FORCE);
+   }
+   else {
+   
+      // --- For multiple groups, just use the map name ---
+      
+      FileExt_STR(sMap, "dm", sStringFile, FILE_EXT_FORCE);
+   }
+   GetString_SYS("EXPDATAMINE","FILE", sFile);
+   if(!iStrlen_STR(sFile)) {
+      SetString_SYS("EXPDATAMINE","FILE", sStringFile);   
+   }
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Force the default name for interactive use ---
+      
+      SetString_SYS("EXPDATAMINE","FILE", sStringFile);         
+      
+      
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("EXPDATAMINE");
+      
+
+      // --- Put current values into the dialogue --
+
+      SetInfoSYS_DGW(Diag,_EXPDATAMINE_0,DGW_FILEPATH, "EXPDATAMINE","FILE");  
+      
+
+      // --- Run the Dialogue ---
+
+      if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+      
+
+      // --- Read the returned values from the dialogue ---
+	
+      GetInfoSYS_DGW(Diag,_EXPDATAMINE_0,DGW_FILEPATH, "EXPDATAMINE","FILE");
+      
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+                 
+   }
+   
+   // --- Get and validate parameters ---
+
+   GetString_SYS("EXPDATAMINE","FILE", sStringFile);
+   if(!iStrlen_STR(sStringFile))
+      Abort_SYS(_("No Datamine String file name has been defined."));
+   
+
+   // --- Delete an existing file ---
+      
+   FileExt_STR(sStringFile,"dm",sStringFile,FILE_EXT_ADD_IF_NONE);
+   if(iFileExist_SYS(sStringFile))
+   {
+      if(iDeleteFile_SYS(sStringFile)) 
+      {
+         Printf_STR(sMsg, sizeof(sMsg), _("Unable to delete the existing string file %s."), sStringFile);
+         Abort_SYS(sMsg);
+      }
+   }
+   
+      
+   // --- Do the export ---
+   
+   ExportDatamineString_MVU(View, SelLST, sStringFile);
+   
+
+   // --- Clean up ---
+   
+   Destroy_MVIEW(View);
+   Destroy_LST(ViewLST);   
+   Destroy_LST(SelLST);
+   
+   UnLock_EMAP(EMap);   
+}

@@ -1,0 +1,203 @@
+//===========================================================================
+NAME          = "VOXCLIP"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "\
+
+Apply a math formula to Grids
+
+Parameters: 
+
+       VOXCLIP.VO       Output Voxel Name
+       VOXCLIP.VM       Input Voxel 
+       VOXCLIP.GT       Top File Grid Name (optional)
+       VOXCLIP.GB       Bottom File Grid Name (optional)
+
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.3.0   Enabled ArcGIS specific functionality
+// v6.3.0   Added
+//===========================================================================
+
+RESOURCE = "voxclip.gr"
+#include "voxclip.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;                 // Dialogue handle
+int        i;                    // utility int
+
+string(STR_FILE)  sVO;             // Name of output voxel
+string(STR_FILE)  sVM;             // Name of master voxel
+string(STR_FILE)  sGT;             // Name of grid Top
+string(STR_FILE)  sGB;             // Name of grid Bottom
+string(1024)      sExp;            // Expression string
+string(STR_VIEW)  sView;
+
+EMAP  EMap;
+LST   hLST;
+VOX   hVOX;
+
+int         iDone, iInteractive, isVectorVoxel;
+
+//===========================================================================
+//                            VOXEL CLIP CODE
+//===========================================================================
+
+{
+   iDone = 0;
+	iInteractive = iInteractive_SYS();
+   if (iInteractive == 1)
+   {
+      while (!iDone)
+	  {
+	      // --- Create the Dialogue ---
+
+	      Diag = Create_DGW("VOXCLIPForm");
+	   
+	      // --- Set any Defaults from INI ---
+
+	      SetInfoSYS_DGW(Diag,_VOXCLIPFORM_0,DGW_FILEPATH,"VOXCLIP","VM");     
+	      SetInfoSYS_DGW(Diag,_VOXCLIPFORM_1,DGW_FILEPATH,"VOXCLIP","VO");     
+	      SetInfoSYS_DGW(Diag,_VOXCLIPFORM_2,DGW_FILEPATH,"VOXCLIP","GT");     
+	      SetInfoSYS_DGW(Diag,_VOXCLIPFORM_3,DGW_FILEPATH,"VOXCLIP","GB");     
+
+	      // --- Run the Dialogue ---
+
+	      i = iRunDialogue_DGW(Diag);
+	      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+	      // --- Get the Strings and replace in INI ---
+
+	      GetInfoSYS_DGW(Diag,_VOXCLIPFORM_0,DGW_FILEPATH,"VOXCLIP","VM");     
+	      GetInfoSYS_DGW(Diag,_VOXCLIPFORM_1,DGW_FILEPATH,"VOXCLIP","VO");  
+	      GetInfoSYS_DGW(Diag,_VOXCLIPFORM_2,DGW_FILEPATH,"VOXCLIP","GT");     
+	      GetInfoSYS_DGW(Diag,_VOXCLIPFORM_3,DGW_FILEPATH,"VOXCLIP","GB");     
+
+
+	      // --- Destroy the Dialogue ---
+
+	      Destroy_DGW(Diag);
+
+		   GetString_SYS("VOXCLIP","GT",sGT);
+		   GetString_SYS("VOXCLIP","GB",sGB);
+
+		   // --- Load the Source Voxels ---
+		   
+		   i = 0;
+		   if (iStrlen_STR(sGT) && iFileExist_SYS(sGT)) { i += 1; }
+		   if (iStrlen_STR(sGB) && iFileExist_SYS(sGB)) { i += 2; }
+
+
+		   // --- Set the Formula ---
+
+		   if (i == 0)
+		      DisplayMessage_SYS(_("Voxel Clip"),_("You must specify an existing top and/or bottom grid."));
+		   else
+		      iDone = 1;
+   	  }
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VOXCLIP","VO",sVO);
+   GetString_SYS("VOXCLIP","VM",sVM);
+   GetString_SYS("VOXCLIP","GT",sGT);
+   GetString_SYS("VOXCLIP","GB",sGB);
+
+
+	// --- If input voxel is a vector voxel, ensure the output one has the same extension ---
+
+	hVOX = Create_VOX(sVM);
+	isVectorVoxel = iIsVectorVoxel_VOX(hVOX);
+	if(isVectorVoxel == 1)
+		FileExt_STR(sVO, _n("geosoft_vectorvoxel"), sVO, FILE_EXT_FORCE);
+	Destroy_VOX(hVOX);
+
+   
+   // --- Create LST ---
+
+   hLST = Create_LST(4096);
+
+
+   // --- Load the Source Voxels ---
+   
+   i = 0;
+   if (iStrlen_STR(sGT) && iFileExist_SYS(sGT)) { AddItem_LST(hLST,sGT,"GT"); i += 1; }
+   if (iStrlen_STR(sGB) && iFileExist_SYS(sGB)) { AddItem_LST(hLST,sGB,"GB"); i += 2; }
+
+
+   // --- Set the Formula ---
+
+   switch (i)
+   {
+       case 0 : Abort_SYS(_("You must specify an existing top and/or bottom grid.")); break;
+       case 1 : Strcpy_STR(sExp,_n("VO = (GT != DUMMY && Z >= GT) ? DUMMY : VM;")); break;
+       case 2 : Strcpy_STR(sExp,_n("VO = (GB != DUMMY && Z <= GB) ? DUMMY : VM;")); break;
+       case 3 : Strcpy_STR(sExp,_n("VO = ((GB != DUMMY && Z <= GB) || (GT != DUMMY && Z >= GT)) ? DUMMY : VM;")); break;
+   }
+   
+   // --- Try to remove the voxel from the document tree first ---
+
+	if(iScript_SYS()!=1)
+		iRemoveDocument_PROJ(sVO);
+
+
+   // --- Apply formula to voxels ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Clipping Voxel..."),1);
+   Math_VOX(sVM,"VM",sVO,"VO",sExp,hLST);
+   Progress_SYS(0);
+   
+   
+   // --- Display the Voxel ---
+   
+	if(iScript_SYS()!=1)
+	{
+		if(iHaveCurrent_EMAP())
+		{
+			EMap = Current_EMAP();
+			if(iIs3DView_EMAP(EMap))
+			{	
+				Get3DViewName_EMAP(EMap, sView);
+				SetInteractive_SYS(0);
+				if(isVectorVoxel == 1)
+				{
+					SetString_SYS("DISPVECTORVOX", "VIEW", sView);
+					SetString_SYS("DISPVECTORVOX", "VECTORVOXEL", sVO);
+					iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.DispVectorVox;Run)");
+				}
+				else
+				{
+					SetString_SYS("V3DVOX", "VOXEL", sVO);
+					iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.DispVoxGrid;Run)");
+				}
+				SetInteractive_SYS(iInteractive);
+			}
+			else
+			{
+				// Add to project and display the voxel.
+				iAddDocument_PROJ(sVO, "Voxel", 1);
+			}				
+		}
+		else
+		{
+			// Add to project and display the voxel.
+			iAddDocument_PROJ(sVO, "Voxel", 1);
+		}				
+	}
+}

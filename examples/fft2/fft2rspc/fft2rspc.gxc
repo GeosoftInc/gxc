@@ -1,0 +1,112 @@
+//===========================================================================
+NAME          = "Apply an FFT2D Transform radial power spectrum calculation"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP/Interactive Filtering"
+
+DESCRIPTION   = "\
+\r\n\
+Apply an FFT2D Transform radial power spectrum calculation.\r\n\
+\r\n\
+Parameters: \r\n\
+\r\n\
+    FFT2SPC.GRD      - Name of the input transform grid file\r\n\
+           .SPC      - Name of the output radial power spectrum file\r\n\
+\r\n"
+
+// Revision History:
+// v5.1.4:  Added setting parameter values for fft2 gxes
+//===========================================================================
+
+RESOURCE = "fft2rspc.gr"
+#include "fft2rspc.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sTrnGrid,sSpcFile;      // File names
+
+DGW         Diag;              // Dialogue handle
+
+IMG         IMGi;
+
+int         i;       
+
+
+//===========================================================================
+//                            FFT2SPC CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFT2RSPCForm");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFT2RSPCFORM_0,DGW_FILEPATH,"FFT2RSPC","TRN");
+      SetInfoSYS_DGW(Diag,_FFT2RSPCFORM_1,DGW_FILEPATH,"FFT2RSPC","SPC");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==1) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFT2RSPCFORM_0,DGW_FILEPATH,"FFT2RSPC","TRN");     
+      GetInfoSYS_DGW(Diag,_FFT2RSPCFORM_1,DGW_FILEPATH,"FFT2RSPC","SPC");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FFT2RSPC","TRN",sTrnGrid);
+   GetString_SYS("FFT2RSPC","SPC",sSpcFile);
+
+
+   // --- Check for null input and output strings ---
+
+   if (!iStrlen_STR(sTrnGrid))
+      Abort_SYS(_("Input transform grid name not specified"));   
+
+   if (!iStrlen_STR(sSpcFile))
+      Abort_SYS(_("Output spectrum file name not specified"));
+
+
+   // --- Prepare to do the work ---
+
+   Progress_SYS(1);
+
+
+   // --- Power Spectrum ---
+
+   IMGi = CreateFile_IMG(GS_FLOAT,sTrnGrid,IMG_FILE_READONLY);
+
+   RadSpc_FFT2(IMGi, sSpcFile);
+
+   Destroy_IMG(IMGi);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Set parameter values for fft2 gxes ---
+   
+   SetString_SYS("FFT2SPCFLT","SPCFILE",sSpcFile);
+   SetString_SYS("FFT2SMAP","SPEC",sSpcFile);
+}

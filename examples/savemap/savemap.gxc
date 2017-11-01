@@ -1,0 +1,217 @@
+//===========================================================================
+NAME          = "Save map as"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   SAVEMAP.MAP       New map name
+          .VERSION   0 - Current version
+                     1 - Pre montaj 6.2 version
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+// Revision History
+// 6.0.0: Don't blow away undo/redo stack by only locking after dialog
+// 6.2.0: Added ability to send for versions prior to 6.2. to solve some Unicode compatibility issues
+// 7.0.0: Remove option in GUI to save as pre 6.2 version
+
+//===========================================================================
+
+RESOURCE = "savemap.gr"
+#include "savemap.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+string(STR_FILE)  sMap,sOrigMap,sTempMap,sNewMap;
+
+EMAP  EMap;
+MAP   Map,NewMap;
+DGW   Diag;
+int   i,i3D,iVersion;
+
+
+//===========================================================================
+
+{
+   // --- gotta have a map ---
+   
+   if (!iHaveCurrent_EMAP()) Cancel_SYS();
+   
+   
+   // --- get the current map ---
+
+   EMap = Current_EMAP();
+   
+   if (iIsGrid_EMAP(EMap))
+   {
+		SetInt_SYS("SCLMAP","GRID_SAVE", 1);
+		iRunGX_SYS("sclmap");
+		Exit_SYS();
+   }
+   
+   i3D = iIs3DView_EMAP(EMap);
+   
+   GetName_EMAP(EMap,sMap);
+   AbsoluteFileName_SYS(sMap,sMap);
+   RemoveQualifiers_STR(sMap,sMap);
+
+   Strcpy_STR(sOrigMap, sMap);
+   if (!i3D)
+   {
+	   // --- Save MxDs as maps ---
+	   FileExt_STR(sMap, "map", sMap, FILE_EXT_FORCE);
+   }
+
+   // --- Are we running interactively ?
+
+	if (iInteractive_SYS()) {
+   
+		// --- We grandfathered this in the GUI but still support it in scripting mode ---
+
+		SetInt_SYS("SAVEMAP","VERSION", 0);
+
+	
+		if (i3D)
+		{
+			Diag = Create_DGW("SAVE3DV");
+			SetInfo_DGW(Diag,_SAVE3DV_0,DGW_FILEPATH,sMap);
+		}
+		else
+		{
+			Diag = Create_DGW("SAVEMAP");
+			SetInfo_DGW(Diag,_SAVEMAP_0,DGW_FILEPATH,sMap);
+		}			
+		
+      i = 0;
+      while (i == 0) {
+      
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+         
+         
+         if (i3D)
+		{
+			// --- Put values back in INI ---
+
+			 GetInfoSYS_DGW(Diag,_SAVE3DV_0,DGW_FILEPATH,"SAVE3DV","3DV");     
+			 // --- does new map name exist ---
+			 
+			 GetString_SYS("SAVE3DV","3DV",sNewMap);
+			 AbsoluteFileName_SYS(sNewMap,sNewMap);
+
+			 if(iStrcmp_STR(sOrigMap,sNewMap,0) == 0 && iReadOnly_EMAP(EMap))
+				DisplayMessage_SYS(_("Save Map as"), _("Cannot save the 3D View to itself. It is currently open in a read-only mode."));
+			 else
+				i = 1;
+		}
+		else
+		{
+			// --- Put values back in INI ---
+
+			 GetInfoSYS_DGW(Diag,_SAVEMAP_0,DGW_FILEPATH,"SAVEMAP","MAP");     
+			 // --- does new map name exist ---
+			 
+			 GetString_SYS("SAVEMAP","MAP",sNewMap);
+			 AbsoluteFileName_SYS(sNewMap,sNewMap);
+
+			 if(iStrcmp_STR(sOrigMap,sNewMap,0) == 0 && iReadOnly_EMAP(EMap))
+				DisplayMessage_SYS(_("Save Map as"), _("Cannot save the map to itself. It is currently open in a read-only mode."));
+			 else
+				i = 1;
+		}
+      }                  
+      
+      // --- Destroy the dialogue ---
+
+      Destroy_DGW(Diag);
+      
+   }
+
+   if (!i3D)
+   {
+	   GetString_SYS("SAVEMAP","MAP",sNewMap);
+	   iVersion = iGetInt_SYS("SAVEMAP","VERSION");
+	   if (iVersion == iDUMMY)
+		  iVersion = 0;
+   } else 
+	   GetString_SYS("SAVE3DV","3DV",sNewMap);
+	
+   
+   // --- same name? ---
+
+   AbsoluteFileName_SYS(sNewMap,sNewMap);
+   if(iStrcmp_STR(sOrigMap,sNewMap,0) == 0) {
+      if (iReadOnly_EMAP(EMap))
+	  {
+		if (i3D)
+			Abort_SYS(_("Cannot save the map to itself. It is currently open in a read-only mode."));
+		else
+			Abort_SYS(_("Cannot save the 3D View to itself. It is currently open in a read-only mode."));
+	  }
+
+      if (!iVersion)
+      {
+         // --- just commit and unlock ---
+         Map = Lock_EMAP(EMap);
+         SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+         Commit_MAP(Map);
+         UnLock_EMAP(EMap);
+      } else {
+         // --- Need a temporary spot to save with same name ---
+         Map = Lock_EMAP(EMap);
+
+         Strcpy_STR(sTempMap, "~~dupmap_tempmap~~.map");
+         TransferPath_SYS(sMap, sTempMap);
+         NewMap = Create_MAP(sTempMap, MAP_WRITENEW);
+         DupMap_MAP(Map,NewMap,DUPMAP_COPY_PRE62);
+
+         // --- Unload old map. ---
+         UnLock_EMAP(EMap);
+         UnLoad_EMAP(sMap);
+
+         Destroy_MAP(NewMap);
+
+         if (iCopyFile_SYS(sTempMap, sMap))
+            Abort_SYS(_("Could not copy temporary map '~~dupmap_tempmap~~.map' to original map. Temporary map kept."));
+         iDeleteFile_SYS(sTempMap);
+         Load_EMAP(sMap);
+      }
+   } else {
+      UnLoad_EMAP(sNewMap);
+
+      Map = Lock_EMAP(EMap);
+      
+      // --- open the map ---
+
+      NewMap = Create_MAP(sNewMap,MAP_WRITENEW);
+
+      // --- dup the map ---
+
+      if (iVersion)      
+         DupMap_MAP(Map,NewMap,DUPMAP_COPY_PRE62);
+      else
+         DupMap_MAP(Map,NewMap,DUPMAP_COPY);
+      
+      // --- discard changes to old map ---
+      
+      Discard_MAP(Map);
+      
+      // --- done ---
+
+      
+      UnLock_EMAP(EMap);
+      UnLoad_EMAP(sMap);
+      
+      Destroy_MAP(NewMap);
+      Load_EMAP(sNewMap);
+   }      
+}

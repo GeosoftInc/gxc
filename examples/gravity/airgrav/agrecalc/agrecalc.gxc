@@ -1,0 +1,276 @@
+//===========================================================================
+NAME          = "Recalculate gravity from raw data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   AGRECALC.SPRTENS    Name of the spring tension channel
+           .BEAM       Name of the beam velocity channel
+           .CRSCPL     Name of the cross coupling channel
+           .FCAL       Calibration factor, default is 0.9966
+           .K          K factor of beam (? mv/minute=1mgal), default is 2.0
+           .OUTCH      Output (recalculated gravity) channel
+
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3 New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "agrecalc.gr"
+#include "agrecalc.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Edited database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+DB_SYMB     Line,STCh,ST2Ch,BMCh,CCCh,OutCh,BDCh;
+LST         List;           
+EXP         Exp;
+VV          hVV;
+
+string(STR_DEFAULT) sSTCh,sST2Ch,sBMCh,sCCCh,sOutCh,sBDCh;
+string(STR_DEFAULT) sFcal,sK;
+string(512)         sFormula;
+   
+real                rFcal,rK;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGRECALC");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_AGRECALC_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);      
+      
+      List = GetList_DGW(Diag,_AGRECALC_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGRECALC_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGRECALC_5);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_AGRECALC_0,DGW_TEXT,"AGRECALC","SPRTENS");
+      SetInfoSYS_DGW(Diag,_AGRECALC_1,DGW_TEXT,"AGRECALC","BEAM");
+      SetInfoSYS_DGW(Diag,_AGRECALC_2,DGW_TEXT,"AGRECALC","CRSCPL");
+      SetInfoSYS_DGW(Diag,_AGRECALC_3,DGW_TEXT,"AGRECALC","FCAL");
+      SetInfoSYS_DGW(Diag,_AGRECALC_4,DGW_TEXT,"AGRECALC","K");
+      SetInfoSYS_DGW(Diag,_AGRECALC_5,DGW_TEXT,"AGRECALC","OUTCH");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_AGRECALC_0,DGW_TEXT,"AGRECALC","SPRTENS");
+      GetInfoSYS_DGW(Diag,_AGRECALC_1,DGW_TEXT,"AGRECALC","BEAM");
+      GetInfoSYS_DGW(Diag,_AGRECALC_2,DGW_TEXT,"AGRECALC","CRSCPL");
+      GetInfoSYS_DGW(Diag,_AGRECALC_3,DGW_TEXT,"AGRECALC","FCAL");
+      GetInfoSYS_DGW(Diag,_AGRECALC_4,DGW_TEXT,"AGRECALC","K");
+      GetInfoSYS_DGW(Diag,_AGRECALC_5,DGW_TEXT,"AGRECALC","OUTCH");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("AGRECALC","SPRTENS",sSTCh);
+   GetString_SYS("AGRECALC","BEAM",sBMCh);            
+   GetString_SYS("AGRECALC","CRSCPL",sCCCh);
+   GetString_SYS("AGRECALC","OUTCH",sOutCh);            
+   GetString_SYS("AGRECALC","FCAL",sFcal);            
+   GetString_SYS("AGRECALC","K",sK);            
+         
+
+   // --- Get handles to the input data channels ---
+
+   if (iExistChan_DB(Data,sSTCh) == 0)
+      Abort_SYS(_("The \"spring tension\" channel is missing from the gravity database."));
+   if (iExistChan_DB(Data,sBMCh) == 0)
+      Abort_SYS(_("The \"raw beam\" channel is missing from the gravity database."));
+   if (iExistChan_DB(Data,sCCCh) == 0)
+      Abort_SYS(_("The \"cross coupling\" channel is missing from the gravity database."));
+
+   rFcal = 0.9966;
+   if(iStrlen_STR(sFcal)>0)  
+      rFcal = rGetReal_SYS("AGRECALC","FCAL");
+   if(rFcal==rDUMMY)
+      Abort_SYS(_("Invalid Fcal (Calibration factor) value."));
+
+   rK = 2.0;
+   if(iStrlen_STR(sK)>0)  
+      rK = rGetReal_SYS("AGRECALC","K");
+   if(rK==rDUMMY)
+      Abort_SYS(_("Invalid K (K factor of beam) value."));
+
+
+
+   STCh = FindChan_DB(Data,sSTCh);
+   BMCh = FindChan_DB(Data,sBMCh);
+   CCCh = FindChan_DB(Data,sCCCh);
+   LockSymb_DB(Data,STCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,BMCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,CCCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+
+   // --- Get handle to the output channel ---
+
+   if (iExistChan_DB(Data,sOutCh) == 0)
+      OutCh = DupSymb_DB(Data,STCh,sOutCh);
+   else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE); 
+      SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);        
+   }
+
+   // --- Create First derivative of Beam channel ---
+
+   Strcpy_STR(sBDCh,"Beam_Deriv");
+   if (iExistChan_DB(Data,sBDCh) == 0)
+      BDCh = DupSymb_DB(Data,BMCh,sBDCh);
+   else {
+      BDCh = FindChan_DB(Data,sBDCh);
+      LockSymb_DB(Data,BDCh,DB_LOCK_READWRITE,DB_WAIT_NONE); 
+      SetChanProtect_DB(Data,BDCh,DB_CHAN_UNPROTECTED);        
+   }
+
+   // --- Create recalculated spring tension channel ---
+
+   Strcpy_STR(sST2Ch,_n("SprTensRec"));
+   if (iExistChan_DB(Data,sST2Ch) == 0)
+      ST2Ch = DupSymb_DB(Data,STCh,sST2Ch);
+   else {
+      ST2Ch = FindChan_DB(Data,sST2Ch);
+      LockSymb_DB(Data,ST2Ch,DB_LOCK_READWRITE,DB_WAIT_NONE); 
+      SetChanProtect_DB(Data,ST2Ch,DB_CHAN_UNPROTECTED);        
+   }
+
+
+   // --- Create expression ---
+
+   Strcpy_STR(sFormula,"@Fcal=$rFcal;@BK=60.0/$rK;$sOutCh=($sST2Ch+$sCCCh)*@Fcal+($sBDCh*@BK);");
+
+   Exp = Create_EXP(Data,sFormula,512);
+
+   hVV = Create_VV(REAL,0);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Recalculate gravity from raw data..."),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, STCh) > 0) {
+
+         GetChanVV_DB(Data,Line,BMCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,BDCh,hVV);
+
+         GetChanVV_DB(Data,Line,STCh,hVV);
+         DummyRepeat_VVU(hVV,VVU_DUMMYREPEAT_FIRST);
+         Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);
+         PutChanVV_DB(Data,Line,ST2Ch,hVV);
+
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+     }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Set output channel width, decimals and protection ---
+
+   SetChanWidth_DB(Data,OutCh,12);  
+   SetChanDecimal_DB(Data,OutCh,1);
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+   
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Recalculate gravity"),"AGRECALC;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Recalculated Gravity"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Unlock channels ---
+
+   UnLockSymb_DB(Data,STCh);
+   UnLockSymb_DB(Data,ST2Ch);
+   UnLockSymb_DB(Data,BMCh);
+   UnLockSymb_DB(Data,CCCh);
+   UnLockSymb_DB(Data,BDCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+
+
+   // --- Load output channel ---
+
+   LoadChan_EDB(EData,sST2Ch);
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);      
+}

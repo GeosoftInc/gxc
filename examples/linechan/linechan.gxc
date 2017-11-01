@@ -1,0 +1,270 @@
+//===========================================================================
+
+NAME          = "Create a line number channel"
+#include <version.gxh>
+DESCRIPTION   = "
+
+    LINECHAN.NAME    - output channel name
+            .REF     - reference channel on which to base sampling
+            .FORMAT  - line label format, which a string composed of
+                           L - inlcude line number
+                           T - include line type
+                           V - include line version
+                           F - include line flight
+                           D - flight date (cannot be combined)
+                       For example, \"LTF\" produces \"L100:3\"
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History
+// v6.3.0: Increase maximum line name size to the maximum.
+//         Fixed for case where reference channel was empty (QA 7068).
+// v6.0.0: Don't delete existing line channel.
+// v5.1.4: Accomodating alpha-numeric lines for all types except V, F, D and T.
+//         Line channel gets loaded automatically.
+//===========================================================================
+
+RESOURCE = "linechan.gr"
+#include "linechan.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sLine;
+string(8)   sFormat;
+string(2)   sChar;
+string(STR_DB_SYMBOL) sName;
+string(STR_DB_SYMBOL) sRef;
+							
+EDB        EData;
+DB         Data;
+DB_SYMB    RCh,LCh;     // Channel handles
+DB_SYMB    Line;        // Line handle
+DGW   Diag;
+LST   List;
+VV    VVr,VVl;
+int   i,iLines,iTotLines;
+int   iFormat,iVVtype,iVVcat;
+int   iLen;
+real  rFidStart, rFidIncr;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("LineChan");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_LINECHAN_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_LINECHAN_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_LINECHAN_0,DGW_TEXT,"LINECHAN","NAME");
+      SetInfoSYS_DGW(Diag,_LINECHAN_1,DGW_TEXT,"LINECHAN","REF");
+      SetInfoSYS_DGW(Diag,_LINECHAN_2,DGW_LISTALIAS,"LINECHAN","FORMAT");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_LINECHAN_0,DGW_TEXT,"LINECHAN","NAME");
+      GetInfoSYS_DGW(Diag,_LINECHAN_1,DGW_TEXT,"LINECHAN","REF");
+      GetInfoSYS_DGW(Diag,_LINECHAN_2,DGW_LISTALIAS,"LINECHAN","FORMAT");
+
+   }
+
+   GetString_SYS("LINECHAN","NAME",sName);
+   GetString_SYS("LINECHAN","REF",sRef);
+   GetString_SYS("LINECHAN","FORMAT",sFormat);
+
+
+   // --- construct format option ---
+
+   iLen = iStrlen_STR(sFormat);
+   iFormat = 0;
+   for (i=0;i<iLen;i++) {
+      Substr_STR(sChar,sFormat,i,1);
+      if (iCharComp_STR(sChar,"T"))      iFormat += DB_LINE_LABEL_FORMAT_TYPE;   
+      else if (iCharComp_STR(sChar,"L")) iFormat += DB_LINE_LABEL_FORMAT_LINE;   
+      else if (iCharComp_STR(sChar,"V")) iFormat += DB_LINE_LABEL_FORMAT_VERSION;
+      else if (iCharComp_STR(sChar,"F")) iFormat += DB_LINE_LABEL_FORMAT_FLIGHT; 
+      else if (iCharComp_STR(sChar,"D")) iFormat += DB_LINE_LABEL_FORMAT_DATE;
+   }
+
+
+   // --- Unless using version or flight, use string channel to accomodate 
+   //     alphanumeric line names  ---
+
+   if((iFormat == DB_LINE_LABEL_FORMAT_VERSION) ||   
+      (iFormat == DB_LINE_LABEL_FORMAT_FLIGHT) ) {
+
+      iVVtype = INT;         
+      iVVcat  = DB_CATEGORY_CHAN_LONG;
+
+   } else if (iFormat == DB_LINE_LABEL_FORMAT_DATE) {
+
+      iVVtype = iVVcat = -11;         
+
+   } else if (iFormat == DB_LINE_LABEL_FORMAT_TYPE) {
+
+      iVVtype = iVVcat = -2;         
+
+   }
+   else  {
+
+      // --- Alpha-numeric lines require string channels ---
+   
+      iVVtype = iVVcat = -STR_DB_SYMBOL;         
+   
+   }
+
+   
+   // ---  channels ---
+
+   if (!iExistSymb_DB(Data,sRef,DB_SYMB_CHAN))
+      Abort_SYS(_("Reference channel does not exist."));
+   RCh = FindSymb_DB(Data,sRef,DB_SYMB_CHAN);
+   LockSymb_DB(Data,RCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Create/Get line channel ---
+
+   LCh = CreateSymb_DB(Data,sName,DB_SYMB_CHAN,DB_OWN_SHARED,iVVcat);
+   LockSymb_DB(Data,LCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   if (iVVtype == REAL)
+      SetChanDecimal_DB(Data,LCh,1);
+
+
+   // --- get some VV's ---
+
+   VVr = Create_VV(REAL,0);
+   VVl = Create_VV(iVVtype,0);
+
+
+   // --- process ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line)) {
+
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,iFormat);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- strip leading ":" or "." if it is there ---
+
+      if (iCharComp_STR(sLine,":") || iCharComp_STR(sLine,"."))
+         Substr_STR(sLine,sLine,1,20);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get channel ---
+
+      GetChanVV_DB(Data,Line,RCh,VVr);
+      
+      
+      // --- Skip if the reference channel is empty ---
+      
+      if(iLength_VV(VVr)>0)
+      {
+         // --- Create line VV ---
+
+			rFidStart = rGetFidStart_VV(VVr);
+			rFidIncr =  rGetFidIncr_VV(VVr);
+			if(rFidStart != rDUMMY)
+				SetFidStart_VV(VVl,rFidStart);
+			if(rFidIncr != rDUMMY)
+				SetFidIncr_VV(VVl,rFidIncr);
+         SetLen_VV(VVl,iLength_VV(VVr));
+         SetStringN_VV(VVl,0,-1,sLine);
+
+
+         // --- put line in DB ---
+			
+         PutChanVV_DB(Data,Line,LCh,VVl);
+      }
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+   Progress_SYS(0);
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,LCh,_("Line channel"),"LINECHAN;");
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,RCh);
+   UnLockSymb_DB(Data,LCh);
+
+
+   // --- done ---
+
+   Destroy_VV(VVr);
+   Destroy_VV(VVl);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+
+   // --- Load the new channel ---
+
+   if (iInteractive_SYS())
+      LoadChan_EDB(EData, sName);
+}

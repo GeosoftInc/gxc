@@ -1,0 +1,577 @@
+//===========================================================================
+NAME          = "Multipoint Warp Projection File Builder"
+#include <version.gxh>
+DESCRIPTION   = "
+Create a warp definition file.
+
+           WARPFILE.WRP   - Name of the output warp file
+                   .MODE  - Method of building file
+                   .TYPE  - Warp Type
+                   .PTS   - Number of points (for multipoint warp only)
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates/Georeferencing"
+
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+//         Modified mode 2, so it can be scriptable
+//         Fixed dialog create/destroy and parameter default behaviour for mode 2.
+// v6.0.1: Increased max number of points to 4096.
+//===========================================================================
+
+RESOURCE = "warpfile.gr"
+#include "warpfile.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define NEW(A) Strcpy_STR(sMessage,A)
+#define ADD(A) Strcat_STR(sMessage," "); Strcat_STR(sMessage,A)
+#define CMA(A) Strcat_STR(sMessage,","); Strcat_STR(sMessage,A)
+
+#define PROMPT _("Select next point...")
+
+#define MAXP 4096
+
+#define REMOVE_MARKS Map  = Lock_EMAP(EMap);\
+                     View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);\
+                     MarkAllGroups_MVIEW(View,0);\
+                     MarkGroup_MVIEW(View,"Warp_Corrections",1);\
+                     DelMarkedGroups_MVIEW(View);\
+                     Destroy_MVIEW(View);\
+                     UnLock_EMAP(EMap);\
+                     Redraw_EMAP(EMap);
+
+#define DRAW_WARP               \
+         Map  = Lock_EMAP(EMap);\
+         View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);\
+         StartGroup_MVIEW(View,"Warp_Corrections",MVIEW_GROUP_APPEND);\
+         iVal=iPts-1;\
+         Ellipse_MVIEW(View, rX0[iVal], rY0[iVal], rRadius*rScale, 1.0, 0.0);\
+         rDx = rX1[iVal] - rX0[iVal];\
+         rDy = rY1[iVal] - rY0[iVal];\
+         rDist = rSqrt_MATH(rDx*rDx + rDy*rDy);\
+         if (rDist > rRadius*rScale) {\
+            rDx /= rDist;\
+            rDy /= rDist;\
+            rDx = rX0[iVal] + rDx*rRadius*rScale;\
+            rDy = rY0[iVal] + rDy*rRadius*rScale;\
+            Line_MVIEW(View, rDx, rDy, rX1[iVal], rY1[iVal]);\
+         }\
+         Destroy_MVIEW(View);\
+         UnLock_EMAP(EMap);\
+         Redraw_EMAP(EMap);
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sWarp;    // Name of warp file
+string(STR_DEFAULT_LONG) sTemp;            // Temporary
+string(512) sMessage, sMess;         // message prompt
+int         i,iMode,iPts,iType,iRet,iMaxPts,iVal,iDone;         
+
+DGW         Diag;             // Dialogue handle
+WA          hWA;              // control point file
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+
+IPJ         hIPJ;
+
+string(STR_FILE)  sGXF1,sGXF2,sGXF3,sGXF4,sGXF5;
+string(STR_FILE)  sHd,sX0, sX1, sY0, sY1;
+real(MAXP)  rX0, rX1, rY0, rY1;  // control points
+real rDx, rDy, rScale, rDist, rRadius, rX, rY;
+
+
+
+//===========================================================================
+//                            PROJECTION CODE
+//===========================================================================
+
+{ 
+   if(iInteractive_SYS()) { 
+   
+      Diag = Create_DGW("WARPFILE");
+   
+      while (1) {
+   
+         // --- Create the 1st Dialogue ---
+
+         SetInfoSYS_DGW(Diag,_WARPFILE_0,DGW_FILEPATH,"WARPFILE","PRJ");     
+         SetInfoSYS_DGW(Diag,_WARPFILE_1,DGW_LISTALIAS,"WARPFILE","TYPE");     
+         SetInfoSYS_DGW(Diag,_WARPFILE_2,DGW_LISTALIAS,"WARPFILE","MODE");     
+         i = iRunDialogue_DGW(Diag);
+         if (i != 0) Cancel_SYS();
+         GetInfoSYS_DGW(Diag,_WARPFILE_0,DGW_FILEPATH,"WARPFILE","PRJ");     
+         GetInfoSYS_DGW(Diag,_WARPFILE_1,DGW_LISTALIAS,"WARPFILE","TYPE");     
+         GetInfoSYS_DGW(Diag,_WARPFILE_2,DGW_LISTALIAS,"WARPFILE","MODE");     
+      
+               
+         // --- Get Parameters ---
+
+         GetString_SYS("WARPFILE","PRJ",sWarp);
+         if (iStrlen_STR(sWarp) <=0) {
+            DisplayMessage_SYS(_("Warp input error"), _("Warp File Name is invalid"));
+            continue;
+         }
+         iType = iGetInt_SYS("WARPFILE","TYPE");
+         if (iType<1 || iType>5) {
+            DisplayMessage_SYS(_("Warp "), _("Number of control points must be >= 2."));
+            continue;
+         }
+         iMode = iGetInt_SYS("WARPFILE","MODE");
+         if (iMode<0 || iMode>2) {
+            DisplayMessage_SYS(_("Warp input error"), _("Invalid mode"));
+            continue;
+         }    
+         break;     
+      }
+      Destroy_DGW(Diag);
+   }            
+
+   // --- Get Parameters ---
+
+   GetString_SYS("WARPFILE","PRJ",sWarp);
+   if (iStrlen_STR(sWarp) <=0)
+      Abort_SYS(_("Warp File Name is invalid"));
+         
+   iType = iGetInt_SYS("WARPFILE","TYPE");
+   if (iType<1 || iType>5) 
+      Abort_SYS(_("Invalid Warp, must be a value fom 1 to 5"));
+
+   iMode = iGetInt_SYS("WARPFILE","MODE");
+   if (iMode<0 || iMode>2)
+      Abort_SYS(_("Invalid input mode, must be 0:Interactive, 1:Semi-interactive or 2:Manual"));
+
+   if ((iMode==0 || iMode==1) && !iInteractive_SYS())
+      Abort_SYS(_("Error: This GX can only run interactively for the \"Interactive\" and \"Semi-interactive\" modes"));
+
+   if(iType==5 && !iInteractive_SYS()) {
+      iMaxPts = iGetInt_SYS("WARPFILE","PTS");
+      if(iMaxPts<2)
+         Abort_SYS(_("Invalid or undefined number of points for Multipoint Warp"));
+   }
+
+   // --- get a blank projection ---
+   
+   hIPJ = Create_IPJ();
+   
+   if (iInteractive_SYS()) {
+
+      if (iDisplayQuestion_SYS(_("Map projection"), _("Define the output coordinate projection?"))) {
+   
+      
+         if(iMode!=2) {    // don't need map for manual warp definition
+   
+            // --- get view projection ---
+   
+            EMap = Current_EMAP();
+            Map = Lock_EMAP(EMap);
+            SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+            View = Create_MVIEW(Map,"*Data",MVIEW_READ);
+            GetIPJ_MVIEW(View,hIPJ);
+            Destroy_MVIEW(View);
+            UnLock_EMAP(EMap);
+         }
+         
+      
+         // --- Edit/modify the IPJ ---
+         
+         iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Warp file"), sWarp);   
+      } 
+   }
+     
+   // --- get GXF strings ---
+   
+   GetGXF_IPJ(hIPJ,sGXF1,sGXF2,sGXF3,sGXF4,sGXF5);
+   
+
+   // --- open control and write out data ---
+
+   hWA = Create_WA(sWarp,0);
+   Puts_WA(hWA,sGXF1); NewLine_WA(hWA);
+   Puts_WA(hWA,sGXF2); NewLine_WA(hWA);
+   Puts_WA(hWA,sGXF3); NewLine_WA(hWA);
+   Puts_WA(hWA,sGXF4); NewLine_WA(hWA);
+   Puts_WA(hWA,sGXF5); NewLine_WA(hWA);
+
+   // --- Do point selection ---
+      
+   i = 1;
+   iPts = 0;
+
+   // --- For interactive modes, draw warp on map ---
+
+   if(iMode==0 || iMode==1) {
+
+      rRadius = 1.0;    // radius of marked circles on map
+
+      // --- make data view current ---
+
+      EMap = Current_EMAP();
+      iSetCurrentView_EMAP(EMap,"*Data");
+      Map    = Lock_EMAP(EMap);   
+
+      // --- open the data view ---
+
+      View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+      rScale = rScaleMM_MVIEW(View);
+
+      // --- create correction group ---
+
+      MarkAllGroups_MVIEW(View, 0);
+      StartGroup_MVIEW(View,"Warp_Corrections",MVIEW_GROUP_NEW);
+      LineThick_MVIEW(View, 0.2*rRadius*rScale);
+      Destroy_MVIEW(View);
+
+      // --- release the map ---
+
+      UnLock_EMAP(EMap);
+
+   }
+
+
+   if (iMode==0) {    // Interactive Mode
+      
+
+      NEW(_(" For each control point, click on the old location, then the new location."));
+      if(iType==5) {
+         ADD(_("\r\nAfter you have defined two points or more, right click and select \"Done\" to finish."));
+      }
+      ADD(_("\r\nClick on OK when you are ready to define the first point..."));
+
+      DisplayMessage_SYS(_("Define Warp control points"), sMessage);
+
+      EMap = Current_EMAP();
+      iSetCurrentView_EMAP(EMap,"*Data");
+
+      while(1) {
+         
+         // --- get control points ---
+
+         i = iPts+1;
+         NEW(_("Select coordinate "));
+         FormatI_STR(i,sTemp,3); ADD(sTemp); 
+         if(iType == 5) {
+            if(iPts>=2) {
+               ADD(_(" or right click \"Done\" to finish"));
+            }
+         }
+         else {
+            ADD(_(" of "));
+            FormatI_STR(iType,sTemp,3); ADD(sTemp);
+         }
+         Strcpy_STR(sMess, sMessage);
+         ADD(_(" : Current Location"));
+
+         iDone = 0;
+         while(1) {
+         
+            if (iGetPoint_EMAP(EMap, sMessage, rX, rY)) {
+               if(iType==5) {
+                  if(iPts<=1) {
+                     REMOVE_MARKS
+                     Abort_SYS(_("You must define at least two points for the multipoint warp."));
+                  }
+                  iDone = 1;
+                  break;  
+               }                   
+               else {
+                  REMOVE_MARKS
+                  Cancel_SYS();
+               }
+            }
+           
+            if(iPts==0) {
+               rX0[0] = rX;
+               rY0[0] = rY;
+               break;
+            }
+
+            // --- Suppress clicks from the previous point #2 ---
+
+            if(rX==rX1[iPts-1] && rY==rY1[iPts-1]) continue;
+            
+            rX0[iPts] = rX;
+            rY0[iPts] = rY;
+            break;
+         }
+
+         if(iDone) break;
+
+         Strcpy_STR(sMessage, sMess);
+         ADD(_(" : New Location"));
+
+         while(1) {
+
+            if (iGetPoint_EMAP(EMap, sMessage,rX,rY)) {
+               DisplayMessage_SYS(_("Define Warp control points"), _("You must define the second point before exiting."));
+               continue;
+            }
+
+            // --- Suppress clicks from the first spot ---
+
+            if(rX==rX0[iPts] && rY==rY0[iPts]) continue;
+            
+            rX1[iPts] = rX;
+            rY1[iPts] = rY;
+            break;
+
+         }
+
+         iPts++;
+         DRAW_WARP
+
+         if(iType<5 && iPts==iType) break;
+         if(iPts==MAXP) break;
+
+      }
+
+      // --- Remove the marks ---
+
+      REMOVE_MARKS
+   }
+
+   else if(iMode==1) {  // Semi-interactive mode
+
+      // --- get point dialogue ---
+
+      Diag = Create_DGW("WARPFILESI");
+
+      NEW(_("For each control point, click on the point location.  You will then be prompted to enter the desired coordinates for that point. Click on OK when you are ready to define the first point..."));
+
+      DisplayMessage_SYS(_("Define Warp control points"),sMessage);
+
+      EMap = Current_EMAP();
+      iSetCurrentView_EMAP(EMap,"*Data");
+   
+      while(1) {
+
+         if(iType==5) {
+            if(iPts==1) {
+               Destroy_DGW(Diag);
+               Diag = Create_DGW("WARPFILESI3");
+            }
+         }
+         else if(iType == iPts+1) {
+            Destroy_DGW(Diag);
+            Diag = Create_DGW("WARPFILESI2");
+         }
+         
+         // --- get control points ---
+
+         i = iPts+1;
+            
+         NEW(_("Select current coordinate "));
+         FormatI_STR(i,sTemp,3); ADD(sTemp); 
+         if(iType == 5) {
+            if(iPts>=2) {
+               ADD(_(" or right click \"Done\" to finish"));
+            }
+         }
+         else {
+            ADD(_(" of "));
+            FormatI_STR(iType,sTemp,3); ADD(sTemp);
+         }
+
+         // --- get control points ---
+
+         if (iGetPoint_EMAP(EMap,sMessage,rX0[iPts],rY0[iPts])) {
+            if(iType==5) {
+               if(iPts<=1) {
+                  REMOVE_MARKS
+                  Abort_SYS(_("You must define at least two points for the multipoint warp."));
+               }
+               break;  
+            }                   
+            else {
+               REMOVE_MARKS
+               Cancel_SYS();
+            }
+         }
+         
+         FormatR_STR(rX0[iPts],sX0,16,10);
+         FormatR_STR(rY0[iPts],sY0,16,10);
+
+         // --- get new X,Y ---
+
+         NEW(_("Assign new coordinate "));
+         FormatI_STR(i,sTemp,3); ADD(sTemp); 
+         if(iType!=5) {
+            ADD(_(" of "));
+            FormatI_STR(iType,sTemp,3); ADD(sTemp);
+         }
+         
+         SetTitle_DGW(Diag,sMessage);
+         SetInfo_DGW(Diag,_WARPFILESI_0,DGW_TEXT,sX0);     
+         SetInfo_DGW(Diag,_WARPFILESI_1,DGW_TEXT,sY0);     
+         SetInfo_DGW(Diag,_WARPFILESI_2,DGW_TEXT,sX0);     
+         SetInfo_DGW(Diag,_WARPFILESI_3,DGW_TEXT,sY0);     
+         
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) {
+            REMOVE_MARKS
+            Cancel_SYS();  
+         }
+         
+         GetInfo_DGW(Diag,_WARPFILESI_2,DGW_TEXT,sX1);     
+         GetInfo_DGW(Diag,_WARPFILESI_3,DGW_TEXT,sY1);     
+
+         rX1[iPts] = rScanR_STR(sX1);
+         rY1[iPts] = rScanR_STR(sY1);
+
+         iPts++;
+
+         if(iType<5 && iPts==iType) break;
+         if(iRet==2) break;
+         if(iPts==MAXP) break;
+
+         // --- Draw the warp on the map ---
+
+         DRAW_WARP
+      }
+
+      Destroy_DGW(Diag);
+
+      // --- Remove the marks ---
+
+      REMOVE_MARKS
+   }
+
+   else if(iMode==2) {  // Manually enter points
+
+		iPts = 0;
+		
+      while(1) 
+      {
+         i = iPts+1;
+         FormatI_STR(i,sTemp,1); 
+
+         Strcpy_STR(sX0,"X");
+         Strcat_STR(sX0,sTemp);
+         Strcat_STR(sX0,"_OLD");
+         Strcpy_STR(sY0,"Y");
+         Strcat_STR(sY0,sTemp);
+         Strcat_STR(sY0,"_OLD");
+         Strcpy_STR(sX1,"X");
+         Strcat_STR(sX1,sTemp);
+         Strcat_STR(sX1,"_NEW");
+         Strcpy_STR(sY1,"Y");
+         Strcat_STR(sY1,sTemp);
+         Strcat_STR(sY1,"_NEW");
+
+         if(iInteractive_SYS()) 
+         {         
+            if(iType==5)
+               Diag = Create_DGW("WARPFILEMAN3");
+            else 
+            {
+	            if(iType == iPts+1)
+	               Diag = Create_DGW("WARPFILEMAN2");
+	            else
+			         Diag = Create_DGW("WARPFILEMAN");
+            }
+            
+            // --- Assign previous locations to new locations each time. ---
+            
+            if(iPts>0)
+            {
+					rX0[iPts] = rGetReal_SYS("WARPFILE",sX0);
+					rY0[iPts] = rGetReal_SYS("WARPFILE",sY0);
+					rX1[iPts] = rGetReal_SYS("WARPFILE",sX1);
+					rY1[iPts] = rGetReal_SYS("WARPFILE",sY1);
+
+					SetReal_SYS("WARPFILE",sX0, rX0[iPts-1]);
+					SetReal_SYS("WARPFILE",sY0, rY0[iPts-1]);
+					SetReal_SYS("WARPFILE",sX1, rX1[iPts-1]);
+					SetReal_SYS("WARPFILE",sY1, rY1[iPts-1]);
+				}				
+				else
+				{
+					SetString_SYS("WARPFILE",sX0, "");
+					SetString_SYS("WARPFILE",sY0, "");
+					SetString_SYS("WARPFILE",sX1, "");
+					SetString_SYS("WARPFILE",sY1, "");
+				}	
+         
+            NEW(_("Assign new coordinate "));
+            FormatI_STR(i,sTemp,3); ADD(sTemp); 
+            if(iType!=5) {
+               ADD(_(" of "));
+               FormatI_STR(iType,sTemp,3); ADD(sTemp);
+            }
+      
+            SetTitle_DGW(Diag, sMessage);
+            SetInfoSYS_DGW(Diag,_WARPFILEMAN_0,DGW_TEXT,"WARPFILE",sX0);     
+            SetInfoSYS_DGW(Diag,_WARPFILEMAN_1,DGW_TEXT,"WARPFILE",sY0);     
+            SetInfoSYS_DGW(Diag,_WARPFILEMAN_2,DGW_TEXT,"WARPFILE",sX1);     
+            SetInfoSYS_DGW(Diag,_WARPFILEMAN_3,DGW_TEXT,"WARPFILE",sY1);     
+   
+            iRet = iRunDialogue_DGW(Diag);
+            if(iRet==-1) Cancel_SYS();  
+   
+            GetInfoSYS_DGW(Diag,_WARPFILEMAN_0,DGW_TEXT,"WARPFILE",sX0);     
+            GetInfoSYS_DGW(Diag,_WARPFILEMAN_1,DGW_TEXT,"WARPFILE",sY0);     
+            GetInfoSYS_DGW(Diag,_WARPFILEMAN_2,DGW_TEXT,"WARPFILE",sX1);     
+            GetInfoSYS_DGW(Diag,_WARPFILEMAN_3,DGW_TEXT,"WARPFILE",sY1);     
+
+				Destroy_DGW(Diag);
+         }
+
+         // --- Recover points ---
+
+         rX0[iPts] = rGetReal_SYS("WARPFILE",sX0);
+         rY0[iPts] = rGetReal_SYS("WARPFILE",sY0);
+         rX1[iPts] = rGetReal_SYS("WARPFILE",sX1);
+         rY1[iPts] = rGetReal_SYS("WARPFILE",sY1);
+
+         if(rX0[iPts]==rDUMMY)
+            Abort_SYS(_("Invalid X0 value"));
+         if(rY0[iPts]==rDUMMY)
+            Abort_SYS(_("Invalid Y0 value"));
+         if(rX1[iPts]==rDUMMY)
+            Abort_SYS(_("Invalid X1 value"));
+         if(rY1[iPts]==rDUMMY)
+            Abort_SYS(_("Invalid Y1 value"));
+
+         iPts++;
+         if(iType<5 && iPts==iType) break;
+         if(iType==5 && iRet==2) break;
+         if(iType==5 && iPts==iMaxPts) break;
+         if(iPts==MAXP) break;
+
+      }
+   }
+
+   // --- write points ---
+
+   FormatI_STR(iType,sMessage,2);
+   FormatI_STR(iPts,sTemp,4); CMA(sTemp);
+   Strcpy_STR(sHd,sMessage);
+   Puts_WA(hWA,sHd); NewLine_WA(hWA);
+   for(i=0;i<iPts;i++) {
+
+      FormatR_STR(rX0[i],sMessage,16,10);
+      FormatR_STR(rY0[i],sTemp,16,10); CMA(sTemp);
+      FormatR_STR(rX1[i],sTemp,16,10); CMA(sTemp);
+      FormatR_STR(rY1[i],sTemp,16,10); CMA(sTemp);
+      Puts_WA(hWA,sMessage); NewLine_WA(hWA);
+   }
+
+   if(iType==5)
+      SetInt_SYS("WARPFILE","PTS",iPts);
+
+   Destroy_WA(hWA);
+  
+   
+   // --- Set the current warp projection file names ---
+
+   SetString_SYS("WARPPROJ","WARP",sWarp);
+   SetString_SYS("WARPGRID","WARP",sWarp);
+
+
+}

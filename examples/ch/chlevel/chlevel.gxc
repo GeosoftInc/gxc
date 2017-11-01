@@ -1,0 +1,636 @@
+//===========================================================================
+NAME          = "Level assay channel values based on categories"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis/GeochemUtilities"
+
+DESCRIPTION   = "
+
+      Level data based on category in ASSAY channels.
+
+Parameters:
+
+CHLEVEL.CATCHAN : Channel containing the categorization classes.
+CHLEVEL.LEVEL   : Levelling method
+                  0: Divide by mean
+                  1: Divide by median
+                  2. Divide by mode
+                  3. Divide by geometric mean (log mean)
+                  4. Z-Scores (subtract mean, divide by standard deviation)
+                  5. Z-Scores (subtract median, divide by standard deviation)
+                  6. Robust Z-Score (subtract median, divide by difference of 3rd and 1st quartile values)
+                  7. Peak to noise (Response Ratio)   
+                  
+CHLEVEL.DATA \"ASSAY\"
+             \"DISPLAYED_ASSAY\"
+             \"LIST\"                                 
+"
+// Revision History:
+// v7.2: Fixed for non-categorized items.
+// v6.4.2: Fixed bug when Div stats for a category was dummy or zero.
+//         Corrected comments, replacing "subtract" with "divide" in several places.
+// v6.3.0: New GX.
+//===========================================================================
+
+RESOURCE = "CHLEVEL.gr"
+#include "CHLEVEL.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    Ch, ClassCh;
+DGW   Diag;
+LST   ChLST, LineLST, List; 
+VV    VVc, VVcl, VVcn, VVd, VVd2, VVdata, VVdr, VVfs, VVfi, VVi, VVind;
+VV    VVinit, VVl, VVn, VVnd, VVsi, VVt, VVtd, VVtemp;
+ST    St;
+
+string(STR_DEFAULT_LONG) sData, sMsg;
+string(STR_DEFAULT) sClass, sSuffix, sVal;
+string(STR_DB_SYMBOL) sCh, sClassCh;
+string(STR_FILE) sCurDB;
+string(32768) sChannels;
+
+int i, iCh, iDec, iPrev, iNChans, iN, iNLines, iNProg, iProg, iStart, iLevelled;
+int iLevel, iNClasses, iNCur, iNData, iRet, iInteractive, iType, iProtect;
+int iMaxChans, iNewChans;
+
+real rVal, rSub, rDiv;
+
+//===========================================================================
+//                           CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   GetName_EDB(EData, sCurDB);
+   Data = Lock_EDB(EData);
+   
+   //--- See if any assay channels are in the database ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   
+   // --- Get current number of channels ---
+   
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   iNCur = iSize_LST(ChLST);
+   
+   ClassChanLST_DB(Data, ChLST, "ASSAY");
+   SelectedLineLST_DB(Data, LineLST);
+   
+   iNChans = iSize_LST(ChLST);   
+   if(iNChans==0) 
+      Abort_SYS(_("No ASSAY class channels were found in the current database."));
+      
+   iNLines = iSize_LST(LineLST);
+   if(iNLines==0)
+      Abort_SYS(_("There are no lines selected in the current database."));
+      
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if (iInteractive) 
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHLEVEL");
+      
+      List = GetList_DGW(Diag,_CHLEVEL_0);      
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      SetInfoSYS_DGW(Diag,_CHLEVEL_0, DGW_TEXT, "CHLEVEL", "CATCHAN");
+      SetInfoSYS_DGW(Diag,_CHLEVEL_1, DGW_LISTALIAS, "CHLEVEL", "LEVEL");
+      SetInfoSYS_DGW(Diag,_CHLEVEL_2, DGW_LISTALIAS, "CHLEVEL", "DATA");
+
+      iRet = iRunDialogue_DGW(Diag);
+      if(iRet==-1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_CHLEVEL_0, DGW_TEXT, "CHLEVEL", "CATCHAN");
+      GetInfoSYS_DGW(Diag,_CHLEVEL_1, DGW_LISTALIAS, "CHLEVEL", "LEVEL");
+      GetInfoSYS_DGW(Diag,_CHLEVEL_2, DGW_LISTALIAS, "CHLEVEL", "DATA");
+
+      Destroy_DGW(Diag);
+   }
+   
+   UnLock_EDB(EData);
+   
+   
+   // --- Get and Validate parameters ---
+
+   GetString_SYS("CHLEVEL","CATCHAN",sClassCh);    // can be left undefined
+      
+   iLevel = iGetInt_SYS("CHLEVEL", "LEVEL");
+   if(iLevel<0 || iLevel>7)
+      Abort_SYS(_("Levelling method not selected or invalid."));
+        
+
+   // --- Get channels ---
+  
+   GetString_SYS("CHLEVEL","DATA",sData);
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sData);
+   SetString_SYS("CHCHANLST","GX","CHLEVEL");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+
+     
+   // --- Lock the database ---
+
+   Data = Lock_EDB(EData);   
+
+
+   // --- Create a suffix for the channel name ---
+   
+   if(iLevel==0)    // Divide by Mean
+   {
+      Strcpy_STR(sSuffix, "_Mean");
+   }
+   else if(iLevel==1)  // Divide by Median
+   {
+      Strcpy_STR(sSuffix, "_Median");
+   }
+   else if(iLevel==2)  // Divide by Mode
+   {
+      Strcpy_STR(sSuffix, "_Mode");
+   }
+   else if(iLevel==3) // Divide by geometric (log) mean
+   {
+      Strcpy_STR(sSuffix, "_GeoMean");
+   }
+   else if(iLevel==4) // Z-Score (subtract mean, divide by standard deviation)
+   {
+      Strcpy_STR(sSuffix, "_ZMean");
+   }
+   else if(iLevel==5) // Z-Score (subtract median, divide by standard deviation)
+   {
+      Strcpy_STR(sSuffix, "_ZMedian");
+   }
+   else if(iLevel==6) // Robust Z-Score (subtract median, divide by difference of 3rd and 1st quartile values)
+   {
+      Strcpy_STR(sSuffix, "_ZRobust");
+   }
+   else if(iLevel==7)
+   {
+      Strcpy_STR(sSuffix, "_ResRatio");      
+   }
+
+
+   // --- Get the required channels ---
+   
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+   
+   
+   // --- Get the selected lines ---
+   
+   Clear_LST(LineLST);
+   SelectedLineLST_DB(Data, LineLST);
+      
+   iNLines = iSize_LST(LineLST);
+   if(iNLines==0)
+      Abort_SYS(_("There are no lines selected in the current database."));
+
+
+   iNChans = iSize_LST(ChLST);
+   if(iNChans==0) 
+      Abort_SYS(_("No ASSAY class channels were selected for levelling in the database."));
+   
+
+   // --- Count the number of new channels that will be required to see if the database must be grown first ---
+   
+   iNewChans = 0;
+   for(i=0;i<iNChans;i++)
+   {
+      GetSymbItem_LST(ChLST, i, sCh, Ch);
+      Strcat_STR(sCh, sSuffix);
+      if(!iExistChan_DB(Data, sCh))
+         iNewChans++;
+   }
+   
+   iMaxChans = iChansMax_DB(Data);
+   if(iNCur + iNewChans > iMaxChans)
+   {
+      Printf_STR(sMsg, sizeof(sMsg), _("The current database contains %d channels, and a maximum of %d channels, but %d channels will be added by the current process.\r\nUse the \"Data|Maintenance|Grow...\" method to increase the number of channels to at least %d."), iNCur, iMaxChans, iNewChans, iNCur + iNewChans);
+      Abort_SYS(sMsg);
+   }
+
+
+	// --- Warn user if some channels are already levelled ---
+
+	iLevelled = 0;	
+   for(i=iNChans-1;i>=0;i--)
+   {
+      GetSymbItem_LST(ChLST, i, sCh, Ch);
+      if(iGetRegSymbSetting_DB(Data, Ch, "LEVEL_METHOD")!=iDUMMY)
+      {
+         iLevelled++;
+      }
+   }
+
+   if(iLevelled>0)
+   {
+		FormatI_STR(iLevelled, sMsg, 4);
+		if(iLevelled==1)
+			Printf_STR(sMsg, sizeof(sMsg), _("%d of the channels has been leveled."), iLevelled);
+		else
+			Printf_STR(sMsg, sizeof(sMsg), _("%d of the channels have been leveled."), iLevelled);
+		DisplayMessage_SYS(_("Levelling Warning"), sMsg);
+   }      
+   
+   
+   // --- Set up VVs ---
+   
+   VVt = Create_VV(INT, iNChans);
+   SetIntN_VV(VVt, 0, -1, 0);
+   
+   VVdr = Create_VV(INT, iNChans); // not used
+   
+   VVd = Create_VV(INT, iNChans);
+   for(i=0;i<iNChans;i++)
+   {
+      SetInt_VV(VVd, i, (int)Create_VV(REAL, 0));
+   }
+   
+
+   // --- Do categorization? ---
+   
+   if(iStrlen_STR(sClassCh))
+   {
+
+      // --- Classification channel cannot be in the assay channel list ---
+      
+      if(iFindItem_LST(ChLST, 0, sClassCh)!=-1)
+         Abort_SYS(_("You cannot use a selected assay channel as the classification channel."));
+
+
+
+      // --- Classification channel ---
+      
+      ClassCh = FindChan_DB(Data, sClassCh);
+      if(ClassCh==NULLSYMB) {
+         Printf_STR(sMsg, sizeof(sMsg), _("Unable to locate classification channel %s."), sClassCh);
+         Abort_SYS(sMsg);
+      }
+
+     
+      // --- Add the categorization channel to the LST ---
+      
+      AddSymbItem_LST(ChLST, sClassCh, ClassCh);
+      
+      
+      // --- Get class chan type ---
+      
+      LOCK_R(Data, ClassCh);
+      iType = iGetChanType_DB(Data, ClassCh);
+      UNLOCK(Data, ClassCh);
+      
+      VVc = CreateExt_VV(iType, 0);
+      SetLen_VV(VVd, iNChans+1);
+      SetInt_VV(VVd, iNChans, (int)VVc);   
+      
+      SetLen_VV(VVt, iNChans+1);
+      SetInt_VV(VVt, iNChans, 0);
+
+      SetLen_VV(VVdr, iNChans+1);   // not used
+   }
+   
+   
+   // --- Get the data ---
+   
+   VVl = Create_VV(INT, 0);
+   VVn = Create_VV(INT, 0);
+   VVnd = Create_VV(INT, 0);
+   VVind = Create_VV(INT, 0);
+   VVfs = Create_VV(REAL, 0);
+   VVfi = Create_VV(REAL, 0);
+   
+	GetLithogeochemData_CHIMERA(Data, ChLST, NULLSYMB, VVt, 0, VVdr, 0, VVd, VVl, VVn, VVnd, VVind, VVfs, VVfi);
+                    
+   
+   
+   // --- All the data will be sorted based on the classes ---
+   
+   iNData = iLength_VV((VV)iGetInt_VV(VVd, 0));
+   
+   
+   // --- Initialize as if there is just one class ---
+   
+   VVsi = Create_VV(INT, iNData);  
+   InitIndex_VV(VVsi, -1);
+   iNClasses = 1;
+
+
+   // --- For classification ---
+   
+   if(iStrlen_STR(sClassCh))
+   {   
+                                  
+      // ---  Find out how many classes there are first. ---
+      
+      VVcl = CreateExt_VV(iType, 0);       // temp classification data
+      VVcn = Create_VV(INT, iNData);  // max size possible
+      Copy_VV(VVcl, VVc);
+      SortIndex_VV(VVcl, VVsi);        // Sorts both classes and index
+      IndexOrder_VV(VVsi, VVcl);
+      
+		// --- Find the first non-empty string. All the values not including the first string are single class ---
+	      
+		i = iFindDummy_VVU(VVcl, 0, 1, 0, iNData-1);
+		if(i>0)
+			SetString_VV(VVcl, i-1, "(none)");
+	   
+		DummyRepeat_VVU(VVcl, VVU_DUMMYREPEAT_LAST);
+	   
+		iNClasses = 0;
+		iPrev = -1;
+      i = iFindDummy_VVU(VVcl, 0, 1, 0, iNData-1);
+      while(i!=-1)
+      {
+	      GetString_VV(VVcl, i, sClass);  // for debugging
+         SetInt_VV(VVcn, iNClasses, i-iPrev);
+         iNClasses++;
+         iPrev = i;
+         if(i==iNData-1) break;
+         i = iFindDummy_VVU(VVcl, 0, 1, i+1, iNData-1);
+      }
+   }
+   
+   
+   // --- Add the categorization channel, if defined ---
+   
+   if(iStrlen_STR(sClassCh))
+   {
+      Strcat_STR(sSuffix, "_");
+      Strcat_STR(sSuffix, sClassCh);
+   }
+   
+                       
+   St = CreateExact_ST();
+
+   VVd2 = Create_VV(REAL, 0);
+   VVdata = Create_VV(REAL, 0);
+   VVtemp = Create_VV(REAL, 0);
+   VVi = Create_VV(INT, 0);
+   
+   iNProg = iNClasses*iNChans;
+   iProg = 0;
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Levelling assay values"),1);
+   for(iCh=0;iCh<iNChans;iCh++) 
+   {
+
+      GetItem_LST(ChLST, 0, iCh, sCh);
+      Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, iCh);
+      
+      Strcpy_STR(sMsg, _("Categorizing assay values: "));
+      Strcat_STR(sMsg, sCh);
+      ProgName_SYS(sMsg, 0);
+
+
+      // --- Create/overwrite the levelled channel ---
+
+      Strcat_STR(sCh, sSuffix);
+      if(iExistChan_DB(Data, sCh))
+      {
+         Ch = FindChan_DB(Data, sCh);
+         LOCK_RW(Data, Ch);
+      }
+      else
+         Ch = DupSymb_DB(Data, Ch, sCh);     
+
+
+      // --- Reset the channel name and handle for the output data LST ---
+      
+      SetItem_LST(ChLST, 0, iCh, sCh);
+      FormatI_STR((int)Ch, sVal, 10);
+      SetItem_LST(ChLST, 1, iCh, sVal);
+      
+      
+      // --- Remove any channel protection ---
+      
+      iProtect = iGetChanProtect_DB(Data, Ch);
+      SetChanProtect_DB(Data, Ch, DB_CHAN_UNPROTECTED);
+      
+      
+      // --- Get the (already stored) data ---
+      
+      VVtd = (VV)iGetInt_VV(VVd, iCh);
+            
+      
+      // --- Get a copy of the original data, and sort it based on the classes ---
+      
+      Copy_VV(VVd2, VVtd);
+      IndexOrder_VV(VVsi, VVd2);
+      
+      
+      // --- Go through the classes ---
+      
+      iStart = 0;
+      for(i=0;i<iNClasses;i++)
+      {                        
+         // --- Reset the stats ---
+          
+         Reset_ST(St);
+          
+          
+         // --- Get the data for this class and do the statistics ---
+         
+         if(iStrlen_STR(sClassCh))
+         {
+            iN = iGetInt_VV(VVcn, i);
+            SetLen_VV(VVdata, iN);
+            Copy2_VV(VVdata, 0, VVd2, iStart, iN);           
+	         GetString_VV(VVcl, iStart+iN-1, sClass);    // for debugging
+         }
+         else 
+         {
+            iN = iLength_VV(VVd2);
+            Copy_VV(VVdata, VVd2);
+         }
+         DataVV_ST(St, VVdata);     
+                
+                 
+           
+         // --- Modify the data depending on the statistic chosen ---
+          
+         if(iLevel==7)  // Response Ratios
+         {
+            // --- Get the mean of the 1st quartile (background) by clipping values
+            //     above the 25% value ---
+            
+            rVal = rEquivalentValue_ST(St, 25.0);
+            Copy_VV(VVtemp, VVdata);
+            Clip_VVU(VVtemp, rDUMMY, rVal, VVU_CLIP_DUMMY);
+            
+            Reset_ST(St);
+            DataVV_ST(St, VVtemp);   
+            
+            
+            
+            // --- Divide by the mean of the remaining (1st quartile) values ---
+            
+            rDiv = rGetInfo_ST(St, ST_MEAN);  
+            if(rDiv==rDUMMY || rDiv==0.0) continue;          
+            Translate_VVU(VVdata, 0.0, 1.0/rDiv);
+
+            
+            // --- Copy to an integer VV and back again in order to round the output ---
+            
+            Copy_VV(VVi, VVdata);
+            Copy_VV(VVdata, VVi);
+         }
+         else
+         {
+            rSub = 0.0;
+            rDiv = 1.0;
+            if(iLevel==0)    // Divide by Mean
+            {
+               rDiv = rGetInfo_ST(St, ST_MEAN);
+            }
+            else if(iLevel==1)  // Divide by Median
+            {
+               rDiv = rGetInfo_ST(St, ST_MEDIAN);
+            }
+            else if(iLevel==2)  // Divide by Mode
+            {
+               rDiv = rGetInfo_ST(St, ST_MODE);
+            }
+            else if(iLevel==3) // Divide by geometric (log) mean
+            {
+               rDiv = rGetInfo_ST(St, ST_GEOMEAN);
+            }
+            else if(iLevel==4) // Z-Score (subtract mean, divide by standard deviation)
+            {
+               rSub = rGetInfo_ST(St, ST_MEAN);
+               rDiv = rGetInfo_ST(St, ST_STDDEV);
+            }
+            else if(iLevel==5) // Z-Score (subtract median, divide by standard deviation)
+            {
+               rSub = rGetInfo_ST(St, ST_MEDIAN);
+               rDiv = rGetInfo_ST(St, ST_STDDEV);
+            }
+            else if(iLevel==6) // Robust Z-Score (subtract median, divide by difference of 3rd and 1st quartile values)
+            {
+               rSub = rGetInfo_ST(St, ST_MEDIAN);
+               rDiv = rEquivalentValue_ST(St, 75.0) - rEquivalentValue_ST(St, 25.0);
+            }
+            
+            if(rSub==rDUMMY || rDiv==rDUMMY || rDiv==0.0) 
+            {            
+               iStart += iN;            
+               continue;
+            }
+            Translate_VVU(VVdata, -rSub, 1.0/rDiv);
+         }
+           
+
+         // --- Put the data back in ---
+          
+         Copy2_VV(VVd2, iStart, VVdata, 0, iN);
+         iStart += iN;            
+      }          
+
+
+      // --- For those levelling methods that scale the data, ensure that at least two decimal
+      //     places are displayed ---
+      
+      if(iLevel<=6)
+      {
+         iDec = iGetChanDecimal_DB(Data, Ch);
+         if(iDec<2)
+            SetChanDecimal_DB(Data, Ch, 2);
+      }
+      
+      
+      // --- Remove the detection limit, outlier limit and units from the data because it will no longer
+      //     be valid on this data set, and can affect input functions for other processes. ---
+      
+      SetRegSymbSetting_DB(Data, Ch, "DETECTLIMIT", "");
+      SetRegSymbSetting_DB(Data, Ch, "OUTLIERLIMIT", "");
+      SetRegSymbSetting_DB(Data, Ch, "UNITS", "");
+      
+            
+      // --- Remove other attributes ---
+      
+      SetRegSymbSetting_DB(Data, Ch, "SYMBOL_SCALING", "");
+      SetRegSymbSetting_DB(Data, Ch, "LOG", "No");
+                  
+
+      // --- Set the levelling method value ---
+      
+      FormatI_STR(iLevel, sVal, 10);                  
+      SetRegSymbSetting_DB(Data, Ch, "LEVEL_METHOD", sVal);
+      
+                  
+      // --- Reset channel protection ---
+      
+      SetChanProtect_DB(Data, Ch, iProtect);
+                  
+      UNLOCK(Data,Ch);
+      
+      
+      // --- Put the data back in the original order ---
+      
+      IndexInsert_VV(VVtd, VVd2, VVsi);  // outputs to original data
+   }            
+
+
+   // --- Put the data back in the database. Don't need to output the classification channel ---
+
+   SetLen_VV(VVd, iNChans);   
+   SetLen_VV(VVt, iNChans);   
+   SetLen_VV(VVdr, iNChans);   
+   VVinit = Create_VV(INT, iNChans);
+   if(iStrlen_STR(sClassCh))
+   {
+      i = iFindItem_LST(ChLST, 0, sClassCh);
+      DelItem_LST(ChLST, i);
+   }
+   SetIntN_VV(VVinit, 0, -1, 0);  // Don't need to initialize the channels
+   
+	SetLithogeochemData_CHIMERA(Data, ChLST, VVd, VVl, VVn, VVnd, VVind, VVfs, VVfi, VVinit);
+
+
+   // --- Turn off progress ---
+   
+   Progress_SYS(0);
+
+
+   // --- Release the locks ---
+
+   UnLock_EDB(EData);
+   
+   
+   // --- Load the channels ---
+   
+   for(iCh=0;iCh<iNChans;iCh++) 
+   {
+      GetItem_LST(ChLST, 0, iCh, sCh);
+      LoadChan_EDB(EData, sCh);
+   }   
+   
+   
+   // --- Destroy objects ---
+
+   Destroy_LST(ChLST);
+   Destroy_LST(LineLST);   
+}

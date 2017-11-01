@@ -1,0 +1,479 @@
+//===========================================================================
+
+NAME          = "Default Settings"
+#include <version.gxh>
+DESCRIPTION   = "
+
+    SETTINGS.DEFAULT_XGD
+            .DEFAULT_XGD_IN
+            .DEFAULT_XGD_OUT
+            .DEFAULT_COLOUR
+            .DEFAULT_CSYMB_COLOUR
+            .DEFAULT_MAP_FONT
+            .DEFAULT_SYMBOL_FONT
+            .CORE_MENUS
+            .ERROR_LEVEL
+            .HPRTL_NESTING
+            .xxx_DEFAULT
+            .LOADLAST
+            .CONFIRM_GDB_SAVE
+            .NEW_GDB_PROJECTION
+            .COMPRESSION
+            .GEOTEMP
+            .EDITOR
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Global Settings"
+
+// Revision History:
+// v7.0.1: Remove printer RAM from this GUI and also remove unused Image Cache setting
+// v5.1.7: Added input and output default grid types with improved lists.
+// v5.1.3: Added option to set projection on import to a new database.
+//         Geosoft grid element type is always set, not just when Geosoft
+//         grids are selected as the default grid.
+//===========================================================================
+
+RESOURCE = "settings.gr"
+#include "settings.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_FILE) sTemp,sName;
+string(STR_FILE) sTTFile;
+string(STR_FILE) sMessage;
+string(STR_DEFAULT_SHORT) sXGD, sNest, sNoNest, sAliasLoadLast, sAliasConfirmGDBSave, sAliasNewGDBProjection;
+DGW Diag;
+LTB hUNI;
+LST List;
+int i, iNesting;
+
+
+//===========================================================================
+//                             MAP CODE
+//===========================================================================
+
+{
+
+   // --- create a units table ---
+   
+   hUNI = Create_LTB("units",LTB_TYPE_HEADER,LTB_DELIM_COMMA,"");
+   
+
+   // --- set current defaults ---
+
+   if (iGlobal_SYS("MONTAJ.CORE_MENUS",sTemp) == 0) {
+      ReplaceChar_STR(sTemp,";","|");
+      SetString_SYS("SETTINGS","CORE_MENUS",sTemp);
+   }
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sTemp) == 0)
+      SetString_SYS("SETTINGS","DEFAULT_COLOUR",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_CSYMB_COLOUR",sTemp) == 0)
+      SetString_SYS("SETTINGS","DEFAULT_CSYMB_COLOUR",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_UNIT",sTemp) == 0) {
+      i = iFindKey_LTB(hUNI,sTemp);
+      if (i >= 0) {
+         SetInt_SYS("SETTINGS","DEFAULT_UNIT",i);
+      } else   
+         SetInt_SYS("SETTINGS","DEFAULT_UNIT",0);
+   }
+      
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sTemp) == 0)
+      SetString_SYS("SETTINGS","DEFAULT_MAP_FONT",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sTemp) == 0)
+      SetString_SYS("SETTINGS","DEFAULT_SYMBOL_FONT",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_XGD_IN",sTemp) == 0)
+      SetString_SYS("SETTINGS","DEFAULT_XGD_IN",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_XGD_OUT",sTemp) == 0)
+      SetString_SYS("SETTINGS","DEFAULT_XGD_OUT",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.LOAD_LAST_WORKSPACE",sTemp) == 0)
+      SetString_SYS("SETTINGS","LOADLAST",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.CONFIRM_GDB_SAVE",sTemp) == 0)
+      SetString_SYS("SETTINGS","CONFIRM_GDB_SAVE",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.NEW_GDB_PROJECTION",sTemp) == 0)
+      SetString_SYS("SETTINGS","NEW_GDB_PROJECTION",sTemp);
+
+   if (iGlobal_SYS("MONTAJ.ERROR_LEVEL",sTemp) == 0)
+      SetString_SYS("SETTINGS","ERROR_LEVEL",sTemp);
+
+   iGlobal_SYS("HPRTL.INIT_NEST",sNest);
+   iGlobal_SYS("HPRTL.INIT_NONEST",sNoNest);
+   iNesting = 0;
+   if (iGlobal_SYS("HPRTL.INIT",sTemp) == 0) {
+      if(iStrcmp_STR(sTemp, sNest, STR_CASE_SENSITIVE)==0)
+         iNesting = 1;
+   }
+
+   SetInt_SYS("SETTINGS","HPRTL_NESTING", iNesting);
+
+  if (iGlobal_SYS("MONTAJ.DB_COMPRESS",sTemp) == 0)
+      SetString_SYS("SETTINGS","COMPRESSION",sTemp);
+
+   if (iGlobal_SYS("DAT_GRD.DEFAULT",sTemp) == 0)
+       SetString_SYS("SETTINGS","XGD_DEFAULT",sTemp);
+       
+   if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sTemp) == 0) 
+   {
+      SetString_SYS("SETTINGS","EDITOR",sTemp);
+   } else {
+      GetWindowsDir_SYS(sTemp);
+      Strcat_STR(sTemp,"\\r\notepad.exe");
+   }
+
+   if (iGlobal_SYS("MONTAJ.HTTP_STREAM_COMMAND",sTemp) == 0) 
+      SetString_SYS("SETTINGS","HTTP_TYPE",sTemp);
+       
+       
+   // --- Set Geotemp Drive ---
+
+   GetEnv_SYS("GEOTEMP",sTemp);
+   SetString_SYS("SETTINGS","GEOTEMP",sTemp);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      if (!iCheckIntrinsic_SYS(100,"OasisMontaj")) 
+      {
+         //--- free setup ---
+      
+         i = 0;
+         while (i != 2)  switch (i) {
+      
+           case 0:
+           
+            Diag = Create_DGW("settings");
+            SetInfoSYS_DGW(Diag,_SETTINGS0_0,DGW_FILEPATH ,"SETTINGS","DEFAULT_COLOUR");
+            SetInfoSYS_DGW(Diag,_SETTINGS1_1,DGW_FILEPATH ,"SETTINGS","GEOTEMP");
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_SETTINGS0_0,DGW_FILEPATH ,"SETTINGS","DEFAULT_COLOUR");
+            GetInfoSYS_DGW(Diag,_SETTINGS1_1,DGW_FILEPATH ,"SETTINGS","GEOTEMP");
+
+
+            // --- Geotemp Drive ---
+
+            GetString_SYS("SETTINGS","GEOTEMP",sTemp);
+
+
+            // --- Does it exist ? ---
+
+            if (!iDirExist_SYS(sTemp))
+            {
+               Printf_STR(sMessage, sizeof(sMessage), _("The directory \"%s\" does not exist, create?"), sTemp);
+               if (iDisplayQuestion_SYS(_("GEOTEMP Directory"),sMessage)==1)
+               {
+                  if (iMakeDir_SYS(sTemp))
+                  {
+                    DisplayMessage_SYS(_("GEOTEMP Directory"),_("Unable to create directory."));
+                    i = 1;
+                  }
+               } else
+                 i = 1;  
+                 
+            } else {
+
+               // --- Can we write in it ? ---
+
+               if (!iWriteInDir_SYS(sTemp))
+               {
+                  Printf_STR(sMessage, sizeof(sMessage), _("The directory \"%s\" does not have write permission. Please choose another directory."), sTemp);
+                  DisplayMessage_SYS(_("GEOTEMP Directory"),sMessage);
+                  i = 1;
+               }
+            }
+
+            break;
+         
+            default:
+               DisplayInt_SYS(_("I'm lost."),i);
+               i = 0;
+               break;
+         }
+      
+      } else {
+   
+         //--- processing engine ---
+
+         i = 0;
+         while (i != 2) switch (i) {
+   
+            case 0:      
+           
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("settings0");
+               GetLST_LTB(hUNI,iFindField_LTB(hUNI,"Description"),GetList_DGW(Diag,_SETTINGS0_3));
+               FontLST_SYS(GetList_DGW(Diag,_SETTINGS0_4),SYS_FONT_GFN);
+               FontLST_SYS(GetList_DGW(Diag,_SETTINGS0_4),SYS_FONT_TT);
+               FontLST_SYS(GetList_DGW(Diag,_SETTINGS0_5),SYS_FONT_GFN);
+         
+               // --- Set any Defaults from INI ---
+
+               SetInfoSYS_DGW(Diag,_SETTINGS0_0,DGW_FILEPATH ,"SETTINGS","CORE_MENUS");
+               SetInfoSYS_DGW(Diag,_SETTINGS0_1,DGW_FILEPATH ,"SETTINGS","DEFAULT_COLOUR");
+               SetInfoSYS_DGW(Diag,_SETTINGS0_2,DGW_FILEPATH ,"SETTINGS","DEFAULT_CSYMB_COLOUR");
+               SetInfoSYS_DGW(Diag,_SETTINGS0_3,DGW_LISTALIAS,"SETTINGS","DEFAULT_UNIT");
+               SetInfoSYS_DGW(Diag,_SETTINGS0_4,DGW_LISTALIAS,"SETTINGS","DEFAULT_MAP_FONT");
+               SetInfoSYS_DGW(Diag,_SETTINGS0_5,DGW_LISTALIAS,"SETTINGS","DEFAULT_SYMBOL_FONT");
+               SetInfoSYS_DGW(Diag,_SETTINGS0_6,DGW_LISTALIAS,"SETTINGS","COMPRESSION");
+               SetInfoSYS_DGW(Diag,_SETTINGS0_7,DGW_FILEPATH ,"SETTINGS","EDITOR");
+
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+
+         
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_SETTINGS0_0,DGW_FILEPATH ,"SETTINGS","CORE_MENUS");
+               GetInfoSYS_DGW(Diag,_SETTINGS0_1,DGW_FILEPATH ,"SETTINGS","DEFAULT_COLOUR");
+               GetInfoSYS_DGW(Diag,_SETTINGS0_2,DGW_FILEPATH ,"SETTINGS","DEFAULT_CSYMB_COLOUR");
+               GetInfoSYS_DGW(Diag,_SETTINGS0_3,DGW_LISTALIAS,"SETTINGS","DEFAULT_UNIT");
+               GetInfoSYS_DGW(Diag,_SETTINGS0_4,DGW_LISTALIAS,"SETTINGS","DEFAULT_MAP_FONT");
+               GetInfoSYS_DGW(Diag,_SETTINGS0_5,DGW_LISTALIAS,"SETTINGS","DEFAULT_SYMBOL_FONT");
+               GetInfoSYS_DGW(Diag,_SETTINGS0_6,DGW_LISTALIAS,"SETTINGS","COMPRESSION");
+               GetInfoSYS_DGW(Diag,_SETTINGS0_7,DGW_FILEPATH ,"SETTINGS","EDITOR");
+
+               Destroy_DGW(Diag);
+               break;
+         
+            case 1:         
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("settings1");
+
+            
+               // --- Set up DAT lists and defaults if not set ---
+
+               List = GetList_DGW(Diag,_SETTINGS1_0);
+               GetLST_DAT(List, "XGD", DAT_FILE_GRID, DAT_FILE_FORM_OPEN);
+
+               if(iSize_LST(List)) {
+                  GetString_SYS("SETTINGS", "DEFAULT_XGD_IN", sTemp);
+                  if(!iStrlen_STR(sTemp)) {
+                     GetItem_LST(List, 0, 0, sTemp);
+                     SetString_SYS("SETTINGS", "DEFAULT_XGD_IN", sTemp);
+                  }
+               }
+
+               List = GetList_DGW(Diag,_SETTINGS1_1);
+               GetLST_DAT(List, "XGD", DAT_FILE_GRID, DAT_FILE_FORM_SAVE);
+
+               if(iSize_LST(List)) {
+                  GetString_SYS("SETTINGS", "DEFAULT_XGD_OUT", sTemp);
+                  if(!iStrlen_STR(sTemp)) {
+                     GetItem_LST(List, 0, 0, sTemp);
+                     SetString_SYS("SETTINGS", "DEFAULT_XGD_OUT", sTemp);
+                  }
+               }
+
+
+               // --- Set any Defaults from INI ---
+
+               SetInfoSYS_DGW(Diag,_SETTINGS1_0,DGW_TEXT     ,"SETTINGS","DEFAULT_XGD_IN");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_1,DGW_TEXT     ,"SETTINGS","DEFAULT_XGD_OUT");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_2,DGW_LISTALIAS,"SETTINGS","XGD_DEFAULT");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_3,DGW_TEXT     ,"SETTINGS","LOADLAST");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_4,DGW_TEXT     ,"SETTINGS","CONFIRM_GDB_SAVE");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_5,DGW_TEXT     ,"SETTINGS","NEW_GDB_PROJECTION");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_6,DGW_LISTALIAS,"SETTINGS","ERROR_LEVEL");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_7,DGW_LISTALIAS,"SETTINGS","HPRTL_NESTING");
+               SetInfoSYS_DGW(Diag,_SETTINGS1_8,DGW_FILEPATH,"SETTINGS","GEOTEMP");
+
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+
+         
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_SETTINGS1_0,DGW_TEXT     ,"SETTINGS","DEFAULT_XGD_IN");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_1,DGW_TEXT     ,"SETTINGS","DEFAULT_XGD_OUT");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_2,DGW_LISTALIAS,"SETTINGS","XGD_DEFAULT");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_3,DGW_TEXT     ,"SETTINGS","LOADLAST");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_4,DGW_TEXT     ,"SETTINGS","CONFIRM_GDB_SAVE");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_5,DGW_TEXT     ,"SETTINGS","NEW_GDB_PROJECTION");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_6,DGW_LISTALIAS,"SETTINGS","ERROR_LEVEL");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_7,DGW_LISTALIAS,"SETTINGS","HPRTL_NESTING");
+               GetInfoSYS_DGW(Diag,_SETTINGS1_8,DGW_FILEPATH,"SETTINGS","GEOTEMP");
+
+               GetInfo_DGW(Diag,_SETTINGS1_3,DGW_LISTALIAS,sAliasLoadLast);
+               GetInfo_DGW(Diag,_SETTINGS1_4,DGW_LISTALIAS,sAliasConfirmGDBSave);
+               GetInfo_DGW(Diag,_SETTINGS1_5,DGW_LISTALIAS,sAliasNewGDBProjection);
+
+               // --- Geotemp Drive ---
+
+               GetString_SYS("SETTINGS","GEOTEMP",sTemp);
+        
+        
+               // --- Does it exist ? ---
+        
+               if (!iDirExist_SYS(sTemp))
+               {
+                  Printf_STR(sMessage, sizeof(sMessage), _("The directory \"%s\" does not exist, create?"), sTemp);
+                  if (iDisplayQuestion_SYS(_("GEOTEMP Directory"),sMessage)==1)
+                  {
+                     if (iMakeDir_SYS(sTemp))
+                     {
+                       DisplayMessage_SYS(_("GEOTEMP Directory"),_("Unable to create directory."));
+                       i = 1;
+                     }
+                  } else
+                    i = 1;  
+                    
+               } else {
+        
+                   // --- Can we write in it ? ---
+        
+                   if (!iWriteInDir_SYS(sTemp))
+                   {
+                       Printf_STR(sMessage, sizeof(sMessage), _("The directory \"%s\" does not have write permission. Please choose another directory."), sTemp);
+                       DisplayMessage_SYS(_("GEOTEMP Directory"),sMessage);
+                       i = 1;
+                   }
+               }
+         
+               break;
+
+            default:
+            
+               DisplayInt_SYS(_("I'm lost."),i);
+               i = 0;
+               break;
+         
+         }
+      }
+   }
+   
+
+   // --- get/set parameters ---
+
+   GetString_SYS("SETTINGS","CORE_MENUS",sTemp);
+   ReplaceChar_STR(sTemp,"|",";");
+   GlobalSet_SYS("MONTAJ.CORE_MENUS",sTemp);
+
+   GetString_SYS("SETTINGS","DEFAULT_COLOUR",sName);
+   FileNamePart_STR(sName,sTemp,STR_FILE_PART_NAME);
+   FileNamePart_STR(sName,sName,STR_FILE_PART_EXTENSION);
+   Strcat_STR(sTemp,".");
+   Strcat_STR(sTemp,sName);
+   GlobalSet_SYS("MONTAJ.DEFAULT_COLOUR",sTemp);
+
+   GetString_SYS("SETTINGS","DEFAULT_CSYMB_COLOUR",sName);
+   FileNamePart_STR(sName,sTemp,STR_FILE_PART_NAME);
+   FileNamePart_STR(sName,sName,STR_FILE_PART_EXTENSION);
+   Strcat_STR(sTemp,".");
+   Strcat_STR(sTemp,sName);
+   GlobalSet_SYS("MONTAJ.DEFAULT_CSYMB_COLOUR",sTemp);
+   
+
+   i = iGetInt_SYS("SETTINGS","DEFAULT_UNIT");
+   if (i >= 0) {
+      GetString_LTB(hUNI,i,0,sTemp);
+      GlobalSet_SYS("MONTAJ.DEFAULT_UNIT",sTemp);
+      GetString_LTB(hUNI,i,iFindField_LTB(hUNI,"factor"),sTemp);
+      GlobalSet_SYS("MONTAJ.DEFAULT_UNIT_FACTOR",sTemp);
+   }
+
+   GetString_SYS("SETTINGS","DEFAULT_MAP_FONT",sTemp);
+   GlobalSet_SYS("MONTAJ.DEFAULT_MAP_FONT",sTemp);
+      
+
+   // --- change true-type mapping ---
+   
+   GetPath_SYS(SYS_PATH_GEOSOFT_USER_INI,sTTFile);
+   Strcat_STR(sTTFile,"truetype.ini");
+   if (iFileExist_SYS(sTTFile)) 
+      LoadParm_SYS(sTTFile,"TRUETYPE");
+   SetString_SYS("TRUETYPE","DEFAULT",sTemp);
+   SaveParm_SYS(sTTFile,0,"TRUETYPE");
+														    
+   GetString_SYS("SETTINGS","DEFAULT_SYMBOL_FONT",sTemp);
+   GlobalSet_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sTemp);
+
+   GetString_SYS("SETTINGS","EDITOR",sTemp);
+   GlobalSet_SYS("MONTAJ.DEFAULT_EDITOR",sTemp);
+
+   GetString_SYS("SETTINGS","DEFAULT_XGD_IN",sXGD);
+   GlobalSet_SYS("MONTAJ.DEFAULT_XGD_IN",sXGD);
+
+   GetString_SYS("SETTINGS","DEFAULT_XGD_OUT",sXGD);
+   GlobalSet_SYS("MONTAJ.DEFAULT_XGD_OUT",sXGD);
+
+   GetString_SYS("SETTINGS","XGD_DEFAULT",sTemp);
+   GlobalSet_SYS("DAT_GRD.DEFAULT",sTemp);
+
+   GetString_SYS("SETTINGS","LOADLAST",sTemp);
+   if (!iStrcmp_STR(sTemp, _n("Yes"), STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasLoadLast, "1", STR_CASE_TOLERANT))
+      GlobalSet_SYS("MONTAJ.LOAD_LAST_WORKSPACE",_n("Yes"));
+   else if (!iStrcmp_STR(sTemp, _n("Prompt"), STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasLoadLast, "2", STR_CASE_TOLERANT))
+      GlobalSet_SYS("MONTAJ.LOAD_LAST_WORKSPACE",_n("Prompt"));
+   else
+      GlobalSet_SYS("MONTAJ.LOAD_LAST_WORKSPACE",_n("No"));
+
+   GetString_SYS("SETTINGS","CONFIRM_GDB_SAVE",sTemp);
+   if (!iStrcmp_STR(sTemp, _n("Yes"), STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasConfirmGDBSave, "1", STR_CASE_TOLERANT))
+      GlobalSet_SYS("MONTAJ.CONFIRM_GDB_SAVE",_n("Yes"));
+   else
+      GlobalSet_SYS("MONTAJ.CONFIRM_GDB_SAVE",_n("No"));
+
+   GetString_SYS("SETTINGS","NEW_GDB_PROJECTION",sTemp);
+   if (!iStrcmp_STR(sTemp, _n("Yes"), STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasNewGDBProjection, "1", STR_CASE_TOLERANT))
+      GlobalSet_SYS("MONTAJ.NEW_GDB_PROJECTION",_n("Yes"));
+   else
+       GlobalSet_SYS("MONTAJ.NEW_GDB_PROJECTION",_n("No"));
+
+   GetString_SYS("SETTINGS","ERROR_LEVEL",sTemp);
+   GlobalSet_SYS("MONTAJ.ERROR_LEVEL",sTemp);
+
+   GetString_SYS("SETTINGS","COMPRESSION",sTemp);
+   GlobalSet_SYS("MONTAJ.DB_COMPRESS",sTemp);
+
+
+   // --- HP-RTL Nesting ---
+
+   iNesting = iGetInt_SYS("SETTINGS","HPRTL_NESTING");
+   if(iNesting==1)
+      GlobalSet_SYS("HPRTL.INIT", sNest);
+   else
+      GlobalSet_SYS("HPRTL.INIT", sNoNest);
+
+
+
+
+   
+   // --- Set Geotemp Drive ---
+   
+   GetString_SYS("SETTINGS","GEOTEMP",sTemp);
+   SetEnv_SYS("GEOTEMP",sTemp);
+
+   
+   GlobalWrite_SYS("");            
+
+}

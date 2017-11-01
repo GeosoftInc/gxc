@@ -1,0 +1,310 @@
+//===========================================================================
+NAME          = "Calculate a statistic in a rolling window"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "
+   Calculate a statistic in a rolling window.
+
+    ROLLINGSTATS.IN  : Name of the Input Channel
+          .OUT      : Name of the Ouput Channel (created if does not exist)
+          .STATISTIC: Statistic to calculate (see list in st.gxh)
+          .WIDTH    : Width of the window to calculate the statistic. If even,
+                      is increased by 1 to give a symmetric window about the center.
+          .SHRINK   : Shrink window at ends to eliminate edge effects.
+"
+// Revision History:
+// v6.4.1: Allow for data with unset fiducial info.
+// v6.0.0: Skip lines with no data.
+// v5.1.6: Fiducial starts, increments not set for output VV to be the same
+//         as for the input VV.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "ROLLINGSTATS.gr"
+#include "ROLLINGSTATS.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;      // Channel Names
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh,OutCh;        // Channel handles
+DB_SYMB    Line;              // Line handle
+VV         VVi;
+VV         VVo;
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        iStat;
+int        iWidth;            // window width in points
+int        iShrink;
+int        i;                 // utility int
+int        iLines;            // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+real       rFidStart, rFidIncr;
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel, sStat;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("ROLLINGSTATS");
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_ROLLINGSTATS_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_ROLLINGSTATS_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_ROLLINGSTATS_0,DGW_TEXT,"ROLLINGSTATS","IN");     
+     SetInfoSYS_DGW(Diag,_ROLLINGSTATS_1,DGW_TEXT,"ROLLINGSTATS","OUT");     
+     SetInfoSYS_DGW(Diag,_ROLLINGSTATS_2,DGW_LISTALIAS,"ROLLINGSTATS","STATISTIC");    
+     SetInfoSYS_DGW(Diag,_ROLLINGSTATS_3,DGW_TEXT,"ROLLINGSTATS","WIDTH");    
+     SetInfoSYS_DGW(Diag,_ROLLINGSTATS_4,DGW_LISTALIAS,"ROLLINGSTATS","SHRINK");    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_ROLLINGSTATS_0,DGW_TEXT,"ROLLINGSTATS","IN");     
+     GetInfoSYS_DGW(Diag,_ROLLINGSTATS_1,DGW_TEXT,"ROLLINGSTATS","OUT");     
+     GetInfoSYS_DGW(Diag,_ROLLINGSTATS_2,DGW_LISTALIAS,"ROLLINGSTATS","STATISTIC");    
+     GetInfoSYS_DGW(Diag,_ROLLINGSTATS_3,DGW_TEXT,"ROLLINGSTATS","WIDTH");    
+     GetInfoSYS_DGW(Diag,_ROLLINGSTATS_4,DGW_LISTALIAS,"ROLLINGSTATS","SHRINK");    
+
+     
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("ROLLINGSTATS","IN",sInCh);
+   GetString_SYS("ROLLINGSTATS","OUT",sOutCh);
+   iStat = iGetInt_SYS("ROLLINGSTATS","STATISTIC");
+   iWidth = iGetInt_SYS("ROLLINGSTATS","WIDTH");
+   iShrink = iGetInt_SYS("ROLLINGSTATS","SHRINK");
+
+   if(!iStrlen_STR(sInCh))
+      Abort_SYS(_("No input channel specified"));
+   if(!iStrlen_STR(sOutCh))
+      Abort_SYS(_("No output channel specified"));
+
+   if(iStat<0 || iStat>19)
+      Abort_SYS(_("Invalid statistic requested."));
+
+   if(iWidth<=0)
+      Abort_SYS(_("Window width must be greater than 0."));
+
+   if(iShrink!=0) iShrink = 1;   // yes by default
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sInCh))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindChan_DB(Data,sInCh);
+   
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sOutCh))   // if channel does not exist 
+      OutCh = DupSymbNoLock_DB(Data,InCh,sOutCh);
+   else
+      OutCh = FindChan_DB(Data,sOutCh);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) 
+      LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   
+   // --- Make sure channels are of same size ---
+   
+   if (iGetColVA_DB(Data, InCh) != iGetColVA_DB(Data, OutCh))
+      Abort_SYS(_("Input and output channels are different in array sizes."));
+   
+
+   // --- Create VVs ---
+
+   VVi = Create_VV(REAL, 0);
+   VVo = Create_VV(REAL, 0);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Filter line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+ 
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,InCh,VVi);
+      
+      
+      // --- Skip no data cases ---
+      
+      if(iLength_VV(VVi)>0) {
+      
+         rFidStart = rGetFidStart_VV(VVi);
+         rFidIncr = rGetFidIncr_VV(VVi);
+         
+         
+         // --- Create valid fiducials ---
+         
+         if(rFidStart==rDUMMY) rFidStart = 0.0;
+         if(rFidIncr==rDUMMY) rFidIncr = 1.0;
+         
+
+         // --- apply filter ---
+
+         RollingStats_VVU(VVi,VVo,iStat,iWidth,iShrink);
+
+
+         // --- Set data ---
+
+         SetFidStart_VV(VVo, rFidStart);
+         SetFidIncr_VV(VVo, rFidIncr);
+         PutChanVV_DB(Data,Line,OutCh,VVo);
+      }
+      
+      
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   if(iStat==ST_ITEMS)
+      Strcpy_STR(sStat, _("Rolling window number of items"));
+   else if(iStat==ST_NPOS)
+      Strcpy_STR(sStat, _("Rolling window items > 0"));
+   else if(iStat==ST_DUMMIES)
+      Strcpy_STR(sStat, _("Rolling window number of dummies"));
+   else if(iStat==ST_MIN)
+      Strcpy_STR(sStat, _("Rolling window minimum"));
+   else if(iStat==ST_MAX)
+      Strcpy_STR(sStat, _("Rolling window maximum"));
+   else if(iStat==ST_RANGE)
+      Strcpy_STR(sStat, _("Rolling window range"));
+   else if(iStat==ST_MEAN)
+      Strcpy_STR(sStat, _("Rolling window mean"));
+   else if(iStat==ST_MEDIAN)
+      Strcpy_STR(sStat, _("Rolling window median"));
+   else if(iStat==ST_MODE)
+      Strcpy_STR(sStat, _("Rolling window mode"));
+   else if(iStat==ST_GEOMEAN)
+      Strcpy_STR(sStat, _("Rolling window geometric mean"));
+   else if(iStat==ST_VARIANCE)
+      Strcpy_STR(sStat, _("Rolling window variance"));
+   else if(iStat==ST_STDDEV)
+      Strcpy_STR(sStat, _("Rolling window standard deviation"));
+   else if(iStat==ST_STDERR)
+      Strcpy_STR(sStat, _("Rolling window standard error"));
+   else if(iStat==ST_SKEW)
+      Strcpy_STR(sStat, _("Rolling window skew"));
+   else if(iStat==ST_KURTOSIS)
+      Strcpy_STR(sStat, _("Rolling window kurtosis"));
+   else if(iStat==ST_BASE)
+      Strcpy_STR(sStat, _("Rolling window first value"));
+   else if(iStat==ST_SUM)
+      Strcpy_STR(sStat, _("Rolling window sum"));
+   else if(iStat==ST_SUM2)
+      Strcpy_STR(sStat, _("Rolling window sum of squares"));
+   else if(iStat==ST_SUM3)
+      Strcpy_STR(sStat, _("Rolling window sum of cubes"));
+   else if(iStat==ST_SUM4)
+      Strcpy_STR(sStat, _("Rolling window sum of 4th powers"));
+   
+   ProgName_SYS(sStat,0);
+
+
+   EasyMakerSymb_DB(Data,OutCh,sStat,"ROLLINGSTATS;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+
+   // --- Load the output channel ---
+
+   LoadChan_EDB(EData, sOutCh);
+
+}

@@ -1,0 +1,190 @@
+//===========================================================================
+NAME          = "Delete lines from a database"
+#include <version.gxh>
+DESCRIPTION   = "
+Delete a Line or range of lines from a database.
+
+Parameters:
+
+     DELLINE.LINE  - Line number or range of lines.  You may use the
+                     normal selection syntax to specify the lines
+                     to delete.  For example:
+
+                     \"L12:300\" deletes Line 12 through 300.
+                     \"F10\"     deletes all lines on flight 10.
+
+     WARNING!! This GX will delete a lines even if they contains
+       channels that are marked as READ only!
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+//===========================================================================
+
+RESOURCE = "delline.gr"
+#include "delline.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sTemp;           // Temp. strings
+string(STR_DEFAULT_LONG) sLines; // Lines to delete
+string(STR_DB_SYMBOL) sLine;     // Line to delete
+string(STR_DEFAULT) sVal;            // List values
+
+EDB        EData;
+DB         Data;
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle 
+LST        List;              // List handle
+DB_SELECT  Select;
+
+int        i,iLines, iTotLines;
+
+//===========================================================================
+//                           LINE DELETION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DELLINEForm");         
+
+
+      // --- set up line list ---
+                                               
+      List = GetList_DGW(Diag,_DELLINEFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_LINE);
+
+      // --- BUG FIX: In the List, lines with version 0 are displayed as
+      //     "L0", and if left as that and selected, ALL versions of L0 
+      //     would be deleted. To prevent this, go through the list and
+      //     append ".0" to all version 0 lines. ---
+
+      for(i=iSize_LST(List)-1;i>=0;i--) {
+
+         GetItem_LST(List, 0, i, sLine);
+   
+         Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);
+   
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         if(iLineVersion_DB(Data, Line)==0) {
+            
+            Strcat_STR(sLine,".0");
+
+            GetItem_LST(List, 1, i, sVal);
+
+            // --- Delete the current line name ---
+
+            DelItem_LST(List, i);
+
+            // --- Add the edited item to the end of the list
+
+            AddItem_LST(List, sLine, sVal);
+         }
+         UnLockSymb_DB(Data,Line);
+      }
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_DELLINEFORM_0,DGW_TEXT,"DELLINE","LINE");   
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the String and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_DELLINEFORM_0,DGW_TEXT,"DELLINE","LINE");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("DELLINE","LINE",sLines);
+
+   // --- save current selection ---
+
+   Select = GetSelect_DB(Data);
+
+
+   // --- select lines to delete ---
+
+   Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+   Select_DB(Data,sLines,DB_LINE_SELECT_INCLUDE);
+
+
+   // --- Go through all selected Lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+
+   while (iIsLineValid_DB(Data,Line))  {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      Strcpy_STR(sLines,_("Deleting line: "));
+      Strcat_STR(sLines,sTemp);
+      ProgName_SYS(sLines,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- delete it ---
+
+      DeleteSymb_DB(Data,Line);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = FirstSelLine_DB(Data);
+      iLines++;
+
+   }
+
+
+   // --- re-set selection ---
+
+   SetSelect_DB(Data,Select);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

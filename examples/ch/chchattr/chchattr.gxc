@@ -1,0 +1,223 @@
+//===========================================================================
+NAME          = "CHIMERA assay attributes"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/PopupSelChan/List"
+
+DESCRIPTION   = "Interactive display/modification of assay attributes."
+// Revision History:
+// v6.4.2: Pre-set class selection to ASSAY if not yet defined.
+// v5.1.4: Added drop-list for CLASS attributes.
+// v9.2: Removed the pre-set class selection to ASSAY if not yet defined (should only happen from chattrib.gx)
+//===========================================================================
+
+RESOURCE = "chchattr.gr"
+#include "chchattr.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sChan;
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT_SHORT) sUnits;
+string(STR_DEFAULT_SHORT) sDetLim;
+string(STR_DEFAULT_SHORT) sOutlierLim, sMin, sMax, sSymbScl;
+string(STR_DEFAULT_SHORT) sLog;
+string(STR_DEFAULT) sMethod;
+string(STR_DEFAULT_SHORT) sClass;
+
+EDB      EData;
+DB       Data;
+DB_SYMB  Ch;
+DGW   	Diag;
+LST      List;
+REG      hREG;
+
+int i, iChild, iLast, iItem;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("The CHCHATTR GX must be run interactively"));
+
+   // --- Is this GX being run as a child process?  ---
+
+   iChild = 0;
+   if(iGetInt_SYS("CHCHATTR","CHILD")==1) iChild = 1;
+   SetInt_SYS("CHCHATTR","CHILD",0);   // reset to 0 always
+
+   // --- get current channel reg ---
+      
+   EData = Current_EDB();
+
+   if(iChild)
+      Ch = (DB_SYMB)iGetInt_SYS("CHCHATTR","CHAN");
+   else
+      Ch = GetCurChanSymb_EDB(EData);
+
+   Data = Lock_EDB(EData);
+   hREG = Create_REG(128);
+   GetRegSymb_DB(Data,Ch,hREG);
+   
+   
+   // --- get current settings ---
+   
+   GetChanName_DB(Data,Ch,sChan);
+   Get_REG(hREG,"LABEL",sLabel,sizeof(sLabel));      
+   Get_REG(hREG,"UNITS",sUnits,sizeof(sUnits));
+   Get_REG(hREG,"DETECTLIMIT",sDetLim,sizeof(sDetLim));
+   Get_REG(hREG,"OUTLIERLIMIT",sOutlierLim,sizeof(sOutlierLim));
+   Get_REG(hREG,"STANDARDMIN",sMin,sizeof(sMin));
+   Get_REG(hREG,"STANDARDMAX",sMax,sizeof(sMax));
+   Get_REG(hREG,"LOG",sLog,sizeof(sLog));
+   Get_REG(hREG,"SYMBOL_SCALING",sSymbScl,sizeof(sSymbScl));
+   Get_REG(hREG,"ASSAYMETHOD",sMethod,sizeof(sMethod));
+   Get_REG(hREG,"CLASS",sClass,sizeof(sClass));
+   
+   // --- Create the Dialogue ---
+
+   if(iChild==1)
+      Diag = Create_DGW("chchattr1");
+   else
+      Diag = Create_DGW("chchattr");
+
+
+   i = 0;
+   while (i == 0) {
+         
+   
+      // --- set up lists ---
+
+      List = GetList_DGW(Diag,_CHCHATTR_9);
+      Clear_LST(List);
+      LoadFile_LST(List,"ch_assay_method");
+      Sort_LST(List,0,0);
+      
+      // --- Set wizard button values when running as child
+      //  (normally it is "Finish" ---
+
+      if(iChild) {
+         iLast = iGetInt_SYS("CHCHATTR","LASTCHAN");
+         if(iLast!=1)
+            SetInfo_DGW(Diag,_CHCHATTR_12,DGW_LABEL,"&Next>");
+      }
+
+      // --- Set any Defaults from INI ---
+
+      SetInfo_DGW(Diag,_CHCHATTR_0,DGW_TEXT,sChan);
+      SetInfo_DGW(Diag,_CHCHATTR_1,DGW_TEXT,sLabel);
+      SetInfo_DGW(Diag,_CHCHATTR_2,DGW_TEXT,sUnits);
+      SetInfo_DGW(Diag,_CHCHATTR_3,DGW_TEXT,sDetLim);
+      SetInfo_DGW(Diag,_CHCHATTR_4,DGW_TEXT,sOutlierLim);
+      SetInfo_DGW(Diag,_CHCHATTR_5,DGW_TEXT,sMin);
+      SetInfo_DGW(Diag,_CHCHATTR_6,DGW_TEXT,sMax);
+      SetInfo_DGW(Diag,_CHCHATTR_7,DGW_TEXT,sLog);
+      SetInfo_DGW(Diag,_CHCHATTR_8,DGW_TEXT,sSymbScl);
+      SetInfo_DGW(Diag,_CHCHATTR_10,DGW_TEXT,sClass);
+
+      // --- Treat methods differently for list editing purposes ---
+
+      SetString_SYS("CHCHATTR","METHOD",sMethod);
+      SetInfoSYS_DGW(Diag,_CHCHATTR_9,DGW_TEXT,"CHCHATTR","METHOD");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) {
+         UnLock_EDB(EData);
+         Cancel_SYS();    
+      }
+
+      GetInfo_DGW(Diag,_CHCHATTR_0,DGW_TEXT,sChan);
+      GetInfo_DGW(Diag,_CHCHATTR_1,DGW_TEXT,sLabel);
+      GetInfo_DGW(Diag,_CHCHATTR_2,DGW_TEXT,sUnits);
+      GetInfo_DGW(Diag,_CHCHATTR_3,DGW_TEXT,sDetLim);
+      GetInfo_DGW(Diag,_CHCHATTR_4,DGW_TEXT,sOutlierLim);
+      GetInfo_DGW(Diag,_CHCHATTR_5,DGW_TEXT,sMin);
+      GetInfo_DGW(Diag,_CHCHATTR_6,DGW_TEXT,sMax);
+      GetInfo_DGW(Diag,_CHCHATTR_7,DGW_TEXT,sLog);
+      GetInfo_DGW(Diag,_CHCHATTR_8,DGW_TEXT,sSymbScl);
+      GetInfo_DGW(Diag,_CHCHATTR_10,DGW_TEXT,sClass);
+
+
+      GetInfoSYS_DGW(Diag,_CHCHATTR_9,DGW_TEXT,"CHCHATTR","METHOD");
+      GetString_SYS("CHCHATTR","METHOD",sMethod);
+      
+      
+      // --- check for new assay method list entries ---
+                  
+      if(iStrlen_STR(sMethod)) {
+
+         iItem = iFindItem_LST(List,0, sMethod);
+         if(iItem==-1) {
+            AddUniqueItem_LST(List,sMethod,"");
+            SaveFile_LST(List,"ch_assay_method");
+         }
+      }
+
+      // --- new method? ---
+      
+      if (i==3) {
+		 SetString_SYS("LISTEDIT","TITLE",_("Edit the Assay Method names"));
+		 SetString_SYS("LISTEDIT","PROMPT",_("Method name"));
+         SetString_SYS("LISTEDIT","LIST","ch_assay_method");
+         SetString_SYS("LISTEDIT","SETTING",sMethod);
+         iRunGX_SYS("listedit");
+         GetString_SYS("LISTEDIT","SETTING",sMethod);
+
+         i = 0;
+         continue;                        
+      }
+      else {
+
+         if(iChild) {
+            if(i==1)
+               SetInt_SYS("CHCHATTR","DIR",0);
+            else
+               SetInt_SYS("CHCHATTR","DIR",1);
+            i = 1;  // force break
+         }
+      }
+   }
+               
+   Destroy_SYS(Diag);
+   
+   
+   // --- put settings back in the REG ---
+   
+   Set_REG(hREG,"LABEL",sLabel);      
+   Set_REG(hREG,"UNITS",sUnits);      
+   Set_REG(hREG,"DETECTLIMIT",sDetLim);      
+   Set_REG(hREG,"OUTLIERLIMIT",sOutlierLim);      
+   Set_REG(hREG,"STANDARDMIN",sMin);
+   Set_REG(hREG,"STANDARDMAX",sMax);
+   Set_REG(hREG,"ASSAYMETHOD",sMethod);
+   Set_REG(hREG,"SYMBOL_SCALING",sSymbScl);
+   Set_REG(hREG,"CLASS",sClass);
+   Set_REG(hREG,"LOG",sLog);
+   
+
+   // --- set the reg back in the channel ---
+   
+   SetRegSymb_DB(Data,Ch,hREG);
+   UnLock_EDB(EData);
+   
+   Destroy_SYS(hREG);
+   
+}
+   

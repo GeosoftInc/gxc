@@ -1,0 +1,174 @@
+//===========================================================================
+
+NAME          = "Extract group mask from a view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Map Views"
+
+DESCRIPTION   = "
+      VIEWGETEXTCLIP.FILE  polygon file name
+                    .VIEW  name of the view
+                    .NAME  group mask name
+"
+//===========================================================================
+
+RESOURCE = "viewgetextclip.gr"
+#include "viewgetextclip.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile,sName,sNameComp;
+string(STR_VIEW) sView;
+int         i;
+int         iRun;
+int         iClipRegion;
+DGW         hDGW;             // Dialogue handle
+PLY         Poly;		// polygon object
+EMAP        EMap;
+MAP         hMAP;
+MVIEW       View;
+LST         hLST;
+IPJ         hIPJ;
+
+//===========================================================================
+
+{
+   // --- get current map ---
+
+   EMap  = Current_EMAP();
+   hMAP = Lock_EMAP(EMap);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      iRun = 0;
+
+      while (iRun != 99) {
+
+         if (iRun == 0) {
+            // --- Create the 1st Dialogue ---
+
+            hDGW = Create_DGW("VIEWGETEXTCLIP1");
+
+            hLST = GetList_DGW(hDGW,_VIEWGETEXTCLIP1_1);
+            ViewList_MAP(hMAP,hLST);
+            Sort_LST(hLST,0,0);
+      
+      
+            // --- set default view to the current data view ---
+      
+            GetClassName_MAP(hMAP,"Data",sView);
+            SetInfo_DGW(hDGW,_VIEWGETEXTCLIP1_1,DGW_TEXT,sView);
+      
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(hDGW,_VIEWGETEXTCLIP1_0,DGW_FILEPATH,"VIEWGETEXTCLIP","FILE");
+
+            // --- Run the Dialogue ---
+
+            if (iRunDialogue_DGW(hDGW) < 0) Cancel_SYS();
+
+          
+            // --- Get the Strings and replace in INI ---
+
+            GetInfoSYS_DGW(hDGW,_VIEWGETEXTCLIP1_0,DGW_FILEPATH,"VIEWGETEXTCLIP","FILE");     
+            GetInfoSYS_DGW(hDGW,_VIEWGETEXTCLIP1_1,DGW_TEXT,"VIEWGETEXTCLIP","VIEW");
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(hDGW);
+
+            GetString_SYS("VIEWGETEXTCLIP","VIEW",sView);
+            View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+
+            if (iNumExtClipPLY_MVIEW(View)<=0)
+               DisplayMessage_SYS(_("VIEWRENEXTCLIP"), _("No extended regions found in this view."));
+            else
+               iRun = 1;
+            Destroy_MVIEW(View);
+         } else if (iRun == 1) {
+            // --- Create the Dialogue ---
+
+            hDGW = Create_DGW("VIEWGETEXTCLIP2");
+
+            hLST = GetList_DGW(hDGW,_VIEWGETEXTCLIP2_0);
+            View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+            ExtClipPLYList_MVIEW(View,hLST);
+            Destroy_MVIEW(View);
+            Sort_LST(hLST,0,0);
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(hDGW,_VIEWGETEXTCLIP2_0,DGW_TEXT,"VIEWGETEXTCLIP","NAME");
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(hDGW);
+            if (i == -1) Cancel_SYS(); 
+
+            GetInfoSYS_DGW(hDGW,_VIEWGETEXTCLIP2_0,DGW_TEXT,"VIEWGETEXTCLIP","NAME");
+
+            Destroy_DGW(hDGW);
+
+            if (i == 1)
+               iRun = 0;
+            else
+               iRun = 99;
+         } else 
+            Abort_SYS(_("Error processing dialog options"));
+      }
+	}
+            
+   // --- Get parameters ---
+
+   GetString_SYS("VIEWGETEXTCLIP","FILE",sFile);
+   GetString_SYS("VIEWGETEXTCLIP","VIEW",sView);
+   GetString_SYS("VIEWGETEXTCLIP","NAME",sName);
+
+   // --- get view and clear ---
+
+   View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+
+   iClipRegion = -1;
+   for (i = 0; i<iNumExtClipPLY_MVIEW(View); i++) {
+      GetNameExtClipPLY_MVIEW(View,i,sNameComp);
+      if (iStrcmp_STR(sNameComp, sName, STR_CASE_TOLERANT) == 0) {
+         iClipRegion = i;
+         break;
+      }
+   }
+   
+   if (iClipRegion == -1)
+      Abort_SYS(_("Could not find region by that name!"));
+
+   // --- Change the PLY Projection to that of the View ---
+
+   hIPJ = Create_IPJ();
+   GetIPJ_MVIEW(View,hIPJ);
+
+   Poly = Create_PLY();
+   ChangeIPJ_PLY(Poly,hIPJ);
+   Destroy_IPJ(hIPJ);
+
+   // --- Get polygon and save to file ---
+
+   GetExtClipPLY_MVIEW(View, iClipRegion, Poly);
+   SaveTable_PLY(Poly, sFile);
+      
+   
+   Destroy_MVIEW(View);
+   
+   // --- Release the Map ---
+
+   UnLock_EMAP(EMap);
+}

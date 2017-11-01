@@ -1,0 +1,200 @@
+//===========================================================================
+NAME          = "Calculate latitude correction"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav/Corrections by Steps"
+
+DESCRIPTION   = "
+
+   AGLATCOR.LAT     Latitude channel
+           .OUTCH   Output latitude correction channel
+			  .METHOD  IAG : IAG - Telford (1977)
+			           IGF : IGF - Moritz (1980)
+"
+// Revision History:
+// v8.5 : Added user-selection of correction formula, now default to Moritz (1980).
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3: New GX.
+    
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "aglatcor.gr"
+#include "aglatcor.grh"
+
+//===========================================================================
+//                                INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DB          Data;                   // Database handle
+EDB         EData;                  // Edited database handle
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // Channel list handle
+EXP         Exp;
+
+DB_SYMB     Line,LatCh,OutCh;
+
+int         i;                      // Utility
+
+string(STR_DEFAULT)  sLatCh,sOutCh,sMethod;
+string(512)          sFormula;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGLATCOR");
+                                                 
+
+      // --- Set up channel lists ---
+      
+      List = GetList_DGW(Diag,_AGLATCOR_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGLATCOR_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+
+      // --- Set any Defaults ---
+  
+      SetInfoSYS_DGW(Diag,_AGLATCOR_0,DGW_TEXT,"AGLATCOR","LAT");
+      SetInfoSYS_DGW(Diag,_AGLATCOR_1,DGW_TEXT,"AGLATCOR","OUTCH");
+      SetInfoSYS_DGW(Diag,_AGLATCOR_2,DGW_LISTALIAS,"AGLATCOR","METHOD");
+
+     
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();           // They hit cancel
+                                                 
+     
+      // --- Read inputs from the dialogue box ---
+      
+      GetInfoSYS_DGW(Diag,_AGLATCOR_0,DGW_TEXT,"AGLATCOR","LAT");
+      GetInfoSYS_DGW(Diag,_AGLATCOR_1,DGW_TEXT,"AGLATCOR","OUTCH");
+      GetInfoSYS_DGW(Diag,_AGLATCOR_2,DGW_LISTALIAS,"AGLATCOR","METHOD");
+     
+      // --- Destroy the Dialogue ---
+     
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGLATCOR","LAT",sLatCh);
+   GetString_SYS("AGLATCOR","OUTCH",sOutCh);
+   GetString_SYS("AGLATCOR","METHOD",sMethod);
+    
+   
+   // --- Get handles to the input data channels ---
+
+   if (!iExistChan_DB(Data,sLatCh))
+      Abort_SYS(_("The latitude channel does not exist."));
+
+   LatCh  = FindChan_DB(Data,sLatCh);
+   LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Get handle to the output channel ---
+
+   if (!iExistChan_DB(Data,sOutCh)) {
+      OutCh = DupSymb_DB(Data,LatCh,sOutCh);
+      SetChanFormat_DB(Data,OutCh,DB_CHAN_FORMAT_NORMAL);
+   } else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+      SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);     
+   }   
+                         
+
+   // --- Create expression ---
+
+	Strcpy_STR(sFormula,"@r2d=57.29578;@lat=$sLatCh/@r2d;@slat2=sin(@lat)**2;");
+	if(iStrcmp_STR(sMethod, _n("IAG"), STR_CASE_TOLERANT) == 0)
+		Strcat_STR(sFormula,"$sOutCh=978031.85*(1+0.005278895*@slat2+0.000023462*(@slat2**2));");
+	else
+		Strcat_STR(sFormula,"$sOutCh=978032.67714*(1+0.00193185138639*@slat2)/sqrt(1-0.00669437999013*@slat2);");
+
+   Exp = Create_EXP(Data,sFormula,512);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating latitude correction"),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, LatCh) > 0) {
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+   Progress_SYS(0);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Latitude correction"),"AGLATCOR;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Latitude Correction"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   UnLockSymb_DB(Data,LatCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+
+
+   // --- Set default for AGFREEAIR GX ---
+
+   SetString_SYS("AGFREEAIR","LATCORCH", sOutCh);
+
+   // --- Load channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+   
+   Progress_SYS(0);      
+}

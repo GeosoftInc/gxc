@@ -1,0 +1,379 @@
+//===========================================================================
+
+NAME          = "Plot proportional symbol legend"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Plot Solution Symbols"
+
+DESCRIPTION   = "
+Plot a legend for proportional symbols.
+
+      Parameters:
+
+ PROPSYMBLEG.TITLE       (Optional) Title for the legend
+            .SUBTITLE    (Optional) Subtitle for the legend
+            .X           X location of bottom left corner of legend
+            .Y           Y location of bottom left corner of legend
+            .FONTSIZE    Font size for labels
+            .NSYMBOLS    Number of symbols
+            .START       First value plotted (>= Base value)
+            .INCREMENT   Increment for each symbol
+
+   PROPSYMB.BASE         - zero base level.
+           .SCALE        - symbol size units/mm.
+           .FONT         - Font name
+           .GEO_FONT     - Is this a geosoft font?
+           .SYMBOL       - symbol number
+           .WEIGHT       - symbol weight
+           .LINE_COLOR   - symbol color 
+           .FILL_COLOR   - fill color
+           .ANGLE        - symbol angle
+"
+// Revision History:
+// v7.0.0: Symbol font weight fix-up.
+// v6.4.2: Replaced symbol controls with button and symbol form.
+// v6.3.1: Explicitly set base view when locating legend (QA 8709)
+// v6.0.0: Fixed font parameter bug.
+//         HF: Map locking problem when locating legend.
+// v5.1.5: New GX replacing CHPSYMBLEG.
+//===========================================================================
+
+RESOURCE="PROPSYMBLEG.gr"
+#include "PROPSYMBLEG.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT_SHORT) sTitle, sSubTitle;
+string(STR_DEFAULT_SHORT) sHints;
+string(STR_FILE) sNamePart, sQualPart;
+real rFontSize, rX1, rY1, rSymbScale, rStart, rIncrement, rBase;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+
+int iAction, iDone, iValue, iNSymbols;
+int iSymb, iSymbWt, iGeoFont;
+int  iFillCol, iEdgeCol;
+real rSymbAng, rSymbSize;
+string(STR_DEFAULT_LONG) sSymbFont, sFont, sLcolor, sFcolor;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- check for base view ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   if (!iExistView_MAP(Map,"*Base"))
+      Abort_SYS(_("A base view is required to use this GX."));
+
+   // --- If scale is set, but not the start or increment data values, set defaults. ---
+
+   rBase  = rGetReal_SYS("PROPSYMB","BASE");
+   rSymbScale = rGetReal_SYS("PROPSYMB","SCALE");
+
+   if(rBase != rDUMMY && rSymbScale != rDUMMY) {
+
+      rStart = rGetReal_SYS("PROPSYMBLEG","START");
+      rIncrement = rGetReal_SYS("PROPSYMBLEG","INCREMENT");
+
+      if(rStart==rDUMMY) 
+         SetReal_SYS("PROPSYMBLEG","START",rBase+rSymbScale);
+      if(rIncrement==rDUMMY)
+         SetReal_SYS("PROPSYMBLEG","INCREMENT",rSymbScale);
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+      
+
+      iDone = 0;
+      iAction = 0;
+      while(!iDone) {
+
+         if(iAction == 0) {   // --- Run Main dialogue ---
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("PROPSYMBLEG");
+
+            
+            // --- Set defaults ---
+
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_0,DGW_TEXT,"PROPSYMBLEG","TITLE");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_1,DGW_TEXT,"PROPSYMBLEG","SUBTITLE");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_2,DGW_TEXT,"PROPSYMBLEG","X");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_3,DGW_TEXT,"PROPSYMBLEG","Y");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_4,DGW_TEXT,"PROPSYMBLEG","FONTSIZE");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_5,DGW_TEXT,"PROPSYMB",   "BASE");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_6,DGW_TEXT,"PROPSYMB",   "SCALE");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_7,DGW_TEXT,"PROPSYMBLEG","NSYMBOLS");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_8,DGW_TEXT,"PROPSYMBLEG","START");
+            SetInfoSYS_DGW(Diag,_PROPSYMBLEG_9,DGW_TEXT,"PROPSYMBLEG","INCREMENT");
+
+            iValue = iRunDialogue_DGW(Diag);
+            if(iValue==-1) Cancel_SYS();
+
+            if(iValue != -1) {
+            
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_0,DGW_TEXT,"PROPSYMBLEG","TITLE");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_1,DGW_TEXT,"PROPSYMBLEG","SUBTITLE");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_2,DGW_TEXT,"PROPSYMBLEG","X");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_3,DGW_TEXT,"PROPSYMBLEG","Y");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_4,DGW_TEXT,"PROPSYMBLEG","FONTSIZE");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_5,DGW_TEXT,"PROPSYMB",   "BASE");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_6,DGW_TEXT,"PROPSYMB",   "SCALE");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_7,DGW_TEXT,"PROPSYMBLEG","NSYMBOLS");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_8,DGW_TEXT,"PROPSYMBLEG","START");
+               GetInfoSYS_DGW(Diag,_PROPSYMBLEG_9,DGW_TEXT,"PROPSYMBLEG","INCREMENT");
+      
+            }
+
+            Destroy_DGW(Diag);
+
+
+            if(iValue == 0)   // --- Plot ---
+
+               iDone = 1;
+            
+            else if(iValue == 1) // --- Locate the plot corner
+
+               iAction = 1;
+
+            else if(iValue == 2) // --- Symbols dialog
+             
+               iAction = 2;
+            
+
+         }  // --- End Main Dialogue ---
+
+         else if(iAction == 1) {  // --- Locate Plot ---  
+
+            // --- Get the coordinates of a user selected box ---
+
+            if (HINTS)    
+               DisplayMessage_SYS(_("Locate Legend"),_("Locate the Legend Lower Left Corner"));
+
+            UnLock_EMAP(EMap);
+            iSetCurrentView_EMAP(EMap,"*Base");
+            if (!iGetPoint_EMAP(EMap,_("Locate Legend..."),rX1,rY1)) {
+
+               SetReal_SYS("PROPSYMBLEG","X",rX1);
+               SetReal_SYS("PROPSYMBLEG","Y",rY1);
+
+            }
+            Map = Lock_EMAP(EMap);
+
+            iAction = 0;   // Main dialogue 
+
+         }  // --- End if(iAction==1) Locate --
+
+         else if(iAction == 2)      // --- Symbols dialogue ---
+         {   
+
+
+            GetString_SYS("PROPSYMB","FONT",sSymbFont);
+            if(!iStrlen_STR(sSymbFont)) {
+               iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sSymbFont);
+					if(!iStrlen_STR(sSymbFont))
+						Strcpy_STR(sSymbFont, "Symbols(GFN)");
+               SetString_SYS("PROPSYMB","FONT", sSymbFont);
+            }
+
+            iGeoFont = iGetInt_SYS("PROPSYMB","GFN_FONT");
+            if(iGeoFont==iDUMMY) iGeoFont = TRUE;
+             
+            iSymb = iGetInt_SYS("PROPSYMB","SYMBOL");    
+				if(iSymb==iDUMMY) iSymb = 20;		// Filled circle in symbols.gfn
+				
+            iSymbWt = iGetInt_SYS("PROPSYMB","WEIGHT");    
+            if(iSymbWt==iDUMMY) iSymbWt = MVIEW_FONT_WEIGHT_MEDIUM; // medium by default
+
+            GetString_SYS("PROPSYMB","LINE_COLOR",sLcolor);
+            if(iStrlen_STR(sLcolor)==0)
+               Strcpy_STR(sLcolor, "K");     // default to black
+
+            GetString_SYS("PROPSYMB","FILL_COLOR",sFcolor);
+
+            rSymbAng = rGetReal_SYS("PROPSYMB","ANGLE");
+            if(rSymbAng==rDUMMY) rSymbAng = 0.0;
+
+            iEdgeCol = iColor_MVIEW(sLcolor);
+            iFillCol = iColor_MVIEW(sFcolor);
+            
+            rSymbSize = 1.0;     // doesn't change
+            
+            
+            // --- Call the symbol GUI ---
+                        
+            if(iSymbolForm_GUI(sSymbFont, iGeoFont, iSymbWt, iSymb, rSymbSize, rSymbAng, iEdgeCol, iFillCol)==0)
+            {
+               
+               ColorDescr_MVIEW(iEdgeCol, sLcolor, sizeof(sLcolor));
+               ColorDescr_MVIEW(iFillCol, sFcolor, sizeof(sFcolor));
+
+               SetString_SYS("PROPSYMB","FONT",sSymbFont);  
+               SetInt_SYS("PROPSYMB","GFN_FONT", iGeoFont);   
+               SetInt_SYS("PROPSYMB","SYMBOL", iSymb);      
+               SetInt_SYS("PROPSYMB","WEIGHT",iSymbWt);             
+               SetString_SYS("PROPSYMB","LINE_COLOR",sLcolor);
+               SetString_SYS("PROPSYMB","FILL_COLOR",sFcolor);
+               SetReal_SYS("PROPSYMB","ANGLE",rSymbAng);
+            }
+
+            iAction = 0;
+         }
+
+      }  // End while(!iDone)
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("PROPSYMBLEG", "TITLE", sTitle);
+   GetString_SYS("PROPSYMBLEG", "SUBTITLE", sSubTitle);
+
+   rX1  = rGetReal_SYS("PROPSYMBLEG","X");
+   rY1  = rGetReal_SYS("PROPSYMBLEG","Y");
+   if(rX1==rDUMMY || rY1==rDUMMY)
+      Abort_SYS(_("Location for plot not defined."));
+
+
+   rFontSize = rGetReal_SYS("PROPSYMBLEG","FONTSIZE");
+   if(rFontSize<=0.0) {
+      Abort_SYS(_("The font size in mm must be > 0.0"));
+   }
+
+   rSymbScale = rGetReal_SYS("PROPSYMB","SCALE");
+   if(rSymbScale<=0.0) {
+      Abort_SYS(_("The scale in units/mm must be > 0.0"));
+   }
+
+   rBase = rGetReal_SYS("PROPSYMB","BASE");
+   if(rBase==rDUMMY) {
+      Abort_SYS(_("The base value must be defined."));
+   }
+
+   iNSymbols = iGetInt_SYS("PROPSYMBLEG","NSYMBOLS");
+   if(iNSymbols<=0)
+      Abort_SYS(_("The number of symbols must be greater than zero."));
+
+   rStart = rGetReal_SYS("PROPSYMBLEG","START");
+   if(rStart==rDUMMY) {
+      Abort_SYS(_("The start value must be defined."));
+   }
+   if(rStart-rBase <0.0)
+      Abort_SYS(_("The start value minus the base value must be >= 0.0."));
+
+   rIncrement = rGetReal_SYS("PROPSYMBLEG","INCREMENT");
+   if(rIncrement<=0.0)
+      Abort_SYS(_("The data increment between symbols must be > 0.0."));
+
+
+   // --- Create a view ---
+
+   View = Create_MVIEW(Map,"base",MVIEW_WRITEOLD);
+   
+
+   // --- Set a title group ---
+
+   GenGroupName_STR("PSLEG",sTitle,"",sGroup);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   
+
+   // --- add the maker ---
+
+   Maker_MVIEW(View,0,1,"PROPSYMBLEG",MAKER_GX,_("Proportional Symbol Legend..."),"PROPSYMBLEG;PROPSYMB;");
+
+
+   // --- set default label font characteristics --- 
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Arial"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,C_BLACK);
+  
+  
+   // --- Set symbol parameters ---
+
+   iSymb = iGetInt_SYS("PROPSYMB","SYMBOL");       
+   iSymbWt = iGetInt_SYS("PROPSYMB","WEIGHT");    
+   
+   GetString_SYS("PROPSYMB","FONT",sSymbFont);
+   if(!iStrlen_STR(sSymbFont)) {
+      iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sSymbFont);
+		if(!iStrlen_STR(sSymbFont))
+			Strcpy_STR(sSymbFont, "Symbols(GFN)");
+      SetString_SYS("PROPSYMB","FONT", sSymbFont);
+   }
+   
+   
+   // --- As a clean-up of a previous bug, prevent full file paths being using as the
+   //     symbol font name.  Remove any drive, directory or extension. ---
+   
+   FileNamePart_STR(sSymbFont, sNamePart, STR_FILE_PART_NAME);
+   FileNamePart_STR(sSymbFont, sQualPart, STR_FILE_PART_QUALIFIERS);
+   FileCombineParts_STR("", "", sNamePart, "", sQualPart, sSymbFont);
+
+   iGeoFont = iGetInt_SYS("PROPSYMB","GFN_FONT");
+   if(iGeoFont==iDUMMY) iGeoFont = TRUE;
+    
+   iSymb = iGetInt_SYS("PROPSYMB","SYMBOL");    
+   if(iSymb==iDUMMY) iSymb = 20;		// Filled circle in symbols.gfn
+   
+   iSymbWt = iGetInt_SYS("PROPSYMB","WEIGHT");    
+   if(iSymbWt==iDUMMY) iSymbWt = MVIEW_FONT_WEIGHT_MEDIUM; // medium by default
+
+   GetString_SYS("PROPSYMB","LINE_COLOR",sLcolor);
+   if(iStrlen_STR(sLcolor)==0)
+	   Strcpy_STR(sLcolor, "K");     // default to black
+   
+   GetString_SYS("PROPSYMB","FILL_COLOR",sFcolor);
+
+   rSymbAng = rGetReal_SYS("PROPSYMB","ANGLE");
+   if(rSymbAng==rDUMMY) rSymbAng = 0.0;
+
+
+   // --- set symbol parameters ---
+
+   SymbFont_MVIEW(View,sSymbFont,iGeoFont,iSymbWt,FALSE);
+   SymbColor_MVIEW(View,iColor_MVIEW(sLcolor));
+   SymbFillColor_MVIEW(View,iColor_MVIEW(sFcolor));
+   SymbNumber_MVIEW(View,iSymb);
+   SymbAngle_MVIEW(View,rSymbAng);
+
+
+   // --- Draw the legend ---
+
+   PropSymbLegend_MVU(View, rX1, rY1, rFontSize, rSymbScale, rBase, iNSymbols, rStart, rIncrement,
+                        sTitle, sSubTitle);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+
+   // --- Release the map ---
+
+   UnLock_EMAP(EMap);
+
+}

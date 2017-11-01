@@ -1,0 +1,199 @@
+//===========================================================================
+
+NAME          = "Semplot Preferences"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+
+    SEMPREFERENCES.SORTDATA
+                  .DUMMIES          // Use dummies '*'
+                  .AUTOREDRAW
+                  .SYMBLEGEND
+                  .REFRESH_GROUPS
+                  .GROUP_WARNING
+                  .MINERAL_CHANNEL
+                  .MINERAL          // Enforce mineral ID on plots?
+                  .SYMBOL_SIZE
+                  .LEGEND_SIZE
+           SEMPLOT.MINERAL_CHANNEL
+
+"
+// Revision History
+// v6.3.0: Added ability to select a current mineral channel.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+//===========================================================================
+
+RESOURCE = "SEMPREFERENCES.gr"
+#include "SEMPREFERENCES.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+DGW Diag;
+EDB EData;
+DB  Data;
+LST List;
+
+string(20) sTemp;
+int i;
+
+//===========================================================================
+//                             MAP CODE
+//===========================================================================
+
+{
+   // --- set current defaults ---
+
+   if (iGlobal_SYS("SEMPLOT.SORTDATA",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","SORTDATA",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","SORTDATA","1");    // default - sort "yes"
+
+   if (iGlobal_SYS("SEMPLOT.DUMMIES",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","DUMMIES",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","DUMMIES","1");     // Use dummies
+
+   if (iGlobal_SYS("SEMPLOT.AUTOREDRAW",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","AUTOREDRAW",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","AUTOREDRAW","1");  // Auto-redraw "yes"
+
+   if (iGlobal_SYS("SEMPLOT.SYMBLEGEND",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","SYMBLEGEND",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","SYMBLEGEND","1");  // Plot symbol legend
+
+   if (iGlobal_SYS("SEMPLOT.REFRESH_GROUPS",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","REFRESH_GROUPS",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","REFRESH_GROUPS","0"); // don't reassign groups symbols
+
+   if (iGlobal_SYS("SEMPLOT.GROUP_WARNING",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","GROUP_WARNING",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","GROUP_WARNING","1");  // warn of unassigned groups
+
+   if (iGlobal_SYS("SEMPLOT.MINERAL_CHANNEL",sTemp) == 0) {
+      SetString_SYS("SEMPLOT","MINERAL_CHANNEL",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","MINERAL_CHANNEL",_("Mineral"));  // current mineral channel
+
+   if (iGlobal_SYS("SEMPLOT.MINERAL",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","MINERAL",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","MINERAL","1");  // enforce mineral ID
+
+   if (iGlobal_SYS("SEMPLOT.SYMBOL_SIZE",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","SYMBOL_SIZE",sTemp);
+   }
+//   else
+//      SetString_SYS("SEMPREFERENCES","SYMBOL_SIZE","2.0");      // no default symbol size
+
+   if (iGlobal_SYS("SEMPLOT.LEGEND_SIZE",sTemp) == 0) {
+      SetString_SYS("SEMPREFERENCES","LEGEND_SIZE",sTemp);
+   }
+   else
+      SetString_SYS("SEMPREFERENCES","LEGEND_SIZE","2");
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      Diag = Create_DGW("SEMPREFERENCES");
+
+
+      // --- Create a LST of mineral channels ---
+      
+      List = GetList_DGW(Diag,_SEMPREFERENCES_6);
+      
+      if(iHaveCurrent_EDB())
+      {
+         EData = Current_EDB();
+         Data = Lock_EDB(EData);
+         
+         ClassChanLST_DB(Data, List, "MINERAL");
+         UnLock_EDB(EData);
+      }
+      AddUniqueItem_LST(List, _("Mineral"), "");
+
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_0,DGW_LISTALIAS ,"SEMPREFERENCES","SORTDATA");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_1,DGW_LISTALIAS ,"SEMPREFERENCES","DUMMIES");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_2,DGW_LISTALIAS ,"SEMPREFERENCES","AUTOREDRAW");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_3,DGW_LISTALIAS ,"SEMPREFERENCES","SYMBLEGEND");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_4,DGW_LISTALIAS ,"SEMPREFERENCES","REFRESH_GROUPS");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_5,DGW_LISTALIAS ,"SEMPREFERENCES","GROUP_WARNING");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_6,DGW_TEXT ,     "SEMPLOT","MINERAL_CHANNEL");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_7,DGW_LISTALIAS ,"SEMPREFERENCES","MINERAL");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_8,DGW_TEXT      ,"SEMPREFERENCES","SYMBOL_SIZE");
+      SetInfoSYS_DGW(Diag,_SEMPREFERENCES_9,DGW_TEXT      ,"SEMPREFERENCES","LEGEND_SIZE");
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_0,DGW_LISTALIAS ,"SEMPREFERENCES","SORTDATA");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_1,DGW_LISTALIAS ,"SEMPREFERENCES","DUMMIES");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_2,DGW_LISTALIAS ,"SEMPREFERENCES","AUTOREDRAW");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_3,DGW_LISTALIAS ,"SEMPREFERENCES","SYMBLEGEND");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_4,DGW_LISTALIAS ,"SEMPREFERENCES","REFRESH_GROUPS");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_5,DGW_LISTALIAS ,"SEMPREFERENCES","GROUP_WARNING");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_6,DGW_TEXT      ,"SEMPLOT","MINERAL_CHANNEL");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_7,DGW_LISTALIAS ,"SEMPREFERENCES","MINERAL");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_8,DGW_TEXT      ,"SEMPREFERENCES","SYMBOL_SIZE");
+      GetInfoSYS_DGW(Diag,_SEMPREFERENCES_9,DGW_TEXT      ,"SEMPREFERENCES","LEGEND_SIZE");
+   }
+
+
+   // --- get/set parameters ---
+
+   GetString_SYS("SEMPREFERENCES","SORTDATA",sTemp);
+   GlobalSet_SYS("SEMPLOT.SORTDATA",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","DUMMIES",sTemp);
+   GlobalSet_SYS("SEMPLOT.DUMMIES",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","AUTOREDRAW",sTemp);
+   GlobalSet_SYS("SEMPLOT.AUTOREDRAW",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","SYMBLEGEND",sTemp);
+   GlobalSet_SYS("SEMPLOT.SYMBLEGEND",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","REFRESH_GROUPS",sTemp);
+   GlobalSet_SYS("SEMPLOT.REFRESH_GROUPS",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","GROUP_WARNING",sTemp);
+   GlobalSet_SYS("SEMPLOT.GROUP_WARNING",sTemp);
+
+   GetString_SYS("SEMPLOT","MINERAL_CHANNEL",sTemp);
+   GlobalSet_SYS("SEMPLOT.MINERAL_CHANNEL",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","MINERAL",sTemp);
+   GlobalSet_SYS("SEMPLOT.MINERAL",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","SYMBOL_SIZE",sTemp);
+   GlobalSet_SYS("SEMPLOT.SYMBOL_SIZE",sTemp);
+
+   GetString_SYS("SEMPREFERENCES","LEGEND_SIZE",sTemp);
+   GlobalSet_SYS("SEMPLOT.LEGEND_SIZE",sTemp);
+
+   GlobalWrite_SYS("");            
+
+}

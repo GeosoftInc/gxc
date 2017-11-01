@@ -1,0 +1,128 @@
+//===========================================================================
+NAME          = "View and print a survey plan"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/QC Utility"
+
+DESCRIPTION   = "
+
+   Use this GX to view and print a survey plan.
+   
+   No interactive parameters and no GX help file available for this GX.
+
+"
+// Revision History:
+// Added a parameter which you can specify which file to write to in script mode (Joseph)
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+SBF         hSBF;
+DB          Data;
+EDB         EData;
+string(STR_FILE) sFile;
+string(STR_DEFAULT_LONG) sDefEdit,sDefEditType;
+string(STR_DEFAULT_SHORT) sWait;
+
+int         i;
+//int         iCheck;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Set temp file name ---
+   
+   if (!iInteractive_SYS()) {
+      GetString_SYS("QCPLANSM","FILE",sFile);
+   }
+   else
+      Strcpy_STR(sFile,"_Surveyplan.sum");
+                            
+
+   // --- Get sum file from DB ---
+
+   if (iExistDir_SBF(hGetDB_SBF (Data), "QC")) {
+      hSBF = Create_SBF(hGetDB_SBF (Data), "QC", SBF_READ);
+      
+      if (iExistFile_SBF(hSBF, "Suvyplan.sum")) 
+         SaveLog_SBF(hGetDB_SBF (Data), "QC", "Suvyplan.sum", sFile,  0);
+      else
+         Abort_SYS(_("The current database was not created using the QCPLAN.GX and therefore does not contain survey flight path summary information."));
+   } else
+      Abort_SYS(_("The current database was not created using the QCPLAN.GX and therefore does not contain survey flight path summary information."));
+
+   UnLock_EDB(EData);
+   if (!iInteractive_SYS())
+      Exit_SYS();
+   
+
+   // --- get editor name ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit))
+      iRunGX_SYS("newedit");
+   iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit);
+   
+   
+   // --- get windows wait ---
+   
+   GetString_SYS("EDIT","WAIT",sWait);
+   if (iCharComp_STR(sWait,"W"))
+      i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_WAIT;
+   else   
+      i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_NOWAIT;
+   
+      
+   // --- reset to default no wait ---
+            
+   SetString_SYS("EDIT","WAIT","NOWAIT");
+   
+
+
+
+   // --- check if DOS editor ---
+
+   if (!iGlobal_SYS("MONTAJ.DEFAULT_EDITOR_TYPE",sDefEditType)) {
+
+      ToUpper_STR(sDefEditType);
+      if (iCharComp_STR(sDefEditType,"D"))
+         i = SYS_RUN_TYPE_DOS;
+         
+   }
+
+
+   // --- edit ---
+
+   if (iRun_SYS(sDefEdit,sFile,i)) {
+
+      Strcpy_STR(sFile,_("Unable to run "));
+      Strcat_STR(sFile,sDefEdit);
+      Abort_SYS(sFile);
+
+   }
+   
+   
+   // --- Delete temp file ---
+   
+//   iDeleteFile_SYS(sFile);
+
+
+}
+

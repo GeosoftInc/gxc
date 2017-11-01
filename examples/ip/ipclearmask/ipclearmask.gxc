@@ -1,0 +1,208 @@
+//===========================================================================
+NAME          = "Set Mask Channel to 1"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+
+ IPCLEARMASK.MASK 	Mask channel - default is \"QC\"
+            .LINES : Line selections:
+                     A : All lines
+                     S : Selected lines
+                     D : Displayed line
+"
+// Revision History
+// v7.0.0 Enabled to work with array mask channels.
+// v5.1.7 New GX.
+//===========================================================================
+
+RESOURCE = "IPCLEARMASK.gr"
+#include "IPCLEARMASK.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+
+EDB        EData;
+DB         Data;
+DB_SYMB    MCh;        // Channel handles
+DB_SYMB    Line;       // Line handle
+DB_SELECT  Select;
+DGW        Diag;
+VA         VAm;
+VV         VVm;
+LST        List,LineLST;
+
+string(300) sBuff;
+string(STR_DB_SYMBOL)    sLines,sCurLine,sMask;
+int   i, iLine, iTotLines, iCol;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- get current database and currently selected line ---
+
+   EData = Current_EDB();
+   GetCurLine_EDB(EData,sCurLine);
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPCLEARMASK");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_IPCLEARMASK_0);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      SetInfoSYS_DGW(Diag,_IPCLEARMASK_0,DGW_TEXT, "IPCLEARMASK","MASK");
+      SetInfoSYS_DGW(Diag,_IPCLEARMASK_1,DGW_LISTALIAS,"IPCLEARMASK","LINES");
+    
+      
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_IPCLEARMASK_0,DGW_TEXT, "IPCLEARMASK","MASK");
+      GetInfoSYS_DGW(Diag,_IPCLEARMASK_1,DGW_LISTALIAS,"IPCLEARMASK","LINES");
+     
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IPCLEARMASK","MASK",sMask);    
+   GetString_SYS("IPCLEARMASK","LINES",sLines);
+
+
+   // --- Open mask channel ---
+      
+   if (!iExistChan_DB(Data,sMask)) 
+      Abort_SYS(_("Mask Channel Does not exist!"));
+   else 
+      MCh = FindChan_DB(Data,sMask);
+
+   LockSymb_DB(Data,MCh,DB_LOCK_READWRITE,DB_WAIT_NONE);     
+
+
+   // --- Set line selections ---
+
+   if (iChar_STR(sLines) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLines) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLines) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+
+   // --- Do the line selection ---
+
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+
+   // --- Get LST of selected lines ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, LineLST);
+   
+   
+   // --- Reset selections ---
+
+   if(iLine != DU_LINES_SELECTED) {
+      SetSelect_DB(Data, Select);
+   }
+
+
+	// --- Get the number of columns (might be a VA mask) ---
+	
+	iCol = iGetColVA_DB(Data, MCh);
+	
+
+   // --- Create a VV, VA ---
+
+   VAm = Create_VA(INT,0,iCol);
+
+
+   // --- process lines ---
+
+   iTotLines = iSize_LST(LineLST);
+
+   // --- Go through all selected Lines ---
+
+   Progress_SYS(1);
+
+   for(i=0;i<iTotLines;i++) {
+   
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, i);
+      GetItem_LST(LineLST, 0, i, sCurLine);
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      Strcpy_STR(sBuff,_("Processing line: "));
+      Strcat_STR(sBuff,sCurLine);
+
+      ProgName_SYS(sBuff,0);
+      ProgUpdateL_SYS(i,iTotLines);
+
+
+      // --- Get data ---
+
+      GetChanVA_DB(Data,Line,MCh,VAm);
+
+
+      // --- Set mask values to "1" ---
+
+		VVm = GetFullVV_VA(VAm);
+      SetIntN_VV(VVm, 0, -1, 1);
+
+
+      // --- Replace the data ---
+
+      PutChanVA_DB(Data,Line,MCh,VAm);
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);   
+   }              
+
+   // --- done ---
+
+   UnLockSymb_DB(Data,MCh);
+   Destroy_SYS(VAm);
+   Progress_SYS(0);
+   
+   UnLock_EDB(EData);   
+   LoadChan_EDB(EData, sMask);    
+}

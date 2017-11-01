@@ -1,0 +1,98 @@
+//===========================================================================
+NAME          = "Attach a warp to a grid"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   WARPGRDA.GRD   name of the grid
+           .WRP   name of the warp file
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates/Georeferencing"
+
+//===========================================================================
+// Revistion history
+//
+// 5.1.6 Grid was opened READONLY, so the warp was not applied.  The grid
+//       is now opened READWRITE.   Also added a check to prevent applying
+//       a warp to a rotated grid.
+//
+//===========================================================================
+
+RESOURCE = "warpgrda.gr"
+#include "warpgrda.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_FILE)  sGrid;
+string(STR_FILE)  sWarp;
+
+DGW      Diag;                   // Dialogue handle
+IMG      hIMG;
+IPJ      hIPJ;
+int      i;
+real     rDx,rDy,rXo,rYo,rRot;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("WARPGRDA0");
+      SetInfoSYS_DGW(Diag,_WARPGRDA0_0,DGW_FILEPATH,"WARPGRDA","GRD");
+      SetInfoSYS_DGW(Diag,_WARPGRDA0_1,DGW_FILEPATH,"WARPGRDA","WRP");
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+      GetInfoSYS_DGW(Diag,_WARPGRDA0_0,DGW_FILEPATH,"WARPGRDA","GRD");    
+      GetInfoSYS_DGW(Diag,_WARPGRDA0_1,DGW_FILEPATH,"WARPGRDA","WRP");
+      Destroy_DGW(Diag);
+      
+   }      
+   
+   Progress_SYS(1);
+   
+   
+   // --- Get the image and IPJ ---
+
+   GetString_SYS("WARPGRDA","GRD",sGrid);
+   hIMG = CreateFile_IMG(GS_FLOAT,sGrid,IMG_FILE_READORWRITE);
+   
+   // --- check if grid is rotated - warps do not work with rotated grids ---
+   
+   rDx = rDy = rXo = rYo = rRot = 0.0;
+   GetInfo_IMG(hIMG,rDx,rDy,rXo,rYo,rRot);
+   if (rRot != 0.0) {
+      DisplayMessage_SYS(_("Grid is rotated"), _("This grid is rotated.  Warps cannot be applied to rotated grids.  Re-grid the grid to remove the rotation."));
+      Exit_SYS();
+   }   
+   
+   // --- get the IPJ ---
+   
+   GetString_SYS("WARPGRDA","WRP",sWarp);
+   hIPJ = Create_IPJ();
+   Read_IPJ(hIPJ,IPJ_TYPE_WRP,sWarp,"","");
+   
+   
+   // --- set the warp ---
+   
+   SetIPJ_IMG(hIMG,hIPJ);
+   
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+}

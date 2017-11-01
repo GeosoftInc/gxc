@@ -1,0 +1,556 @@
+//===========================================================================
+NAME          = "RANGRID Gridding Program"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Gridding"
+
+DESCRIPTION   = "\
+
+Creates a Grid file using minimum curvature gridding.
+
+Parameters: 
+
+Channel to grid                 RANGRID.CHAN                (required)
+Name of new grid file                  .GRID                (required)
+Grid cell size                         .CS                  (required)
+Xmin,Ymin,Xmax,Ymax                    .XY                  (optional)
+Log option                             .LOGOPT              (optional)
+Log minimum                            .LOGMIN              (optional)
+Low-pass desampling factor             .DSF                 (optional)
+Blanking distance                      .BKD                 (optional)
+Tolerance                              .TOL                 (optional)
+% pass tolerance                       .PASTOL              (optional)
+Max. iterations                        .ITRMAX              (optional)
+Starting coarse grid                   .ICGR                (optional)
+Starting search radius                 .SRD                 (optional)
+Internal tension (0-1)                 .TENS                (optional)
+Cells to extend beyond data            .EDGCLP              (optional)
+Weighting power                        .IWT                 (optional)
+Weighting slope                        .WTSLP               (optional)
+
+Run Modes      RANGRID.RUNMODE   0: Normal behaviour
+                                 1: Run advanced options dialog only
+                                 2: Write control file only
+               RANGRID.CONTROL_FILE - for RUNMODE = 2                                 
+"
+// Revision History:
+// v7.0.1: Unload/delete existing grid to ensure proper refresh of grid window.
+// v6.3.0: Added "Advanced Options" and control file modes
+// v6.1.0: Fixed double-lock when called from external GX and cancel out.
+// v5.1.8: Added IWT and WTSLP parameters to advanced options
+// v5.1.7: Added Finish button to advanced options
+// v5.1.4: Added EDGCLP parameter to advanced options
+// v5.1.3: Using "Current" X and Y channels
+//         Using new iRun2_RGRD function to process.
+//===========================================================================
+
+RESOURCE = "rangrid.gr"
+#include "rangrid.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+#define MODE_NORMAL 0
+#define MODE_OPTIONS 1
+#define MODE_CONTROL_FILE 2
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sCtl;           // Name of control file
+string(STR_FILE) sGrid;          // Name of new grid file
+string(STR_DB_SYMBOL) sXCh,sYCh,sZCh;  // channels
+string(STR_DEFAULT) sCS;         // grid cell size       
+string(STR_DEFAULT_LONG) sXY;    //    . 
+string(STR_DEFAULT) sLogOpt;     //    .
+string(STR_DEFAULT) sLogMin;     //    .
+string(STR_DEFAULT) sDSF;        //    . 
+string(STR_DEFAULT) sBKD;        //    .
+string(STR_DEFAULT) sTol;        //    .
+string(STR_DEFAULT) sPasTol;     //   optional parameters
+string(STR_DEFAULT) sItrMax;     //    .
+string(STR_DEFAULT) sTens;       //    .  
+string(STR_DEFAULT) sICGR;       //    . 
+string(STR_DEFAULT) sSRD;        //    .
+string(STR_DEFAULT) sEdgClp;     //    .
+string(STR_DEFAULT) sIWT;        //    .
+string(STR_DEFAULT) sWtSlp;      //    .
+
+WA          WA_con;       // Handle to write control file
+string(STR_DEFAULT_LONG) sText;        // Line of text to write to control file
+                                           
+EDB         EData;
+DB          Data;         // Database handle
+DGW         Diag;         // Dialogue handle
+LST         List;         // List handle
+
+int         i, iDone, iLocked, iRunMode;
+
+string(STR_DEFAULT_LONG) sMsg;
+string(STR_FILE) sDatabase;
+
+//===========================================================================
+//                           RANGRID CODE
+//===========================================================================
+
+{
+
+   // --- Determine open method. On rare occasions, KRIGRID and RANGRID are
+   //     called from "C" code which has itself already been called from a
+   //     GX where the database has already been locked. In this case, don't try
+   //     to unlock it at the end, or the underlying DB object will be destroyed.
+   //     Lock_EDB will return an error ("Locked twice") in this case, but it
+   //     will still work.
+	//     We now also allow the opening of an external database not loaded into
+	//     montaj, if the user so chooses, using LOCKED = 2.
+
+   iLocked = iGetInt_SYS("RANGRID","LOCKED");
+   if(iLocked!=1 && iLocked!=2) iLocked = 0;
+
+   // --- Locking mode must be reset for every call --
+
+   SetInt_SYS("RANGRID","LOCKED",0);
+
+
+   // --- As of v6.3, this GX can be run simply to gather advanced parameters,
+   //     and/or create a control file ---
+   
+   iRunMode = iGetInt_SYS("RANGRID", "RUNMODE");
+   SetInt_SYS("RANGRID", "RUNMODE", 0);      // must set every time, default to normal behaviour
+   if(iRunMode!=MODE_OPTIONS && 
+      iRunMode!=MODE_CONTROL_FILE) iRunMode = MODE_NORMAL;
+   
+   
+   if(iRunMode==MODE_NORMAL)
+   {  
+      // --- Are we running interactively ? ---
+
+      if(iInteractive_SYS())  {
+
+         iDone = 0;
+         i = 0;
+         while (iDone==0)
+         {
+            
+            if(i==0) {
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("RANGRID");
+
+               // --- Set up lists ---
+     
+					EData = Current_EDB();
+               Data = Lock_EDB(EData);
+               List = GetList_DGW(Diag,_RANGRID_0);
+               SymbLST_DB(Data,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+               UnLock_EDB(EData);
+            
+
+               // --- Set any Defaults from INI ---
+
+               SetInfoSYS_DGW(Diag,_RANGRID_0,DGW_TEXT,"RANGRID","CHAN");     
+               SetInfoSYS_DGW(Diag,_RANGRID_1,DGW_FILEPATH,"RANGRID","GRID");
+               SetInfoSYS_DGW(Diag,_RANGRID_2,DGW_TEXT,"RANGRID","CS");     
+
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1)
+                  Cancel_SYS();    // Cancel
+
+            
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_RANGRID_0,DGW_TEXT,"RANGRID","CHAN");
+               GetInfoSYS_DGW(Diag,_RANGRID_1,DGW_FILEPATH,"RANGRID","GRID");
+               GetInfoSYS_DGW(Diag,_RANGRID_2,DGW_TEXT,"RANGRID","CS");     
+      
+
+               // ---  Do file verification here ---
+
+               if(i==0) {
+                     
+                  GetString_SYS("RANGRID","GRID",sGrid);
+                  if(iFileExist_SYS(sGrid)) {
+
+                     Printf_STR(sMsg, sizeof(sMsg), _("Overwrite the \"%s\" file?"), sGrid);
+
+                     if(iDisplayQuestion_SYS(_("File Validation"), sMsg)==0) i = 1;
+                  }
+               }
+
+               Destroy_DGW(Diag);
+
+               if(i==0) iDone = 1;
+
+            }
+            else if(i==1) {
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("RANGRID1");
+
+               // --- Set any Defaults from INI ---
+
+               GetString_SYS("RANGRID","CHAN",sZCh);
+               SetInfo_DGW(Diag,_RANGRID1_0,DGW_TEXT,sZCh);
+
+               GetString_SYS("RANGRID","GRID",sGrid);
+               SetInfo_DGW(Diag,_RANGRID1_1,DGW_TEXT,sGrid);
+
+               GetString_SYS("RANGRID","CS",sCS);
+               SetInfo_DGW(Diag,_RANGRID1_2,DGW_TEXT,sCS);
+
+               SetInfoSYS_DGW(Diag,_RANGRID1_3,DGW_TEXT,"RANGRID","XY");
+               SetInfoSYS_DGW(Diag,_RANGRID1_4,DGW_LISTALIAS,"RANGRID","LOGOPT");     
+               SetInfoSYS_DGW(Diag,_RANGRID1_5,DGW_TEXT,"RANGRID","LOGMIN");
+               SetInfoSYS_DGW(Diag,_RANGRID1_6,DGW_TEXT,"RANGRID","DSF");     
+               SetInfoSYS_DGW(Diag,_RANGRID1_7,DGW_TEXT,"RANGRID","BKD");
+               SetInfoSYS_DGW(Diag,_RANGRID1_8,DGW_TEXT,"RANGRID","TOL");     
+               SetInfoSYS_DGW(Diag,_RANGRID1_9,DGW_TEXT,"RANGRID","PASTOL");
+               SetInfoSYS_DGW(Diag,_RANGRID1_10,DGW_TEXT,"RANGRID","ITRMAX");     
+               SetInfoSYS_DGW(Diag,_RANGRID1_11,DGW_TEXT,"RANGRID","ICGR");
+               SetInfoSYS_DGW(Diag,_RANGRID1_12,DGW_TEXT,"RANGRID","SRD");
+               SetInfoSYS_DGW(Diag,_RANGRID1_13,DGW_TEXT,"RANGRID","TENS");
+               SetInfoSYS_DGW(Diag,_RANGRID1_14,DGW_TEXT,"RANGRID","EDGCLP");
+               SetInfoSYS_DGW(Diag,_RANGRID1_15,DGW_TEXT,"RANGRID","IWT");
+               SetInfoSYS_DGW(Diag,_RANGRID1_16,DGW_TEXT,"RANGRID","WTSLP");     
+               
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1)
+                  Cancel_SYS();    // Cancel
+
+            
+               // --- Put values back in INI ---
+
+               GetInfoSYS_DGW(Diag,_RANGRID1_3,DGW_TEXT,"RANGRID","XY");
+               GetInfoSYS_DGW(Diag,_RANGRID1_4,DGW_LISTALIAS,"RANGRID","LOGOPT");     
+               GetInfoSYS_DGW(Diag,_RANGRID1_5,DGW_TEXT,"RANGRID","LOGMIN");
+               GetInfoSYS_DGW(Diag,_RANGRID1_6,DGW_TEXT,"RANGRID","DSF");     
+               GetInfoSYS_DGW(Diag,_RANGRID1_7,DGW_TEXT,"RANGRID","BKD");
+               GetInfoSYS_DGW(Diag,_RANGRID1_8,DGW_TEXT,"RANGRID","TOL");     
+               GetInfoSYS_DGW(Diag,_RANGRID1_9,DGW_TEXT,"RANGRID","PASTOL");
+               GetInfoSYS_DGW(Diag,_RANGRID1_10,DGW_TEXT,"RANGRID","ITRMAX");     
+               GetInfoSYS_DGW(Diag,_RANGRID1_11,DGW_TEXT,"RANGRID","ICGR");
+               GetInfoSYS_DGW(Diag,_RANGRID1_12,DGW_TEXT,"RANGRID","SRD");
+               GetInfoSYS_DGW(Diag,_RANGRID1_13,DGW_TEXT,"RANGRID","TENS");
+               GetInfoSYS_DGW(Diag,_RANGRID1_14,DGW_TEXT,"RANGRID","EDGCLP");
+               GetInfoSYS_DGW(Diag,_RANGRID1_15,DGW_TEXT,"RANGRID","IWT");
+               GetInfoSYS_DGW(Diag,_RANGRID1_16,DGW_TEXT,"RANGRID","WTSLP");     
+               
+               Destroy_DGW(Diag);
+
+               
+               // --- User hit Finish? ---
+
+               if(i==1) {
+
+                  // ---  Do file verification here ---
+                    
+                  GetString_SYS("RANGRID","GRID",sGrid);
+                  if(iFileExist_SYS(sGrid)) {
+
+                     Printf_STR(sMsg, sizeof(sMsg), _("Overwrite the \"%s\" file?"), sGrid);
+
+                     if(iDisplayQuestion_SYS(_("File Validation"), sMsg)==0) {
+                        i = 0;
+                        continue;
+                     }
+                  }
+                  iDone = 1;
+               }
+            }
+         
+         } // end while(!iDone)
+      } 
+   }
+   else if(iRunMode == MODE_OPTIONS)
+   {
+      if(!iInteractive_SYS())
+         Abort_SYS(_("Rangrid OPTIONS mode must be run interactively"));
+         
+      
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("RANGRID2");
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_RANGRID1_0,DGW_TEXT,"RANGRID","CS");
+      SetInfoSYS_DGW(Diag,_RANGRID1_1,DGW_TEXT,"RANGRID","XY");
+      SetInfoSYS_DGW(Diag,_RANGRID2_2,DGW_LISTALIAS,"RANGRID","LOGOPT");     
+      SetInfoSYS_DGW(Diag,_RANGRID2_3,DGW_TEXT,"RANGRID","LOGMIN");
+      SetInfoSYS_DGW(Diag,_RANGRID2_4,DGW_TEXT,"RANGRID","DSF");     
+      SetInfoSYS_DGW(Diag,_RANGRID2_5,DGW_TEXT,"RANGRID","BKD");
+      SetInfoSYS_DGW(Diag,_RANGRID2_6,DGW_TEXT,"RANGRID","TOL");     
+      SetInfoSYS_DGW(Diag,_RANGRID2_7,DGW_TEXT,"RANGRID","PASTOL");
+      SetInfoSYS_DGW(Diag,_RANGRID2_8,DGW_TEXT,"RANGRID","ITRMAX");     
+      SetInfoSYS_DGW(Diag,_RANGRID2_9,DGW_TEXT,"RANGRID","ICGR");
+      SetInfoSYS_DGW(Diag,_RANGRID2_10,DGW_TEXT,"RANGRID","SRD");
+      SetInfoSYS_DGW(Diag,_RANGRID2_11,DGW_TEXT,"RANGRID","TENS");
+      SetInfoSYS_DGW(Diag,_RANGRID2_12,DGW_TEXT,"RANGRID","EDGCLP");
+      SetInfoSYS_DGW(Diag,_RANGRID2_13,DGW_TEXT,"RANGRID","IWT");
+      SetInfoSYS_DGW(Diag,_RANGRID2_14,DGW_TEXT,"RANGRID","WTSLP");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+
+   
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_RANGRID1_1,DGW_TEXT,"RANGRID","XY");
+      GetInfoSYS_DGW(Diag,_RANGRID2_2,DGW_LISTALIAS,"RANGRID","LOGOPT");     
+      GetInfoSYS_DGW(Diag,_RANGRID2_3,DGW_TEXT,"RANGRID","LOGMIN");
+      GetInfoSYS_DGW(Diag,_RANGRID2_4,DGW_TEXT,"RANGRID","DSF");     
+      GetInfoSYS_DGW(Diag,_RANGRID2_5,DGW_TEXT,"RANGRID","BKD");
+      GetInfoSYS_DGW(Diag,_RANGRID2_6,DGW_TEXT,"RANGRID","TOL");     
+      GetInfoSYS_DGW(Diag,_RANGRID2_7,DGW_TEXT,"RANGRID","PASTOL");
+      GetInfoSYS_DGW(Diag,_RANGRID2_8,DGW_TEXT,"RANGRID","ITRMAX");     
+      GetInfoSYS_DGW(Diag,_RANGRID2_9,DGW_TEXT,"RANGRID","ICGR");
+      GetInfoSYS_DGW(Diag,_RANGRID2_10,DGW_TEXT,"RANGRID","SRD");
+      GetInfoSYS_DGW(Diag,_RANGRID2_11,DGW_TEXT,"RANGRID","TENS");
+      GetInfoSYS_DGW(Diag,_RANGRID2_12,DGW_TEXT,"RANGRID","EDGCLP");
+      GetInfoSYS_DGW(Diag,_RANGRID2_13,DGW_TEXT,"RANGRID","IWT");
+      GetInfoSYS_DGW(Diag,_RANGRID2_14,DGW_TEXT,"RANGRID","WTSLP");     
+      
+      Destroy_DGW(Diag);
+      
+      Exit_SYS();
+   }
+
+
+   if(iRunMode==MODE_NORMAL)
+   {
+      
+      // --- Lock the database ---
+
+		if(iLocked == 2)  // Load external database
+		{
+			GetString_SYS("RANGRID","DATABASE",sDatabase);
+			if(iStrlen_STR(sDatabase)==0)
+				Abort_SYS(_("A database must be specified when using the RANGRID.LOCKED = 2 parameter."));
+			Data = Open_DB(sDatabase, "SUPER", "");
+		}
+		else
+		{
+			EData = Current_EDB();
+			Data = Lock_EDB(EData);
+		}
+      
+      
+      // --- Get Non-control file Parameters ---
+
+      GetString_SYS("RANGRID","CHAN",sZCh); 
+      GetString_SYS("RANGRID","GRID",sGrid);
+
+
+      // --- Validate parameters ---
+      
+      if (iStrlen_STR(sZCh) <=0)
+         Abort_SYS(_("Z channel name is invalid"));
+
+      if (iStrlen_STR(sGrid) <=0)
+         Abort_SYS(_("New grid file name is invalid"));
+
+
+      // --- Get current X, Y channels ---
+
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+      
+
+      // --- See if grid channels exist ---
+
+      if (!iExistSymb_DB(Data,sXCh,DB_SYMB_CHAN))
+         Abort_SYS(_("The current X channel does not exist in database"));
+
+      if (!iExistSymb_DB(Data,sYCh,DB_SYMB_CHAN))
+         Abort_SYS(_("The current Y channel does not exist in database"));
+
+      if (!iExistSymb_DB(Data,sZCh,DB_SYMB_CHAN))
+         Abort_SYS(_("The Z Channel does not exist in database"));
+   }
+
+
+
+   // --- Get Control File Parameters ---
+
+   GetString_SYS("RANGRID","CS",sCS);     
+   GetString_SYS("RANGRID","XY",sXY);
+   GetString_SYS("RANGRID","LOGOPT",sLogOpt);     
+   if (iStrcmp_STR(sLogOpt,_n("log"),STR_CASE_TOLERANT)==0 ||
+		 iStrcmp_STR(sLogOpt,_n("log, save as linear"),STR_CASE_TOLERANT)==0) 
+      Strcpy_STR(sLogOpt,"-1");
+   else if (iStrcmp_STR(sLogOpt,_n("log +/-"),STR_CASE_TOLERANT)==0 ||
+				iStrcmp_STR(sLogOpt,_n("log +/-, save as linear"),STR_CASE_TOLERANT)==0) 
+      Strcpy_STR(sLogOpt,"-2");
+   else if (iStrcmp_STR(sLogOpt,_n("log, save as log"),STR_CASE_TOLERANT)==0) 
+      Strcpy_STR(sLogOpt,"1");
+   else if (iStrcmp_STR(sLogOpt,_n("log +/-, save as log"),STR_CASE_TOLERANT)==0) 
+      Strcpy_STR(sLogOpt,"2");
+   else if (iStrcmp_STR(sLogOpt,"-2",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"-1",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"0",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"1",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"2",STR_CASE_TOLERANT)!=0)
+      Strcpy_STR(sLogOpt,"0");
+
+   GetString_SYS("RANGRID","LOGMIN",sLogMin);
+   GetString_SYS("RANGRID","DSF",sDSF);     
+   GetString_SYS("RANGRID","BKD",sBKD);
+   GetString_SYS("RANGRID","TOL",sTol);     
+   GetString_SYS("RANGRID","PASTOL",sPasTol);
+   GetString_SYS("RANGRID","ITRMAX",sItrMax);     
+   GetString_SYS("RANGRID","TENS",sTens);
+   GetString_SYS("RANGRID","EDGCLP",sEdgClp);
+   GetString_SYS("RANGRID","IWT",sIWT);
+   GetString_SYS("RANGRID","WTSLP",sWtSlp);
+   
+
+   // --- Coarse grid has required default (16) which may not be set if
+   //     user does not go to advanced options ---
+
+   GetString_SYS("RANGRID","ICGR",sICGR);  
+   if(!iStrlen_STR(sICGR))
+      Strcpy_STR(sICGR,"16");
+         
+         
+   GetString_SYS("RANGRID","SRD",sSRD);
+   
+
+   
+   // --- write control file ---
+   
+   if(iRunMode==MODE_CONTROL_FILE)
+   {
+      GetString_SYS("RANGRID", "CONTROL_FILE", sCtl);
+      if(!iStrlen_STR(sCtl))
+         Strcpy_STR(sCtl, "_rangrid.con");
+   }
+   else
+      Strcpy_STR(sCtl, "_rangrid.con");
+      
+   WA_con=Create_WA(sCtl,0);
+
+   // --- Line 1: cs ---
+
+   Strcpy_STR(sText,sCS);
+   Strcat_STR(sText,_n("     / cs"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   // --- line 2: xmin,ymin,xmax,ymax ---
+
+   Strcpy_STR(sText,sXY);
+   Strcat_STR(sText,_n("     / xmin,ymin,xmax,ymax"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+
+   // --- line 3: chan,zb,zm,logopt,logmin
+
+   Strcpy_STR(sText,",,,");
+   Strcat_STR(sText,sLogOpt);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLogMin);
+   Strcat_STR(sText,_n("     / chan,zb,zm,logopt,logmin"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+
+   // --- line 4: idsf,bkd,srd,iwt,edgclp,wtslp
+
+   Strcpy_STR(sText,sDSF);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sBKD);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sSRD);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sIWT);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sEdgClp);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sWtSlp);
+   Strcat_STR(sText,_n("     / idsf,bkd,srd,iwt,edgclp,wtslp"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+   
+
+   // --- line 5: tol,pastol,itrmax,ti,icgr
+
+   Strcpy_STR(sText,sTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sPasTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sItrMax);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sTens);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sICGR);
+   Strcat_STR(sText,_n("     / tol,pastol,itrmax,ti,icgr"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Destroy_WA(WA_con);
+
+
+   // --- If just creating a control file, exit now ---
+   
+   if(iRunMode==MODE_CONTROL_FILE) Exit_SYS();
+
+
+	// --- Delete existing file ---
+	
+	if(iFileExist_SYS(sGrid))
+	{
+		if (iInteractive_SYS())
+			iRemoveDocument_PROJ(sGrid);
+		iDeleteGridFile_SYS(sGrid);
+	}
+		
+   
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- Execute rangrid program ---
+
+   iRun2_RGRD(Data, sXCh, sYCh, sZCh, sCtl, sGrid);
+   
+
+   // --- Turn off progress ---
+
+   Progress_SYS(0);
+
+
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sGrid,"Grid",1);
+   
+   
+   // --- Release the Database ---
+
+   if(iLocked==0)            // see note at top...
+      UnLock_EDB(EData);  
+	else if(iLocked==2)
+		Destroy_DB(Data);
+
+}
+
+
+//-----------------------------------------------------------------------

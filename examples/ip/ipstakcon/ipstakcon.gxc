@@ -1,0 +1,441 @@
+//===========================================================================
+NAME          = "Control file for Stacked Pseudo-Section Map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Create control file for Stacked Pseudo-Section Map
+
+    IP.STAKCON : IPPLOT control file
+"
+// Revision History:
+// v5.1.8: Options for angled line/station labels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPSTAKCON.gr"
+#include "IPSTAKCON.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define DONE -1
+#define MAIN  0
+#define FINISH 999
+#define SECTION_PARAM 1
+#define PLOT_DIM 2
+#define CONTOURS 3
+#define LINE_ATTRIBUTES 4
+#define STAKCONS 5
+#define NEWFILE 100
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+
+int         i,iD;                // Utility 
+int  iSigDigits;
+string(STR_FILE) sConFile, sModFile;
+string(STR_DEFAULT_LONG) sBuff, sBuff1, sBuff2;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   
+   i = MAIN;
+   if(iInteractive_SYS())
+   {
+
+      while (i != DONE) {
+      
+         switch (i) {
+         
+            case MAIN:
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSTAKCON");
+
+               SetInfoSYS_DGW(Diag,_IPSTAKCON_0,DGW_FILEPATH,"IP","STAKCON");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSTAKCON_0,DGW_FILEPATH,"IP","STAKCON");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==1) {  // Next
+
+                  // -- Validate ---
+                  
+                  GetString_SYS("IP","STAKCON",sConFile);
+                  if(!iStrlen_STR(sConFile)) {
+                     DisplayMessage_SYS(_("IPSTAKCON"),_("The \"IP Plot Control file\" parameter is required."));
+                     break;
+                  }
+                  if(!iFileExist_SYS(sConFile)) {
+                     Printf_STR(sBuff, sizeof(sBuff), _("The file %s does not exist. Use the \"New\" button to create a new IP Plot Control file."), sConFile);
+                     DisplayMessage_SYS("IPSTAKCON",sBuff);
+                     break;
+                  }
+                  ClearGroup_SYS("IPPLOT");
+                  LoadParm_SYS(sConFile, "IPPLOT");
+				  if(iExistInt_SYS("IPPLOT","SSIGDIG")==1){
+					iSigDigits =  iGetInt_SYS("IPPLOT","SSIGDIG");
+					if(iSigDigits<-6)
+						SetInt_SYS("IPPLOT","SSIGDIG",-6);
+					else if(iSigDigits > 6)
+						SetInt_SYS("IPPLOT","SSIGDIG",6);
+				  }
+                  i = SECTION_PARAM;
+
+               }
+               else if(iD==2) {
+                  ClearGroup_SYS("IPPLOT");
+                  i = NEWFILE;
+               }
+               else if(iD==FINISH)
+                  i = DONE;
+
+            break;
+
+
+            case NEWFILE:
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSTAKCON0");
+
+               SetInfoSYS_DGW(Diag,_IPSTAKCON0_0,DGW_FILEPATH,"IP","STAKCON");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON0_1,DGW_FILEPATH,"IPPLOT","STAKMODELFILE");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSTAKCON0_0,DGW_FILEPATH,"IP","STAKCON");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON0_1,DGW_FILEPATH,"IPPLOT","STAKMODELFILE");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               // -- Validate ---
+                  
+               GetString_SYS("IP","STAKCON",sConFile);
+               if(!iStrlen_STR(sConFile)) {
+                  DisplayMessage_SYS(_("IPSTAKCON"),_("The \"New file name\" parameter is required."));
+                  break;
+               }
+
+               GetString_SYS("IPPLOT","STAKMODELFILE",sModFile);
+
+               // --- Load model if specified ---
+
+               if(iStrlen_STR(sModFile)) {
+                              
+                  ClearGroup_SYS("IPPLOT");       // group to clear
+                  LoadParm_SYS(sModFile,"IPPLOT");
+               }
+               SaveParm_SYS(sConFile, 0, "IPPLOT");
+
+               i = MAIN;
+
+            break;
+
+
+            case SECTION_PARAM:
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSTAKCON1");
+
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_0,DGW_TEXT,"IPPLOT","SCALE");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_1,DGW_TEXT,"IPPLOT","XMIN");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_2,DGW_TEXT,"IPPLOT","XMAX");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_3,DGW_TEXT,"IPPLOT","MAXN");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_4,DGW_TEXT,"IPPLOT","EXAG");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_5,DGW_LISTALIAS,"IPPLOT","TOPO");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_6,DGW_LISTALIAS,"IPPLOT","SSIGDIG");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_7,DGW_TEXT,"IPPLOT","SPVALHT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_8,DGW_TEXT,"IPPLOT","SNVALHT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_9,DGW_LISTALIAS,"IPPLOT","SPLTFILT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_10,DGW_TEXT,"IPPLOT","SFILTHT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_11,DGW_TEXT,"IPPLOT","SPOSNHT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_12,DGW_TEXT,"IPPLOT","SCHANHT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_13,DGW_LISTALIAS,"IPPLOT","SFMT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_14,DGW_LISTALIAS,"IPPLOT","LINE_LABEL_DIR");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_15,DGW_LISTALIAS,"IPPLOT","STN_LABEL_DIR");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_16,DGW_TEXT,"IPPLOT","POSINC");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_17,DGW_LISTALIAS,"IPPLOT","STN_SCALE_POSITION");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON1_18,DGW_FILEPATH,"IPPLOT","COLORFILE");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_0,DGW_TEXT,"IPPLOT","SCALE");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_1,DGW_TEXT,"IPPLOT","XMIN");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_2,DGW_TEXT,"IPPLOT","XMAX");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_3,DGW_TEXT,"IPPLOT","MAXN");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_4,DGW_TEXT,"IPPLOT","EXAG");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_5,DGW_LISTALIAS,"IPPLOT","TOPO");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_6,DGW_LISTALIAS,"IPPLOT","SSIGDIG");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_7,DGW_TEXT,"IPPLOT","SPVALHT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_8,DGW_TEXT,"IPPLOT","SNVALHT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_9,DGW_LISTALIAS,"IPPLOT","SPLTFILT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_10,DGW_TEXT,"IPPLOT","SFILTHT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_11,DGW_TEXT,"IPPLOT","SPOSNHT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_12,DGW_TEXT,"IPPLOT","SCHANHT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_13,DGW_LISTALIAS,"IPPLOT","SFMT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_14,DGW_LISTALIAS,"IPPLOT","LINE_LABEL_DIR");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_15,DGW_LISTALIAS,"IPPLOT","STN_LABEL_DIR");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_16,DGW_TEXT,"IPPLOT","POSINC");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_17,DGW_LISTALIAS,"IPPLOT","STN_SCALE_POSITION");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON1_18,DGW_FILEPATH,"IPPLOT","COLORFILE");
+
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==1)
+                  i = PLOT_DIM;
+               else if(iD==0)
+                  i = MAIN;
+               else if(iD==FINISH)
+                  i = DONE;
+
+            break;
+
+            case PLOT_DIM:
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSTAKCON2");
+
+               SetInfoSYS_DGW(Diag,_IPSTAKCON2_0,DGW_TEXT,"IPPLOT","PLWID");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON2_1,DGW_TEXT,"IPPLOT","VEDGE");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON2_2,DGW_TEXT,"IPPLOT","HEDGE");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON2_3,DGW_TEXT,"IPPLOT","NWIDL");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON2_4,DGW_TEXT,"IPPLOT","NWIDR");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSTAKCON2_0,DGW_TEXT,"IPPLOT","PLWID");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON2_1,DGW_TEXT,"IPPLOT","VEDGE");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON2_2,DGW_TEXT,"IPPLOT","HEDGE");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON2_3,DGW_TEXT,"IPPLOT","NWIDL");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON2_4,DGW_TEXT,"IPPLOT","NWIDR");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==1)
+                  i = CONTOURS;
+               else if(iD==0)
+                  i = SECTION_PARAM;
+               else if(iD==FINISH)
+                  i = DONE;
+
+            break;
+
+            case CONTOURS:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSTAKCON3");
+
+               SetInfoSYS_DGW(Diag,_IPSTAKCON3_0,DGW_TEXT,"IPPLOT","CINT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON3_1,DGW_TEXT,"IPPLOT","CINTMIN");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON3_2,DGW_TEXT,"IPPLOT","MULT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON3_3,DGW_TEXT,"IPPLOT","GAP");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON3_4,DGW_LISTALIAS,"IPPLOT","SM");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSTAKCON3_0,DGW_TEXT,"IPPLOT","CINT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON3_1,DGW_TEXT,"IPPLOT","CINTMIN");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON3_2,DGW_TEXT,"IPPLOT","MULT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON3_3,DGW_TEXT,"IPPLOT","GAP");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON3_4,DGW_LISTALIAS,"IPPLOT","SM");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==1)
+                  i = LINE_ATTRIBUTES;
+               else if(iD==0)
+                  i = PLOT_DIM;
+               else if(iD==FINISH)
+                  i = DONE;
+
+            break;
+
+            case LINE_ATTRIBUTES:
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSTAKCON4");
+
+               SetInfoSYS_DGW(Diag,_IPSTAKCON4_0,DGW_LISTALIAS,"IPPLOT","LINESTYLE");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON4_1,DGW_TEXT,"IPPLOT","LINETHICK");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON4_2,DGW_LISTALIAS,"IPPLOT","MINORSTYLE");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON4_3,DGW_TEXT,"IPPLOT","MINORTHICK");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON4_4,DGW_LISTALIAS,"IPPLOT","MAJORSTYLE");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON4_5,DGW_TEXT,"IPPLOT","MAJORTHICK");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSTAKCON4_0,DGW_LISTALIAS,"IPPLOT","LINESTYLE");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON4_1,DGW_TEXT,"IPPLOT","LINETHICK");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON4_2,DGW_LISTALIAS,"IPPLOT","MINORSTYLE");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON4_3,DGW_TEXT,"IPPLOT","MINORTHICK");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON4_4,DGW_LISTALIAS,"IPPLOT","MAJORSTYLE");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON4_5,DGW_TEXT,"IPPLOT","MAJORTHICK");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==1)
+                  i = STAKCONS;
+               else if(iD==0)
+                  i = CONTOURS;
+               else if(iD==FINISH)
+                  i = DONE;
+
+            break;
+
+            case STAKCONS:
+      
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("IPSTAKCON5");
+
+               // --- Set defaults ---
+
+               GetString_SYS("IP","CLIENT", sBuff1);
+               GetString_SYS("IPPLOT","CLIENT", sBuff2);
+               if(iStrlen_STR(sBuff1) &&
+                  !iStrlen_STR(sBuff2)) SetString_SYS("IPPLOT","CLIENT",sBuff1);
+
+               GetString_SYS("IP","TITLE1", sBuff1);
+               GetString_SYS("IPPLOT","TITLE1", sBuff2);
+               if(iStrlen_STR(sBuff1) &&
+                  !iStrlen_STR(sBuff2)) SetString_SYS("IPPLOT","TITLE1",sBuff1);
+
+               GetString_SYS("IP","TITLE2", sBuff1);
+               GetString_SYS("IPPLOT","TITLE2", sBuff2);
+               if(iStrlen_STR(sBuff1) &&
+                  !iStrlen_STR(sBuff2)) SetString_SYS("IPPLOT","TITLE2",sBuff1);
+
+               GetString_SYS("IP","INTERP", sBuff1);
+               GetString_SYS("IPPLOT","INTERP", sBuff2);
+               if(iStrlen_STR(sBuff1) &&
+                  !iStrlen_STR(sBuff2)) SetString_SYS("IPPLOT","INTERP",sBuff1);
+
+               GetString_SYS("IP","CONTRACTOR", sBuff1);
+               GetString_SYS("IPPLOT","CONTRACTOR", sBuff2);
+               if(iStrlen_STR(sBuff1) &&
+                  !iStrlen_STR(sBuff2)) SetString_SYS("IPPLOT","CONTRACTOR",sBuff1);
+
+               // --- Set the default control file ---
+
+               GetString_SYS("IPPLOT","STAKMAPPLOT", sBuff1);
+               if(!iStrlen_STR(sBuff1)) {
+                  if(!iFindPathNameEx_SYS("psstak.con",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_USER_ETC,sBuff1))
+                     SetString_SYS("IPPLOT","STAKMAPPLOT", sBuff1);
+               }
+
+
+               SetInfoSYS_DGW(Diag,_IPSTAKCON5_0,DGW_FILEPATH,"IPPLOT","STAKMAPPLOT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON5_1,DGW_TEXT,"IPPLOT","CLIENT");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON5_2,DGW_TEXT,"IPPLOT","TITLE1");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON5_3,DGW_TEXT,"IPPLOT","TITLE2");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON5_4,DGW_TEXT,"IPPLOT","INTERP");
+               SetInfoSYS_DGW(Diag,_IPSTAKCON5_5,DGW_TEXT,"IPPLOT","CONTRACTOR");
+
+               // --- Run the Dialogue ---
+
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_IPSTAKCON5_0,DGW_FILEPATH,"IPPLOT","STAKMAPPLOT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON5_1,DGW_TEXT,"IPPLOT","CLIENT");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON5_2,DGW_TEXT,"IPPLOT","TITLE1");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON5_3,DGW_TEXT,"IPPLOT","TITLE2");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON5_4,DGW_TEXT,"IPPLOT","INTERP");
+               GetInfoSYS_DGW(Diag,_IPSTAKCON5_5,DGW_TEXT,"IPPLOT","CONTRACTOR");
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               if(iD==1)
+                  i = DONE;
+               else if(iD==0)
+                  i = LINE_ATTRIBUTES;
+               else if(iD==FINISH)
+                  i = DONE;
+
+            break;
+
+
+
+         }  // End of the switch
+
+      }  // End of while
+
+   } // End of interactive section
+
+   // --- Get the Strings ---
+
+   GetString_SYS("IP","STAKCON",sConFile);
+   if(!iStrlen_STR(sConFile)) {
+      Abort_SYS(_("IP Plot Control File not defined."));
+   }
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating IPPLOT control file"),1);
+
+   SetInt_SYS("IPPLOT", "PLOT_TYPE", IP_PLOT_STACKEDSECTION);
+   SaveParm_SYS(sConFile, 0, "IPPLOT");
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+   
+}

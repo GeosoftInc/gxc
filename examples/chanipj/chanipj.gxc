@@ -1,0 +1,115 @@
+//===========================================================================
+NAME          = "Georeference database channels"
+#include <version.gxh>
+DESCRIPTION   = "
+   Display the projection of a channel.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Channel"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sXCh,sYCh;                 // Channel Names
+
+EDB         EData;                     // database handle
+DB          Data;                      // database handle
+
+DB_SYMB     XCh;
+
+string(STR_DEFAULT) sTemp;
+
+int i;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS()) {   
+   
+      // --- get channel names ---
+
+      EData = Current_EDB();
+   
+      XCh = GetCurChanSymb_EDB(EData);
+      if (XCh == NULLSYMB) {
+         DisplayMessage_SYS(_("chanipj error"), _("The mark is not in a channel"));
+         Cancel_SYS();
+      }
+      Data = Lock_EDB(EData);
+      GetChanName_DB(Data,XCh,sXCh);
+      i = iCoordPair_DB(Data,sXCh,sYCh);
+      if (i == DB_COORDPAIR_X) {
+         Strcpy_STR(sTemp,sXCh);
+         Strcpy_STR(sXCh,sYCh);
+         Strcpy_STR(sYCh,sTemp);
+      }
+		else if (i == DB_COORDPAIR_NONE)
+		{
+			// --- Try to guess the Y channel from the X channel ---
+
+			if (iStrStr_STR(sXCh, _n("X"), STR_CASE_SENSITIVE) != -1)
+			{
+				Strcpy_STR(sTemp, sXCh);
+				ReplaceChar_STR(sTemp, _n("X"), _n("Y"));
+				if(iExistChan_DB(Data, sTemp) == 1)
+					Strcpy_STR(sYCh, sTemp);
+			}
+			else if (iStrStr_STR(sXCh, _n("x"), STR_CASE_SENSITIVE) != -1)
+			{
+				Strcpy_STR(sTemp, sXCh);
+				ReplaceChar_STR(sTemp, _n("x"), _n("y"));
+				if(iExistChan_DB(Data, sTemp) == 1)
+					Strcpy_STR(sYCh, sTemp);
+			}
+
+			// --- Try to guess the X channel from the Y channel ---
+
+			else if (iStrStr_STR(sXCh, _n("Y"), STR_CASE_SENSITIVE) != -1)
+			{
+				Strcpy_STR(sTemp, sXCh);
+				ReplaceChar_STR(sTemp, _n("Y"), _n("X"));
+				if(iExistChan_DB(Data, sTemp) == 1)
+				{
+					Strcpy_STR(sYCh, sXCh);
+					Strcpy_STR(sXCh, sTemp);
+				}
+			}
+			else if (iStrStr_STR(sXCh, _n("y"), STR_CASE_SENSITIVE) != -1)
+			{
+				Strcpy_STR(sTemp, sXCh);
+				ReplaceChar_STR(sTemp, _n("y"), _n("x"));
+				if(iExistChan_DB(Data, sTemp) == 1)
+				{
+					Strcpy_STR(sYCh, sXCh);
+					Strcpy_STR(sXCh, sTemp);
+				}
+			}
+		}
+      UnLock_EDB(EData);
+   
+   
+      // --- set channel names and run setchprj gx ---
+   
+      SetString_SYS("SETCHPRJ","X",sXCh);
+      SetString_SYS("SETCHPRJ","Y",sYCh);
+      
+   }
+         
+   iRunGX_SYS("setchprj");
+   
+}

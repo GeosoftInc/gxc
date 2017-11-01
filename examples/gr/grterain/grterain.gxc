@@ -1,0 +1,513 @@
+//===========================================================================
+NAME          = "Terrain corrections"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav/Terrain Corrections"
+
+DESCRIPTION   = "\
+
+Parameters: 
+
+   GRTERAIN.XCH          X channel
+           .YCH          Y channel
+           .ELEVCH       Elevation channel
+           .TCORCH       Output Terrain correction channel
+           .SLOPCH       Local slope channel
+           .CORGRD       Regional correction grid
+           .DEMGRD       Local DEM grid
+           .ELEVUNIT     Elevation Units
+           .WATERELEV    Water reference elevation (in elevation unit)
+           .DENST        Terrain density g/cc
+           .WATERDENS    Water density g/cc (overridden on input by the system REG value)
+           .DIST         Local correction distance
+           .OPT          Optimization
+           .SURVEYTYPE   0: Ground Survey, 1: Shipborne Survey, 2: Airborne Survey
+			  .BATHYMETRY   Water depth - required for Shipborne surveys
+
+\r\n"
+
+// Revision History:
+// v8.5:    Added water density as a parameter. Don't use system REG.'
+//          Added bathymetry channel as a user-input (instead of relying on hard-wired "water")
+// v6.4.1:  Reviewed and corrected.
+// v6.4.0:  Set default X and Y to the current X, Y.
+// v6.3.0:  Don't delete existing output channels first.
+//          Correct for dummy Fid start and increment values.
+// v6.2:    Added survey type parameter (ground/shipborne/airborne).
+// v6.0:    Modified to add water elevation parameter.
+// v6.0:    Modified to work for marine gravity correction as well.
+// v5.1.7:  Set terrain correction channel default for GRBOUG GX.
+// v5.1.4:  Changed to use gr parameter GRAVRED.DENSITY_WATER in Create_TC() instead of 1.0.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grterain.gr"
+#include "grterain.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW        Diag;
+TC         TCg;
+IMG        ImgCor,ImgDem;
+EDB        EData; 
+DB         Data;                   
+DB_SYMB    XCh,YCh,ElevCh,SlopCh,WaterCh;      // Input Channel handles
+DB_SYMB    TcorCh;                             // Output Channel handle
+DB_SYMB    Line;                               // Line handle
+LST        List;                               // List handle
+VV         hVVx,hVVy,hVVelev,hVVslop,hVVwater; // VV for input channel
+VV         hVVtcor;                            // VV for output channel
+REG        hREG;
+
+int        iLine;          // Number of Lines Processed
+int        iTotLines;      // Total Number of Lines to Process
+int        iVVlen;         // Length of input VV
+int        iDum;           // flags if input VV is all dummy
+int        iSlopCh;
+int        iWaterCh;
+int        iCorGrd; 
+int        iEdge;
+int        iOpt;           
+int        iSurveyType;    // 0-Ground Survey, 1-Shipborne Survey, 2-Airborne Survey
+int			iLen;
+
+real       rFstart;        // Fiducial start of input VV
+real       rFinc;          // Fiducial increment of input VV
+real       rElevUnit,rDensT,rDensW,rDist,rWm,rElevW;
+
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL)  sXCh,sYCh,sElevCh,sSlopCh, sBathymetryCh; 
+string(STR_FILE)  sCorGrd,sDemGrd,sTcorCh; 
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_DEFAULT_SHORT) sWtUnits;
+string(STR_DEFAULT_SHORT) sSurveyType;
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Set default X, Y channels to the existing current X, Y ---
+   
+   GetString_SYS("GRTERAIN", "XCH", sXCh);
+   if(!iStrlen_STR(sXCh) || !iExistChan_DB(Data, sXCh))
+   {
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      SetString_SYS("GRTERAIN", "XCH", sXCh);
+   }
+
+   GetString_SYS("GRTERAIN", "YCH", sYCh);
+   if(!iStrlen_STR(sYCh) || !iExistChan_DB(Data, sYCh))
+   {
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+      SetString_SYS("GRTERAIN", "YCH", sYCh);
+   }
+
+
+	// --- Set up the bathymetry channel and take into account that
+	//     formerly the "water" channel was expected (hard-wired) ---
+
+	GetString_SYS("GRTERAIN","BATHYMETRY", sBathymetryCh);
+	if(iStrlen_STR(sBathymetryCh) == 0)
+	{
+		if(iExistChan_DB(Data, _n("Bathymetry")) == 0 && iExistChan_DB(Data, _n("Water")) == 1)
+			SetString_SYS("GRTERAIN","BATHYMETRY", _n("Water"));
+	}
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRTERAIN");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_GRTERAIN_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_GRTERAIN_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_GRTERAIN_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_GRTERAIN_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_GRTERAIN_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_GRTERAIN_14);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRTERAIN_0, DGW_TEXT,     "GRTERAIN","XCH");
+      SetInfoSYS_DGW(Diag,_GRTERAIN_1, DGW_TEXT,     "GRTERAIN","YCH");
+      SetInfoSYS_DGW(Diag,_GRTERAIN_2, DGW_TEXT,     "GRTERAIN","ELEVCH");
+      SetInfoSYS_DGW(Diag,_GRTERAIN_3, DGW_TEXT,     "GRTERAIN","SLOPCH");
+      SetInfoSYS_DGW(Diag,_GRTERAIN_4, DGW_TEXT,     "GRTERAIN","TCORCH");
+      SetInfoSYS_DGW(Diag,_GRTERAIN_5, DGW_FILEPATH, "GRTERAIN","CORGRD");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_6, DGW_FILEPATH, "GRTERAIN","DEMGRD");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_7, DGW_LISTALIAS,"GRTERAIN","ELEVUNIT");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_8, DGW_TEXT,     "GRTERAIN","WATERELEV");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_9, DGW_TEXT,     "GRTERAIN","DENST");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_10, DGW_TEXT,    "GRTERAIN","WATERDENS");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_11,DGW_TEXT,     "GRTERAIN","DIST");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_12,DGW_LISTALIAS,"GRTERAIN","OPT");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_13,DGW_LISTALIAS,"GRTERAIN","SURVEYTYPE");     
+      SetInfoSYS_DGW(Diag,_GRTERAIN_14,DGW_TEXT,     "GRTERAIN","BATHYMETRY");     
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();   
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRTERAIN_0, DGW_TEXT,     "GRTERAIN","XCH");
+      GetInfoSYS_DGW(Diag,_GRTERAIN_1, DGW_TEXT,     "GRTERAIN","YCH");
+      GetInfoSYS_DGW(Diag,_GRTERAIN_2, DGW_TEXT,     "GRTERAIN","ELEVCH");
+      GetInfoSYS_DGW(Diag,_GRTERAIN_3, DGW_TEXT,     "GRTERAIN","SLOPCH");
+      GetInfoSYS_DGW(Diag,_GRTERAIN_4, DGW_TEXT,     "GRTERAIN","TCORCH");
+      GetInfoSYS_DGW(Diag,_GRTERAIN_5, DGW_FILEPATH, "GRTERAIN","CORGRD");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_6, DGW_FILEPATH, "GRTERAIN","DEMGRD");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_7, DGW_LISTALIAS,"GRTERAIN","ELEVUNIT");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_8, DGW_TEXT,     "GRTERAIN","WATERELEV");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_9, DGW_TEXT,     "GRTERAIN","DENST");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_10, DGW_TEXT,    "GRTERAIN","WATERDENS");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_11,DGW_TEXT,     "GRTERAIN","DIST");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_12,DGW_LISTALIAS,"GRTERAIN","OPT");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_13,DGW_LISTALIAS,"GRTERAIN","SURVEYTYPE");     
+      GetInfoSYS_DGW(Diag,_GRTERAIN_14,DGW_TEXT,     "GRTERAIN","BATHYMETRY");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRTERAIN","XCH",    sXCh);
+   GetString_SYS("GRTERAIN","YCH",    sYCh);
+   GetString_SYS("GRTERAIN","ELEVCH", sElevCh);
+   GetString_SYS("GRTERAIN","SLOPCH", sSlopCh);
+   GetString_SYS("GRTERAIN","TCORCH", sTcorCh);
+   
+   GetString_SYS("GRTERAIN","CORGRD",sCorGrd);
+   GetString_SYS("GRTERAIN","DEMGRD",sDemGrd);
+
+   rElevUnit = rGetReal_SYS("GRTERAIN","ELEVUNIT");
+
+   GetString_SYS("GRTERAIN","WATERELEV",sTemp);
+   rElevW = 0.0;
+   if (iStrlen_STR(sTemp))
+   {
+      rElevW = rGetReal_SYS("GRTERAIN","WATERELEV");
+      if (rElevW == rDUMMY)
+         Abort_SYS(_("Invalid water reference elevation! Must be a real number or blank."));
+   }
+   
+   rDensT = 2.67;
+   GetString_SYS("GRTERAIN","DENST",sTemp);
+   if (iStrlen_STR(sTemp))
+   {
+      rDensT = rGetReal_SYS("GRTERAIN","DENST");
+      if (rDensT == rDUMMY)
+         Abort_SYS(_("Invalid terrain density! Must be a real number or blank."));
+   }
+   
+   GetString_SYS("GRTERAIN","DIST",sTemp);
+   rDist = rDUMMY;
+   if (iStrlen_STR(sTemp))
+   {
+      rDist = rGetReal_SYS("GRTERAIN","DIST");
+      if (rDist == rDUMMY)
+         Abort_SYS(_("Invalid local correction distance! Must be a real number or blank."));
+   }
+
+	rDensW = rGetReal_SYS("GRTERAIN","WATERDENS");
+	if(rDensW == rDUMMY)
+		rDensW = 1.0;
+	SetReal_SYS("GRREGTER","WATERDENS", rDensW);  // reset the GRREGTER value
+
+
+   iOpt = iGetInt_SYS("GRTERAIN","OPT");
+   
+   GetString_SYS("GRTERAIN","SURVEYTYPE",sSurveyType);
+   if(iStrcmp_STR(sSurveyType,_n("Shipborne Survey"),STR_CASE_TOLERANT)==0)       iSurveyType = 1;
+   else if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0)   iSurveyType = 2;
+   else                                                                       iSurveyType = 0;
+
+	GetString_SYS("GRTERAIN","BATHYMETRY", sBathymetryCh);
+	if(iSurveyType == 1 && iStrlen_STR(sBathymetryCh)==0)
+		Abort_SYS(_("A bathymetry channel is required for shipborne surveys"));
+
+
+   // --- Check for null input/output file name strings ---
+
+   if (iStrlen_STR(sCorGrd))  iCorGrd=1;
+   else                       iCorGrd=0;
+   
+   if (!iStrlen_STR(sDemGrd))
+      Abort_SYS(_("Local DEM Grid  Not Specified!"));   
+      
+      
+   // --- Does the Input/Ouput Channel Exist ? ---
+
+   if (!iStrlen_STR(sXCh) || !iStrlen_STR(sYCh))
+      Abort_SYS(_("Input X/Y Channel Name not specified"));
+   if (!iStrlen_STR(sElevCh))
+      Abort_SYS(_("Input Elevation Channel Name not specified"));
+
+   if (!iExistChan_DB(Data,sXCh) ||
+       !iExistChan_DB(Data,sYCh))
+      Abort_SYS(_("X or Y channel does not exist."));
+   if (!iExistSymb_DB(Data,sElevCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Elevation channel does not exist."));
+      
+   XCh = FindSymb_DB(Data,sXCh,DB_SYMB_CHAN);
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   YCh = FindSymb_DB(Data,sYCh,DB_SYMB_CHAN);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   ElevCh = FindSymb_DB(Data,sElevCh,DB_SYMB_CHAN);
+   LockSymb_DB(Data,ElevCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+   if (iStrlen_STR(sSlopCh)>0)  {
+      if (iExistSymb_DB(Data,sSlopCh,DB_SYMB_CHAN))  {
+         SlopCh = FindSymb_DB(Data,sSlopCh,DB_SYMB_CHAN);
+         LockSymb_DB(Data,SlopCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         iSlopCh=1;
+      }   
+   } else 
+      iSlopCh=0;
+   
+   if (iStrcmp_STR(sElevCh,sTcorCh,0) == 0) {
+      Abort_SYS(_("Elevation/TerrainCorrection Channel Names can not be the same!"));
+   } else {
+      if (iExistSymb_DB(Data,sTcorCh,DB_SYMB_CHAN)) {
+         TcorCh = FindSymb_DB(Data,sTcorCh,DB_SYMB_CHAN);
+         LockSymb_DB(Data,TcorCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      }   
+      else {
+         DupSymb_DB(Data,ElevCh,sTcorCh);       // Create it 
+         TcorCh = FindSymb_DB(Data,sTcorCh,DB_SYMB_CHAN);
+         hREG = Create_REG(128);
+         GetRegSymb_DB(Data,TcorCh,hREG);
+         Set_REG(hREG,"UNITS","mgal");      
+         SetRegSymb_DB(Data,TcorCh,hREG);
+         Destroy_SYS(hREG);
+      }
+   }
+
+   iWaterCh = 0;
+	if(iStrlen_STR(sBathymetryCh) != 0)
+	{
+		WaterCh = FindSymb_DB(Data,sBathymetryCh,DB_SYMB_CHAN);
+		if (WaterCh != NULLSYMB) 
+		{
+			LockSymb_DB(Data,WaterCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+			GetChanUnit_DB(Data,WaterCh,sWtUnits);
+			rWm = rUnitScale_IPJ(sWtUnits,1.0);
+			iWaterCh = 1;
+		} 
+	}
+
+
+   // --- Create Images tied to the grids ---  
+   
+   if (iCorGrd)
+      ImgCor = CreateFile_IMG(GS_DOUBLE,sCorGrd,IMG_FILE_READONLY);
+   else
+      ImgCor = (IMG)0;
+
+   ImgDem = CreateFile_IMG(GS_DOUBLE,sDemGrd,IMG_FILE_READONLY);
+
+
+   // --- create input and output VV's ---
+
+   hVVx = Create_VV(REAL,0);
+   hVVy = Create_VV(REAL,0);
+   hVVelev = Create_VV(REAL,0);
+   hVVtcor = Create_VV(REAL,0);
+   if(iSlopCh)
+      hVVslop = Create_VV(REAL,0);
+   else   
+      hVVslop = (VV)0;
+   if(iWaterCh)
+      hVVwater = Create_VV(REAL,0);
+   else   
+      hVVwater = (VV)0;
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   if(rDist!=rDUMMY)  iEdge=FALSE;
+   else               iEdge=TRUE;
+
+   TCg = CreateEx_TC(ImgDem,rElevUnit,0.0,rDist,rDensT,rDensW,rElevW,iEdge,rDUMMY,iOpt,iSurveyType);
+    
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS(_("Calculate terrain corrections..."),1); 
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Terrain correction line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);        
+
+
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,XCh,hVVx);
+      GetChanVV_DB(Data,Line,YCh,hVVy);
+      GetChanVV_DB(Data,Line,ElevCh,hVVelev);
+      if(iSlopCh)
+         GetChanVV_DB(Data,Line,SlopCh,hVVslop);
+      if(iWaterCh)
+         GetChanVV_DB(Data,Line,WaterCh,hVVwater);
+
+
+      // --- Set the length of output VV = length of input VV ---
+
+      iVVlen = iLength_VV(hVVelev);
+      SetLen_VV(hVVtcor,iVVlen);
+
+      // --- if input VV is empty or all dummy, then don't do process ---
+
+      if (iVVlen)
+         iDum = iFindDum_VV(hVVelev,0,(iVVlen-1),1,0);
+
+      if ((iVVlen) && (iDum != -1))
+      {          
+         // --- Use the input VV fiducial information as the output VV's fiducial information ---
+
+         rFstart = rGetFidStart_VV(hVVelev);
+         rFinc   = rGetFidIncr_VV(hVVelev);
+         iLen   = iLength_VV(hVVelev);
+		 ReFid_VV(hVVx,rFstart,rFinc,iLen);
+		 ReFid_VV(hVVy,rFstart,rFinc,iLen);
+		 if(iSlopCh)
+			ReFid_VV(hVVslop,rFstart,rFinc,iLen);
+		 if(iWaterCh)
+			ReFid_VV(hVVwater,rFstart,rFinc,iLen);
+         
+         // --- Correct for dummy fid start and increment ---
+         
+         if(rFstart == rDUMMY) rFstart = 0.0;
+         if(rFinc == rDUMMY) rFinc = 1.0;
+         
+
+         SetFidStart_VV(hVVtcor,rFstart);
+         SetFidIncr_VV(hVVtcor,rFinc);
+
+         // --- Terrain correction ---
+   
+         if (iWaterCh) {
+      
+            Trans_VV(hVVwater,0.0,rWm);
+            Grterain2_TC(TCg,hVVx,hVVy,hVVelev,hVVslop,hVVwater,hVVtcor,ImgCor,rDensT);
+       
+         } else
+         
+            Grterain_TC(TCg,hVVx,hVVy,hVVelev,hVVslop,hVVtcor,ImgCor,rDensT);
+      }
+
+      // --- Write the output VV back to database ---
+
+      PutChanVV_DB(Data,Line,TcorCh,hVVtcor);
+
+
+      // --- Advance to Next Line ---    
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,TcorCh,_("Terrain Corrections"),"GRTERAIN;");
+
+
+   // --- Set default for GRBOUG GX ---
+
+   SetString_SYS("GRAVRED","TCORCH", sTcorCh);
+   SetString_SYS("GRAVRED","SURVEYTYPE",sSurveyType);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+   Destroy_TC(TCg);
+   Destroy_VV(hVVx);
+   Destroy_VV(hVVy);
+   Destroy_VV(hVVelev);
+   Destroy_VV(hVVtcor);
+   if(iSlopCh)
+      Destroy_VV(hVVslop);
+   if(iWaterCh)
+      Destroy_VV(hVVwater);
+   if (iCorGrd)
+      Destroy_IMG(ImgCor);
+   Destroy_IMG(ImgDem);
+
+   
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,ElevCh);
+   UnLockSymb_DB(Data,TcorCh);
+   if(iSlopCh) 
+      UnLockSymb_DB(Data,SlopCh);
+   if(iWaterCh)
+      UnLockSymb_DB(Data,WaterCh);
+   
+   // --- Display the output chan ---
+
+   UnLock_EDB(EData);
+   if (iInteractive_SYS())
+      LoadChan_EDB(EData,sTcorCh);
+}

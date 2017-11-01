@@ -1,0 +1,602 @@
+//==========================================================================
+NAME          = "Import an ASCII file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Surface Mapping/Import Data"
+
+DESCRIPTION   = "
+   Import assay data into a CHIMERA database.
+
+    CHIMPLAB.FILE     Input data file name
+    
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v7.1.1: QA 16304 Batch channel increased to 32 characters from 16.
+// v7.1.1: QA 15185 Don't run wizard if the template is specified and it already exists.
+// v7.0.1: QA 13331 ASSAYMETHOD parameter not being set in ASSAY channels.
+// v6.0.0: Was not saving database name for CHMERGE.
+// v5.1.8: Ensure _chassay.i* templates are newly created if no template
+//         is specified on import.
+// v5.1.7: ADO connection string buffer size increased to 1024.
+// v5.1.4: Database creation functions now use CHCREATE GX.
+//         Import was resetting channels with classes other than "Assay" to ""
+// v5.1.3: Removed commented-out lines dealing with existing X and Y Channels
+//         Using ADO instead of DAO calls to access databases.
+//         Using FindChan_DB and iExistChan_DB   
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chimplab.gr"
+#include "chimplab.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+LST         ListID, ListM;
+DB_SYMB     Ch,SampleCh,LabCh,WeightCh,OrderCh,BatchCh,Line,MCh;
+VV          ChVV,StrVV,DataVV,MaskVV;
+REG         hREG;
+
+string(1024) sConnect;
+string(STR_FILE) sData, sDataBase, sTemplate, sLine;
+string(STR_FILE) sAttrib, sMask;
+string(STR_DEFAULT_LONG) sLabel;
+string(STR_DEFAULT) sClass,sLabID,sBatch;
+string(STR_DEFAULT) sMethod;
+string(STR_DEFAULT_SHORT) sSource;
+
+int i,id,iLen,iItem,iConv,iChans,iTemplateSpecified;
+real rWeight;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Clear default name for new database ---
+
+      SetString_SYS("CHCREATE","NAME","");
+   
+
+      i = 0;
+      while (i != 2) {
+      
+         switch (i) {
+         
+            case 0:
+            
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("CHIMPLAB");
+               
+               i = 0;
+               while (i == 0) {
+               
+               
+                  // --- set up lists ---
+                  
+                  ListID = GetList_DGW(Diag,_CHIMPLAB_3);
+                  Clear_LST(ListID);
+                  LoadFile_LST(ListID,"ch_lab_id");
+                  Sort_LST(ListID,0,0);
+                  
+                  
+                  ListM = GetList_DGW(Diag,_CHIMPLAB_4);
+                  Clear_LST(ListM);
+                  LoadFile_LST(ListM,"ch_assay_method");
+                  Sort_LST(ListM,0,0);
+
+
+                  // --- Set any Defaults ---
+
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_0,DGW_LISTALIAS,"CHIMPLAB","SOURCE");
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_1,DGW_FILEPATH,"CHIMPLAB","FILE");
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_2,DGW_FILEPATH,"CHIMPLAB","TEMPLATE");
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_3,DGW_TEXT,"CHIMPLAB","LAB_ID");
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_4,DGW_TEXT,"CHIMPLAB","ASSAYMETHOD");
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_5,DGW_TEXT,"CHIMPLAB","WEIGHT");
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_6,DGW_FILEPATH,"CHGETATT","FILE");
+                  SetInfoSYS_DGW(Diag,_CHIMPLAB_7,DGW_LISTALIAS,"CHIMPLAB","CONVNEG");
+
+
+                  // --- Run the Dialogue ---
+
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();
+
+
+                  // --- Get the Strings ---
+
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_0,DGW_LISTALIAS,"CHIMPLAB","SOURCE");
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_1,DGW_FILEPATH,"CHIMPLAB","FILE");
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_2,DGW_FILEPATH,"CHIMPLAB","TEMPLATE");
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_3,DGW_TEXT,"CHIMPLAB","LAB_ID");
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_4,DGW_TEXT,"CHIMPLAB","ASSAYMETHOD");
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_5,DGW_TEXT,"CHIMPLAB","WEIGHT");
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_6,DGW_FILEPATH,"CHGETATT","FILE");
+                  GetInfoSYS_DGW(Diag,_CHIMPLAB_7,DGW_LISTALIAS,"CHIMPLAB","CONVNEG");
+                  
+                  
+                  // --- check for new LAB ID list entries ---
+                  
+                  GetString_SYS("CHIMPLAB","LAB_ID",sLabID);
+                  if(iStrlen_STR(sLabID)) {
+
+                     iItem = iFindItem_LST(ListID,0, sLabID);
+                     if(iItem==-1) {
+                        AddUniqueItem_LST(ListID,sLabID,"");
+                        SaveFile_LST(ListID,"ch_lab_id");
+                     }
+                  }
+
+                  // --- check for new methods list entries ---
+                  
+                  GetString_SYS("CHIMPLAB","ASSAYMETHOD",sMethod);
+                  if(iStrlen_STR(sMethod)) {
+
+                     iItem = iFindItem_LST(ListM,0, sMethod);
+                     if(iItem==-1) {
+                        AddUniqueItem_LST(ListM,sMethod,"");
+                        SaveFile_LST(ListM,"ch_assay_method");
+                     }
+                  }
+
+                  if (i==2) {
+					 SetString_SYS("LISTEDIT","TITLE",_("Edit the LAB ID list"));
+					 SetString_SYS("LISTEDIT","PROMPT",_("LAB ID name"));
+                     SetString_SYS("LISTEDIT","LIST","ch_lab_id");
+                     SetString_SYS("LISTEDIT","SETTING",sLabID);
+                     iRunGX_SYS("listedit");
+                     GetString_SYS("LISTEDIT","SETTING",sLabID);
+                     if(iStrlen_STR(sLabID))
+                        SetString_SYS("CHIMPLAB","LAB_ID",sLabID);
+                     i = 0;
+                  }
+                  
+                  if (i==3) {
+					 SetString_SYS("LISTEDIT","TITLE",_("Edit the technique names"));
+					 SetString_SYS("LISTEDIT","PROMPT",_("Technique name"));
+                     SetString_SYS("LISTEDIT","LIST","ch_assay_method");
+                     SetString_SYS("LISTEDIT","SETTING",sMethod);
+                     iRunGX_SYS("listedit");
+                     GetString_SYS("LISTEDIT","SETTING",sMethod);
+                     if(iStrlen_STR(sMethod))
+                        SetString_SYS("CHIMPLAB","ASSAYMETHOD",sMethod);
+                     i = 0;
+                  }
+                  
+               }
+               
+               
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+               
+               
+               // --- determine type
+               
+               GetString_SYS("CHIMPLAB","SOURCE",sSource);
+               if (iCharComp_STR(sSource,"C") || iCharComp_STR(sSource,"O")) {
+               
+                  SetString_SYS("CHIMPLAB","FILE","");
+                  
+               } else {
+               
+                  GetString_SYS("CHIMPLAB","FILE",sData);
+                  if (!iFileExist_SYS(sData)) {
+                     DisplayMessage_SYS(_("Error"),_("ASSAY file not specified or file does not exist.  Please check the file name."));
+                     i = 0;
+                  }                     
+               }
+                              
+               break;
+               
+               
+            case 1:
+            
+                           
+               // --- Create a new database.  ---
+
+               if(iRunGX_SYS("chcreate.gx")) Cancel_SYS();
+
+               i = iGetInt_SYS("CHCREATE","RETURN");
+
+               break;
+               
+            default:
+            
+               DisplayMessage_SYS(_("Error"),_("I'm lost!"));
+               i = 0;               
+               
+         }               
+      }
+   }
+   
+   // --- get parameters ---
+   
+   GetString_SYS("CHIMPLAB","SOURCE",sSource);
+   GetString_SYS("CHIMPLAB","FILE",sData);
+   GetString_SYS("CHIMPLAB","TEMPLATE",sTemplate);
+   GetString_SYS("CHIMPLAB","LAB_ID",sLabID);
+   GetString_SYS("CHIMPLAB","ASSAYMETHOD",sMethod);
+   rWeight = rGetReal_SYS("CHIMPLAB","WEIGHT");
+   iConv = iGetInt_SYS("CHIMPLAB","CONVNEG");
+   GetString_SYS("CHGETATT","FILE",sAttrib);
+   
+   iTemplateSpecified = (iStrlen_STR(sTemplate) > 0);
+   
+   if(iConv!=1) iConv = 0;    // don't convert negatives by default
+
+
+   // --- objects ---
+      
+   ChVV = Create_VV(INT,0);
+   StrVV = Create_VV(-64,0);
+   DataVV = Create_VV(REAL,0);
+   MaskVV = CreateExt_VV(GS_LONG,0);
+   hREG = Create_REG(128);
+   
+   
+   // --- load database ---
+
+   GetString_SYS("CHCREATE","NAME",sDataBase);
+   FileNamePart_STR(sDataBase,sBatch,STR_FILE_PART_NAME);
+   
+   Load_EDB(sDataBase);
+   
+   
+   // --- Save database name for CHMERGE ---
+      
+   SetString_SYS("CHIMERA","ASSAY",sDataBase);
+   
+   
+   // --- create/load standard channels. Let the import create the sample channel to the correct length ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   // --- Get the Mask channel from preferences ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) != 0 ||
+       !iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+
+      Strcpy_STR(sMask,_n("ChemMask"));
+   }
+
+   if(!iStrlen_STR(sMask)) 
+      Strcpy_STR(sMask,_n("ChemMask"));
+
+   if (!iExistChan_DB(Data,sMask)) {
+      MCh = CreateSymb_DB(Data,sMask,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      SetRegSymbSetting_DB(Data,MCh,"CLASS","MASK");
+   }
+   else
+      MCh = FindChan_DB(Data,sMask);
+      
+   UnLock_EDB(EData);
+   
+   
+   // --- determine the data source ---
+    
+   if (iCharComp_STR(sSource,"D") || iCharComp_STR(sSource,"O")) {
+   
+      if (!iCharComp_STR(sSource,"O"))
+      {
+         // --- template name ---
+   
+         Strcpy_STR(sConnect, "FILENAME=");
+         Strcat_STR(sConnect, sData);
+      }
+
+      if (iStrlen_STR(sTemplate) > 0)
+         FileExt_STR(sTemplate,"i4",sTemplate,FILE_EXT_ADD_IF_NONE);
+      else {     
+
+         // --- If no template is specified, ensure that the default template
+         //     does not already exist. This has been the cause of much unexpected
+         //     behaviour by the import wizard, because it uses values from the
+         //     input template file, if it exists ---
+
+         Strcpy_STR(sTemplate,"_chassay.i4");
+         if(iFileExist_SYS(sTemplate))
+            iDeleteFile_SYS(sTemplate);
+      }
+         
+         
+      // --- template creation wizard ---
+      
+      if (iInteractive_SYS() && (iTemplateSpecified == 0 || iFileExist_SYS(sTemplate)==0))         
+         ImportChemDatabaseADO_GUI(sConnect,sTemplate,sLine,IMPCH_TYPE_ASSAY)
+      
+      
+      // --- import ---
+
+      Progress_SYS(1);
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+      ProgName_SYS(_("Importing assays"),1);
+      ImportADO_DU(Data,"","",sTemplate,"D0");
+      UnLock_EDB(EData);
+      Progress_SYS(0);
+
+      
+   } else {
+   
+   
+      // --- import ASCII from a file or the clipboard ---
+      
+      if (iStrlen_STR(sTemplate) > 0)
+         FileExt_STR(sTemplate,"i3",sTemplate,FILE_EXT_ADD_IF_NONE);
+      else  {    
+
+         // --- If no template is specified, ensure that the default template
+         //     does not already exist. This has been the cause of much unexpected
+         //     behaviour by the import wizard, because it uses values from the
+         //     input template file, if it exists ---
+
+         Strcpy_STR(sTemplate,"_chassay.i3");
+         if(iFileExist_SYS(sTemplate))
+            iDeleteFile_SYS(sTemplate);
+      }
+   
+   
+      if (iCharComp_STR(sSource,"C")) {
+      
+      
+         // --- copy clipboard to a temporary file ---
+         
+         Strcpy_STR(sData,"_clip.txt");
+         ClipboardToFile_SYS(sData);
+         
+         
+      }
+      
+      
+      // --- Make Template ---
+
+      if (iInteractive_SYS() && (iTemplateSpecified == 0 || iFileExist_SYS(sTemplate)==0))         
+         ImportChemWizard_GUI(sData,sTemplate,IMPCH_TYPE_ASSAY);
+      
+      
+      // --- get current database ---
+      
+      EData = Current_EDB();
+      
+      
+      // --- import ---
+      
+      Data = Lock_EDB(EData);
+      iDeleteFile_SYS("import.log");
+      Progress_SYS(1);
+      ProgName_SYS(_("Importing Data"),1);
+      ImportBIN_DU(Data,sData,sTemplate,"",iDUMMY,rDUMMY);
+      Progress_SYS(0);
+      UnLock_EDB(EData);
+      
+      
+      // --- delete temporary clipboard file ---
+      
+      if (iCharComp_STR(sSource,"C"))
+         iDeleteFile_SYS(sData);
+         
+         
+      // --- Display Errors ---
+
+      if (iInteractive_SYS()) {
+      
+      
+         // --- Anything to display ---
+
+         if (iFileSize_SYS("import_error.log")>3) // 3 characters could be UTF-8 BOM only
+         {
+         
+                
+             // --- edit ---
+             
+             SetString_SYS("EDIT","FILE","import_error.log");
+             SetString_SYS("EDIT","WAIT","");
+             iRunGX_SYS("EDIT");
+             
+         }
+         
+      }
+      
+      
+   }
+   
+   
+   // --- turn off protection ---
+   
+   iRunGX_SYS("chanpoff");
+   
+   
+   // --- set all channel classes to ASSAY if not already set ---
+   
+   Data = Lock_EDB(EData);
+   iChans = iSymbList_DB(Data,ChVV,DB_SYMB_CHAN);
+   for (i=0;i<iChans;i++) {
+   
+   
+      // --- get the reg ---
+      
+      Ch = (DB_SYMB)iGetInt_VV(ChVV,i);
+      GetRegSymb_DB(Data,Ch,hREG);
+      
+      
+      // --- set LOG and ASSAYMETHOD attribute for ASSAY class channels ---
+      
+      Get_REG(hREG,"CLASS",sClass,sizeof(sClass));
+      if (iStrcmp_STR(sClass,"ASSAY",STR_CASE_TOLERANT)==0)
+      {
+         Set_REG(hREG,"LOG","Yes");
+
+
+			// --- set the assay method ---
+	      
+			if(iStrlen_STR(sMethod))
+			{
+				Set_REG(hREG,"ASSAYMETHOD",sMethod);
+			}                  
+      }
+      else
+         Set_REG(hREG,"LOG","No");
+
+
+      // --- set the label ---
+      
+      Get_REG(hREG,"LABEL",sLabel,sizeof(sLabel));
+      if (iStrMin2_STR(sLabel) == 0) {
+         GetChanName_DB(Data,Ch,sLabel);
+         Set_REG(hREG,"LABEL",sLabel);
+      } 
+      
+      
+      // --- put the reg back ---
+               
+      SetRegSymb_DB(Data,Ch,hREG);
+      
+   }      
+   
+   // --- get/create Lab_ID, weight and Order channels and fill them ---
+
+   SampleCh = FindSymb_DB(Data,"Sample", DB_SYMB_CHAN);     // must be created on import.
+
+   OrderCh = FindChan_DB(Data, "Order");
+   if(OrderCh==NULLSYMB)   
+      OrderCh  = CreateSymb_DB(Data,"Order",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);   
+   
+   LabCh = FindChan_DB(Data, "Lab_ID");
+   if(LabCh==NULLSYMB)   
+      LabCh    = CreateSymb_DB(Data,"Lab_ID",DB_SYMB_CHAN,DB_OWN_SHARED,-32);      
+   
+   BatchCh = FindChan_DB(Data, "Batch");
+   if(BatchCh==NULLSYMB)   
+      BatchCh  = CreateSymb_DB(Data,"Batch",DB_SYMB_CHAN,DB_OWN_SHARED,-32);      
+
+   WeightCh = FindChan_DB(Data, "Weight");
+   if(WeightCh==NULLSYMB)   
+      WeightCh = CreateSymb_DB(Data,"Weight",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_FLOAT);
+   
+
+   LockSymb_DB(Data,SampleCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,LabCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,BatchCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,WeightCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,OrderCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,MCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+   Line=FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line)) {
+   
+      iLen = iGetChannelLength_DB(Data,Line,SampleCh);
+      
+      GetChanVV_DB(Data,Line,LabCh,StrVV);
+      SetLen_VV(StrVV,iLen);
+      TrimSpace_STR(sLabID,STR_TRIMBOTH);
+      FillString_VV(StrVV,sLabID);
+      PutChanVV_DB(Data,Line,LabCh,StrVV);
+      
+      GetChanVV_DB(Data,Line,BatchCh,StrVV);
+      SetLen_VV(StrVV,iLen);
+      TrimSpace_STR(sBatch,STR_TRIMBOTH);         
+      FillString_VV(StrVV,sBatch);
+      PutChanVV_DB(Data,Line,BatchCh,StrVV);
+      
+      SetLen_VV(DataVV,iLen);
+      FillReal_VV(DataVV,rWeight);
+      PutChanVV_DB(Data,Line,WeightCh,DataVV);
+      
+      SetLen_VV(MaskVV,iLen);
+      FillInt_VV(MaskVV,1);
+      PutChanVV_DB(Data,Line,MCh,MaskVV);
+
+
+      if (iLen != iGetChannelLength_DB(Data,Line,OrderCh)) {
+         for (id=1;id<=iLen;id++) SetInt_VV(DataVV,id-1,id);
+         PutChanVV_DB(Data,Line,OrderCh,DataVV);
+      }
+      
+      Line=NextSelLine_DB(Data,Line);
+   }
+   UnLockSymb_DB(Data,WeightCh);
+   UnLockSymb_DB(Data,LabCh);
+   UnLockSymb_DB(Data,BatchCh);
+   UnLockSymb_DB(Data,SampleCh);
+   UnLockSymb_DB(Data,OrderCh);
+   UnLockSymb_DB(Data,MCh);
+
+
+   // --- If "East" and "North" exist, make them the current X and Y channels ---
+   
+   if(iExistChan_DB(Data, "East") && iExistChan_DB(Data, "North")) {   
+      SetXYZChan_DB(Data, DB_CHAN_X, "East");
+      SetXYZChan_DB(Data, DB_CHAN_Y, "North");
+   }   
+
+   UnLock_EDB(EData);
+   
+
+   // --- Set up default attributes ---
+
+   if(iStrlen_STR(sAttrib) &&
+      iFileExist_SYS(sAttrib)) {
+   
+      SetInteractive_SYS(0);
+      iRunGX_SYS("CHGETATT");
+      SetInteractive_SYS(1);
+   }
+
+   
+   // --- filter detection limits ---
+
+   SetInt_SYS("CHDETFLT","CONVNEG",iConv);      // Set negative conversion
+      
+   iRunGX_SYS("CHDETFLT");
+   
+   
+   // --- delete line 0 and load all channels ---
+   
+   DelLine0_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+   LoadChan_EDB(EData,"Sample");
+   LoadChan_EDB(EData,"Order");
+   LoadChan_EDB(EData,"Batch");
+   LoadChan_EDB(EData,"Lab_ID");
+   LoadChan_EDB(EData,"Weight");
+   LoadChan_EDB(EData, sMask);
+   
+   LoadAllChans_EDB(EData);
+   
+   Destroy_SYS(ChVV);
+   Destroy_SYS(StrVV);
+   Destroy_SYS(DataVV);
+   Destroy_SYS(hREG);
+ 
+ 
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+   
+}

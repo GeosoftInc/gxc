@@ -1,0 +1,1405 @@
+//===========================================================================
+NAME          = "Create new stacked array section map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Array Channels"
+
+DESCRIPTION   = "
+"
+// Revision History:
+// v6.4+:  Increased sPar buffer length and added input validation similar to vasctplt
+// v6.0:   Replaced iStrMin_STR() by iStrMin2_STR() to keep sColor string unchanged.
+// v6.0:   Adjust the colour bar title text size to fit in the plot area.
+// v5.1.8: New GX.
+//===========================================================================
+
+RESOURCE = "vastkplt.gr"
+#include "vastkplt.grh"
+                              
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+
+DGW         Diag;
+LST         List;              // dialog list handle
+EDB         EData;
+DB          Data;
+DB_SYMB     Line,XCh,YCh,StnCh,DataCh,DepCh,ElevCh,ElevDepCh;
+LST         LineLST;
+EMAP        EMap;
+MAP         Map;
+MAPL        Mapplot;
+MVIEW       DataView;
+ITR         Itr;
+RA          Master;     // Master control file
+WA          ConFile;    // Control File
+VV          hXVV,hYVV,hStnVV;
+EXP         Exp;
+ST          hST;
+AGG         Agg;
+VV          MinXVV,MaxXVV,XIntVV;
+VV          MinYVV,MaxYVV,YIntVV;
+IPJ         hIPJ;
+
+int         i,ii;
+int         iPlotColorBar,iPlotContour;
+int         iGridOption;
+int         iInteract,iPow,iLines,iTotLines,iRefGrid;
+int         iItrSize,iLen,i1,i2,iStnDir,iElevCh,iCol,iZone;
+
+real        rPHeight,rContour;
+real        rMinX,rMinY,rMaxX,rMaxY;
+real        rDTop,rDBottom,rDLeft,rDRight;
+real        rMTop,rMBottom,rMLeft,rMRight;
+real        rXInterval,rYInterval;
+real        rScale,rYScale,rExagg;
+real        rTmp,rTmp1,rTmp2,rTmp3,rTmp4,rTmp5;
+real        rViewScale,rYViewScale,rCum,rVal;
+real        rXSpace,rYSpace,rGridLineThick;
+real        rLabelTextSize;
+real        rMapWidth,rTitleWidth,rScaleBarMaxLen,rScaleBarXoff;
+real        rXCh1,rYCh1,rXCh2,rYCh2,rStnCh1,rStnCh2, rDirAngle;
+real        rGMinX,rGMaxX,rGExagg;
+real        rGDTop,rGDBottom,rGDLeft,rGDRight,rGPHeight,rGSpace;
+real        rMinXm,rMinYm,rMaxXm,rMaxYm,rMinXg,rMinYg,rMaxXg,rMaxYg,rYm;
+            
+string(STR_GROUP)  sGridLineColor,sCum;
+string(100) sTemp,sTemp2;
+string(STR_GROUP)  sStnDir;
+string(256) sTemp3;
+string(GS_MAX_PATH)        sMap,sGrid,sSecDB,sAgg,sMapParms,sFont,sBuff,sDBname,sNameTag,sColor,sPar,sTempStr,sDir;
+string(DB_SYMB_NAME_SIZE)  sLineSel,sCurLine,sCurSymb;
+string(DB_SYMB_NAME_SIZE)  sStnCh,sDataCh,sDepCh,sElevCh,sElevDepCh;
+string(DB_SYMB_NAME_SIZE)  sX,sY,sZ;
+
+            
+//===========================================================================
+
+{
+   // --- Initialize ---
+   
+   Strcpy_STR(sX,"X");
+   Strcpy_STR(sY,"Y");
+   Strcpy_STR(sZ,"Z");     // renamed later
+   Strcpy_STR(sSecDB, "_VAsection.gdb");
+   
+   rTmp=rTmp1=rTmp2=rTmp3=rTmp4=rTmp5=rDUMMY;
+   rXInterval=rYInterval=rDUMMY;
+   rScale=rYScale=rDLeft=rDRight=rDUMMY;
+   iPow=iDUMMY;
+   
+
+   // --- Current EDB ---
+
+   EData = Current_EDB();
+   
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+   Data = Lock_EDB(EData);
+   Line = FindSymb_DB(Data,sCurLine,DB_SYMB_LINE);
+   FormatI_STR((int)Line,sCurSymb,32);
+
+   // --- Get database name ---
+
+   GetName_DB(Data,DB_NAME_FILE,sDBname);
+   FileNamePart_STR(sDBname,sDBname,STR_FILE_PART_NAME);
+
+
+   // --- Intercative Mode ---   
+ 
+   iInteract = iInteractive_SYS();
+   ii = 0;
+   while (iInteractive_SYS() && ii != 999) {
+      
+      Diag = Create_DGW("VASTKMAP");      
+      List = GetList_DGW(Diag,_VASTKMAP_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_VASTKMAP_2);
+      ArrayLST_DB(Data,List);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_VASTKMAP_3);
+      ArrayLST_DB(Data,List);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_VASTKMAP_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      
+      SetInfoSYS_DGW(Diag,_VASTKMAP_0,DGW_LISTALIAS,"VASTKSECTMAP","LINESEL");     
+      SetInfoSYS_DGW(Diag,_VASTKMAP_1,DGW_TEXT,     "VASTKSECTMAP","STATIONCH");     
+      SetInfoSYS_DGW(Diag,_VASTKMAP_2,DGW_TEXT,     "VASTKSECTMAP","DATACH");     
+      SetInfoSYS_DGW(Diag,_VASTKMAP_3,DGW_TEXT,     "VASTKSECTMAP","DEPTHCH");     
+      SetInfoSYS_DGW(Diag,_VASTKMAP_4,DGW_TEXT,     "VASTKSECTMAP","ELEVCH");     
+      SetInfoSYS_DGW(Diag,_VASTKMAP_5,DGW_FILEPATH, "VASTKSECTMAP","MAPPARMS");     
+      SetInfoSYS_DGW(Diag,_VASTKMAP_6,DGW_TEXT,     "VASTKSECTMAP","NAMETAG");     
+      ii = iRunDialogue_DGW(Diag);
+      if (ii == -1) Cancel_SYS();
+      GetInfoSYS_DGW(Diag,_VASTKMAP_0,DGW_LISTALIAS,"VASTKSECTMAP","LINESEL");     
+      GetInfoSYS_DGW(Diag,_VASTKMAP_1,DGW_TEXT,     "VASTKSECTMAP","STATIONCH");     
+      GetInfoSYS_DGW(Diag,_VASTKMAP_2,DGW_TEXT,     "VASTKSECTMAP","DATACH");     
+      GetInfoSYS_DGW(Diag,_VASTKMAP_3,DGW_TEXT,     "VASTKSECTMAP","DEPTHCH");     
+      GetInfoSYS_DGW(Diag,_VASTKMAP_4,DGW_TEXT,     "VASTKSECTMAP","ELEVCH");     
+      GetInfoSYS_DGW(Diag,_VASTKMAP_5,DGW_FILEPATH, "VASTKSECTMAP","MAPPARMS");     
+      GetInfoSYS_DGW(Diag,_VASTKMAP_6,DGW_TEXT,     "VASTKSECTMAP","NAMETAG");     
+
+      Destroy_DGW(Diag);
+
+      GetString_SYS("VASTKSECTMAP","LINESEL",sLineSel);
+      GetString_SYS("VASTKSECTMAP","STATIONCH",sStnCh);
+      GetString_SYS("VASTKSECTMAP","DATACH",sDataCh);
+      GetString_SYS("VASTKSECTMAP","DEPTHCH",sDepCh);
+      GetString_SYS("VASTKSECTMAP","ELEVCH",sElevCh);
+      GetString_SYS("VASTKSECTMAP","MAPPARMS",sMapParms);
+      GetString_SYS("VASTKSECTMAP","NAMETAG",sNameTag);
+      iStrMin_STR(sNameTag);
+
+      // --- Input channels validation ---
+
+      if (!iExistSymb_DB(Data,sStnCh,DB_SYMB_CHAN))    {
+         DisplayMessage_SYS(_("VASCTPLT"),_("Station channel does not exist."));    ii = -2;   continue;  }
+      StnCh = FindSymb_DB(Data,sStnCh,DB_SYMB_CHAN);
+      iCol = iGetColVA_DB(Data,StnCh);
+      if (iCol != 1)  {
+         DisplayMessage_SYS(_("VASCTPLT"),_("Station channel should not be array channel."));    ii = -2;   continue;  }
+
+      if (!iExistSymb_DB(Data,sDataCh,DB_SYMB_CHAN))    {
+         DisplayMessage_SYS(_("VASCTPLT"),_("Data channel does not exist."));     ii = -2;   continue;  }
+      DataCh = FindSymb_DB(Data,sDataCh,DB_SYMB_CHAN);
+      iCol = iGetColVA_DB(Data,DataCh);
+      if (iCol == 1)  {
+         DisplayMessage_SYS(_("VASCTPLT"),_("Data channel should be array channel."));   ii = -2;   continue;  }
+
+      if (!iExistSymb_DB(Data,sDepCh,DB_SYMB_CHAN))    {
+         DisplayMessage_SYS(_("VASCTPLT"),_("Depth channel does not exist."));     ii = -2;   continue;  }
+      DepCh = FindSymb_DB(Data,sDepCh,DB_SYMB_CHAN);
+      iCol = iGetColVA_DB(Data,DepCh);
+      if (iCol == 1)  {
+         DisplayMessage_SYS(_("VASCTPLT"),_("Depth channel should be array channel."));   ii = -2;   continue;  }
+
+      if (iStrlen_STR(sElevCh)==0 || !iExistSymb_DB(Data,sElevCh,DB_SYMB_CHAN)) 
+         iElevCh = 0;
+      else {
+         iElevCh = 1;
+         ElevCh = FindSymb_DB(Data,sElevCh,DB_SYMB_CHAN);
+         iCol = iGetColVA_DB(Data,ElevCh);
+         if (iCol != 1)  {
+            DisplayMessage_SYS(_("VASCTPLT"),_("Elevation channel should not be array channel."));   ii = -2;   continue;  }
+      }
+
+
+      // --- Load parameter group ----
+      
+      ClearGroup_SYS("VASECTMAP");
+      
+      if (iFileExist_SYS(sMapParms)) 
+         
+         LoadParm_SYS(sMapParms,"VASECTMAP");
+      
+      else {  // --- set all defaults
+
+         SetString_SYS("VASECTMAP","DLEFT","");     
+         SetString_SYS("VASECTMAP","DRIGHT","");     
+         SetString_SYS("VASECTMAP","SCALE","");     
+         SetString_SYS("VASECTMAP","EXAGG","");     
+         SetString_SYS("VASECTMAP","PHEIGHT","25");     
+         SetString_SYS("VASECTMAP","MLEFT","25");     
+         SetString_SYS("VASECTMAP","MRIGHT","20");     
+         SetString_SYS("VASECTMAP","MTOP","20");     
+         SetString_SYS("VASECTMAP","MBOTTOM","45");     
+         
+         SetString_SYS("VASECTMAP","TA1","");
+         SetString_SYS("VASECTMAP","TB1","");
+         SetString_SYS("VASECTMAP","TC1","");
+         SetString_SYS("VASECTMAP","TC2","");
+         SetString_SYS("VASECTMAP","TD1","");
+         
+         SetString_SYS("VASECTMAP","REFGRID","-1");       // no grid
+         SetString_SYS("VASECTMAP","REFHSPACE","");
+         SetString_SYS("VASECTMAP","REFVSPACE","");
+         SetString_SYS("VASECTMAP","REFTHICK1","0.1");
+         SetString_SYS("VASECTMAP","REFCOLOR","k");     
+         SetString_SYS("VASECTMAP","LABELTEXTSIZE","2.0");     
+         
+         SetString_SYS("VASECTMAP","GRIDOPTION","1");   // bigrid
+         SetString_SYS("VASECTMAP","COLOR","");     
+         SetString_SYS("VASECTMAP","ZONE","0");         // default   
+         SetString_SYS("VASECTMAP","CONTOUR","");     
+         SetString_SYS("VASECTMAP","PLOTCONTOUR","0");   // No
+         
+         SetString_SYS("VASECTMAP","CELLSIZE","");     
+         SetString_SYS("VASECTMAP","XYRANGE","");     
+         SetString_SYS("VASECTMAP","LOGOPTION1","0");   // linear
+         SetString_SYS("VASECTMAP","LOGMIN","1.0");     
+         SetString_SYS("VASECTMAP","DESAMPLE","");     
+         SetString_SYS("VASECTMAP","BLANK","");     
+         SetString_SYS("VASECTMAP","EDGCLP","0");     
+         SetString_SYS("VASECTMAP","TOL","");     
+         SetString_SYS("VASECTMAP","PASSTOL","99");     
+         SetString_SYS("VASECTMAP","ITERATION","100");     
+         SetString_SYS("VASECTMAP","TENSION","0");     
+
+         SetString_SYS("VASECTMAP","CELLSIZE","");     
+         SetString_SYS("VASECTMAP","XYRANGE","");     
+         SetString_SYS("VASECTMAP","LOGOPTION2","0");   // linear   
+         SetString_SYS("VASECTMAP","LOGMIN","1.0");     
+         SetString_SYS("VASECTMAP","MAXLINE","");     
+         SetString_SYS("VASECTMAP","MAXPOINT","");     
+         SetString_SYS("VASECTMAP","EXTEND","1");     
+         SetString_SYS("VASECTMAP","DOWNSPLINE","2");   // Akima   
+         SetString_SYS("VASECTMAP","ACROSPLINE","2");   // Akima   
+
+         SetString_SYS("VASECTMAP","PLOTCOLORBAR","1");   // yes
+         SetString_SYS("VASECTMAP","CLRBARTITLE","");     
+         SetString_SYS("VASECTMAP","CLRBARSUBTITLE","");     
+         SetString_SYS("VASECTMAP","CLRBARANNSIZE","1.5");     
+         SetString_SYS("VASECTMAP","CLRBARDECIMALS","1");     
+         SetString_SYS("VASECTMAP","CLRBARHEIGHT","");     
+         SetString_SYS("VASECTMAP","CLRBARWIDTH","");     
+         SetString_SYS("VASECTMAP","CLRBARXPOS","");   
+         SetString_SYS("VASECTMAP","CLRBARYPOS","");   
+     }
+      
+      
+      // --- Do we need to run wizard ? ---
+
+      if (ii == 999 || ii == 0) i = -2;
+      else if (ii == 1)         i = 1;
+      else i = -1;
+      
+      
+      // --- Wizard ---
+      
+      while (i >= 1) {
+      
+         switch (i) {
+         
+         case 1:
+               
+            Diag = Create_DGW("VASECTMAP1");
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_0,DGW_TEXT,"VASECTMAP","DLEFT");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_1,DGW_TEXT,"VASECTMAP","DRIGHT");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_2,DGW_TEXT,"VASECTMAP","SCALE");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_3,DGW_TEXT,"VASECTMAP","EXAGG");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_4,DGW_TEXT,"VASECTMAP","PHEIGHT");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_5,DGW_TEXT,"VASECTMAP","MLEFT");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_6,DGW_TEXT,"VASECTMAP","MRIGHT");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_7,DGW_TEXT,"VASECTMAP","MTOP");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP1_8,DGW_TEXT,"VASECTMAP","MBOTTOM");     
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_0,DGW_TEXT,"VASECTMAP","DLEFT");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_1,DGW_TEXT,"VASECTMAP","DRIGHT");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_2,DGW_TEXT,"VASECTMAP","SCALE");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_3,DGW_TEXT,"VASECTMAP","EXAGG");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_4,DGW_TEXT,"VASECTMAP","PHEIGHT");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_5,DGW_TEXT,"VASECTMAP","MLEFT");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_6,DGW_TEXT,"VASECTMAP","MRIGHT");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_7,DGW_TEXT,"VASECTMAP","MTOP");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP1_8,DGW_TEXT,"VASECTMAP","MBOTTOM");     
+            Destroy_DGW(Diag);            
+
+            break;
+            
+         case 2:
+            
+            Diag = Create_DGW("VASECTMAP2");
+            SetInfoSYS_DGW(Diag,_VASECTMAP2_0,DGW_TEXT,"VASECTMAP","TA1");
+            SetInfoSYS_DGW(Diag,_VASECTMAP2_1,DGW_TEXT,"VASECTMAP","TB1");
+            SetInfoSYS_DGW(Diag,_VASECTMAP2_2,DGW_TEXT,"VASECTMAP","TC1");
+            SetInfoSYS_DGW(Diag,_VASECTMAP2_3,DGW_TEXT,"VASECTMAP","TC2");
+            SetInfoSYS_DGW(Diag,_VASECTMAP2_4,DGW_TEXT,"VASECTMAP","TD1");
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VASECTMAP2_0,DGW_TEXT,"VASECTMAP","TA1");
+            GetInfoSYS_DGW(Diag,_VASECTMAP2_1,DGW_TEXT,"VASECTMAP","TB1");
+            GetInfoSYS_DGW(Diag,_VASECTMAP2_2,DGW_TEXT,"VASECTMAP","TC1");
+            GetInfoSYS_DGW(Diag,_VASECTMAP2_3,DGW_TEXT,"VASECTMAP","TC2");
+            GetInfoSYS_DGW(Diag,_VASECTMAP2_4,DGW_TEXT,"VASECTMAP","TD1");
+            Destroy_DGW(Diag);
+            break;
+         
+         case 3:
+            
+            Diag = Create_DGW("VASECTMAP3");
+            SetInfoSYS_DGW(Diag,_VASECTMAP3_0,DGW_LISTALIAS,"VASECTMAP","REFGRID");
+            SetInfoSYS_DGW(Diag,_VASECTMAP3_1,DGW_TEXT     ,"VASECTMAP","REFHSPACE");
+            SetInfoSYS_DGW(Diag,_VASECTMAP3_2,DGW_TEXT     ,"VASECTMAP","REFVSPACE");
+            SetInfoSYS_DGW(Diag,_VASECTMAP3_3,DGW_TEXT     ,"VASECTMAP","REFTHICK1");
+            SetInfoSYS_DGW(Diag,_VASECTMAP3_4,DGW_LISTALIAS,"VASECTMAP","REFCOLOR");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP3_5,DGW_TEXT,     "VASECTMAP","LABELTEXTSIZE");     
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VASECTMAP3_0,DGW_LISTALIAS,"VASECTMAP","REFGRID");
+            GetInfoSYS_DGW(Diag,_VASECTMAP3_1,DGW_TEXT     ,"VASECTMAP","REFHSPACE");
+            GetInfoSYS_DGW(Diag,_VASECTMAP3_2,DGW_TEXT     ,"VASECTMAP","REFVSPACE");
+            GetInfoSYS_DGW(Diag,_VASECTMAP3_3,DGW_TEXT     ,"VASECTMAP","REFTHICK1");
+            GetInfoSYS_DGW(Diag,_VASECTMAP3_4,DGW_LISTALIAS,"VASECTMAP","REFCOLOR");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP3_5,DGW_TEXT,     "VASECTMAP","LABELTEXTSIZE");     
+            Destroy_DGW(Diag);
+            
+            break;
+
+         case 4:
+            
+            Diag = Create_DGW("VASECTMAP4");
+            SetInfoSYS_DGW(Diag,_VASECTMAP4_0,DGW_LISTALIAS,"VASECTMAP","GRIDOPTION");
+            SetInfoSYS_DGW(Diag,_VASECTMAP4_1,DGW_FILEPATH, "VASECTMAP","COLOR");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP4_2,DGW_LISTALIAS,"VASECTMAP","ZONE");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP4_3,DGW_TEXT,     "VASECTMAP","CONTOUR");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP4_4,DGW_LISTALIAS,"VASECTMAP","PLOTCONTOUR");
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VASECTMAP4_0,DGW_LISTALIAS,"VASECTMAP","GRIDOPTION");
+            GetInfoSYS_DGW(Diag,_VASECTMAP4_1,DGW_FILEPATH, "VASECTMAP","COLOR");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP4_2,DGW_LISTALIAS,"VASECTMAP","ZONE");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP4_3,DGW_TEXT,     "VASECTMAP","CONTOUR");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP4_4,DGW_LISTALIAS,"VASECTMAP","PLOTCONTOUR");
+            Destroy_DGW(Diag);
+            
+            iGridOption = iGetInt_SYS ("VASECTMAP","GRIDOPTION");
+            break;
+
+         case 5:
+
+            if (iGridOption == 0) {
+               Diag = Create_DGW("VASECTMAP5A");
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_0,DGW_TEXT,     "VASECTMAP","CELLSIZE");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_1,DGW_TEXT,     "VASECTMAP","XYRANGE");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_2,DGW_LISTALIAS,"VASECTMAP","LOGOPTION1");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_3,DGW_TEXT,     "VASECTMAP","LOGMIN");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_4,DGW_TEXT,     "VASECTMAP","DESAMPLE");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_5,DGW_TEXT,     "VASECTMAP","BLANK");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_6,DGW_TEXT,     "VASECTMAP","EDGCLP");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_7,DGW_TEXT,     "VASECTMAP","TOL");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_8,DGW_TEXT,     "VASECTMAP","PASSTOL");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_9,DGW_TEXT,     "VASECTMAP","ITERATION");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5A_10,DGW_TEXT,    "VASECTMAP","TENSION");     
+               i = iRunDialogue_DGW(Diag);   
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_0,DGW_TEXT,     "VASECTMAP","CELLSIZE");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_1,DGW_TEXT,     "VASECTMAP","XYRANGE");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_2,DGW_LISTALIAS,"VASECTMAP","LOGOPTION1");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_3,DGW_TEXT,     "VASECTMAP","LOGMIN");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_4,DGW_TEXT,     "VASECTMAP","DESAMPLE");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_5,DGW_TEXT,     "VASECTMAP","BLANK");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_6,DGW_TEXT,     "VASECTMAP","EDGCLP");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_7,DGW_TEXT,     "VASECTMAP","TOL");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_8,DGW_TEXT,     "VASECTMAP","PASSTOL");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_9,DGW_TEXT,     "VASECTMAP","ITERATION");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5A_10,DGW_TEXT,    "VASECTMAP","TENSION");     
+               Destroy_DGW(Diag);
+            } else if (iGridOption == 1) {
+               Diag = Create_DGW("VASECTMAP5B");
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_0,DGW_TEXT,     "VASECTMAP","CELLSIZE");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_1,DGW_TEXT,     "VASECTMAP","XYRANGE");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_2,DGW_LISTALIAS,"VASECTMAP","LOGOPTION2");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_3,DGW_TEXT,     "VASECTMAP","LOGMIN");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_4,DGW_TEXT,     "VASECTMAP","MAXLINE");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_5,DGW_TEXT,     "VASECTMAP","MAXPOINT");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_6,DGW_TEXT,     "VASECTMAP","EXTEND");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_7,DGW_LISTALIAS,"VASECTMAP","DOWNSPLINE");     
+               SetInfoSYS_DGW(Diag,_VASECTMAP5B_8,DGW_LISTALIAS,"VASECTMAP","ACROSPLINE");     
+               i = iRunDialogue_DGW(Diag);   
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_0,DGW_TEXT,     "VASECTMAP","CELLSIZE");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_1,DGW_TEXT,     "VASECTMAP","XYRANGE");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_2,DGW_LISTALIAS,"VASECTMAP","LOGOPTION2");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_3,DGW_TEXT,     "VASECTMAP","LOGMIN");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_4,DGW_TEXT,     "VASECTMAP","MAXLINE");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_5,DGW_TEXT,     "VASECTMAP","MAXPOINT");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_6,DGW_TEXT,     "VASECTMAP","EXTEND");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_7,DGW_LISTALIAS,"VASECTMAP","DOWNSPLINE");     
+               GetInfoSYS_DGW(Diag,_VASECTMAP5B_8,DGW_LISTALIAS,"VASECTMAP","ACROSPLINE");     
+               Destroy_DGW(Diag);
+            } else
+               i = 6;
+            break;
+      
+         case 6:
+            
+            Diag = Create_DGW("VASECTMAP6");
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_0,DGW_LISTALIAS,"VASECTMAP","PLOTCOLORBAR");
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_1,DGW_TEXT,"VASECTMAP","CLRBARTITLE");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_2,DGW_TEXT,"VASECTMAP","CLRBARSUBTITLE");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_3,DGW_TEXT,"VASECTMAP","CLRBARANNSIZE");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_4,DGW_TEXT,"VASECTMAP","CLRBARDECIMALS");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_5,DGW_TEXT,"VASECTMAP","CLRBARHEIGHT");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_6,DGW_TEXT,"VASECTMAP","CLRBARWIDTH");     
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_7,DGW_TEXT,"VASECTMAP","CLRBARXPOS");   
+            SetInfoSYS_DGW(Diag,_VASECTMAP6_8,DGW_TEXT,"VASECTMAP","CLRBARYPOS");   
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_0,DGW_LISTALIAS,"VASECTMAP","PLOTCOLORBAR");
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_1,DGW_TEXT,"VASECTMAP","CLRBARTITLE");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_2,DGW_TEXT,"VASECTMAP","CLRBARSUBTITLE");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_3,DGW_TEXT,"VASECTMAP","CLRBARANNSIZE");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_4,DGW_TEXT,"VASECTMAP","CLRBARDECIMALS");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_5,DGW_TEXT,"VASECTMAP","CLRBARHEIGHT");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_6,DGW_TEXT,"VASECTMAP","CLRBARWIDTH");     
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_7,DGW_TEXT,"VASECTMAP","CLRBARXPOS");   
+            GetInfoSYS_DGW(Diag,_VASECTMAP6_8,DGW_TEXT,"VASECTMAP","CLRBARYPOS");   
+            Destroy_DGW(Diag);
+            
+            break;
+            
+         default:
+            
+            DisplayInt_SYS(_("I'm lost"),i);            
+            i = -1;
+            break;
+         }   
+      }
+      
+      // --- Save parameters ---
+      
+      if (i != -1) SaveParm_SYS(sMapParms,0,"VASECTMAP");
+   } 
+   
+
+   Progress_SYS(1);
+
+   // --- Get parameters ---
+
+   GetString_SYS("VASTKSECTMAP","LINESEL",sLineSel);
+   GetString_SYS("VASTKSECTMAP","STATIONCH",sStnCh);
+   GetString_SYS("VASTKSECTMAP","DATACH",sDataCh);
+   GetString_SYS("VASTKSECTMAP","DEPTHCH",sDepCh);
+   GetString_SYS("VASTKSECTMAP","ELEVCH",sElevCh);
+   GetString_SYS("VASTKSECTMAP","MAPPARMS",sMapParms);
+   GetString_SYS("VASTKSECTMAP","NAMETAG",sNameTag);
+   GetString_SYS("VASTKSECTMAP","FILEDIR",sDir);
+   iStrMin_STR(sNameTag);
+
+   // --- Input channels validation ---
+
+   if (!iExistSymb_DB(Data,sStnCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Station channel does not exist!"));
+   StnCh = FindSymb_DB(Data,sStnCh,DB_SYMB_CHAN);
+   iCol = iGetColVA_DB(Data,StnCh);
+   if (iCol != 1)
+      Abort_SYS(_("Station channel should not be array channel!"));
+
+   if (!iExistSymb_DB(Data,sDataCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Data channel does not exist!"));
+   DataCh = FindSymb_DB(Data,sDataCh,DB_SYMB_CHAN);
+   iCol = iGetColVA_DB(Data,DataCh);
+   if (iCol == 1)
+      Abort_SYS(_("Data channel should be array channel!"));
+
+   if (!iExistSymb_DB(Data,sDepCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Depth channel does not exist!"));
+   DepCh = FindSymb_DB(Data,sDepCh,DB_SYMB_CHAN);
+   iCol = iGetColVA_DB(Data,DepCh);
+   if (iCol == 1)
+      Abort_SYS(_("Depth channel should be array channel!"));
+
+
+   // --- Make the stacked map name from database name and nametag string ---
+   
+   Strcpy_STR(sMap,sDBname);
+   Strcat_STR(sMap,sNameTag);
+   Strcat_STR(sMap,".map");
+   
+   Strcpy_STR(sTempStr, sDir);
+   Strcat_STR(sTempStr, sMap);
+   Strcpy_STR(sMap, sTempStr);
+      
+   
+   SetString_SYS("VASTKSECTMAP","MAPNAME",sMap);
+   if(iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+
+      
+   // --- Load parameter group ----
+   
+   ClearGroup_SYS("VASECTMAP");
+
+   if (iFileExist_SYS(sMapParms)) 
+      
+      LoadParm_SYS(sMapParms,"VASECTMAP");
+   
+   else {  // --- set all defaults
+
+      SetString_SYS("VASECTMAP","DLEFT","");     
+      SetString_SYS("VASECTMAP","DRIGHT","");     
+      SetString_SYS("VASECTMAP","SCALE","");     
+      SetString_SYS("VASECTMAP","EXAGG","");     
+      SetString_SYS("VASECTMAP","PHEIGHT","25");     
+      SetString_SYS("VASECTMAP","MLEFT","25");     
+      SetString_SYS("VASECTMAP","MRIGHT","20");     
+      SetString_SYS("VASECTMAP","MTOP","20");     
+      SetString_SYS("VASECTMAP","MBOTTOM","45");     
+      
+      SetString_SYS("VASECTMAP","TA1","");
+      SetString_SYS("VASECTMAP","TB1","");
+      SetString_SYS("VASECTMAP","TC1","");
+      SetString_SYS("VASECTMAP","TC2","");
+      SetString_SYS("VASECTMAP","TD1","");
+      
+      SetString_SYS("VASECTMAP","REFGRID","-1");       // no grid
+      SetString_SYS("VASECTMAP","REFHSPACE","");
+      SetString_SYS("VASECTMAP","REFVSPACE","");
+      SetString_SYS("VASECTMAP","REFTHICK1","0.1");
+      SetString_SYS("VASECTMAP","REFCOLOR","k");     
+      SetString_SYS("VASECTMAP","LABELTEXTSIZE","2.0");     
+      
+      SetString_SYS("VASECTMAP","GRIDOPTION","1");   // bigrid
+      SetString_SYS("VASECTMAP","COLOR","");     
+      SetString_SYS("VASECTMAP","ZONE","0");         // default   
+      SetString_SYS("VASECTMAP","CONTOUR","");     
+      SetString_SYS("VASECTMAP","PLOTCONTOUR","0");   // No
+      
+      SetString_SYS("VASECTMAP","CELLSIZE","");     
+      SetString_SYS("VASECTMAP","XYRANGE","");     
+      SetString_SYS("VASECTMAP","LOGOPTION1","0");   // linear
+      SetString_SYS("VASECTMAP","LOGMIN","1.0");     
+      SetString_SYS("VASECTMAP","DESAMPLE","");     
+      SetString_SYS("VASECTMAP","BLANK","");     
+      SetString_SYS("VASECTMAP","EDGCLP","0");     
+      SetString_SYS("VASECTMAP","TOL","");     
+      SetString_SYS("VASECTMAP","PASSTOL","99");     
+      SetString_SYS("VASECTMAP","ITERATION","100");     
+      SetString_SYS("VASECTMAP","TENSION","0");     
+
+      SetString_SYS("VASECTMAP","CELLSIZE","");     
+      SetString_SYS("VASECTMAP","XYRANGE","");     
+      SetString_SYS("VASECTMAP","LOGOPTION2","0");   // linear   
+      SetString_SYS("VASECTMAP","LOGMIN","1.0");     
+      SetString_SYS("VASECTMAP","MAXLINE","");     
+      SetString_SYS("VASECTMAP","MAXPOINT","");     
+      SetString_SYS("VASECTMAP","EXTEND","1");     
+      SetString_SYS("VASECTMAP","DOWNSPLINE","2");   // Akima   
+      SetString_SYS("VASECTMAP","ACROSPLINE","2");   // Akima   
+
+      SetString_SYS("VASECTMAP","PLOTCOLORBAR","1");   // yes
+      SetString_SYS("VASECTMAP","CLRBARTITLE","");     
+      SetString_SYS("VASECTMAP","CLRBARSUBTITLE","");     
+      SetString_SYS("VASECTMAP","CLRBARANNSIZE","1.5");     
+      SetString_SYS("VASECTMAP","CLRBARDECIMALS","1");     
+      SetString_SYS("VASECTMAP","CLRBARHEIGHT","");     
+      SetString_SYS("VASECTMAP","CLRBARWIDTH","");     
+      SetString_SYS("VASECTMAP","CLRBARXPOS","");   
+      SetString_SYS("VASECTMAP","CLRBARYPOS","");   
+   }
+
+
+   // --- Set line selections ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+
+   if (iCharComp_STR(sLineSel,"A")) 
+
+      SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
+
+   else if(iCharComp_STR(sLineSel,"S")) 
+
+      SelectedLineLST_DB(Data, LineLST);
+
+   else if(iCharComp_STR(sLineSel,"D")) 
+
+      AddItem_LST(LineLST, sCurLine, sCurSymb);
+
+   Sort_LST(LineLST,0,0);
+   
+   iTotLines = iSize_LST(LineLST);
+   if(iTotLines==0)
+      Abort_SYS(_("No lines selected to plot."));
+
+
+   // --- check elevation channel ---
+
+   Strcpy_STR(sElevDepCh,"_Elev_Depth_");
+   if (iStrlen_STR(sElevCh)==0 || !iExistSymb_DB(Data,sElevCh,DB_SYMB_CHAN)) 
+      iElevCh = 0;
+   else {
+      iElevCh = 1;
+      ElevCh = FindSymb_DB(Data,sElevCh,DB_SYMB_CHAN);
+      iCol = iGetColVA_DB(Data,ElevCh);
+      if (iCol != 1)
+         Abort_SYS(_("Elevation channel should not be array channel."));
+   
+      if (iExistSymb_DB(Data,sElevDepCh,DB_SYMB_CHAN)) {
+         ElevDepCh = FindSymb_DB(Data,sElevDepCh,DB_SYMB_CHAN);
+         LockSymb_DB(Data,ElevDepCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         DeleteSymb_DB(Data,ElevDepCh);
+      }
+      DupSymbNoLock_DB(Data,DepCh,sElevDepCh);
+   }
+
+
+   // --- get color and zone ---
+
+   GetString_SYS("VASECTMAP","COLOR",sColor);
+   if(iStrMin2_STR(sColor)==0) {                            // undefined in dialogue
+      if(iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor)==1)   // undefined in parm block
+         Strcpy_STR(sColor,"colour.tbl");                  // hardwire to 
+      SetString_SYS("VASECTMAP","COLOR",sColor);
+   }
+   GetString_SYS("VASECTMAP","ZONE",sPar);
+   if(iStrlen_STR(sPar)==0)     
+      SetString_SYS("VASECTMAP","ZONE","0");  //Default
+
+
+   // --- get plot ref grid, colorbar and contour options ---
+   
+   iRefGrid = iGetInt_SYS("VASECTMAP","REFGRID");
+   if (iRefGrid == iDUMMY)  iRefGrid = -1;            
+ 
+   iPlotColorBar = iGetInt_SYS ("VASECTMAP","PLOTCOLORBAR");
+   if (iPlotColorBar == iDUMMY)  iPlotColorBar = 1;            
+ 
+   iPlotContour  = iGetInt_SYS ("VASECTMAP","PLOTCONTOUR");
+   if (iPlotContour == iDUMMY)  iPlotContour = 0;            
+
+      
+   // --- get X/Y/Stn channel handles and VVs ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if(XCh!=NULLSYMB && YCh!=NULLSYMB) {
+      hXVV = Create_VV(REAL,0);
+      hYVV = Create_VV(REAL,0);
+   }
+   hStnVV = Create_VV(REAL,0);
+   StnCh = FindSymb_DB(Data,sStnCh,DB_SYMB_CHAN);
+
+
+   // --- get plot sections height and space between sections ---
+
+   rPHeight = rGetReal_SYS("VASECTMAP","PHEIGHT"); 
+   if (rPHeight==rDUMMY || rPHeight<= 0.0)    rPHeight = 25.0; 
+   rGSpace=rPHeight/2.0;
+   rGPHeight = (real)iTotLines*(rPHeight + rGSpace) - rGSpace;
+   
+   // --- Set rScale, rGDLeft, rGDRight, rGDTop and rGDBottom ---
+
+   rScale = rGetReal_SYS("VASECTMAP","SCALE");
+   rGDLeft = rGetReal_SYS("VASECTMAP","DLEFT");
+   rGDRight= rGetReal_SYS("VASECTMAP","DRIGHT");  
+   
+   if(rScale==rDUMMY || rGDLeft==rDUMMY || rGDRight==rDUMMY)   {
+   
+      hST = Create_ST();    
+      LockSymb_DB(Data,StnCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      for(ii=0; ii<iTotLines; ii++) {
+      
+         Line = (DB_SYMB)iGetInt_LST(LineLST, 1, ii);
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         GetChanVV_DB(Data,Line,StnCh,hStnVV);
+         DataVV_ST(hST,hStnVV);
+         UnLockSymb_DB(Data,Line);
+      }
+      UnLockSymb_DB(Data,StnCh);
+      rGMinX = rGetInfo_ST(hST,ST_MIN);
+      rGMaxX = rGetInfo_ST(hST,ST_MAX);
+      NicerScale_MATH(rGMinX,rGMaxX,rXInterval,iPow);
+
+      if(rScale==rDUMMY) {
+         rScale = (rGMaxX-rGMinX)*1000.0/(8.0*rPHeight);  // make map size in 8:1 ratio
+         rTmp = 0.0;
+         NicerScale_MATH(rTmp,rScale,rTmp1,iPow);
+      }
+      if(rGDLeft==rDUMMY)      rGDLeft  = rGMinX;
+      if(rGDRight==rDUMMY)     rGDRight = rGMaxX;
+   }
+   rGDTop =   0.0;
+   rGDBottom = rGDTop - 0.001*rGPHeight*rScale;
+      
+   
+   // --- Go through all Lines to set all VVs, rGExagg and Grids ---
+
+   MinXVV = Create_VV(REAL,iTotLines);
+   MaxXVV = Create_VV(REAL,iTotLines);
+   MinYVV = Create_VV(REAL,iTotLines);
+   MaxYVV = Create_VV(REAL,iTotLines);
+   XIntVV = Create_VV(REAL,iTotLines);
+   YIntVV = Create_VV(REAL,iTotLines);
+   
+   for(ii=0; ii<iTotLines; ii++) {
+   
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, ii);
+      GetItem_LST(LineLST, 0, ii, sCurLine);
+      SetString_SYS("VASTKSECTMAP","LINE",sCurLine);
+      Strcpy_STR(sGrid,sCurLine);
+      Strcat_STR(sGrid,sNameTag);
+      Strcat_STR(sGrid,".grd");
+
+      Strcpy_STR(sTempStr, sDir);
+      Strcat_STR(sTempStr, sGrid);
+      Strcpy_STR(sGrid, sTempStr);
+      
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      Strcpy_STR(sBuff,_("Processing line: "));
+      Strcat_STR(sBuff,sCurLine);
+
+      ProgName_SYS(sBuff,0);
+      ProgUpdateL_SYS(ii,iTotLines);
+
+      // --- Loop over the lines ---
+
+      //if(iLineType_DB(Data, Line) != DB_LINE_TYPE_NORMAL) {
+      //   // --- Advance to Next Line ---        
+      //   UnLockSymb_DB(Data,Line);
+      //   continue;
+      //}
+
+      // --- Make sElevDepCh if Elevation channel exist ---
+
+      if(iElevCh==1) {
+         Exp = Create_EXP(Data,"$sElevDepCh=$sDepCh-$sElevCh;",80);
+         Math_DU(Data,Line,Exp);
+      }
+      
+      // --- Get section data ---
+      
+      SetString_SYS("VSCTDB","LINE",   sCurLine);
+      SetString_SYS("VSCTDB","STATION",sStnCh);
+      SetString_SYS("VSCTDB","COND",   sDataCh);
+      if(iElevCh==0) 
+         SetString_SYS("VSCTDB","DEPTH",  sDepCh);
+      else
+         SetString_SYS("VSCTDB","DEPTH",  sElevDepCh);
+      SetString_SYS("VSCTDB","SECDB",  sSecDB);
+      
+      if(iInteract)   SetInteractive_SYS(0);    // Interactive off
+      UnLockSymb_DB(Data,Line);
+      UnLock_EDB(EData);
+      if (iRunGX_SYS("VSCTDB") != 0) {
+         SetInteractive_SYS(1);
+         Abort_SYS(_("Failure running VSCTDB to extract section data."));
+      }
+      Data = Lock_EDB(EData);
+      if (iInteract)   SetInteractive_SYS(1);    // Interactive set back
+      
+      // --- Get data range in section DB ---
+      
+      if (iInteract) SetInteractive_SYS(0);              
+      SetString_SYS("VSCTDBXY","GDB",sSecDB);
+      if (iRunGX_SYS("VSCTDBXY") != 0)  
+         Abort_SYS(_("Failure running VSCTDBXY to define data range in section database."));
+      if (iInteract) SetInteractive_SYS(1);              
+      
+      rMinX = rGetReal_SYS("VSCTDBXY","MIN_X");     
+      rMinY = rGetReal_SYS("VSCTDBXY","MIN_Y");     
+      rMaxX = rGetReal_SYS("VSCTDBXY","MAX_X");     
+      rMaxY = rGetReal_SYS("VSCTDBXY","MAX_Y");     
+      
+      if (rMinX == rDUMMY || rMinY == rDUMMY || rMaxX == rDUMMY || rMaxY == rDUMMY) 
+         Abort_SYS(_("Section database does not have data in X (station) and/or Y (depth) channels."));       
+                  
+      NicerScale_MATH(rMinX,rMaxX,rXInterval,iPow);
+      NicerScale_MATH(rMinY,rMaxY,rYInterval,iPow);
+      
+      SetReal_VV(MinXVV,ii,rMinX);
+      SetReal_VV(MinYVV,ii,rMinY);
+      SetReal_VV(MaxXVV,ii,rMaxX);
+      SetReal_VV(MaxYVV,ii,rMaxY);
+      SetReal_VV(XIntVV,ii,rXInterval);
+      SetReal_VV(YIntVV,ii,rYInterval);
+
+      
+      // --- Load parameter group ----
+      
+      ClearGroup_SYS("VASECTMAP");
+      if (iFileExist_SYS(sMapParms)) 
+         LoadParm_SYS(sMapParms,"VASECTMAP");
+      
+      // --- Set rGExagg ---
+    
+      rExagg = rGetReal_SYS("VASECTMAP","EXAGG");
+      if (rExagg == rDUMMY || rExagg <= 0.0)   {  // make section fit into map
+
+         rExagg = 1.0;     rVal = (rMaxY-rMinY)*1000.0/rScale/rPHeight;
+         if(rVal>1.0) {
+            while(rVal>1.0) { rExagg /= 2.0; rVal /= 2.0; }
+         } else if(rVal<=0.5) {
+            while(rVal<=0.5) { rExagg *= 2.0; rVal *= 2.0; }
+         } 
+         if(ii==0)  rGExagg = rExagg;
+         else     { if(rExagg>rGExagg)  rGExagg = rExagg; }
+      } else
+         rGExagg = rExagg;
+   
+
+      // ----------------------------------
+      // --- Gridding  ---
+      // ----------------------------------
+
+      iGridOption = iGetInt_SYS ("VASECTMAP","GRIDOPTION");
+      if (iInteract)   SetInteractive_SYS(0);  // Interactive off
+
+      if (iGridOption == 0)  {
+         
+         // --- Rangrid ---
+         
+         ClearGroup_SYS("Rangrid");  
+         SetString_SYS("RANGRID",  "CHAN",      sZ);     
+         SetString_SYS("RANGRID",  "GRID",      sGrid);
+         GetString_SYS("VASECTMAP","CELLSIZE",  sPar);     
+         SetString_SYS("RANGRID",  "CS",        sPar);     
+         GetString_SYS("VASECTMAP","XYRANGE",   sPar);     
+         SetString_SYS("RANGRID",  "XY",        sPar);
+         GetString_SYS("VASECTMAP","LOGOPTION1",sPar);     
+         SetString_SYS("RANGRID",  "LOGOPT",    sPar);     
+         GetString_SYS("VASECTMAP","LOGMIN",    sPar);     
+         SetString_SYS("RANGRID",  "LOGMIN",    sPar);
+         GetString_SYS("VASECTMAP","DESAMPLE",  sPar);     
+         SetString_SYS("RANGRID",  "DSF",       sPar);     
+         GetString_SYS("VASECTMAP","BLANK",     sPar);     
+         SetString_SYS("RANGRID",  "BKD",       sPar);
+         GetString_SYS("VASECTMAP","EDGCLP",    sPar);     
+         SetString_SYS("RANGRID",  "EDGCLP",    sPar);
+         GetString_SYS("VASECTMAP","TOL",       sPar);     
+         SetString_SYS("RANGRID",  "TOL",       sPar);     
+         GetString_SYS("VASECTMAP","PASSTOL",   sPar);     
+         SetString_SYS("RANGRID",  "PASTOL",    sPar);
+         GetString_SYS("VASECTMAP","ITERATION", sPar);     
+         SetString_SYS("RANGRID",  "ITRMAX",    sPar);     
+         GetString_SYS("VASECTMAP","TENSION",   sPar);     
+         SetString_SYS("RANGRID",  "TENS",      sPar);
+         SetString_SYS("RANGRID",  "GDB",       sSecDB);
+         
+         if (iRunGX_SYS("VSCTRGRD") != 0)  
+            Abort_SYS(_("Failure running VSCTRGRD to grid the data."));
+         
+      } else if (iGridOption == 1) {            
+         
+         ClearGroup_SYS("BIGRID");  
+         SetString_SYS("BIGRID",   "CHAN",      sZ);     
+         SetString_SYS("BIGRID",   "GRID",      sGrid);
+         GetString_SYS("VASECTMAP","CELLSIZE",  sPar);     
+         SetString_SYS("BIGRID",   "CS",        sPar);     
+         GetString_SYS("VASECTMAP","MAXLINE",   sPar);     
+         SetString_SYS("BIGRID",   "SMX",       sPar);     
+         GetString_SYS("VASECTMAP","MAXPOINT",  sPar);     
+         SetString_SYS("BIGRID",   "GAPLIM",    sPar);
+         GetString_SYS("VASECTMAP","EXTEND",    sPar);     
+         SetString_SYS("BIGRID",   "NEX",       sPar);
+         GetString_SYS("VASECTMAP","DOWNSPLINE",sPar);     
+         SetString_SYS("BIGRID",   "ISP1",      sPar);     
+         GetString_SYS("VASECTMAP","ACROSPLINE",sPar); 
+         SetString_SYS("BIGRID",   "ISP2",      sPar);     
+         GetString_SYS("VASECTMAP","XYRANGE",   sPar);     
+         SetString_SYS("BIGRID",   "XYRANGE",   sPar);
+         GetString_SYS("VASECTMAP","LOGOPTION2",sPar);     
+         SetString_SYS("BIGRID",   "LOGOPT",    sPar);     
+         GetString_SYS("VASECTMAP","LOGMIN",    sPar);     
+         SetString_SYS("BIGRID",   "LOGMIN",    sPar);
+         SetString_SYS("BIGRID",   "GDB",       sSecDB);
+
+         if (iRunGX_SYS("VSCTBGRD") != 0)
+            Abort_SYS(_("Failure running VSCTBGRD to grid the data."));
+      }
+      if (iInteract)   SetInteractive_SYS(1);    // Interactive set back
+   }
+
+
+   // --- Create map ---
+
+   if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+
+   rMLeft   = rGetReal_SYS("VASECTMAP","MLEFT");    
+   rMRight  = rGetReal_SYS("VASECTMAP","MRIGHT");   
+   rMTop    = rGetReal_SYS("VASECTMAP","MTOP");     
+   rMBottom = rGetReal_SYS("VASECTMAP","MBOTTOM");  
+   if (rMLeft==rDUMMY || rMLeft<0.0)          rMLeft   = 25.0;
+   if (rMRight==rDUMMY || rMRight<0.0)        rMRight  = 20.0;
+   if (rMTop==rDUMMY || rMTop<0.0)            rMTop    = 20.0;
+   if (rMBottom==rDUMMY || rMBottom<0.0)      rMBottom = 45.0;
+   rMapWidth = rMLeft + rMRight + (rGDRight - rGDLeft)/rScale*1000.0;     // mm
+
+      
+   Mapset_MVU( Map,              // MAP Handle
+               _n("SectionBase"),    // Name to use for the base map view
+               _n("SectionData"),    // Name to use for the data view
+               rGDLeft     ,     // Minimum X of map area (ground units)
+               rGDRight    ,     // Maximum X of map area (ground units)
+               rGDBottom   ,     // Minimum Y of map area (ground units)
+               rGDTop      ,     // Maximum Y of map area (ground units) 
+               ""          ,     // Size of paper (e.g. A1, E, etc.)
+               FALSE       ,     // Portrait map? (or landscape) (FALSE by default)
+               FALSE       ,     // Map is exactly sized to area? 
+                                 // (or trimmed to data and margins) (FALSE by default)
+               rScale      ,     // Map scale (rDummy for default)
+               1.0         ,     // Conversion factor (to units/meter) (rDummy for default)
+               rMLeft/10.0 ,     // Minimum X of margin area (cm)
+               rMRight/10.0,     // Maximum X of margin area (cm)
+               rMBottom/10.0,    // Minimum Y of margin area (cm)
+               rMTop/10.0  ,     // Maximum Y of margin area (cm)                 
+               0.0         );    // Inside edge (cm)
+
+   SetClassName_MAP(Map,"Base","SectionBase");
+   SetClassName_MAP(Map,"Data","SectionData");
+  
+   // ------------------------------------------
+   // --- Base map ---
+  
+//   BaseView = Create_MVIEW(Map,"SectionBase",MVIEW_WRITENEW);
+//   SetClassName_MAP(Map,"Base","SectionBase");
+//   hIPJ = Create_IPJ();
+//   GetIPJ_MVIEW(BaseView,hIPJ);
+//   rMinXm = 0.0;
+//   rMinYm = 0.0;
+//   rMaxXm = rMapWidth;
+//   rMaxYm = rMTop + rMBottom + rGPHeight;
+//   FitWindow_MVIEW(BaseView, rMinXm,rMinYm,rMaxXm,rMaxYm, rMinXm,rMinYm,rMaxXm,rMaxYm);
+//   SetIPJ_MVIEW(BaseView,hIPJ);
+//   Destroy_IPJ(hIPJ);
+//   Destroy_MVIEW(BaseView);
+//
+//   DataView = Create_MVIEW(Map,"SectionData",MVIEW_WRITENEW);
+//   SetClassName_MAP(Map,"Data","SectionData");
+//   rMinXm = rMLeft;
+//   rMinYm = rMBottom;
+//   rMaxXm = rMapWidth-rMRight;
+//   rMaxYm = rMBottom + rGPHeight;
+//   rMinXg = rGDLeft;
+//   rMinYg = rGDBottom;
+//   rMaxXg = rGDRight;
+//   rMaxYg = rGDTop;
+//   FitWindow_MVIEW(DataView, rMinXm,rMinYm,rMaxXm,rMaxYm, rMinXg,rMinYg,rMaxXg,rMaxYg);
+//   TranScale_MVIEW(DataView,rGDLeft-rMLeft*rScale/1000.0,rGDBottom-rMBottom*rScale/1000.0,
+//                   1000.0/rScale,1000.0/rScale);
+//   Destroy_MVIEW(DataView);
+
+   
+   rTitleWidth = 120.0;   
+   rScaleBarMaxLen = 100.0;
+   while(rTitleWidth > 0.25*rMapWidth)     rTitleWidth -= 10.0;
+   while(rScaleBarMaxLen > 0.2*rMapWidth)  rScaleBarMaxLen -= 10.0;
+   rScaleBarXoff = -0.5*rMapWidth;
+
+   SetReal_SYS  ("VASECTMAP","TITLEWIDTH", rTitleWidth/10.0);
+   SetReal_SYS  ("VASECTMAP","SCALEBARMAXLEN", rScaleBarMaxLen/10.0);
+   SetReal_SYS  ("VASECTMAP","SCALEBARXOFF", rScaleBarXoff/10.0);
+   SetReal_SYS  ("VASECTMAP","EXAGG", rGExagg);
+
+      
+   // --- Create control file for title box and scale bar ---
+
+   if (iFindPathNameEx_SYS("vasectplot.con",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_ETC,sTemp) == 1)
+      Abort_SYS(_("Cannot find master control file \"vasectplot.CON\"."));
+         
+   Master  = Create_RA(sTemp);
+   ConFile = Create_WA("_vasectplot.con",0);
+   
+   // --- go through master file ---
+   
+   iLines = iLen_RA(Master);
+   for(i=0;i<iLines;i++) {
+   
+      iGets_RA(Master,sTemp);
+      
+      // --- strip comment ---
+      
+      SplitString_STR(sTemp,"/",sTemp2);
+      if (iCharComp_STR(sTemp2,"%")) {
+      
+         // --- test dependency ---
+         
+         SplitString_STR(sTemp2," ",sTemp3);
+         ReplaceString_SYS(sTemp2,sTemp2,"VASECTMAP");
+         
+         if (iStrMin2_STR(sTemp2) == 0) continue; 
+      }         
+      
+      // --- replace variables ---         
+      
+      ReplaceString_SYS(sTemp,sTemp,"VASECTMAP");
+      
+      // --- write out control file ---
+      
+      Puts_WA(ConFile,sTemp);
+      NewLine_WA(ConFile);
+   }
+   Destroy_RA(Master);
+   Destroy_WA(ConFile);
+   
+
+   // --- process mapplot to make title box and scale bar ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Processing _vasectplot.con"),1);
+   Mapplot = Create_MAPL("_vasectplot.con","base",0);
+   Process_MAPL(Mapplot,Map);
+   Destroy_MAPL(Mapplot);
+   
+   Clean_MAP(Map);
+   Destroy_MAP(Map);
+   //if (iInteractive_SYS())  
+   Load_EMAP(sMap);
+
+
+   // --- Go through all Lines to process section map ---
+
+   Progress_SYS(1);
+
+   rYm = rMBottom + rGPHeight + (rPHeight+rGSpace);
+
+   for(ii=0; ii<iTotLines; ii++) {
+
+      rYm -= (rPHeight+rGSpace);
+   
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, ii);
+      GetItem_LST(LineLST, 0, ii, sCurLine);
+      SetString_SYS("VASECTIONMAP","LINE",sCurLine);
+      Strcpy_STR(sGrid,sCurLine);
+      Strcat_STR(sGrid,sNameTag);
+      Strcat_STR(sGrid,".grd");
+
+      Strcpy_STR(sTempStr, sDir);
+      Strcat_STR(sTempStr, sGrid);
+      Strcpy_STR(sGrid, sTempStr);
+      
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      Strcpy_STR(sBuff,_("Processing line: "));
+      Strcat_STR(sBuff,sCurLine);
+
+      ProgName_SYS(sBuff,0);
+      ProgUpdateL_SYS(ii,iTotLines);
+
+
+      // --- Loop over the lines ---
+
+      //if(iLineType_DB(Data, Line) != DB_LINE_TYPE_NORMAL) {
+      //   // --- Advance to Next Line ---        
+      //   UnLockSymb_DB(Data,Line);
+      //   continue;
+      //}
+
+
+      // --- Get station direction ---
+
+      Strcpy_STR(sStnDir,"");
+      if(XCh!=NULLSYMB && YCh!=NULLSYMB) {
+         LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         LockSymb_DB(Data,StnCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         GetChanVV_DB(Data,Line,XCh,hXVV);
+         GetChanVV_DB(Data,Line,YCh,hYVV);
+         GetChanVV_DB(Data,Line,StnCh,hStnVV);
+         UnLockSymb_DB(Data,XCh);
+         UnLockSymb_DB(Data,YCh);
+         UnLockSymb_DB(Data,StnCh);
+         rXCh1 = rDUMMY;
+         rXCh2 = rDUMMY;
+         rYCh1 = rDUMMY;
+         rYCh2 = rDUMMY;
+         rStnCh1 = rDUMMY;
+         rStnCh2 = rDUMMY;
+         iLen = iLength_VV(hXVV);
+         if(iLen>0) {
+            i1 = iFindDum_VV(hXVV,0,iLen-1,1,0);
+            i2 = iFindDum_VV(hXVV,0,iLen-1,1,1);
+            if(i1!=-1 && i2!=-1) {
+               rXCh1 = rGetReal_VV(hXVV,i1);
+               rXCh2 = rGetReal_VV(hXVV,i2);
+            }
+         }
+         iLen = iLength_VV(hYVV);
+         if(iLen>0) {
+            i1 = iFindDum_VV(hYVV,0,iLen-1,1,0);
+            i2 = iFindDum_VV(hYVV,0,iLen-1,1,1);
+            if(i1!=-1 && i2!=-1) {
+               rYCh1 = rGetReal_VV(hYVV,i1);
+               rYCh2 = rGetReal_VV(hYVV,i2);
+            }
+         }
+         iLen = iLength_VV(hStnVV);
+         if(iLen>0) {
+            i1 = iFindDum_VV(hStnVV,0,iLen-1,1,0);
+            i2 = iFindDum_VV(hStnVV,0,iLen-1,1,1);
+            if(i1!=-1 && i2!=-1) {
+               rStnCh1 = rGetReal_VV(hStnVV,i1);
+               rStnCh2 = rGetReal_VV(hStnVV,i2);
+               if(rStnCh1<rStnCh2)  iStnDir=1;
+               else                 iStnDir=-1;
+            }
+         }
+         if(rXCh1!=rDUMMY && rXCh2!=rDUMMY && rYCh1!=rDUMMY && rYCh2!=rDUMMY &&
+            rStnCh1!=rDUMMY && rStnCh2!=rDUMMY) {
+            rDirAngle = rArcTan2_MATH(rYCh2-rYCh1,rXCh2-rXCh1)*180.0/3.14159;
+            if(iStnDir==-1) {
+               if(rDirAngle<=0.0)  rDirAngle+=180.0;
+               else                rDirAngle-=180.0;
+            }
+            rDirAngle = -rDirAngle + 90.0;      // change to azimuth angle: clock-wise from North
+            if(rDirAngle<0.0)  rDirAngle += 360.0;
+            
+            if(     rDirAngle<=  5.0 || rDirAngle>=355.0)    Strcpy_STR(sStnDir,"->N");
+            else if(rDirAngle>   5.0 && rDirAngle<  85.0)    Strcpy_STR(sStnDir,"->NE");
+            else if(rDirAngle>= 85.0 && rDirAngle<= 95.0)    Strcpy_STR(sStnDir,"->E");
+            else if(rDirAngle>  95.0 && rDirAngle< 175.0)    Strcpy_STR(sStnDir,"->SE");
+            else if(rDirAngle>=175.0 && rDirAngle<=185.0)    Strcpy_STR(sStnDir,"->S");
+            else if(rDirAngle> 185.0 && rDirAngle< 265.0)    Strcpy_STR(sStnDir,"->SW");
+            else if(rDirAngle>=265.0 && rDirAngle<=275.0)    Strcpy_STR(sStnDir,"->W");
+            else if(rDirAngle> 275.0 && rDirAngle< 355.0)    Strcpy_STR(sStnDir,"->NW");
+         }
+      }
+
+      // --- Get data range ---
+      
+      rMinX = rGetReal_VV(MinXVV,ii);     
+      rMinY = rGetReal_VV(MinYVV,ii);     
+      rMaxX = rGetReal_VV(MaxXVV,ii);     
+      rMaxY = rGetReal_VV(MaxYVV,ii);     
+      rXInterval = rGetReal_VV(XIntVV,ii);
+      rYInterval = rGetReal_VV(YIntVV,ii);            
+   
+      // --- Get data range to be plotted ---
+      
+      rDLeft  = rGetReal_SYS("VASECTMAP","DLEFT");
+      rDRight = rGetReal_SYS("VASECTMAP","DRIGHT");  
+      
+      if (rDLeft  == rDUMMY)   rDLeft  = rMinX;
+      if (rDRight == rDUMMY)   rDRight = rMaxX;
+      rDTop   = rMaxY;
+      rDBottom = rDTop - 0.001*rPHeight*rScale/rGExagg;
+    
+      // --- DataView ---
+
+      EMap = Current_EMAP();
+      Map = Lock_EMAP(EMap);
+
+      DataView = Create_MVIEW(Map,sCurLine,MVIEW_WRITENEW);
+      GroupClipMode_MVIEW(DataView,TRUE);
+      SetClassName_MAP(Map,"Data",sCurLine);
+
+      rMinXm = rMLeft;
+      rMinYm = rYm - rPHeight;
+      rMaxXm = rMapWidth-rMRight;
+      rMaxYm = rYm;
+      rMinXg = rGDLeft;
+      rMinYg = rDTop - 0.001*rPHeight*rScale;
+      rMaxXg = rGDRight;
+      rMaxYg = rDTop;
+
+      FitWindow_MVIEW(DataView, rMinXm,rMinYm,rMaxXm,rMaxYm, rMinXg,rMinYg,rMaxXg,rMaxYg);
+      rViewScale = rScaleMM_MVIEW(DataView);
+      rYViewScale = rViewScale/rGExagg;
+
+      // --- Attached warp ---
+      
+      if (rGExagg != 1.0) {
+         hIPJ = Create_IPJ();
+         GetIPJ_MVIEW(DataView,hIPJ);
+         AddExaggWarp_IPJ(hIPJ,1.0,rGExagg,1.0,0.0,rDTop,0.0);
+         SetIPJ_MVIEW(DataView,hIPJ);
+         Destroy_IPJ(hIPJ);
+      }
+
+
+      // --- Plot labels and reference grids ---
+
+      StartGroup_MVIEW(DataView,"Coordinates",MVIEW_GROUP_APPEND);
+
+      rXSpace = rGetReal_SYS("VASECTMAP","REFHSPACE");
+      rYSpace = rGetReal_SYS("VASECTMAP","REFVSPACE");
+      rLabelTextSize = rGetReal_SYS("VASECTMAP","LABELTEXTSIZE");
+      if (rLabelTextSize==rDUMMY || rLabelTextSize<=0.0) rLabelTextSize = 2.0;
+      
+      if (rXSpace == rDUMMY) rXSpace = rXInterval;
+      if (rYSpace == rDUMMY) rYSpace = rYInterval;
+
+      while ((rDTop - rDBottom)/rYSpace > 10.0 || (rDTop - rDBottom)/rYSpace < -10.0)
+         rYSpace *= 2.0;
+      rYSpace = (real)((int)(rYSpace+0.5));
+      if (rYSpace <= 0.0) rYSpace = 1.0;   
+      
+      if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+         Strcpy_STR(sFont,_n("Default"));
+      TextFont_MVIEW(DataView,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      TextColor_MVIEW(DataView,iColor_MVIEW("K"));
+      TextSize_MVIEW(DataView,rLabelTextSize*rViewScale);
+      TextAngle_MVIEW(DataView,0.0);
+         
+      LineColor_MVIEW(DataView,iColor_MVIEW("K"));
+      AxisX_MVIEW(DataView,rDTop,rDLeft,rDRight,rXSpace,rXSpace,-2.0*rYViewScale);
+      LabelX_MVIEW(DataView,rDTop+rYViewScale,rDLeft,rDRight,rXSpace,
+                   MVIEW_LABEL_JUST_BOTTOM,MVIEW_LABEL_BOUND_YES,MVIEW_LABEL_ORIENT_HORIZONTAL);
+      Line_MVIEW(DataView,rDLeft,rDTop,rDLeft,rDBottom);
+      Line_MVIEW(DataView,rDRight,rDTop,rDRight,rDBottom);
+      Line_MVIEW(DataView,rDLeft,rDBottom,rDRight,rDBottom);
+
+      TextRef_MVIEW(DataView,3);                 // --- plot station dir notation and line number
+      Text_MVIEW(DataView,sStnDir, rDRight+3.0*rViewScale,rDTop+(1.0+rLabelTextSize)*rYViewScale); 
+      Text_MVIEW(DataView,sCurLine,rDRight+3.0*rViewScale,rDTop+(1.0+2.2*rLabelTextSize)*rYViewScale); 
+
+      rCum = (real)((int)(rDTop/rYSpace)+1)*rYSpace;        
+      while (rCum >= rDBottom)  {
+         if (rCum <= rDTop) { 
+            Line_MVIEW(DataView,rDLeft,rCum,rDLeft+2.0*rViewScale,rCum);
+            Line_MVIEW(DataView,rDRight,rCum,rDRight-2.0*rViewScale,rCum);
+            
+            FormatR2_STR(rCum,sCum,10,0);
+            TextAngle_MVIEW(DataView,0.0);
+            TextRef_MVIEW(DataView,3);
+            Text_MVIEW(DataView,sCum,rDRight+rViewScale,rCum);
+         }   
+         rCum -= rYSpace;
+      }               
+                   
+      if (iRefGrid == 3) {    // --- Reference grids
+         
+         StartGroup_MVIEW(DataView,"Reference Grid",MVIEW_GROUP_APPEND);
+         
+         rGridLineThick = rGetReal_SYS("VASECTMAP","REFTHICK1");
+         if (rGridLineThick==rDUMMY || rGridLineThick<=0.0) rGridLineThick = 0.1;
+         GetString_SYS("VASECTMAP","REFCOLOR",sGridLineColor);
+         if (iStrcmp_STR(sGridLineColor,"",STR_CASE_TOLERANT) == 0)
+            Strcpy_STR(sGridLineColor,"R0");
+            
+         LineColor_MVIEW(DataView,iColor_MVIEW(sGridLineColor));
+         LineStyle_MVIEW(DataView,1,0.0);
+         LineThick_MVIEW(DataView,rGridLineThick*rViewScale);
+
+         rCum = (real)((int)(rDTop/rYSpace)+1)*rYSpace;        
+         while (rCum > rDBottom)  {
+            if (rCum < rDTop) 
+               Line_MVIEW(DataView,rDLeft,rCum,rDRight,rCum);
+            rCum -= rYSpace;
+         }               
+         
+         rCum = ((real)((int)(rDLeft/rXSpace)))*rXSpace;        
+         if (rCum < 0.0) rCum -= rXSpace;
+         while (rCum < rDRight)  {
+            if (rCum > rDLeft)
+               Line_MVIEW(DataView,rCum,rDTop,rCum,rDBottom);
+            rCum += rXSpace;
+         }               
+      }
+
+
+      // --- Display grid ---
+
+      GetString_SYS("VASECTMAP","COLOR",sColor);     
+      if (iStrlen_STR(sColor) == 0)   Strcpy_STR(sColor,"Colour.tbl");
+   
+      iZone = iGetInt_SYS("VASECTMAP","ZONE");
+      if(iZone==iDUMMY)  iZone = 0;
+      
+      if (iExistReal_SYS("VASECTMAP","CONTOUR"))
+         rContour = rGetReal_SYS("VASECTMAP","CONTOUR");
+      else
+         rContour = rDUMMY;
+
+      // --- Agg ---
+
+      Agg = Create_AGG();
+      LayerIMG_AGG(Agg,sGrid,iZone,sColor,rContour);
+
+      Strcpy_STR(sAgg,"AGG_");
+      Strcat_STR(sAgg,sCurLine);
+      if (iZone == 4)
+         Strcat_STR(sAgg,"_s");
+      
+      Aggregate_MVIEW(DataView,Agg,sAgg);
+
+      Destroy_AGG(Agg);
+      Destroy_MVIEW(DataView);
+
+      UnLock_EMAP(EMap);
+      if (iInteractive_SYS())  Load_EMAP(sMap);
+
+
+      // --- Additional components of the map ---
+             
+      iPlotColorBar = iGetInt_SYS ("VASECTMAP","PLOTCOLORBAR");
+      iPlotContour  = iGetInt_SYS ("VASECTMAP","PLOTCONTOUR");
+      if (iPlotColorBar == iDUMMY)  iPlotColorBar = 1;            
+      if (iPlotContour  == iDUMMY)  iPlotContour  = 0;            
+
+      // --- Contour ---
+
+      if (iPlotContour) {   
+         if (iInteract)   SetInteractive_SYS(0);  // Interactive off
+         ClearGroup_SYS("CONTOUR");  
+         SetString_SYS("CONTOUR","GRID",sGrid);     
+         
+         if (iRunGX_SYS("CONTOUR.GX") != 0) 
+            Abort_SYS(_("Failure running CONTOUR to plot contours"));
+         if (iInteract)   SetInteractive_SYS(1);  // Interactive on
+      }
+
+      // ---  Color bar ---
+
+      if (iPlotColorBar) {   
+
+         if (iInteract)   SetInteractive_SYS(0);  // Interactive off
+
+         ClearGroup_SYS("VSTKCBAR");  
+         Strcpy_STR(sAgg,sCurLine);
+         Strcat_STR(sAgg,"\\AGG_");
+         Strcat_STR(sAgg,sCurLine);
+         
+         EMap = Current_EMAP();
+         Map = Lock_EMAP(EMap);
+         SetClassName_MAP(Map,"Base","SectionBase");
+         Itr = CreateMap_ITR(Map,sAgg);
+         iItrSize = iGetSize_ITR(Itr);
+         UnLock_EMAP(EMap);   
+
+         rTmp = rGetReal_SYS("VASECTMAP","CLRBARWIDTH"); 
+         if(rTmp==rDUMMY || rTmp<=0.0)   rTmp = 5.0;    
+         while(rTmp > 0.5*rMLeft)        rTmp -= 0.5;
+         
+         SetReal_SYS("VSTKCBAR","CLRBARWIDTH",rTmp);     
+
+         rTmp = rGetReal_SYS("VASECTMAP","CLRBARHEIGHT"); 
+         if(rTmp==rDUMMY || rTmp<=0.0)    rTmp = 1.0;    
+         rTmp1 = rTmp*(real)iItrSize;
+         while(rTmp1 > 0.75*rPHeight)     rTmp1 -= 0.1;
+         rTmp = rTmp1/(real)iItrSize;
+         
+         SetReal_SYS("VSTKCBAR","CLRBARHEIGHT",rTmp);     
+
+         SetString_SYS("VSTKCBAR", "AGG",           sAgg);
+         GetString_SYS("VASECTMAP","CLRBARTITLE",   sTemp);     
+         SetString_SYS("VSTKCBAR", "CLRBARTITLE",   sTemp);
+         GetString_SYS("VASECTMAP","CLRBARSUBTITLE",sTemp2);     
+         SetString_SYS("VSTKCBAR", "CLRBARSUBTITLE",sTemp2);
+         GetString_SYS("VASECTMAP","CLRBARANNSIZE", sPar);
+         
+         i1 = iStrlen_STR(sTemp);     
+         i2 = iStrlen_STR(sTemp2);
+         rTmp = rScanR_STR(sPar);
+         if(rTmp==rDUMMY)  rTmp = 1.5;
+         while(rTmp*(real)i1*1.25 >= rMLeft)  rTmp = rTmp/1.1;
+         while(rTmp*(real)i2      >= rMLeft)  rTmp = rTmp/1.1;
+         FormatR_STR(rTmp,sPar,10,3);
+         
+         SetString_SYS("VSTKCBAR", "CLRBARANNSIZE", sPar);
+         GetString_SYS("VASECTMAP","CLRBARDECIMALS",sPar);     
+         SetString_SYS("VSTKCBAR", "CLRBARDECIMALS",sPar);
+         
+         if (!iExistReal_SYS("VASECTMAP","CLRBARXPOS") || !iExistReal_SYS("VASECTMAP","CLRBARYPOS")) {
+            SetReal_SYS("VSTKCBAR", "CLRBARXPOS", 0.5*rMLeft);
+            SetReal_SYS("VSTKCBAR", "CLRBARYPOS", rYm-rPHeight+3.0);
+         } else {
+			rTmp = rGetReal_SYS("VASECTMAP","CLRBARXPOS");   
+            SetReal_SYS("VSTKCBAR", "CLRBARXPOS",rTmp);
+            rTmp = rGetReal_SYS("VASECTMAP","CLRBARYPOS");   
+            SetReal_SYS("VSTKCBAR", "CLRBARYPOS",rTmp);
+         }
+            
+         if (iRunGX_SYS("VSTKCBAR") != 0)
+            Abort_SYS(_("Failure running VSCTCBAR to plot color lengend bar."));
+      
+         if (iInteract)   SetInteractive_SYS(1);    // Interactive set back
+      }   
+      UnLockSymb_DB(Data,Line);
+   }
+   Progress_SYS(0);
+
+   // --- Unload temp database ---
+
+   UnLock_EDB(EData);
+   if (iInteract)           SetInteractive_SYS(1); 
+} 

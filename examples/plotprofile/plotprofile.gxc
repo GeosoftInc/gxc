@@ -1,0 +1,951 @@
+//===========================================================================
+NAME          = "Create a figure from the displayed database profiles"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   PLOTPROFILE.SURROUNDS   \"Yes\" or \"No\"
+              .TITLE       figure title
+              .SCALE       horizontal scale in units/mm
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Profile"
+
+// Revision History:
+// v7.1.1: QA 16072 Same Range/Scale confusion fixed.
+// v7.1:   QA 15233 Added cancel to "Map Exists" question dialog.
+// v7.0.0: QA 12223 Fixed bug when plotting VA channels.
+// v6.4.0: Vertical grid line controls added. Now use Horizontal grid line
+//         intervals from first profile. 
+//         X-Axis label orientation fixed (QA 9504).
+// v6.3.0: Zoom to full map at the end.
+// v6.0.0: Array channel colours now tied to channel setting, not global param.
+// v5.1.5: Added label formatting control.
+//===========================================================================
+RESOURCE = "plotprofile.gr"
+#include "plotprofile.grh"
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         eDB;
+DB          hDB;
+MAP         hMAP;
+MVIEW       View;
+DB_SYMB     Line,Line1;
+DB_SYMB     Ch,ChX;
+MSTK        hMSTK;
+STK         hSTK;
+VV          hiVV;
+VV          hrVV;
+ITR         hITRva;
+DGW         hDGW;
+
+string(STR_GROUP) sChan,sChanX,sLabel,sLabelY,sLine,sUnits,sGroup;
+string(STR_FILE) sName,sDB,sMap,sITR;
+string(STR_DEFAULT_LONG) sMessage;
+string(STR_DEFAULT_LONG) sTitle,sPrompt;
+
+string(STR_DEFAULT_SHORT) sColor,sColorEdge, sAliasFlag;
+int         iLine,iXGrid;
+int         i,ii,iVA,iColor,iWindow,iX,iY,iFidX,iScl,iFirst,iFormatX, iFormatY;
+int         iWrap,iLineStyle,iSymbolStyle,iSameScale,iSameRange,iProfs,iSurround,iLog,iDec,iSize;
+int         iOK,iArrayColors,iYMinorTick,iRet;
+real        rX,rY,rX2,rY2,rWidth,rHeight,rLastHeight,rRangeX,rRangeY;
+real        rLineThick,rSymSize,rDashPitch;
+real        rMinX,rMaxX,rMinY,rMaxY;
+real        rOff,rOffMax,rThick;
+real        rDCx0, rDCy0, rDCx1, rDCy1;
+real        rSize,rLabelSize,rScale,rLogMinimum,rXInterval, rYInterval, rYInt;
+
+int(7)      piSymbols;
+int         iBreakDum, iWin0, iWin1;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+ 
+   // --- Get the database and current line ---
+
+   if (!iHaveCurrent_EDB()) Abort_SYS(_("No database loaded."));
+   eDB = Current_EDB();
+   Line = GetCurLineSymb_EDB(eDB);
+   
+   
+   if (iInteractive_SYS()) {
+   
+      hDGW = Create_DGW("PLOTPROFILE");
+      
+      SetInfoSYS_DGW(hDGW,_PLOTPROFILE_0,DGW_TEXT,"PLOTPROFILE","SURROUND");     
+      SetInfoSYS_DGW(hDGW,_PLOTPROFILE_1,DGW_TEXT,"PLOTPROFILE","TITLE");     
+      SetInfoSYS_DGW(hDGW,_PLOTPROFILE_2,DGW_TEXT,"PLOTPROFILE","SCALE");     
+   
+      i = iRunDialogue_DGW(hDGW);
+      if (i == -1) Cancel_SYS();
+      
+      GetInfoSYS_DGW(hDGW,_PLOTPROFILE_0,DGW_TEXT,"PLOTPROFILE","SURROUND");     
+      GetInfoSYS_DGW(hDGW,_PLOTPROFILE_1,DGW_TEXT,"PLOTPROFILE","TITLE");     
+      GetInfoSYS_DGW(hDGW,_PLOTPROFILE_2,DGW_TEXT,"PLOTPROFILE","SCALE");     
+
+      GetInfo_DGW(hDGW,_PLOTPROFILE_0,DGW_LISTALIAS,sAliasFlag);
+      
+      Destroy_DGW(hDGW);
+      
+   }
+   
+   
+   // --- get parameters ---
+   
+   iSurround = iGetYesNo_SYS("PLOTPROFILE","SURROUND") || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT);
+   GetString_SYS("PLOTPROFILE","TITLE",sTitle);
+   if (iExistReal_SYS("PLOTPROFILE","SCALE")) {
+      rScale = rGetReal_SYS("PLOTPROFILE","SCALE");
+      if (rScale <= 0.0) rScale = rDUMMY;
+   } else
+      rScale = rDUMMY;   
+   
+   
+   // --- build a profile name ---
+   
+   hDB = Lock_EDB(eDB);
+   GetName_DB(hDB,DB_NAME_FILE,sDB);
+   GetSymbName_DB(hDB,Line,sLine);
+   UnLock_EDB(eDB);
+   
+   FileNamePart_STR(sDB,sName,STR_FILE_PART_NAME);
+   Strcat_STR(sName,"_");
+   Strcat_STR(sName,sLine);
+   
+   
+   // --- create a map ---
+   
+   iOK = FALSE;
+   FileExt_STR(sName,"map",sMap,FILE_EXT_FORCE);
+   while (iOK == FALSE) {
+      iOK = TRUE;   
+      if (iInteractive_SYS() && iFileExist_SYS(sMap)) {
+         Printf_STR(sPrompt, sizeof(sPrompt), _("\"%s\" exists. Overwrite?"), sMap);
+         iRet = iDisplayQuestionWithCancel_SYS(_("Map exists"),sPrompt);
+         if(iRet==2) Cancel_SYS();
+         if (iRet == 0) {
+            if (Prompt_SYS(_("New map name"),sMap)) Cancel_SYS();
+            iOK = FALSE;
+         }
+      }
+      FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);
+   }
+
+   UnLoad_EMAP(sMap);
+   hMAP = Create_MAP(sMap,MAP_WRITENEW);
+      
+
+   // --- calculate scaled width ---
+   
+   if (rScale == rDUMMY)
+      rWidth  = 150.0;
+      
+   else {
+   
+      ChX = NULLSYMB;
+      GetProfileRangeX_EDB(eDB,rMinX,rMaxX,ChX);
+      rWidth = (rMaxX-rMinX)/rScale;
+      if (rWidth <= 0.0) rWidth = 150.0;
+   
+   }      
+      
+   // --- starting location ---
+   
+   rX = 25.0;
+   rY = 20.0;
+   rHeight = rLastHeight = 0.0;
+   rX2 = rX + rWidth + 2.0;
+   rOffMax = 0.0;       // keeps track of axis offsets
+   rLabelSize = 0.0;    // keeps track of largest label size
+   
+   // --- go through windows ---
+
+   iFirst = TRUE;   
+   for (iWindow = 5; iWindow>=0; iWindow--) {
+   
+      // --- get number of profiles ---
+       
+      iProfs = iWindowProfiles_EDB(eDB,iWindow);
+      if (iProfs <= 0) continue;
+      
+      
+      // --- get window size ---
+      
+      iX = iY = 0;
+      GetProfileWindow_EDB(eDB,iWindow,iX,iY);
+      if (iX < 5 || iY < 5) continue;
+      rHeight = rWidth*(real)iY/(real)iX;
+      
+      
+      // --- make height same as last if within 20% ---
+      
+      if (rLastHeight > 0.0)
+         if ((rAbs_MATH(rHeight - rLastHeight)/rHeight) < 0.20) 
+            rHeight = rLastHeight;
+      rLastHeight = rHeight;
+      
+      rLineThick = 3.0 * rWidth/(real)iX;
+      rSymSize = 8.0 * rWidth/(real)iX;
+      rDashPitch = 30.0 * rWidth/(real)iX;
+      
+      // --- get X range/scaling ---
+      
+      rMinX = rMaxX = 0.0;
+      ChX = NULLSYMB;
+      GetProfileRangeX_EDB(eDB,rMinX,rMaxX,ChX);
+      rRangeX = rMaxX - rMinX;
+      if (rRangeX <= 0.0) Abort_SYS(_("X range is 0."));
+      
+      
+      // --- Get X grid lines info ---
+      
+      GetProfileVerticalGridLines_EDB(eDB,iXGrid,rXInterval);
+      if(iXGrid!=1) rXInterval = rDUMMY;
+      
+
+      // --- if ChX is NULLSYMB, create a fid channel ---
+      
+      if (ChX == NULLSYMB) {
+      
+         hDB = Lock_EDB(eDB);
+         if (iExistSymb_DB(hDB,"_profile_X",DB_SYMB_CHAN))
+            ChX = FindSymb_DB(hDB,"_profile_X",DB_SYMB_CHAN);
+         else   
+            ChX = CreateSymb_DB(hDB,"_profile_X",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+            
+         LockSymb_DB(hDB,ChX,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         SetChanDecimal_DB(hDB,ChX,1);            
+         UnLockSymb_DB(hDB,ChX);
+         
+         iFidX = TRUE;
+         UnLock_EDB(eDB);
+         
+      } else
+         iFidX = FALSE;
+
+
+      // --- get X channel name and format ---
+            
+      hDB = Lock_EDB(eDB);
+      LockSymb_DB(hDB,ChX,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(hDB,ChX,sChanX);
+      iFormatX = iGetChanFormat_DB(hDB, ChX);
+
+      UnLockSymb_DB(hDB,ChX);
+      UnLock_EDB(eDB);
+         
+      
+      // --- get list of displayed profiles ---
+      
+      hiVV = Create_VV(INT,0);
+      hrVV = Create_VV(REAL,0);
+      
+      
+      // --- initialize symbol mapping ---
+      
+      piSymbols[0] = 1;
+      piSymbols[1] = 4;
+      piSymbols[2] = 20;
+      piSymbols[3] = 5;
+      piSymbols[4] = 27;
+      piSymbols[5] = 3;
+      piSymbols[6] = 2;
+      
+
+      // --- create STK ---
+      
+      hMSTK = Create_MSTK();   
+     
+     
+      // --- calculate starting legend location ---
+      
+      rY2 = rY + (rHeight/2.0) - ((real)(iProfs-1)/2.0) * 4.0;
+      
+      
+      // --- open the base view ---
+      
+      if (iExistView_MAP(hMAP,"Base"))
+         View = Create_MVIEW(hMAP,"Base",MVIEW_WRITEOLD);
+      else   
+         View = Create_MVIEW(hMAP,"Base",MVIEW_WRITENEW);
+      StartGroup_MVIEW(View,"Legend",MVIEW_GROUP_APPEND);
+      
+      
+      // --- for each channel, add to the STK ---
+      
+      rOff = 0.0;       // keeps track of axis offsets
+      for (i=0;i<iProfs;i++,rY2+=4.0) {
+      
+      
+         // --- get an STK ---
+         
+         hSTK = AddSTK_MSTK(hMSTK);
+         
+
+         // --- get profile log option ---
+         
+         iLog = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_LOG);
+         rLogMinimum = 1.0;
+         if(iLog==2)
+            rLogMinimum = rGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_R_LOG_MINIMUM);
+         
+         
+         // --- Get horizontal grid lines only for the first profile ---
+         
+         iYMinorTick = 5;
+         rYInterval = rDUMMY;
+         if(i==0)
+         {
+            if(iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_GRID_LINE)==1) 
+            {
+               rYInterval = rGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_R_GRID_LINE_INTERVAL);
+               iYMinorTick = 0;
+            }
+         }
+         
+         
+         // --- get the channel name and label format ---
+         
+         Ch = (DB_SYMB)iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_CHANNEL);
+         hDB = Lock_EDB(eDB);
+         GetSymbName_DB(hDB,Ch,sChan);
+         GetChanLabel_DB(hDB,Ch,sLabel);
+         iFormatY = iGetChanFormat_DB(hDB, Ch);
+
+
+         // --- Array channel colours? ---
+         
+         iArrayColors = 0;
+         iWin0 = 0;	// First column in VA to plot
+         iWin1 = 0;	// Last column in VA to plot
+         if(iGetColVA_DB(hDB, Ch) > 1) {
+
+            GetVAProfColorFile_DB(hDB, Ch, sITR);
+
+
+				// --- Default to color.tbl ---
+
+				if(iStrlen_STR(sITR) == 0)
+					Strcpy_STR(sITR, "colour.tbl");
+
+            if(!iFindPathNameEx_SYS(sITR, FIND_LOCAL_GEOSOFT,
+                                 GEO_DIRECTORY_TBL, sITR)) {
+
+               hITRva = CreateFile_ITR(sITR);
+
+               // --- Set ITR ranges from 0 to 1 so indices for the
+               //     profile columns, when normalized by the number
+               //     of columns, can be mapped to individual colours. ---
+
+               Linear_ITR(hITRva, 0.0, 1.0, rDUMMY);
+               iArrayColors = TRUE;
+            }
+            
+            
+            // --- Subset of windows? ---
+            
+            GetVAWindows_DB(hDB, Ch, iWin0, iWin1);
+         }                   
+         
+         UnLock_EDB(eDB);
+         
+         
+         // --- get line/symbol style ---
+         
+         iLineStyle = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_LINE_STYLE);
+         iSymbolStyle = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_SYMBOL);
+         
+         Strcpy_STR(sGroup,sChan);
+         if (iLineStyle > 0)
+            Strcat_STR(sGroup,"_profile");
+         else if (iSymbolStyle > 0)
+            Strcat_STR(sGroup,"_symbols");
+         else
+            continue;            
+         
+         
+         // --- Y range and scaling method ---
+         
+         rMinY = rMaxY = 0.0;
+         iScl = 0;
+         GetProfileRangeY_EDB(eDB,iWindow,i,rMinY,rMaxY,iScl);
+         rRangeY = rMaxY - rMinY;
+         if (rRangeY <= 0.0) Abort_SYS(_("Y range is 0."));
+         
+         
+         // --- convert log minimum Y into original data ---
+         
+         if (iLog != 0) 
+            rMinY = rUnLogZ_MATH(rMinY,       // log value
+                             iLog-1,      // Log Mode (0 - LogLinear, 1 - LogLinearLog)
+                             rLogMinimum);// Log Minimum
+                             
+         
+         // --- do we need to create a FID channel? (current line and prev/next lines?) ---
+         
+         if (iFidX) {
+            iLine = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_SOURCELINE);
+            if(iLine==-1)  {
+               Line1 = (DB_SYMB)GetPrevLineSymb_EDB(eDB);
+            } else if(iLine==-2) { 
+               Line1 = (DB_SYMB)GetNextLineSymb_EDB(eDB);
+            } else {
+               Line1 = NULLSYMB;
+            }   
+            hDB = Lock_EDB(eDB);
+            LockSymb_DB(hDB,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+            LockSymb_DB(hDB,ChX,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+            LockSymb_DB(hDB,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+            MakeFid_DU(hDB,Line,Ch,ChX);
+            UnLockSymb_DB(hDB,Line);
+            if(Line1 != NULLSYMB) {
+               LockSymb_DB(hDB,Line1,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+               MakeFid_DU(hDB,Line1,Ch,ChX);
+               UnLockSymb_DB(hDB,Line1);
+            }
+            UnLockSymb_DB(hDB,Ch);
+            UnLockSymb_DB(hDB,ChX);
+            UnLock_EDB(eDB);
+         }
+         
+         
+         // --- set STK parameters ---
+         
+         SetGenParms_STK(
+                  hSTK,
+                  sChanX,      // X channel name, REQUIRED
+                  sChan,       // Y channel name, REQUIRED
+                  sGroup,      // Group name
+                  (rRangeX/rWidth)*1000.0,// X (horizontal) scale, REQUIRED
+                  rRangeY/rHeight,        // Y (vertical) scale, REQUIRED
+                  rMinX,       // Minimum X value (data unit) to draw
+                  rMaxX,       // Maximum X value (data unit) to draw 
+                  rMinY,       // Minimum Y value (data unit) to draw
+                  rX,          // Minimum horizontal location in mm of the stack on the map
+                  rY,          // Minimum vertical location in mm on the map
+                  rHeight);    // Profile height in mm on the map, must be > 0.0
+                  
+         // --- X axis ---
+
+         SetAxisParms_STK(
+                  hSTK,       // STK handle
+                  3,          // ?BARDRAW 
+                  rDUMMY,     // Bottom Y/Left X location
+                  rDUMMY,     // Top Y/Right X location
+                  0.25,       // ?BARLINETHICK  - Line thickness in mm. Default is 0.05
+                  "K",        // ?BARCOLOR      - Line color string in RGB model. Default is black
+                  rDUMMY,     // ?BARTICKINTEERVAL
+                  1.0,        // Major tick size in mm for bottom/left axis bar. 
+                  -1.0,       // Major tick size in mm for top/right axis bar.
+                  -1,          // ?BARMINORTICK  - Number of minor ticks. Default is no minor ticks, (-1) means automatic
+                  STK_AXIS_X);// STK_AXIS_?: either X axis or Y axis
+                  
+
+                  
+         if (i == 0) {
+            SetGridParms_STK(
+                     hSTK ,      // STK handle
+                     1,          //  Type of grid to draw: 
+                     rDUMMY,     //  Minimum X in ground unit to draw grid
+                     rDUMMY,     //  Maximum X in ground unit to draw grid
+                     rDUMMY,     //  Minimum Y in ground unit to draw grid
+                     rDUMMY,     //  Maximum Y in ground unit to draw grid
+                     0.2,        //  Line thickness in mm. Default is 0.01mm
+                     rDUMMY,     //  Cross size or separation between dots in mm.
+                     rXInterval, //  Separation between vertical grid lines.
+                     rDUMMY,     //  Separation between horizontal grid lines.
+                     "K96",      //  Grid line color string in RGB model. Default is black
+                     STK_AXIS_X);// STK_AXIS_?: either X axis or Y axis
+                     
+            if (iFirst) {
+            
+               iFirst = FALSE;
+                                    
+               SetLabelParms_STK(
+                        hSTK,       // STK handle
+                        1,          // Bottom/Top or Left/Right axes
+                        -0.6,       // Bottom or Left axis label location
+                        0,          // Bottom or Left labels orientation.
+                        0.0,        // Top or Right axis label location
+                        0,          // Top or Right axis label orientation
+                        rXInterval, // Label interval. Default is to use related axis tick interval
+                        "",         // Font to use to label. Default is use 'default' font set in Montaj
+                        1.8,        // Text size in mm to draw profile labels. Default is 5mm
+                        "K",        // Text color string in RGB model. Default is black
+                        1,          // ?LABELBOUND    - Edge bound.  0 - No
+                        STK_AXIS_X);// STK_AXIS_?: either X axis or Y axis
+      
+               // --- Override the formatting for labels ---
+                                 
+               SetAxisFormat_STK(hSTK, iFormatX, STK_AXIS_X);
+
+                        
+               // --- X-axis label ---
+               
+               if (!iFidX) {
+                  
+                  hDB = Lock_EDB(eDB);
+                  LockSymb_DB(hDB,ChX,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+                  GetChanLabel_DB(hDB,ChX,sLabel);
+                  GetChanUnit_DB(hDB,ChX,sUnits);
+                  UnLockSymb_DB(hDB,ChX);
+                  UnLock_EDB(eDB);
+                  
+                  TrimSpace_STR(sUnits,STR_TRIMBOTH);
+                  if (iStrlen_STR(sUnits)) {
+                     Strcat_STR(sLabel," (");
+                     Strcat_STR(sLabel,sUnits);
+                     Strcat_STR(sLabel,")");
+                  }      
+                  
+                  SetTitleParms_STK(
+                     hSTK ,      // STK handle
+                     sLabel,     // Title for bottom X axis/left Y axis. Default is no title.
+                     "",         // Title for top X axis/right Y axis. Default is no title.
+                     0,          // Bottom/Left axis title orientation.    
+                     0.0,        // X location to draw bottom/left axis title
+                     -5.0,       // Y location to draw bottom/left axis title 
+                     0,          // Top/Right axis title orientation.    
+                     0.0,        // X location to draw top/right axis title
+                     0.0,        // Y location to draw top/right axis title
+                     "",         // Font to draw titles. Default is use 'default' font set in Montaj
+                     1.8,        // Text size in mm to draw titles. Default is 5mm
+                     "K",        // Text color string in RGB model. Default is black
+                     STK_AXIS_X);// STK_AXIS_?: either X axis or Y axis
+                     
+               }      
+      
+            }
+                                    
+         }
+                  
+                  
+         // --- profile parameters ---
+         
+         iColor = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_COLOR);
+         ColorDescr_MVIEW(iColor,sColor,sizeof(sColor));               
+         iWrap  = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_WRAP);
+         iBreakDum  = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_BREAK_ON_DUMMY);
+         
+         
+         // --- set profile display parameters ---
+         
+         iLog = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_LOG);
+         
+         if (iLog != 0) {
+         
+            rLogMinimum = rGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_R_LOG_MINIMUM);
+            
+            SetTransParms_STK(
+                  hSTK,       // STK handle
+                  0,          // Type of transformation for horizontal axis 
+                  1.0,        // Minimum value to apply logarithmic
+                  iDUMMY,     // future use
+                  iDUMMY,     // future use
+                  iLog,       // Type of scaling for vertical axis 
+                  rLogMinimum,// Minimum value to apply logarithmic
+                  iDUMMY,     // future use
+                  iDUMMY);    // future use
+                  
+         }                  
+   
+         if(iArrayColors) {
+            SetArrayColors_STK(hSTK, hITRva);
+            Destroy_ITR(hITRva);
+         }
+         
+
+         // --- get the channel info ---
+         
+         hDB = Lock_EDB(eDB);
+         GetSymbName_DB(hDB,Ch,sChan);
+         GetChanLabel_DB(hDB,Ch,sLabel);
+         GetChanUnit_DB(hDB,Ch,sUnits);
+         iDec = iGetChanDecimal_DB(hDB,Ch) - 1;
+         if (iDec < 0) iDec = 0;         
+         iVA = iGetColVA_DB(hDB,Ch);
+         UnLock_EDB(eDB);
+         
+         
+         // --- draw line ---
+         
+         if (iLineStyle > 0) {
+         
+         
+            rThick = rLineThick * (real)(iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_LINE_WEIGHT)-1);
+            if (rThick <= 0.0) rThick = 0.3;
+
+            
+            // --- remap short dashed line ---
+            
+            if (iLineStyle == 3) {
+               iLineStyle = 4;  
+               rDashPitch *= 0.4;
+            }
+            
+            
+            // --- set up VV to select VA channels to plot ---
+            
+            iVA = iWin1-iWin0+1;            
+            SetLen_VV(hiVV,iVA);
+            for (ii=0;ii<iVA;ii++)
+               SetInt_VV(hiVV,ii,iWin0+ii);
+            
+            
+            // --- define profile ---
+            
+            SetProfileEx_STK(
+                        hSTK,
+                        iLineStyle,     // Profile line type.    1 - solid (default)
+                        rDashPitch, // Patterned line pitch in mm. Default is 10 mm
+                        rThick,     // Line thickness in mm. Default is 0.05mm
+                        sColor,     // Color string in RGB model. Default is black
+                        iBreakDum,  // Break on dummy option  
+                        iWrap,      // Wrap option
+                        1,          // Clip option
+                        0,          // Plot smoothed polyline. 
+                        hiVV,       // Integers starting from 0 indicating windows in VA channel to draw
+                                    // VV type of INT (integer)
+                        "",         // Characters string to label profiles
+                        6,          // Reference location to draw label.
+                        "",         // Font to use to draw profile labels. Default is use 'default' font set in Montaj
+                        4.0,        // Text size in mm to draw profile labels. Default is 5mm
+                        sColor,     // Text color string in RGB model. Default is black
+                        0);         // Include VA column numbers as part of the profile label
+                                    // 0 - no, 1 - yes
+      
+            // --- legend ---
+            
+            LineColor_MVIEW(View,iColor);
+            LineThick_MVIEW(View,rThick);
+
+
+            // --- the legend labels and lines are fixed size, but the dash pitch
+            //     scales to the map size. This means dashed lines sometimes don't
+            //     appear as dashes, because the the dash pitch is too big compared
+            //     to the plotted line length. 
+
+            LineStyle_MVIEW(View,iLineStyle,4.0);
+            Line_MVIEW(View,rX2,rY2,rX2+8.0,rY2);
+            
+         }
+                                       
+         
+         // --- draw symbols ---
+         
+         if (iSymbolStyle > 0) {
+         
+            rThick = rSymSize * (real)(1 + iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_SYMBOL_WEIGHT));
+            SetReal_VV(hrVV,0,rMAX);
+            
+            
+            // --- remap style ---
+
+            iSymbolStyle = piSymbols[iSymbolStyle];
+            SetInt_VV(hiVV,0,iSymbolStyle);
+            
+            if(iSymbolStyle==3 || iSymbolStyle==2)     // symbol x or +
+               Strcpy_STR(sColorEdge,sColor);
+            else   
+               Strcpy_STR(sColorEdge,"K");
+
+            SetSymbParms_STK(
+                  hSTK ,      // STK handle
+                  "",         // Font to use to draw symbols. Default is use 'symbols.gfn' font
+                  rThick,     // Symbol size in mm. Default is 5mm
+                  sColorEdge, // Edge color string in RGB model. Default is black
+                  sColor,     // Fill color string in RGB model. Default is black
+                  iWrap,      // Wrap option
+                  1,          // Clip option
+                  rDUMMY,     // Y location to draw symbols. Default is to use the data from Y channel
+                  1,          // Number of symbols levels
+                  hrVV,       // Y values to define data ranges for each symbol types
+                              // Type of REAL
+                  hiVV,       // Symbol numbers (given in the symbol font) to draw
+                              // Type of INT
+                  0,          // Draw symbols ID (1) or not (0)            
+                  "",         // Font to use to draw symbol ID (A,B,C...). Default is use 'default' 
+                  0.0,        // Text size in mm to draw profile labels. Default is 5mm
+                  "");        // Text color string in RGB model. Default is black
+                  
+            // --- legend ---
+            
+            SymbFont_MVIEW(View,_n("symbols"),TRUE,MVIEW_FONT_WEIGHT_LIGHT,0);
+            SymbNumber_MVIEW(View,iSymbolStyle);
+            SymbFillColor_MVIEW(View,iColor);
+            if(iSymbolStyle==3 || iSymbolStyle==2)     // symbol x or +
+               SymbColor_MVIEW(View,iColor);
+            else   
+               SymbColor_MVIEW(View,C_BLACK);
+            SymbSize_MVIEW(View,rThick);
+            Symbol_MVIEW(View,rX2+4.0,rY2);
+            
+         }
+         
+         
+         // --- annotate legend ---
+                  
+         TextSize_MVIEW(View,2.0);
+         TextRef_MVIEW(View,TEXT_REF_MIDDLE_LEFT);
+         Text_MVIEW(View,sLabel,rX2+9.5,rY2);
+         
+         
+         // --- keep track of maximum label size ---
+         
+         rSize = 2.0 * (real)(iStrlen_STR(sLabel));
+         if (rSize > rLabelSize) rLabelSize = rSize;
+                  
+                  
+         // --- Y axis ---               
+                  
+         iSameScale = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_SAMESCALE);
+         iSameRange = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_SAMERANGE);
+         if ((i == 0) || (iSameRange == 0)) {
+
+            if (i == 0)      
+            {                  
+               SetAxisParms_STK(
+                     hSTK,       // STK handle
+                     3,          // ?BARDRAW 
+                     -rOff,      // Bottom Y/Left X location
+                     rOff,       // Top Y/Right X location
+                     0.25,       // ?BARLINETHICK  - Line thickness in mm. Default is 0.05
+                     "K",        // ?BARCOLOR      - Line color string in RGB model. Default is black
+                     rDUMMY,     // ?BARTICKINTEERVAL - Default is to use related axis label interval
+                     1.0,        // Major tick size in mm for bottom/left axis bar. 
+                     -1.0,       // Major tick size in mm for top/right axis bar.
+                     iYMinorTick,// ?BARMINORTICK  - Number of minor ticks. Default is no minor ticks
+                     STK_AXIS_Y);// STK_AXIS_?: either X axis or Y axis
+            }  
+            else                     
+               SetAxisParms_STK(
+                     hSTK,       // STK handle
+                     1,          // ?BARDRAW 
+                     -rOff,      // Bottom Y/Left X location
+                     rOff,       // Top Y/Right X location
+                     0.25,       // ?BARLINETHICK  - Line thickness in mm. Default is 0.05
+                     "K",        // ?BARCOLOR      - Line color string in RGB model. Default is black
+                     rDUMMY,     // ?BARTICKINTEERVAL
+                     1.0,        // Major tick size in mm for bottom/left axis bar. 
+                     -1.0,       // Major tick size in mm for top/right axis bar.
+                     5,          // ?BARMINORTICK  - Number of minor ticks. Default is no minor ticks
+                     STK_AXIS_Y);// STK_AXIS_?: either X axis or Y axis
+
+            rOff += 0.5;
+
+            rYInt = rDUMMY;
+            if(i==0) rYInt = rYInterval;                     
+            SetLabelParms_STK(
+                     hSTK,       // STK handle
+                     1,          // Bottom/Top or Left/Right axes
+                     -rOff,      // Bottom or Left axis label location
+                     0,          // Bottom or Left labels orientation.
+                     0.0,        // Top or Right axis label location
+                     0,          // Top or Right axis label orientation
+                     rYInt,      // Label interval. 
+                     "",         // Font to use to label. Default is use 'default' font set in Montaj
+                     1.8,        // Text size in mm to draw profile labels. Default is 5mm
+                     "K",        // Text color string in RGB model. Default is black
+                     0,          // ?LABELBOUND    - Edge bound.  0 - No
+                     STK_AXIS_Y);// STK_AXIS_?: either X axis or Y axis
+
+            SetAxisFormat_STK(hSTK, iFormatY, STK_AXIS_Y);
+
+                     
+            // --- work out annotation width ---
+
+            if (iLog) {
+               if (iLog == 1) {
+                   rMinY = rPow_MATH(10.0,rMinY);
+                   rMaxY = rPow_MATH(10.0,rMaxY);
+               } else {
+                   rMinY = rUnLogZ_MATH(rMinY,1,rLogMinimum);
+                   rMaxY = rUnLogZ_MATH(rMaxY,1,rLogMinimum);
+               }
+            }
+            
+            FormatR2_STR(rMinY,sMessage,16,iDec);
+            iSize = iStrMin_STR(sMessage);
+            FormatR2_STR(rMaxY,sMessage,16,iDec);
+            if (iSize < iStrMin_STR(sMessage))
+               iSize = iStrMin_STR(sMessage);
+            rOff += 3.0 + 1.5*(real)iSize;
+
+                     
+            // --- build a Y axis label ---
+            
+            Strcpy_STR(sLabelY,"");
+            if (iSameScale && iProfs > 1) {
+               if (iStrlen_STR(sUnits))
+                  Strcpy_STR(sLabelY,sUnits);
+            } else {            
+               Strcpy_STR(sLabelY,sLabel);
+               if (iStrlen_STR(sUnits)) {
+                  Strcat_STR(sLabelY," (");
+                  Strcat_STR(sLabelY,sUnits);
+                  Strcat_STR(sLabelY,")");
+               }
+            }
+
+
+            SetTitleParms_STK(
+               hSTK ,      // STK handle
+               sLabelY,    // Title for bottom X axis/left Y axis. Default is no title.
+               "",         // Title for top X axis/right Y axis. Default is no title.
+               2,          // Bottom/Left axis title orientation.    
+               -rOff,      // X location to draw bottom/left axis title
+               0.0,        // Y location to draw bottom/left axis title 
+               0,          // Top/Right axis title orientation.    
+               0.0,        // X location to draw top/right axis title
+               0.0,        // Y location to draw top/right axis title
+               "",         // Font to draw titles. Default is use 'default' font set in Montaj
+               1.8,        // Text size in mm to draw titles. Default is 5mm
+               "K",        // Text color string in RGB model. Default is black
+               STK_AXIS_Y);// STK_AXIS_?: either X axis or Y axis
+
+            rOff += 4.0;
+            
+         }
+                  
+         // --- get the line handle of Y Chan ---
+         
+         iLine = iGetProfileParm_EDB(eDB,iWindow,i,EDB_PROF_I_SOURCELINE);
+         if(iLine==-1)  {
+            Line1 = (DB_SYMB)GetPrevLineSymb_EDB(eDB);
+            SetLineParm_STK(hSTK,(int)Line1);
+         } else if(iLine==-2) { 
+            Line1 = (DB_SYMB)GetNextLineSymb_EDB(eDB);
+            SetLineParm_STK(hSTK,(int)Line1);
+         } else {
+            Line1 = (DB_SYMB)GetCurLineSymb_EDB(eDB);
+            SetLineParm_STK(hSTK,(int)Line1);
+         }   
+      }
+  
+  
+      // --- reset data view to full extents ---
+      
+      Extent_MVIEW(View,MVIEW_EXTENT_ALL,MVIEW_EXTENT_UNIT_PLOT,
+                rDCx0,rDCy0,rDCx1,rDCy1);
+      SetWindow_MVIEW(View,rDCx0,rDCy0,rDCx1,rDCy1,MVIEW_UNIT_PLOT);
+
+
+		// --- Invert Y-axis? ---
+
+		if(iGetWindowYAxisDirection_EDB(eDB, iWindow) == EDB_YAXIS_INVERTED)
+			SetYAxisDirection_MSTK(hMSTK, 1);
+
+
+      // --- draw it ---
+
+      Destroy_SYS(View);         
+      hDB  = Lock_EDB(eDB);
+      DrawProfile_MSTK(hMSTK,hDB,Line,hMAP);               
+      UnLock_EDB(eDB);
+      
+      
+      // --- move up for next window ---
+      
+      rY += rHeight + 5.0;
+      
+      
+      // --- update maximum offset ---
+      
+      if (rOff > rOffMax) rOffMax = rOff;
+      
+      
+      // --- clean up ---
+      
+      Destroy_SYS(hMSTK);
+      Destroy_SYS(hiVV);
+      Destroy_SYS(hrVV);
+      
+      
+   } // next window
+   
+   
+   // --- draw surrounds ---
+   
+   if (iSurround) {
+      
+      if (iExistView_MAP(hMAP,"Base"))
+         View = Create_MVIEW(hMAP,"Base",MVIEW_WRITEOLD);
+      else   
+         View = Create_MVIEW(hMAP,"Base",MVIEW_WRITENEW);
+      StartGroup_MVIEW(View,"Surround",MVIEW_GROUP_NEW);
+      
+      
+      // --- box around the plot ---
+      
+      rX2 = rX + rWidth + rLabelSize + 15.0;
+      rX = rX - 5.0 - rOffMax;
+      rY2 = rY + 15.0;
+      rY = 0.0;
+      
+      LineThick_MVIEW(View,0.35);
+      Rectangle_MVIEW(View,rX,rY,rX2,rY2);
+      
+      
+      // --- title ---
+      
+      TextSize_MVIEW(View,4.5);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_CENTER);
+      Text_MVIEW(View,sTitle,(rX+rX2)/2.0,rY2-12.5);
+      
+         
+      // --- margin title ---
+      
+      
+      Printf_STR(sMessage, sizeof(sMessage), _("database: %s  line/group: %s"), sDB, sLine);
+      
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_LIGHT,TRUE);
+      TextSize_MVIEW(View,1.8);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      Text_MVIEW(View,sMessage,rX+1.0,1.0);
+      
+      FormatDate_STR(rDate_SYS(),sLabel,15,DATE_FORMAT_YYYYMMDD);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+      Text_MVIEW(View,sLabel,rX2-1.0,1.0);
+      
+         
+      // --- destroy the view ---
+      
+      Destroy_SYS(View);
+      
+   }      
+      
+   
+   // --- remove fid channel from the database ---
+   
+   if (iFidX) {
+   
+      hDB = Lock_EDB(eDB);
+      LockSymb_DB(hDB,ChX,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(hDB,ChX);
+      UnLock_EDB(eDB);
+      
+   }
+   
+   
+   // --- done ---   
+   
+   Destroy_MAP(hMAP);
+   
+   Load_EMAP(sMap);
+   
+   
+   // --- Need to zoom to full map ---
+   
+   DoCommand_SYS("[ID] ID_MAPNAV_FULLMAP");
+}
+

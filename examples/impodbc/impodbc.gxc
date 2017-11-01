@@ -1,0 +1,100 @@
+//===========================================================================
+NAME          = "Import an ODBC Database table"
+#include <version.gxh>
+DESCRIPTION   = "
+   Import a Database table into the Oasis Montaj database.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v7.1  : Change lines, etc. except if using oms.exe (script mode).
+// v5.1.3: Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+
+//string(STR_FILE) sData;
+string(STR_DB_SYMBOL) sLine;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get Oasis Database ---
+
+   if (iInteractive_SYS()) {
+      if (iHaveCurrent_EDB()) {
+
+         if (iDisplayQuestion_SYS(_("Import Database"),_("Import data into the current database ?"))==0)
+         {
+            if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)"))  Cancel_SYS();
+         }  
+
+      } else {
+        if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) Cancel_SYS();
+      }
+   }
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+     
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Make Template ---
+
+      if (iImportDatabaseADO_GUI("Provider=MSDASQL;","impdb.i4",sLine,sizeof(sLine)))
+         Cancel_SYS();
+      
+   }
+
+   
+   // --- import ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing Data"),1);
+   ImportADO_DU(Data,"","","impdb.i4",sLine);
+
+   Progress_SYS(0);
+
+
+   // --- release database to DBE ---
+   
+   UnLock_EDB(EData);
+   
+   
+   // --- display data ---
+
+   if (!iScript_SYS()) {
+      DelLine0_EDB(EData);
+      SetCurLine_EDB(EData,sLine);
+      LoadAllChans_EDB(EData);
+   }
+
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+
+}

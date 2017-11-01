@@ -1,0 +1,400 @@
+//===========================================================================
+NAME          = "Load differential GPS coordinates"
+#include <version.gxh>
+DESCRIPTION   = "
+   Load differential GPS locations from a Geosoft ASCII table containing
+   corrected differential locations.  See the C3N2TBL program for a 
+   description of the GPS table format.
+
+        GPSLOAD.GPSTable -  C3Nav GPS data table (date,time,lat,lon,alt)
+               .Flight   -  Flight number to which the table applies
+               .GPStime  -  Time channel name
+               .Res      -  Time resolution for the lookup
+               .X        -  Output GPS X channel name
+               .Y        -  Output GPS Y channel name
+               .Alt      -  Output GPS altimeter channel name
+               .XFLD     -  Field name in table for X
+               .YFLD     -  Field name in table for Y
+               .ALTFLD   -  Field name in table for Altimeter
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates/Differential GPS"
+
+// Revision History:
+// v6.1.0: Rewritten to allow input of table field names for long, lat, elev.
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "gpsload.gr"
+#include "gpsload.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>                  // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sIndexName;             // Channel Names
+string(STR_DB_SYMBOL) sX,sY,sAlt;             // Channels in Table file
+string(STR_FILE) sTable;                 // Table Name
+string(STR_DEFAULT_LONG) sFlight;                // Flight number
+
+EDB         EData;
+DB          Data;                   // Database
+DB_SYMB     Index;                  // time channel
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // List handle
+DB_SELECT   Sel;                    // Selection object
+
+
+DB_SYMB     Xgps;                       
+DB_SYMB     Ygps;               
+DB_SYMB     ALTgps;               
+
+ 
+DB_SYMB     Line;                   // DB Line Handle
+TB          GpsTB;                  // GPS Table Handle
+                                     
+int         i;                      // Utility i
+int         iLines;                 // Number of Lines Processed
+int         iTotLines;              // Total Number of Lines to Process
+real        rRes;
+                                    
+string(STR_DEFAULT_SHORT) sTemp;                  // temporary number formating string
+string(STR_DEFAULT) sLabel, sAltFld, sXFld, sYFld;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("gpsload");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_GPSLOAD_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_GPSLOAD_4);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_GPSLOAD_5);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_GPSLOAD_6);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_GPSLOAD_0,DGW_FILEPATH,"gpsload","GPSTable");     
+     SetInfoSYS_DGW(Diag,_GPSLOAD_1,DGW_TEXT,"gpsload","Flight");    
+     SetInfoSYS_DGW(Diag,_GPSLOAD_2,DGW_TEXT,"gpsload","GPSTime");
+     SetInfoSYS_DGW(Diag,_GPSLOAD_3,DGW_TEXT,"gpsload","Res");
+     SetInfoSYS_DGW(Diag,_GPSLOAD_4,DGW_TEXT,"gpsload","X");    
+     SetInfoSYS_DGW(Diag,_GPSLOAD_5,DGW_TEXT,"gpsload","Y");    
+     SetInfoSYS_DGW(Diag,_GPSLOAD_6,DGW_TEXT,"gpsload","Alt");    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_GPSLOAD_0,DGW_FILEPATH,"gpsload","GPSTable");
+     GetInfoSYS_DGW(Diag,_GPSLOAD_1,DGW_TEXT,"gpsload","Flight");    
+     GetInfoSYS_DGW(Diag,_GPSLOAD_2,DGW_TEXT,"gpsload","GPSTime"); 
+     GetInfoSYS_DGW(Diag,_GPSLOAD_3,DGW_TEXT,"gpsload","Res"); 
+     GetInfoSYS_DGW(Diag,_GPSLOAD_4,DGW_TEXT,"gpsload","X");    
+     GetInfoSYS_DGW(Diag,_GPSLOAD_5,DGW_TEXT,"gpsload","Y");    
+     GetInfoSYS_DGW(Diag,_GPSLOAD_6,DGW_TEXT,"gpsload","Alt");    
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+
+   // --- Get Parameters from INI ---
+
+   GetString_SYS("gpsload","GPSTable",sTable);
+   GetString_SYS("gpsload","Flight",sFlight);
+   GetString_SYS("gpsload","GPStime",sIndexName);
+
+
+   // --- Get the resolution in seconds ---
+
+   if (iExistReal_SYS("gpsload","Res"))
+      rRes = rGetReal_SYS("gpsload","Res");
+   else
+      rRes = 0.0;
+
+
+   // --- change selection if a flight has been specified ---
+
+   if (iStrlen_STR(sFlight) > 0) {
+
+
+      // --- get current selection ---
+
+      Sel = GetSelect_DB(Data);
+
+
+      // --- Make a flight number and select data ---
+
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+      Strcpy_STR(sLabel,"F");
+      Strcat_STR(sLabel,sFlight);
+      Select_DB(Data,sLabel,DB_LINE_SELECT_INCLUDE);
+
+   }
+
+
+   // --- get the index channels ---
+   
+   if (!iExistSymb_DB(Data,sIndexName,DB_SYMB_CHAN))  
+      Abort_SYS(_("Input time channel does not exist."));
+   Index = FindSymb_DB(Data,sIndexName,DB_SYMB_CHAN);
+
+
+   // --- change resolution to hours if time channel format is time ---
+
+   if (iGetChanFormat_DB(Data,Index) == DB_CHAN_FORMAT_TIME)
+      rRes /= 3600.0;
+
+   
+   // --- create/get the output channels ---
+
+   Xgps = NULLSYMB;
+   GetString_SYS("gpsload","X",sX);
+   if (iStrlen_STR(sX)) 
+   {
+      if (!iExistSymb_DB(Data,sX,DB_SYMB_CHAN))  
+         Xgps = CreateSymb_DB(Data,sX,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      else
+         Xgps = FindSymb_DB(Data,sX,DB_SYMB_CHAN);
+   }
+
+   Ygps = NULLSYMB;
+   GetString_SYS("gpsload","Y",sY);
+   if (iStrlen_STR(sY))
+   {
+      if (!iExistSymb_DB(Data,sY,DB_SYMB_CHAN))  
+         Ygps   = CreateSymb_DB(Data,sY,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      else
+         Ygps = FindSymb_DB(Data,sY,DB_SYMB_CHAN);
+   }
+
+   ALTgps = NULLSYMB;
+   GetString_SYS("gpsload","Alt",sAlt);
+   if (iStrlen_STR(sAlt)) 
+   {
+      if (!iExistSymb_DB(Data,sAlt,DB_SYMB_CHAN))  
+         ALTgps = CreateSymb_DB(Data,sAlt,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_FLOAT);
+      else
+         ALTgps = FindSymb_DB(Data,sAlt,DB_SYMB_CHAN);
+   }
+
+
+   // --- Ensure symbols are all different ---
+
+   if ((Xgps == Ygps) && (Xgps != NULLSYMB))
+      Abort_SYS(_("Longitude and Latitude Channels must be different."));
+
+   if ((Xgps == ALTgps) && (Xgps != NULLSYMB))
+      Abort_SYS(_("Longitude and Altimeter Channels must be different."));
+
+   if ((Xgps == Index) && (Xgps != NULLSYMB))
+      Abort_SYS(_("Longitude and Time Reference Channels must be different."));
+
+   if ((Ygps == ALTgps) && (Ygps != NULLSYMB))
+      Abort_SYS(_("Latitude and Altimeter Channels must be different."));
+
+   if ((Ygps == Index) && (Ygps != NULLSYMB))
+      Abort_SYS(_("Latitude and Time Reference Channels must be different."));
+
+   if ((ALTgps == Index) && (ALTgps != NULLSYMB))
+      Abort_SYS(_("Altimeter and Time Reference Channels must be different."));
+
+
+   // --- Load the Table into Memory ---
+
+   Strcpy_STR(sLabel,_("Loading GPS data \""));
+   Strcat_STR(sLabel,sTable);
+   Strcat_STR(sLabel,"\"");
+   ProgName_SYS(sLabel,2);
+   GpsTB = Create_TB(sTable);   
+   
+   
+   // --- Find the required lat, long and alt fields in the table ---
+   
+   if(Xgps!=NULLSYMB) {
+      Strcpy_STR(sXFld, "X");
+      if(iFindColByName_TB(GpsTB, sXFld)==-1) {
+         Strcpy_STR(sXFld, _n("Long"));
+         if(iFindColByName_TB(GpsTB, sXFld)==-1) {
+            Strcpy_STR(sXFld, _n("Longitude"));
+            if(iFindColByName_TB(GpsTB, sXFld)==-1)
+               Abort_SYS(_("The longitude field in the table must be labelled \"X\", \"long\", or \"longitude\"."));
+         }
+      }
+   }
+
+   if(Ygps!=NULLSYMB) {
+      Strcpy_STR(sYFld, _n("Y"));
+      if(iFindColByName_TB(GpsTB, sYFld)==-1) {
+         Strcpy_STR(sYFld, _n("Lat"));
+         if(iFindColByName_TB(GpsTB, sYFld)==-1) {
+            Strcpy_STR(sYFld, _n("Latitude"));
+            if(iFindColByName_TB(GpsTB, sYFld)==-1)
+               Abort_SYS(_("The latitude field in the table must be labelled \"Y\", \"lat\", or \"latitude\"."));
+         }
+      }
+   }
+
+   if(ALTgps!=NULLSYMB) {
+      Strcpy_STR(sAltFld, _n("Alt"));
+      if(iFindColByName_TB(GpsTB, sAltFld)==-1) {
+         Strcpy_STR(sAltFld, _n("Z"));
+         if(iFindColByName_TB(GpsTB, sAltFld)==-1) {
+            Strcpy_STR(sAltFld, _n("Elev"));
+            if(iFindColByName_TB(GpsTB, sAltFld)==-1) {
+               Strcpy_STR(sAltFld, _n("Elevation"));
+               if(iFindColByName_TB(GpsTB, sAltFld)==-1)
+                  Abort_SYS(_("The longitude field in the table must be labelled \"Alt\", \"Z\", \"elev\", or \"elevation\"."));
+            }
+         }
+      }
+   }
+
+
+   // --- Prepare to do the work --- 
+
+   ProgName_SYS(_("GPS Correction"),1);
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   // --- Lock the channels ---
+
+   if (Xgps   != NULLSYMB) LockSymb_DB(Data,Xgps,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   if (Ygps   != NULLSYMB) LockSymb_DB(Data,Ygps,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   if (ALTgps != NULLSYMB) LockSymb_DB(Data,ALTgps,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,Index,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line)) {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      Strcpy_STR(sLabel,_("Load GPS on line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Apply the Correction ---
+
+      if (iStrlen_STR(sFlight) == 0) {
+
+
+         // --- lookup using date if flight not specified ---
+
+         if (Xgps != NULLSYMB) 
+            TableLookR2_DU(Data, Line, rLineDate_DB(Data,Line), Index, Xgps, "Date", "Time", sXFld, DU_LOOKUP_INTERPCLOSE, rRes, GpsTB);
+         if (Ygps != NULLSYMB) 
+            TableLookR2_DU(Data, Line, rLineDate_DB(Data,Line), Index, Ygps, "Date", "Time", sYFld, DU_LOOKUP_INTERPCLOSE, rRes, GpsTB);
+         if (ALTgps != NULLSYMB) 
+            TableLookR2_DU(Data, Line, rLineDate_DB(Data,Line), Index, ALTgps, "Date", "Time", sAltFld, DU_LOOKUP_INTERPCLOSE, rRes, GpsTB);
+
+      } else {
+
+
+         // --- flight is specified, so straight time lookup ---
+
+         if (Xgps != NULLSYMB)
+            TableLook1_DU(Data, Line, Index, Xgps, "Time", sXFld, DU_LOOKUP_INTERPCLOSE, rRes, GpsTB);
+         if (Ygps != NULLSYMB)
+            TableLook1_DU(Data, Line, Index, Ygps, "Time", sYFld, DU_LOOKUP_INTERPCLOSE, rRes, GpsTB);
+         if (ALTgps != NULLSYMB) 
+            TableLook1_DU(Data, Line, Index, ALTgps, "Time", sAltFld, DU_LOOKUP_INTERPCLOSE, rRes, GpsTB);
+
+      }
+
+
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+   }
+
+
+   // --- reset current selection ---
+
+   if ( iStrlen_STR(sFlight) > 0 )
+      SetSelect_DB(Data,Sel);
+
+   // --- Add maker ---
+
+   if (Xgps != NULLSYMB) 
+      EasyMakerSymb_DB(Data,Xgps,_("Load differential GPS coordinates"),"GPSLOAD;");
+   if (Ygps != NULLSYMB) 
+      EasyMakerSymb_DB(Data,Ygps,_("Load differential GPS coordinates"),"GPSLOAD;");
+   if (ALTgps != NULLSYMB) 
+      EasyMakerSymb_DB(Data,ALTgps,_("Load differential GPS coordinates"),"GPSLOAD;");
+
+   // --- unlock channels ---
+
+   UnLockSymb_DB(Data,Index);
+   if (Xgps != NULLSYMB) 
+      UnLockSymb_DB(Data,Xgps);
+   if (Ygps != NULLSYMB) 
+      UnLockSymb_DB(Data,Ygps);
+   if (ALTgps != NULLSYMB) 
+      UnLockSymb_DB(Data,ALTgps);
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+}

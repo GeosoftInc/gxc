@@ -1,0 +1,368 @@
+//===========================================================================
+NAME          = "Colour Symbol Plot"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Plotting"
+
+DESCRIPTION   = "
+
+ CHCLASS.CHANNEL     channel name
+        .MASK 			Optional mask channel - default is \"ChemMask\"
+        .ZONE        ZON, ITR, AGG, or TBL file name
+        .SYMBOL      symbol number
+        .SIZE        symbol size in mm
+        .EDGECOLOR   Colour of symbol edge
+        .WEIGHT      symbol edge font weight
+"
+// Revision History:
+// v6.3.0: Group naming improved to allow for underscores in database, channel names. See QA 7304.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "chclass.gr"
+#include "chclass.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sEColour, sTemp;
+string(STR_DB_SYMBOL) sChan,sLine,sMask;
+string(STR_GROUP) sGroup;
+string(STR_VIEW_GROUP) sViewGroup;
+string(STR_DEFAULT) sUnits,sFont,sLabel;
+string(STR_FILE) sZone,sFileName;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,ZCh,MCh;   // Channel handles
+DB_SYMB    Line;              // Line handle
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+IPJ   DataIPJ;
+VV    VVx,VVy,VVz,VVm;
+LST   List;
+int   iSymb,iLines,iTotLines,iWeight,iMask;
+real  rSize,rScaleMM;
+
+CSYMB  CSymb;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- get current database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get Default Mask Channel if required, and if it exists or is "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 &&
+            (iExistChan_DB(Data,sMask) || 
+             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+            SetString_SYS("CHCLASS","MASK",sMask);
+         }
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHCLASS");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_CHCLASS_0);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CHCLASS_0,DGW_TEXT,     "CHCLASS","MASK");
+      SetInfoSYS_DGW(Diag,_CHCLASS_1,DGW_FILEPATH, "CHCLASS","ZONE");
+      SetInfoSYS_DGW(Diag,_CHCLASS_2,DGW_LISTALIAS,"CHCLASS","SYMBOL");
+      SetInfoSYS_DGW(Diag,_CHCLASS_3,DGW_TEXT,     "CHCLASS","SIZE");
+      SetInfoSYS_DGW(Diag,_CHCLASS_4,DGW_TEXT,     "CHCLASS","EDGECOLOR");
+      SetInfoSYS_DGW(Diag,_CHCLASS_5,DGW_LISTALIAS,"CHCLASS","WEIGHT");     
+     
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CHCLASS_0,DGW_TEXT,     "CHCLASS","MASK");
+      GetInfoSYS_DGW(Diag,_CHCLASS_1,DGW_FILEPATH, "CHCLASS","ZONE");
+      GetInfoSYS_DGW(Diag,_CHCLASS_2,DGW_LISTALIAS,"CHCLASS","SYMBOL");
+      GetInfoSYS_DGW(Diag,_CHCLASS_3,DGW_TEXT,     "CHCLASS","SIZE");
+      GetInfoSYS_DGW(Diag,_CHCLASS_4,DGW_TEXT,     "CHCLASS","EDGECOLOR");
+      GetInfoSYS_DGW(Diag,_CHCLASS_5,DGW_LISTALIAS,"CHCLASS","WEIGHT");
+      
+    }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHCLASS","CHANNEL",sChan);    
+   GetString_SYS("CHCLASS","MASK",sMask);    
+   GetString_SYS("CHCLASS","ZONE",sZone);
+   iSymb = iGetInt_SYS("CHCLASS","SYMBOL");     
+   rSize = rGetReal_SYS("CHCLASS","SIZE");     
+   GetString_SYS("CHCLASS","EDGECOLOR",sEColour);
+   iWeight = iGetInt_SYS("CHCLASS","WEIGHT");
+   
+
+   // --- Apply mask? ---
+
+   iMask = 0;
+   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      MCh = FindChan_DB(Data,sMask);
+      if (MCh==NULLSYMB)  
+         Abort_SYS(_("Mask channel does not exist."));
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+      iMask = 1;
+   }
+
+   if (!iStrlen_STR(sZone))
+      Abort_SYS(_("Zone file was not specified."));
+   if (!iStrlen_STR(sEColour))
+      Abort_SYS(_("Symbol edge Colour was not specified."));
+   if ((iSymb < 1) || (iSymb > 255))
+      Abort_SYS(_("Symbol number value was invalid (must be 1-255)."));
+
+   if ((iWeight < 0) || (iWeight > 5))
+      Abort_SYS(_("Symbol edge font weight value was invalid (must be 0-5)."));
+
+
+   // --- channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist. This channel must be in the database for the GX to run."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist. This channel must be in the database for the GX to run."));
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+   if (!iExistChan_DB(Data,sChan))
+      Abort_SYS(_("The specified symbol channel does not exist."));
+   ZCh = FindChan_DB(Data,sChan);
+   LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- get current map and lock it ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   SetWorkingIPJ_MVIEW(View,DataIPJ);
+   
+   
+   // --- Scaling ---
+   
+   SetThinRes_MVIEW(View,0.02);
+   rScaleMM = rScaleMM_MVIEW(View);
+   Assert_SYS(rScaleMM > 0.0);
+
+
+   // --- Start a group. Use the format:
+   //     CSYMB_Database_Channel_Units. Because the default ITR creator in
+   //     dg_csymb.cpp depends on this format, remove any underscores in the
+   //     database and channel names, but allow for channel names with underscores and units ---
+
+   Strcpy_STR(sGroup,"CSYMB_");
+   GetName_DB(Data,DB_NAME_FILE,sFileName);
+   FileNamePart_STR(sFileName,sFileName,STR_FILE_PART_NAME);
+   GetChanUnit_DB(Data,ZCh,sUnits);
+
+   ReplaceChar2_STR(sFileName, "_", "");
+
+   
+   //--- Append the units to the channel name ONLY if the units are defined,
+   //    and they do not already appear in the channel name. ---
+   
+   if(iStrlen_STR(sUnits))
+   {
+      // --- Look for "ppm" in "Cr_ppm", for instance ---
+      
+      if(iStrStr_STR(sChan, sUnits, STR_CASE_TOLERANT)==-1)
+      {
+         Strcat_STR(sChan, "_");
+         Strcat_STR(sChan, sUnits);
+      }
+   }
+   GenGroupName_STR("CSYMB",sFileName,sChan,sGroup);   
+   
+ 
+   // --- get a CSYMB ---
+
+   CSymb = Create_CSYMB(sZone);
+
+
+   // --- edge Colour ---
+   
+   if (iStrcmp_STR(_n("none"),sEColour,STR_CASE_TOLERANT) != 0)
+      SetStaticCol_CSYMB(CSymb,iColor_MVIEW(sEColour),CSYMB_COLOR_EDGE);
+      
+
+   // --- Fixed size symbols ---
+   
+   SetScale_CSYMB(CSymb,rSize*rScaleMM);
+   
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   VVz = Create_VV(REAL,0);
+   VVm = Create_VV(INT,0);
+
+
+   // --- process lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+      GetChanVV_DB(Data,Line,ZCh,VVz);
+      ReFidVV_VV(VVx,VVz);
+      ReFidVV_VV(VVy,VVz);
+
+    
+		// --- mask? ---
+
+   	if(iMask) {
+
+      	GetChanVV_DB(Data,Line,MCh,VVm);
+      	ReFidVV_VV(VVm,VVx);
+			Mask_VVU(VVx,VVm);
+		}
+			
+
+      // --- Add to CSYMB class ---
+
+      AddData_CSYMB(CSymb,VVx,VVy,VVz);  
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+
+   }
+
+
+   // --- set parameters ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("symbols"));
+   SetFont_CSYMB(CSymb,sFont,TRUE,iWeight,FALSE);
+   SetNumber_CSYMB(CSymb,iSymb);
+   SetAngle_CSYMB(CSymb,0.0);
+   SetFixed_CSYMB(CSymb,TRUE);
+
+
+   // --- Create polysymbol ---
+
+   ColSymbol_MVIEW(View,sGroup,CSymb);
+
+
+   // --- add maker ---
+
+   Maker_MVIEW(View,1,1,"CHCLASS",MAKER_GX,_("Colour zone symbols..."),"CHCLASS;");
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,ZCh);
+   if(iMask)
+      UnLockSymb_DB(Data,MCh);
+
+
+   // --- done ---
+
+   Destroy_SYS(VVx);
+   Destroy_SYS(VVy);
+   Destroy_SYS(VVz);
+   Destroy_SYS(VVm);
+   
+   
+   // --- close view and relase map ---
+   
+   Destroy_MVIEW(View);
+   Destroy_IPJ(DataIPJ);
+   UnLock_EMAP(EMap);      
+   Progress_SYS(0);
+   
+   
+   // --- activate the group ---
+   
+   if (iInteractive_SYS()) { 
+   
+      Strcpy_STR(sViewGroup,"Data\\");
+      Strcat_STR(sViewGroup,sGroup);
+      ActivateGroup_EMAP(EMap,sViewGroup);
+      
+   }
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);   
+}

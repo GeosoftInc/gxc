@@ -1,0 +1,134 @@
+//===========================================================================
+NAME          = "Contour"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Contour"
+
+DESCRIPTION   = "
+
+   CONTOUR.GRID   - grid file name.
+
+"
+
+//===========================================================================
+
+RESOURCE = "contour.gr"
+#include "contour.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrid;
+string(STR_FILE) sGrid2;
+string(STR_DEFAULT_LONG) sGroup;
+string(STR_GROUP) sGrpName;
+MAP   Map;
+EMAP  EMap;
+MVIEW View;
+DGW   Diag;
+WA    Wa;
+
+int i;
+
+//===========================================================================
+//                           CONTOUR CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CONTOUR");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CONTOUR_0,DGW_FILEPATH,"CONTOUR","GRID");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CONTOUR_0,DGW_FILEPATH,"CONTOUR","GRID");     
+
+   }
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("CONTOUR","GRID",sGrid);
+   GetString_SYS("CONTOUR","GRID",sGrid2);
+
+
+   // --- get the map ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+   // --- set up an MDF file ---
+
+   MapMDF_MVU(Map,"_contour.mdf","*Data"); 
+
+   // --- get data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+   // --- create a control file using the map name --- 
+
+   Wa = Create_WA("_contour.con",0);
+   Puts_WA(Wa,"_contour.mdf/"); NewLine_WA(Wa);
+   Puts_WA(Wa,",,-1/"); NewLine_WA(Wa);
+   Destroy_WA(Wa);
+
+
+   // --- start a group ---
+
+   FileNamePart_STR(sGrid,sGroup,STR_FILE_PART_NAME);
+   GenGroupName_STR("CONTOUR",sGroup,"",sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   LineStyle_MVIEW(View,0,0.0);
+
+
+   // --- Add maker object ---
+
+   Maker_MVIEW(View,0,1,"CONTOUR",MAKER_GX,_("Quick contours..."),"CONTOUR;");
+
+
+   // --- draw contours ---
+
+   Progress_SYS(1);
+   Contour_MVU(View,"_contour.con",sGrid2);
+   Progress_SYS(0);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+
+   
+}

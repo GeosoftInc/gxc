@@ -1,0 +1,679 @@
+//===========================================================================
+NAME          = "Derive An-Eul solutions at specific locations"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "euler"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D"
+DESCRIPTION   = "
+ 
+      EULER3D.DX       Input X-Derivative Grid (Tx) file name.
+      EULER3D.DY       Input Y-Derivative Grid (Ty) file name.
+      EULER3D.DZ       Input Z-Derivative Grid (Tz) file name.
+      EULER3D.XYSOLGRP Input XY location group name.
+      EULER3D.SOLGRP   Output solution group name.
+      EULER3D.OBSHGHT  Height of observation plane           (default=0.0)
+      EULER3D.OBSELEV  Elevation of observation plane       
+"
+// Revision History:
+// v6.3.0: Improved progress bar messages.
+//         Add warning if E3PEAKS.CHAN not defined.
+// v6.1.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "e3aneuler.gr"
+#include "e3aneuler.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+#define  SETREAL(A, B, C)        \
+   A = rGetReal_SYS("EULER3D",B); \
+   if(A==rDUMMY) A = C;
+
+#define  SETINT(A, B, C)         \
+   A = iGetInt_SYS("EULER3D",B);  \
+   if(A==iDUMMY) A = C;
+
+#define GETCHAN(A, B, C, D, E, F)                              \
+   A = FindChan_DB(Data, B);                                   \
+   if(A==NULLSYMB) {                                           \
+      A=CreateSymb_DB(Data, B, DB_SYMB_CHAN,DB_OWN_SHARED, C); \
+      LockSymb_DB(Data,A,DB_LOCK_READWRITE,DB_WAIT_NONE);      \
+      SetChanFormat_DB(Data,A,DB_CHAN_FORMAT_NORMAL);          \
+      SetChanWidth_DB(Data,A,D);                               \
+      SetChanDecimal_DB(Data,A,E);                             \
+      SetChanProtect_DB(Data,A,F);                             \
+      Associate_DB(Data, Solutions, A);                        \
+   }                                                           \
+   else                                                        \
+      LockSymb_DB(Data,A,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+#define PUT_DATA(A,B)                                 \
+   iProtected = iGetChanProtect_DB(Data, A);           \
+   SetChanProtect_DB(Data, A, DB_CHAN_UNPROTECTED);   \
+   PutChanVV_DB(Data,Solutions, A,  B);               \
+   SetChanProtect_DB(Data, A, iProtected);
+   
+#define SET_IPJ(A,B,C,D)                            \
+   iProtected = iGetChanProtect_DB(A,B);            \
+   iProtected = iGetChanProtect_DB(A,C);            \
+   SetIPJ_DB(A,B,C,D);                              \
+   SetChanProtect_DB(A,B,iProtected);               \
+   SetChanProtect_DB(A,C,iProtected);
+   
+#define SET_UNITS(A,B,C)                            \
+   iProtected = iGetChanProtect_DB(A,B);            \
+   SetChanUnit_DB(A,B,C);                           \
+   SetChanProtect_DB(A,B,iProtected);
+   
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;                           // Dialogue handle
+EDB        EData;                          // output solution database Edited
+DB         Data;                           // output solution database
+DB_SYMB    Locations,Solutions;            // the solution groups.
+DB_SYMB    XWndCh,YWndCh,MaskCh,ZEulCh,NEulCh,GridCh,WndSzCh;
+LST        List, Lst, Lst2;
+IMG        ImgTX,ImgTY,ImgTZ,ImgAS0,ImgAS1,ImgAS2;
+IMG        ImgTXZ,ImgTYZ,ImgTZZ,ImgTXZZ,ImgTYZZ,ImgTZZZ;
+VV         XWndVV,YWndVV,MaskVV,DepthVV,IndexVV,TmpVV;
+ST         St;
+IEXP       IEXP_as0,IEXP_as1,IEXP_as2;
+IPJ        hIPJ;
+
+string(STR_DB_SYMBOL)       sSolutions,sLocations;
+string(STR_DB_SYMBOL)       sXWndCh,sYWndCh,sMaskCh,sZEulCh,sNEulCh,sGridCh,sWndSzCh;
+string(STR_FILE)            sDx,sDy,sDz,sDxz,sDyz,sDzz,sDxzz,sDyzz,sDzzz;
+string(STR_DEFAULT_LONG)    sBuff, sMsg, sName, sValue;
+string(DB_GROUP_CLASS_SIZE) sClass, sClass2;
+string(STR_DEFAULT)         sInGrd,sDxGrd,sDyGrd,sDzGrd,sUpCont,sUpGrd,sXShape;
+string(STR_DEFAULT)         sUnits;
+
+real       rObsHght,rObsElev;
+real       rDepth,rIndex,rTemp,rF;
+real       rX,rY,rAS0,rAS1,rAS2;
+
+int        iLen,iProtected,iN;
+int        i,iTossed,iObsFlg;
+int        iInteractive;
+
+//===========================================================================
+//                                  CODE
+//===========================================================================
+
+{
+   // --- Set input solution group class name ---
+
+   Strcpy_STR(sClass, _n("Targets"));   // used to be "XYEuler"
+
+
+   // --- Set input and output channel names ---
+
+   Strcpy_STR(sXWndCh, "X"); // input
+   Strcpy_STR(sYWndCh, "Y");
+   Strcpy_STR(sWndSzCh,_n("WndSize"));
+
+   Strcpy_STR(sZEulCh, _n("Depth"));    // output
+   Strcpy_STR(sNEulCh, _n("Index"));    // output
+   Strcpy_STR(sMaskCh, _n("Mask"));
+
+
+   // --- Get current database. Locations list must already exist ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get targets list ---
+   
+   Lst = Create_LST(STR_DB_SYMBOL);
+   ClassGroupLST_DB(Data,Lst,sClass);
+   
+   
+   // --- Add items from the old "XYEuler" groups ---
+
+   Lst2 = Create_LST(STR_DB_SYMBOL);
+   ClassGroupLST_DB(Data,Lst2,"XYEuler");
+   
+   iN = iSize_LST(Lst2);
+   for(i=0;i<iN;i++) {
+      GetItem_LST(Lst2, 0, i, sName);
+      GetItem_LST(Lst2, 1, i, sValue);
+      AddUniqueItem_LST(Lst, sName, sValue);
+   }
+   Sort_LST(Lst, 0, 0);
+   
+   if(iSize_LST(Lst)==0) 
+      Abort_SYS(_("There are no located solutions in the current database."));
+
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+    
+   if(iInteractive_SYS()) 
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("E3ANEULER");
+
+
+      // --- Set up channel list ---
+
+      List = GetList_DGW(Diag,_E3ANEULER_3);
+      Copy_LST(List,Lst);
+      
+      List = GetList_DGW(Diag,_E3ANEULER_4);
+      Copy_LST(List,Lst);
+      
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_E3ANEULER_0, DGW_FILEPATH,"EULER3D","DX");
+      SetInfoSYS_DGW(Diag,_E3ANEULER_1, DGW_FILEPATH,"EULER3D","DY");
+      SetInfoSYS_DGW(Diag,_E3ANEULER_2, DGW_FILEPATH,"EULER3D","DZ");
+      SetInfoSYS_DGW(Diag,_E3ANEULER_3, DGW_TEXT,    "EULER3D","XYSOLGRP");     
+      SetInfoSYS_DGW(Diag,_E3ANEULER_4, DGW_TEXT,    "EULER3D","SOLGRP");     
+      SetInfoSYS_DGW(Diag,_E3ANEULER_5, DGW_TEXT,    "EULER3D","OBSHGHT"); 
+      SetInfoSYS_DGW(Diag,_E3ANEULER_6, DGW_TEXT,    "EULER3D","OBSELEV"); 
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1) Cancel_SYS();    // He hit cancel
+   
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_E3ANEULER_0, DGW_FILEPATH,"EULER3D","DX");
+      GetInfoSYS_DGW(Diag,_E3ANEULER_1, DGW_FILEPATH,"EULER3D","DY");
+      GetInfoSYS_DGW(Diag,_E3ANEULER_2, DGW_FILEPATH,"EULER3D","DZ");
+      GetInfoSYS_DGW(Diag,_E3ANEULER_3, DGW_TEXT,    "EULER3D","XYSOLGRP");     
+      GetInfoSYS_DGW(Diag,_E3ANEULER_4, DGW_TEXT,    "EULER3D","SOLGRP");     
+      GetInfoSYS_DGW(Diag,_E3ANEULER_5, DGW_TEXT,    "EULER3D","OBSHGHT"); 
+      GetInfoSYS_DGW(Diag,_E3ANEULER_6, DGW_TEXT,    "EULER3D","OBSELEV"); 
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("EULER3D","DX",sDx);
+   GetString_SYS("EULER3D","DY",sDy);
+   GetString_SYS("EULER3D","DZ",sDz);
+   GetString_SYS("EULER3D","XYSOLGRP", sLocations);
+   GetString_SYS("EULER3D","SOLGRP", sSolutions);
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sDx))
+      Abort_SYS(_("Input Dx grid not specified!"));
+   if (!iStrlen_STR(sDy))
+      Abort_SYS(_("Input Dy grid not specified!"));
+   if (!iStrlen_STR(sDz))
+      Abort_SYS(_("Input Dz grid not specified!"));
+
+   if (!iStrlen_STR(sLocations))
+      Abort_SYS(_("Input location group not specified!"));
+
+
+   // --- Check for null parameter strings and set to default values if blank
+
+   SETREAL(rObsHght, "OBSHGHT", 0.0)
+
+   rObsElev = rGetReal_SYS("EULER3D","OBSELEV");
+   iObsFlg = 1;
+   if(rObsElev==rDUMMY) iObsFlg = 0;
+
+
+   // --- If using elevation, change the channel name ---
+
+   if(iObsFlg)
+      Strcpy_STR(sZEulCh, _n("Elevation"));
+
+   
+   // --- Start Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Located An-Eul solutions"),2);
+
+
+   // --- Create IMGs for input grids ---
+
+   ImgTX = CreateFile_IMG(GS_FLOAT,sDx,IMG_FILE_READONLY);
+   ImgTY = CreateFile_IMG(GS_FLOAT,sDy,IMG_FILE_READONLY);
+   ImgTZ = CreateFile_IMG(GS_FLOAT,sDz,IMG_FILE_READONLY);
+
+
+   // ---- Get Location List handle ---
+
+   if (!iExistSymb_DB(Data,sLocations,DB_SYMB_LINE)) {
+      Printf_STR(sBuff, sizeof(sBuff), _("The location list group \"%s\" does not exist in the current database."), sLocations);
+      Abort_SYS(sBuff);
+   }
+   Locations = FindSymb_DB(Data,sLocations,DB_SYMB_LINE);
+
+
+   // --- Ensure this is a located solutions group ---
+
+   LockSymb_DB(Data,Locations,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   GetGroupClass_DB(Data, Locations, sClass2);
+   UnLockSymb_DB(Data,Locations);
+
+   if(iStrcmp_STR(sClass2, sClass, STR_CASE_TOLERANT)!=0 &&
+      iStrcmp_STR(sClass2, _n("XYEuler"), STR_CASE_TOLERANT)!=0) 
+      Abort_SYS(_("The selected group is not recognized as an EULER SOLUTION group"));
+
+
+   // --- Get the X-window and Y-window channels ---
+
+   XWndCh = FindChan_DB(Data, sXWndCh);
+   if (XWndCh==NULLSYMB) {
+      Printf_STR(sMsg, sizeof(sMsg), _("The %s channel does not exist."), sXWndCh);
+      Abort_SYS(sMsg);
+   }
+
+   YWndCh = FindChan_DB(Data, sYWndCh);
+   if (YWndCh==NULLSYMB) {
+      Printf_STR(sMsg, sizeof(sMsg), _("The %s channel does not exist."), sYWndCh);
+      Abort_SYS(sMsg);
+   }
+
+
+   // --- Get/Make Solution group line ---
+
+   if(!iStrlen_STR(sSolutions) || iStrcmp_STR(sLocations,sSolutions,STR_CASE_TOLERANT)==0) {
+
+      Solutions = FindSymb_DB(Data,sLocations,DB_SYMB_LINE);
+
+   } else {
+
+      // --- Duplicate line ---
+
+      if (iExistSymb_DB(Data,sSolutions,DB_SYMB_LINE)) {
+         Solutions = FindSymb_DB(Data,sSolutions,DB_SYMB_LINE);
+         LockSymb_DB(Data,Solutions,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data,Solutions);
+      }
+
+      Solutions = DupLineSymb_DB(Data,Locations,sSolutions);
+      SetGroupClass_DB(Data, Solutions, sClass);
+         
+
+      // ---- Get the channels ---
+
+      GetString_SYS("E3PEAKS","CHAN",sGridCh);
+      if(!iStrlen_STR(sGridCh))
+         Abort_SYS(_("The Grid Peaks channel has not been defined. You need to run the E3PEAKS GX \"Get grid peak locations...\""));
+         
+      GETCHAN(XWndCh,  sXWndCh,  DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)
+      GETCHAN(YWndCh,  sYWndCh,  DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)
+      GETCHAN(GridCh,  sGridCh,  DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)   
+      GETCHAN(WndSzCh, sWndSzCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)   
+      GETCHAN(MaskCh,  sMaskCh,  DB_CATEGORY_CHAN_LONG,    5, 0, DB_CHAN_UNPROTECTED)   
+
+
+      // --- Copy Chan data ---
+
+      TmpVV = Create_VV(REAL,0);
+
+      GetChanVV_DB(Data,Locations,XWndCh,TmpVV);
+      PUT_DATA(XWndCh,TmpVV)
+      GetChanVV_DB(Data,Locations,YWndCh,TmpVV);
+      PUT_DATA(YWndCh,TmpVV)
+      GetChanVV_DB(Data,Locations,GridCh,TmpVV);
+      PUT_DATA(GridCh,TmpVV)
+      GetChanVV_DB(Data,Locations,WndSzCh,TmpVV);
+      PUT_DATA(WndSzCh,TmpVV)
+
+      // --- Fill MaskCh with ones ---
+
+      iN = iLength_VV(TmpVV);
+      SetIntN_VV(TmpVV, 0, iN, 1);
+      PUT_DATA(MaskCh,TmpVV)
+
+      Destroy_VV(TmpVV);
+
+
+      // --- Unlock channels ---
+
+      UnLockSymb_DB(Data,XWndCh);
+      UnLockSymb_DB(Data,YWndCh);
+      UnLockSymb_DB(Data,GridCh);
+      UnLockSymb_DB(Data,WndSzCh);
+      UnLockSymb_DB(Data,MaskCh);
+      UnLockSymb_DB(Data,Solutions);
+
+   }
+
+
+   // --- Create input VVs ---
+
+   XWndVV = Create_VV(REAL,0);
+   YWndVV = Create_VV(REAL,0);
+  
+
+   // --- Get data ---
+
+   LockSymb_DB(Data,XWndCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YWndCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+   GetChanVV_DB(Data,Solutions,XWndCh,XWndVV);
+   GetChanVV_DB(Data,Solutions,YWndCh,YWndVV);
+   
+   iLen = iLength_VV(XWndVV);
+   MaskVV  = Create_VV(INT,iLen);
+   SetIntN_VV(MaskVV, 0, -1, 1);    // Set all to 1.
+
+
+   // --------------------------------------------------
+   // --- Get ready for An-Eul calculation and put ---
+   // ---        results back into database          ---
+   // --------------------------------------------------
+
+
+   // --- Get the channels, and create if they don't exist ---
+
+   GETCHAN(ZEulCh, sZEulCh, DB_CATEGORY_CHAN_DOUBLE,  10, 2, DB_CHAN_PROTECTED)
+   GETCHAN(NEulCh, sNEulCh, DB_CATEGORY_CHAN_DOUBLE,  10, 2, DB_CHAN_PROTECTED)
+   GETCHAN(WndSzCh, sWndSzCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)   
+   GETCHAN(MaskCh, sMaskCh, DB_CATEGORY_CHAN_LONG,  5, 0, DB_CHAN_UNPROTECTED)
+   SetRegSymbSetting_DB(Data, MaskCh, "CLASS", "Mask");
+
+   
+   // --- Create output VVs ---
+
+   DepthVV = Create_VV(REAL,0);
+   IndexVV = Create_VV(REAL,0);
+
+
+   // --- Calculate dxz, dyz, dzz, dxzz, dyzz and dzzz grids ---
+
+   Strcpy_STR(sDxz, "dxz.grd");
+   Strcpy_STR(sDyz, "dyz.grd");
+   Strcpy_STR(sDzz, "dzz.grd");
+   Strcpy_STR(sDxzz, "dxzz.grd");
+   Strcpy_STR(sDyzz, "dyzz.grd");
+   Strcpy_STR(sDzzz, "dzzz.grd");
+
+   GetString_SYS("E3PREP", "GRID",  sInGrd);
+   GetString_SYS("EULER3D","DX",    sDxGrd);
+   GetString_SYS("EULER3D","DY",    sDyGrd);
+   GetString_SYS("EULER3D","DZ",    sDzGrd);
+   GetString_SYS("E3PREP", "UPCONT",sUpCont);
+   GetString_SYS("E3PREP", "UPGRD", sUpGrd);
+   GetString_SYS("E3PREP", "XSHAPE",sXShape);
+   
+   SetInteractive_SYS(0);
+
+   SetString_SYS("E3PREP", "GRID",  sDz);
+   SetString_SYS("EULER3D","DX",    sDxz);
+   SetString_SYS("EULER3D","DY",    sDyz);
+   SetString_SYS("EULER3D","DZ",    sDzz);
+   SetString_SYS("E3PREP", "UPCONT","");
+   SetString_SYS("E3PREP", "UPGRD", "");
+   SetString_SYS("E3PREP", "XSHAPE","square");
+   
+   ProgName_SYS(_("Calculating 1st derivative grids"),2);
+   
+   if (iRunGX_SYS("e3prep.GX") != 0) {
+      SetInteractive_SYS(iInteractive);
+      Abort_SYS(_("Failure to derivative the grid."));
+   }
+
+   SetString_SYS("E3PREP", "GRID",  sDzz);
+   SetString_SYS("EULER3D","DX",    sDxzz);
+   SetString_SYS("EULER3D","DY",    sDyzz);
+   SetString_SYS("EULER3D","DZ",    sDzzz);
+   SetString_SYS("E3PREP", "UPCONT","");
+   SetString_SYS("E3PREP", "UPGRD", "");
+   SetString_SYS("E3PREP", "XSHAPE","square");
+   
+   ProgName_SYS(_("Calculating 2nd derivative grids"),2);
+
+   if (iRunGX_SYS("e3prep.GX") != 0) {
+      SetInteractive_SYS(iInteractive);
+      Abort_SYS(_("Failure to derivative the grid."));
+   }
+
+   SetInteractive_SYS(iInteractive);
+
+   SetString_SYS("E3PREP", "GRID",  sInGrd);
+   SetString_SYS("EULER3D","DX",    sDxGrd);
+   SetString_SYS("EULER3D","DY",    sDyGrd);
+   SetString_SYS("EULER3D","DZ",    sDzGrd);
+   SetString_SYS("E3PREP", "UPCONT",sUpCont);
+   SetString_SYS("E3PREP", "UPGRD", sUpGrd);
+   SetString_SYS("E3PREP", "XSHAPE",sXShape);
+   SetString_SYS("E3DECON","GRID",  sInGrd);
+   SetString_SYS("E3XYEULER","GRID",sInGrd);
+
+
+   // --- make AS0, AS1 and AS2 grids ---
+
+   ImgTXZ = CreateFile_IMG(GS_FLOAT,sDxz,IMG_FILE_READONLY);
+   ImgTYZ = CreateFile_IMG(GS_FLOAT,sDyz,IMG_FILE_READONLY);
+   ImgTZZ = CreateFile_IMG(GS_FLOAT,sDzz,IMG_FILE_READONLY);
+
+   ImgTXZZ = CreateFile_IMG(GS_FLOAT,sDxzz,IMG_FILE_READONLY);
+   ImgTYZZ = CreateFile_IMG(GS_FLOAT,sDyzz,IMG_FILE_READONLY);
+   ImgTZZZ = CreateFile_IMG(GS_FLOAT,sDzzz,IMG_FILE_READONLY);
+
+   ImgAS0 = CreateOutFile_IMG(GS_DOUBLE,"AS0",ImgTX);
+   ImgAS1 = CreateOutFile_IMG(GS_DOUBLE,"AS1",ImgTX);
+   ImgAS2 = CreateOutFile_IMG(GS_DOUBLE,"AS2",ImgTX);
+
+   ProgName_SYS(_("Calculating analytic signal grids"),2);
+
+   IEXP_as0 = Create_IEXP();
+   AddGrid_IEXP (IEXP_as0,ImgTX,"dx");
+   AddGrid_IEXP (IEXP_as0,ImgTY,"dy");
+   AddGrid_IEXP (IEXP_as0,ImgTZ,"dz");
+   AddGrid_IEXP (IEXP_as0,ImgAS0,"as0");
+   DoFormula_IEXP (IEXP_as0,"as0=sqrt(dx*dx+dy*dy+dz*dz);",100);
+
+   IEXP_as1 = Create_IEXP();
+   AddGrid_IEXP (IEXP_as1,ImgTXZ,"dxz");
+   AddGrid_IEXP (IEXP_as1,ImgTYZ,"dyz");
+   AddGrid_IEXP (IEXP_as1,ImgTZZ,"dzz");
+   AddGrid_IEXP (IEXP_as1,ImgAS1,"as1");
+   DoFormula_IEXP (IEXP_as1,"as1=sqrt(dxz*dxz+dyz*dyz+dzz*dzz);",100);
+
+   IEXP_as2 = Create_IEXP();
+   AddGrid_IEXP (IEXP_as2,ImgTXZZ,"dxzz");
+   AddGrid_IEXP (IEXP_as2,ImgTYZZ,"dyzz");
+   AddGrid_IEXP (IEXP_as2,ImgTZZZ,"dzzz");
+   AddGrid_IEXP (IEXP_as2,ImgAS2,"as2");
+   DoFormula_IEXP (IEXP_as2,"as2=sqrt(dxzz*dxzz+dyzz*dyzz+dzzz*dzzz);",100);
+
+
+   // --- Do the An-Eul method ---
+
+   ProgName_SYS(_("Calculating depths and indices"),0);
+
+   for (i=0; i<iLen; i++) {
+
+      ProgUpdateL_SYS(i, iLen);      
+      
+      rX = rGetReal_VV(XWndVV,i);
+      rY = rGetReal_VV(YWndVV,i);
+
+      rAS0 = rGetZ_IMG(ImgAS0,rX,rY);
+      rAS1 = rGetZ_IMG(ImgAS1,rX,rY);
+      rAS2 = rGetZ_IMG(ImgAS2,rX,rY);
+            
+      rTemp = (rAS2*rAS0-rAS1*rAS1);
+      if(rTemp==0.0) {
+         rDepth = rDUMMY;
+         rIndex = rDUMMY;
+      } else {
+         rDepth = rAS1*rAS0/rTemp;
+         rIndex = (2.0*rAS1*rAS1-rAS2*rAS0)/rTemp;
+      }
+      if(rIndex<0.0 || rIndex>=4.0)  {
+         rIndex = rDUMMY;
+         rDepth = rDUMMY;
+      }
+      SetReal_VV(DepthVV,i,rDepth);
+      SetReal_VV(IndexVV,i,rIndex);
+   }
+
+
+   // --- Correct for height or elevation ---
+
+   if(iObsFlg) {     // only if defined...
+
+      // Output Elevation minus Euler Depth (actual elevation of solution)
+
+      Trans_VV(DepthVV,0.0,-1.0);      // Trans_VV(VV, A, B) = (VV + A)*B
+      Trans_VV(DepthVV,rObsElev,1.0);
+
+   }
+   else {
+
+      // --- Output true depth by subtracting the height of the instrument ---
+      
+      Trans_VV(DepthVV,-rObsHght,1.0);
+
+   }
+   
+   // --- update mask ---
+
+   _Mask_VV(MaskVV, DepthVV); 
+   
+   
+   // --- Put VVs to channels ---
+
+   PUT_DATA(ZEulCh, DepthVV)
+   PUT_DATA(NEulCh, IndexVV)
+   PUT_DATA(MaskCh, MaskVV)
+
+
+   // --- Copy projection and units to output gdb ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_IMG(ImgTX, hIPJ);
+   GetUnits_IPJ(hIPJ, rF, sUnits);
+   
+   SET_IPJ(Data,XWndCh,YWndCh,hIPJ)
+
+   SET_UNITS(Data,ZEulCh,sUnits)
+   SET_UNITS(Data,XWndCh,sUnits)
+   SET_UNITS(Data,YWndCh,sUnits)
+   SET_UNITS(Data,WndSzCh,sUnits)
+
+
+   // --- Give message for bad solutions ---
+
+   iLen = iLength_VV(DepthVV);
+
+   if(iInteractive_SYS() && iLen>0) {
+
+      // --- Count bad solutions ---
+
+      St = Create_ST();
+      Statistics_VV(St, DepthVV);
+
+      iTossed = (int)rGetInfo_ST(St, ST_DUMMIES);
+
+      if(iTossed>0) {
+
+         Printf_STR(sBuff, sizeof(sBuff), _("Could not find valid An-Eul solutions for %d of the %d locations."), iTossed, iLen);
+
+         DisplayMessage_SYS(_("E3ANEULER"),sBuff);
+      }
+   }
+
+
+   // --- Load the channels ---
+
+   AddAssociatedLoad_DB(Data, Solutions, XWndCh);  
+   AddAssociatedLoad_DB(Data, Solutions, YWndCh);  
+   AddAssociatedLoad_DB(Data, Solutions, ZEulCh);  
+   AddAssociatedLoad_DB(Data, Solutions, NEulCh);  
+   AddAssociatedLoad_DB(Data, Solutions, MaskCh);  
+
+
+   // --- Unlock ---
+
+   UnLockSymb_DB(Data,WndSzCh);
+   UnLockSymb_DB(Data,XWndCh);
+   UnLockSymb_DB(Data,YWndCh);
+   UnLockSymb_DB(Data,ZEulCh);
+   UnLockSymb_DB(Data,NEulCh);
+   UnLockSymb_DB(Data,MaskCh);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("E3ANEULER GX (Located An-Eul solutions)"), FALSE);
+   AddComment_DB(Data, "Solution list", sSolutions, TRUE);
+   AddComment_DB(Data, "Depth channel", sZEulCh, TRUE);
+   AddComment_DB(Data, "Index channel", sNEulCh, TRUE);
+   AddComment_DB(Data, "Mask channel",  sMaskCh, TRUE);
+   AddComment_DB(Data, "X channel", sXWndCh, TRUE);
+   AddComment_DB(Data, "Y channel", sYWndCh, TRUE);
+
+   if(iObsFlg==0)
+      AddRealComment_DB(Data, _n("Instrument height"), rObsHght, TRUE);
+   else
+      AddRealComment_DB(Data, _n("Instrument elevation"), rObsElev, TRUE);
+   AddComment_DB(Data, "X-derivative grid", sDx, TRUE);
+   AddComment_DB(Data, "Y-derivative grid", sDy, TRUE);
+   AddComment_DB(Data, "Z-derivative grid", sDz, TRUE);
+
+
+   // --- Release the database ---
+
+   UnLock_EDB(EData);
+
+   LoadChan_EDB(EData,sZEulCh);
+   LoadChan_EDB(EData,sNEulCh);
+
+
+   // --- go to the solutions line ---
+
+   SetCurLine_EDB(EData, sSolutions);
+
+
+   // --- Destroy objects ---
+
+   Destroy_IMG(ImgTX);
+   Destroy_IMG(ImgTY);
+   Destroy_IMG(ImgTZ);
+   Destroy_IMG(ImgTXZ);
+   Destroy_IMG(ImgTYZ);
+   Destroy_IMG(ImgTZZ);
+   Destroy_IMG(ImgTXZZ);
+   Destroy_IMG(ImgTYZZ);
+   Destroy_IMG(ImgTZZZ);
+   Destroy_IMG(ImgAS0);
+   Destroy_IMG(ImgAS1);
+   Destroy_IMG(ImgAS2);
+
+   Destroy_VV(XWndVV);
+   Destroy_VV(YWndVV);
+   Destroy_VV(DepthVV);
+   Destroy_VV(IndexVV);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+}

@@ -1,0 +1,293 @@
+//===========================================================================
+
+NAME          = "Draw polygons from a polygon file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GMSYS-3D Tools/Grid Editing"
+
+DESCRIPTION   = "
+    POLYDRAW.FILE        polygon file name
+            .VIEW        name of the view
+            .NOCLIP      clipping flag
+            .POLYLINE    polyline flag
+            .POLYMULTI   poly multi item flag
+            .LINETHICK   line thickness in mm
+            .LINECOLOR   line colour
+            .FILLCOLOR   fill colour
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.3.1: JB    Added option to allow splitting polygons into multiple items in the group. 
+// v6.3.0: JB    Remove what seems to be debug output of a polydraw.ply file. This may blow away user PLY files in the workspace. 
+//               Found while fixing 6840 and 6806          
+// v6.0.1: JB    Made clipping area slightly larger than view area to prevent edge errors
+// v6.0.0: JB    Added polyline option
+//         SJC   Fixed for oriented sections.
+// v5.1.7: JB    Added clipping flag
+// v5.1.6: INM   fixed problem drawing to rotated views
+// v5.1.5: Turned off thinning of polygons.
+// v5.1.4: Error for oriented views.
+// v5.1.3: INM   Added clipping to the View extent to prevent extremely
+//               large polygons in the map.
+//
+//===========================================================================
+
+RESOURCE = "POLYDRAW.gr"
+#include "POLYDRAW.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_GROUP) sGrpName;
+string(STR_FILE) sFile;
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT_SHORT) sLineColor,sFillColor;
+string(STR_VIEW) sView;
+int   i, iPoly, iMulti, iUserOrientation, iViewOrientation, iPolyLine, iNoClip, iPlot, iIntersect;
+int   iWarpedViewIPJ, iWarpedUserIPJ;
+real  rThick,rScale;
+real  rMinX,rMinY,rMaxX,rMaxY,rEdgeX,rEdgeY;
+
+DGW         Diag;             // Dialogue handle
+PLY			hPLY;					// polygon object
+EMAP        EMap;
+MAP   		Map;
+MVIEW 		View;
+IPJ         hViewIPJ, hUserIPJ;
+LST         List;
+VV          VVx;
+VV          VVy;
+
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   // --- get current map ---
+
+   EMap  = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+
+      // --- Create the 1st Dialogue ---
+
+      Diag = Create_DGW("POLYDRAW");
+
+      List = GetList_DGW(Diag,_POLYDRAW_1);
+      ViewList_MAP(Map,List);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_POLYDRAW_0,DGW_FILEPATH, "POLYDRAW","FILE");
+      SetInfoSYS_DGW(Diag,_POLYDRAW_1,DGW_TEXT,     "POLYDRAW","VIEW");
+      SetInfoSYS_DGW(Diag,_POLYDRAW_2,DGW_LISTALIAS,"POLYDRAW","NOCLIP");
+      SetInfoSYS_DGW(Diag,_POLYDRAW_3,DGW_LISTALIAS,"POLYDRAW","POLYLINE");
+      SetInfoSYS_DGW(Diag,_POLYDRAW_4,DGW_LISTALIAS,"POLYDRAW","POLYMULTI");
+      SetInfoSYS_DGW(Diag,_POLYDRAW_5,DGW_TEXT,     "POLYDRAW","LINETHICK");
+      SetInfoSYS_DGW(Diag,_POLYDRAW_6,DGW_TEXT,     "POLYDRAW","LINECOLOR");
+      SetInfoSYS_DGW(Diag,_POLYDRAW_7,DGW_TEXT,     "POLYDRAW","FILLCOLOR");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) < 0) Cancel_SYS();
+
+    
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_POLYDRAW_0,DGW_FILEPATH, "POLYDRAW","FILE");     
+      GetInfoSYS_DGW(Diag,_POLYDRAW_1,DGW_TEXT,     "POLYDRAW","VIEW");
+      GetInfoSYS_DGW(Diag,_POLYDRAW_2,DGW_LISTALIAS,"POLYDRAW","NOCLIP");
+      GetInfoSYS_DGW(Diag,_POLYDRAW_3,DGW_LISTALIAS,"POLYDRAW","POLYLINE");
+      GetInfoSYS_DGW(Diag,_POLYDRAW_4,DGW_LISTALIAS,"POLYDRAW","POLYMULTI");
+      GetInfoSYS_DGW(Diag,_POLYDRAW_5,DGW_TEXT,     "POLYDRAW","LINETHICK");
+      GetInfoSYS_DGW(Diag,_POLYDRAW_6,DGW_TEXT,     "POLYDRAW","LINECOLOR");
+      GetInfoSYS_DGW(Diag,_POLYDRAW_7,DGW_TEXT,     "POLYDRAW","FILLCOLOR");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+            
+   // --- Get parameters ---
+
+   GetString_SYS("POLYDRAW","FILE",sFile);
+   GetString_SYS("POLYDRAW","VIEW",sView);
+   iNoClip = iGetInt_SYS("POLYDRAW","NOCLIP");
+   iMulti = iGetInt_SYS("POLYDRAW","POLYMULTI");
+   iPolyLine = iGetInt_SYS("POLYDRAW","POLYLINE");
+   rThick = rGetReal_SYS("POLYDRAW","LINETHICK");
+   GetString_SYS("POLYDRAW","LINECOLOR",sLineColor);
+   GetString_SYS("POLYDRAW","FILLCOLOR",sFillColor);
+
+
+   // --- Load poly file ---
+
+   hPLY = Create_PLY();
+   LoadTable_PLY(hPLY,sFile);
+   iPoly = iNumPoly_PLY(hPLY);
+
+   if (iPoly == 0) {
+      if (iInteractive_SYS()) 
+         DisplayMessage_SYS(_("No polygons not in file"),_("The polygon file was empty. Nothing plotted."));
+      Exit_SYS();
+   }
+
+   // --- get map and view ---
+
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+
+
+   // --- change the PLY IPJ to the View, then clip ---
+   
+   hViewIPJ = Create_IPJ();
+   GetIPJ_MVIEW(View,hViewIPJ);
+	iViewOrientation = iGetOrientation_IPJ(hViewIPJ);
+	iWarpedViewIPJ = iWarped_IPJ(hViewIPJ);
+
+   hUserIPJ = Create_IPJ();
+   GetUserIPJ_MVIEW(View,hUserIPJ);
+	iUserOrientation = iGetOrientation_IPJ(hUserIPJ);
+	iWarpedUserIPJ = iWarped_IPJ(hUserIPJ);
+   
+
+   if(iViewOrientation == IPJ_ORIENT_SECTION) 
+	{
+		// --- If this is an oriented section, you must use the native view
+		//     projection, otherwise, one dimension ("Z") is lost because only the
+		//     true "X" and "Y" values are recovered from UserIPJ. This means the
+		//     PLY would collapse to a line.  In a section view, the native view
+		//     "X" coordinate corresponds to either Easting (for azimuth = 90), or
+		//     northing (for azimuth = 0), or begins at 0 on the left side. ---
+
+      ClearOrientation_IPJ(hViewIPJ);
+		ChangeIPJ_PLY(hPLY,hViewIPJ);
+		Copy_IPJ(hViewIPJ, hUserIPJ);
+   }
+	else if(iViewOrientation == IPJ_ORIENT_3D)
+	{
+		if (iUserOrientation == IPJ_ORIENT_PLAN) // 3D-oriented grids converted to maps are given a Plan orientation User IPJ. This might change in the future.
+			Copy_IPJ(hViewIPJ, hUserIPJ);
+		ChangeIPJ_PLY(hPLY,hUserIPJ);
+	}
+	else if(iViewOrientation == IPJ_ORIENT_PLAN)
+	{
+		ChangeIPJ_PLY(hPLY,hUserIPJ);
+	}
+	else
+	{   
+		// --- If there is no projection in the polygon, assume it
+		//     is the same as the User Projection, otherwise
+		//     transform it to the User Projection ---
+   
+		if(iSourceType_IPJ(hViewIPJ)==IPJ_TYPE_NONE)
+			SetIPJ_PLY(hPLY,hUserIPJ);
+		else
+			ChangeIPJ_PLY(hPLY,hUserIPJ);
+	}
+   
+	SetWorkingIPJ_MVIEW(View,hUserIPJ);
+   
+   // --- Assume to plot ---
+   
+   iPlot = 1;
+
+   if (iMulti || iPolyLine) {
+      VVx = Create_VV(REAL,0);
+      VVy = Create_VV(REAL,0);
+   } else if (!iNoClip) {
+   
+      Extent_MVIEW(View,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_VIEW,rMinX,rMinY,rMaxX,rMaxY);
+
+      // --- Make area slightly larger (10%) to not clip points strictly on edges ---
+      rEdgeX = 0.1*(rMaxX-rMinX);
+      rEdgeY = 0.1*(rMaxY-rMinY);
+        
+      iIntersect = iClipArea_PLY(hPLY,rMinX-rEdgeX,rMinY-rEdgeY,rMaxX+rEdgeX,rMaxY+rEdgeY);
+      if (iIntersect != PLY_CLIP_INTERSECT && iIntersect != PLY_CLIP_A_IN_B)
+         iPlot = 0;
+   }
+   
+   if (iPlot && iPoly > 0) {
+   
+
+	   // --- create a group ---
+
+      FileNamePart_STR(sFile,sFile,STR_FILE_PART_NAME);
+      GenGroupName_STR("PLY",sFile,"",sGrpName);
+      Strcpy_STR(sLabel,sGrpName);
+      GroupClipMode_MVIEW(View,CLIP_ON);
+      StartGroup_MVIEW(View,sLabel,MVIEW_GROUP_NEW);
+
+
+	   // --- set drawing attributes ---
+
+      rScale = rScaleMM_MVIEW(View);
+      LineStyle_MVIEW(View,0,0.0);
+      LineThick_MVIEW(View,rThick*rScale);
+      LineColor_MVIEW(View,iColor_MVIEW(sLineColor));
+      FillColor_MVIEW(View,iColor_MVIEW(sFillColor));
+      SetThinRes_MVIEW(View, -1.0);    // no thinning of polygon.
+
+      // --- draw ---
+      if (iPolyLine) 
+      {
+         for (i = 0; i<iPoly; i++) 
+         {
+            GetPolygon_PLY(hPLY, VVx, VVy, i);
+            if (iNoClip)
+               PolyLine_MVIEW(View, MVIEW_DRAW_POLYLINE, VVx, VVy);
+            else
+               PolyWrap_MVIEW(View, VVx, VVy);
+         }
+      } 
+      else if (iMulti)
+	  {
+		 for (i = 0; i<iPoly; i++) {
+            GetPolygon_PLY(hPLY, VVx, VVy, i);
+            PolyLine_MVIEW(View, MVIEW_DRAW_POLYGON, VVx, VVy);
+         }
+	  }
+	  else
+         PolygonPLY_MVIEW(View,hPLY);
+
+      // --- Add maker object ---
+
+      EasyMaker_MVIEW(View,_("Draw from PLY file..."),"POLYDRAW;");
+
+   } else if (iInteractive_SYS()) {
+      if (iIntersect == PLY_CLIP_B_IN_A)
+         DisplayMessage_SYS(_("Polygon(s) not in view"),_("The polygon(s) encloses the current data view completely. Change clipping flag to force plot."));
+      else
+         DisplayMessage_SYS(_("Polygon(s) not in view"),_("The polygon(s) does not intersect the current data view. Change clipping flag to force plot."));
+   }
+   Destroy_SYS(hPLY);
+   Destroy_SYS(View);
+   Destroy_SYS(hViewIPJ);
+
+   // --- Release the map ---
+
+   UnLock_EMAP(EMap);
+   
+}

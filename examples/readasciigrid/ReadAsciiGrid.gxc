@@ -1,0 +1,229 @@
+//===========================================================================
+NAME          = "Import an ASCII formated grid into a Geosoft grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+	READASCIIGRID.ASCII  ASCII file that contains grid data
+					 .GRID   output grid file name
+					 .SKIP   number of rows to skip before reading data
+					 .POINTS number of points in each row of data
+					 .ROWS   number of rows of data
+					 .KX     KX direction
+					 .DUMMY  Dummy value
+					 .DX     X Cell Size
+					 .DY     Y Cell Size
+					 .X0     Grid X Origin on ground
+					 .Y0     Grid Y Origin on ground
+					 .ROT    Grid Rotation Angle
+					 
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "ReadAsciiGrid.gr"
+#include "ReadAsciiGrid.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrid;
+string(STR_FILE) sFile;
+string(256000) sFileLine;
+string(STR_DEFAULT_SHORT) sTok;
+
+int   iSkip,iPoints,iRows;
+int   i,iRead,iKX,iInvert,iReverse;
+real  rDx,rDy,rX0,rY0,rRot,rDummy;
+IMG   hIMG;
+VV    hVV, hVVt;
+RA    hRA;
+DGW   hDGW;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+	// --- Are we running interactively ? ---
+
+	if (iInteractive_SYS())
+	{
+	
+		hDGW = Create_DGW("RAG");
+
+		SetInfoSYS_DGW(hDGW,_RAG_0 ,DGW_FILEPATH,"READASCIIGRID","ASCII");     
+		SetInfoSYS_DGW(hDGW,_RAG_1 ,DGW_FILEPATH,"READASCIIGRID","GRID");
+		SetInfoSYS_DGW(hDGW,_RAG_2 ,DGW_TEXT,"READASCIIGRID","SKIP");    
+		SetInfoSYS_DGW(hDGW,_RAG_3 ,DGW_TEXT,"READASCIIGRID","POINTS");    
+		SetInfoSYS_DGW(hDGW,_RAG_4 ,DGW_TEXT,"READASCIIGRID","ROWS");    
+		SetInfoSYS_DGW(hDGW,_RAG_5 ,DGW_LISTALIAS,"READASCIIGRID","KX");    
+		SetInfoSYS_DGW(hDGW,_RAG_6 ,DGW_TEXT,"READASCIIGRID","DUMMY");    
+		SetInfoSYS_DGW(hDGW,_RAG_7 ,DGW_TEXT,"READASCIIGRID","DX");    
+		SetInfoSYS_DGW(hDGW,_RAG_8 ,DGW_TEXT,"READASCIIGRID","DY");    
+		SetInfoSYS_DGW(hDGW,_RAG_9 ,DGW_TEXT,"READASCIIGRID","X0");    
+		SetInfoSYS_DGW(hDGW,_RAG_10,DGW_TEXT,"READASCIIGRID","Y0");    
+		SetInfoSYS_DGW(hDGW,_RAG_11,DGW_TEXT,"READASCIIGRID","ROT");    
+
+		if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+
+		GetInfoSYS_DGW(hDGW,_RAG_0 ,DGW_FILEPATH,"READASCIIGRID","ASCII");     
+		GetInfoSYS_DGW(hDGW,_RAG_1 ,DGW_FILEPATH,"READASCIIGRID","GRID");
+		GetInfoSYS_DGW(hDGW,_RAG_2 ,DGW_TEXT,"READASCIIGRID","SKIP");    
+		GetInfoSYS_DGW(hDGW,_RAG_3 ,DGW_TEXT,"READASCIIGRID","POINTS");    
+		GetInfoSYS_DGW(hDGW,_RAG_4 ,DGW_TEXT,"READASCIIGRID","ROWS");    
+		GetInfoSYS_DGW(hDGW,_RAG_5 ,DGW_LISTALIAS,"READASCIIGRID","KX");    
+		GetInfoSYS_DGW(hDGW,_RAG_6 ,DGW_TEXT,"READASCIIGRID","DUMMY");    
+		GetInfoSYS_DGW(hDGW,_RAG_7 ,DGW_TEXT,"READASCIIGRID","DX");    
+		GetInfoSYS_DGW(hDGW,_RAG_8 ,DGW_TEXT,"READASCIIGRID","DY");    
+		GetInfoSYS_DGW(hDGW,_RAG_9 ,DGW_TEXT,"READASCIIGRID","X0");    
+		GetInfoSYS_DGW(hDGW,_RAG_10,DGW_TEXT,"READASCIIGRID","Y0");    
+		GetInfoSYS_DGW(hDGW,_RAG_11,DGW_TEXT,"READASCIIGRID","ROT");    
+
+		Destroy_DGW(hDGW);
+		
+	}
+
+
+	// --- Get Parameters ---
+
+	GetString_SYS("READASCIIGRID","ASCII",sFile);
+	GetString_SYS("READASCIIGRID","GRID",sGrid);
+	iSkip   = iGetInt_SYS("READASCIIGRID","SKIP");
+	iPoints = iGetInt_SYS("READASCIIGRID","POINTS");
+	iRows   = iGetInt_SYS("READASCIIGRID","ROWS");
+	iKX     = iGetInt_SYS("READASCIIGRID","KX");
+	if (iExistReal_SYS("READASCIIGRID","DUMMY"))
+		rDummy = rGetReal_SYS("READASCIIGRID","DUMMY");
+	else   
+		rDummy = rDUMMY;
+	rDx  = rGetReal_SYS("READASCIIGRID","DX");
+	rDy  = rGetReal_SYS("READASCIIGRID","DY");
+	rX0  = rGetReal_SYS("READASCIIGRID","X0");
+	rY0  = rGetReal_SYS("READASCIIGRID","Y0");
+	rRot = rGetReal_SYS("READASCIIGRID","ROT");
+	
+	// --- Handle Range Checking ---
+	
+	if (iPoints < 1) Abort_SYS(_("Number of points in each row must be greather than 0."));
+	if (iRows < 1) Abort_SYS(_("Number of rows must be greater than zero."));
+	if (iKX < -2 || iKX > 2 || iKX == 0) Abort_SYS(_("Invalid Row Orientation."));
+	
+	
+	// --- open ascii file and skip unwanted rows ---
+	
+	hRA = Create_RA(sFile);
+	iSeek_RA(hRA,iSkip);
+	
+	
+	// --- create a grid ---
+	
+	if (iKX == 1 || iKX == -2)
+		hIMG = CreateNewFile_IMG(GS_FLOAT,1,iPoints,iRows,sGrid);
+	else   
+		hIMG = CreateNewFile_IMG(GS_FLOAT,-1,iRows,iPoints,sGrid);
+		
+	iInvert = 0;
+	iReverse = 0;
+
+	if (iKX == -2) 
+		iInvert = 1;
+	if (iKX == 2)
+		iReverse = 1;
+	
+	
+	// --- create a VVs to hold data ---
+	
+	hVV = Create_VV(REAL,iPoints);
+	hVVt = Create_VV(REAL, 0);
+	
+	
+	// --- read rows ---
+	
+	Progress_SYS(1);
+	FileNamePart_STR(sFile, sFile, STR_FILE_PART_NAME_EXTENSION);
+	Printf_STR(sFileLine, sizeof(sFileLine), _("Reading \"%s\"..."), sFile);
+	ProgName_SYS(sFileLine,1);
+	
+	for (i=0;i<iRows;i++) {
+	
+		ProgUpdateL_SYS(i,iRows);
+		if (iCheckStop_SYS())
+			Cancel_SYS();
+	
+		iRead = 0;
+		
+		// --- read next line ---
+		 
+		SetLen_VV(hVV, 0);
+		do 
+		{
+			if (iGets_RA(hRA,sFileLine))
+				Abort_SYS(_("Unexpected end-of-file."));
+					
+			TrimSpace_STR(sFileLine, STR_TRIMBOTH);
+			iRead += iTokenizeToValues_VVU(hVVt, sFileLine);
+			Append_VV(hVV, hVVt);
+
+	  } while(iRead < iPoints);
+	
+
+	  if (iRead > iPoints) {
+			Strcpy_STR(sFileLine,_("Too many points at line "));
+			FormatI_STR(iLine_RA(hRA),sTok,8);
+			Printf_STR(sFileLine, sizeof(sFileLine), _("Too many points at line %s in file %s. Expected %d but read %d."), sTok, sFile, iPoints, iRead);
+			Abort_SYS(sFileLine);
+		}          
+	
+		// --- Dummies ---
+
+		if(rDummy != rDUMMY)
+			SearchReplace_VVU(hVV, rDummy, rDUMMY);
+
+	 
+		// --- write the row ---
+		
+		if (iReverse)
+			Reverse_VV(hVV);
+
+		if (iInvert)
+			WriteV_IMG(hIMG,iRows-i-1,0,iPoints,hVV);
+		else      
+			WriteV_IMG(hIMG,i,0,iPoints,hVV);
+	}
+	
+	
+	Progress_SYS(0);
+	
+	Destroy_SYS(hVV);
+	Destroy_SYS(hVVt);
+	Destroy_SYS(hIMG);
+	Destroy_SYS(hRA);
+	
+	
+	// --- Modify the Grid header ---
+  
+	GridHead_IMU(sGrid,rDx,rDy,rX0,rY0,rRot);
+	
+
+	// --- Add this grid to the current project ---
+
+	if (iInteractive_SYS())   
+		iAddDocument_PROJ(sGrid,"Grid",1);
+	
+}
+

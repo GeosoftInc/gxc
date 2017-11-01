@@ -1,0 +1,197 @@
+//===========================================================================
+NAME          = "Export data to a Microsoft Access database (MDB)."
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Export data to a Microsoft Access database file (MDB).  Either displayed
+   data channels or all data channels may be exported, and either
+   the displayed line/group, selected lines/groups or all lines may be exported.
+   The
+	
+   EXPDB.FILE   MDB file name, .mdb assumed.
+
+         .CHAN   \"D\" for displayed channels.
+                 \"A\" for all channels.
+
+         .LINE   \"D\" for the displayed line only.
+                 \"S\" for selected lines.
+                 \"A\" for all lines
+
+         .SINGLE \"M\" for one line per table
+                 \"S\" for all lines in one table
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
+
+
+// Revision History:
+// v5.1.4: Added Access 97 export capability
+
+
+//===========================================================================
+
+RESOURCE = "expdb.gr"
+#include "expdb.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;
+string(STR_DB_SYMBOL) sLine,sChan,sCurLine;
+string(STR_DEFAULT_SHORT) sSingle;
+
+int         i;
+int         iLine;         // Output line selections
+int         iChan;         // Output channel selections
+int         iSingle;       // Line collection mode
+
+EDB         EData;         // database handle
+DB          Data;          // database handle
+DGW         Diag;          // dialogue box
+VV          DispChanVV;    // Displayed channels
+DB_SELECT   Select;        // current selection mode
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("EXPDB");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_EXPDB_0,DGW_FILEPATH,"EXPDB","FILE");
+      SetInfoSYS_DGW(Diag,_EXPDB_1,DGW_LISTALIAS,"EXPDB","CHAN");    
+      SetInfoSYS_DGW(Diag,_EXPDB_2,DGW_LISTALIAS,"EXPDB","LINE");     
+      SetInfoSYS_DGW(Diag,_EXPDB_3,DGW_LISTALIAS,"EXPDB","SINGLE");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_EXPDB_0,DGW_FILEPATH,"EXPDB","FILE");
+      GetInfoSYS_DGW(Diag,_EXPDB_1,DGW_LISTALIAS,"EXPDB","CHAN");    
+      GetInfoSYS_DGW(Diag,_EXPDB_2,DGW_LISTALIAS,"EXPDB","LINE");    
+      GetInfoSYS_DGW(Diag,_EXPDB_3,DGW_LISTALIAS,"EXPDB","SINGLE");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("EXPDB","FILE",sFile);
+   GetString_SYS("EXPDB","LINE",sLine);
+   GetString_SYS("EXPDB","CHAN",sChan);
+   GetString_SYS("EXPDB","SINGLE",sSingle);
+   
+   if (iInteractive_SYS()) { 
+      if (iFileExist_SYS(sFile)) {
+         if (!iDisplayQuestion_SYS(_("EXPDB GX"), _("The database exists. If table name(s) inside the database is/are the same as the Group/Line name(s) exported it/they will be overwritten. Continue?")))
+            Cancel_SYS();
+      }
+   }
+
+   ToUpper_STR(sLine);
+   if (iChar_STR(sLine) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+   ToUpper_STR(sChan);
+   if (iChar_STR(sChan) == iChar_STR("D")) 
+      iChan = DU_CHANNELS_DISPLAYED;
+   else if (iChar_STR(sChan) == iChar_STR("A")) 
+      iChan = DU_CHANNELS_ALL;
+   else
+      Abort_SYS(_("Channel selection invalid"));
+
+   if (iChar_STR(sSingle) == iChar_STR("S")) 
+      iSingle = DU_LINEOUT_SINGLE;
+   else if (iChar_STR(sSingle) == iChar_STR("M")) 
+      iSingle = DU_LINEOUT_MULTIPLE;
+   else
+      Abort_SYS(_("Multiple/Single Table Output selection invalid"));
+
+
+   EData = Current_EDB();
+
+   // --- Get currently selected line ---
+
+   if (iInteractive_SYS()) 
+	  GetCurLine_EDB(EData,sCurLine);
+   else
+	  GetString_SYS("EXPDB","CURLINE",sCurLine);
+
+   // --- Get currently displayed channels ---
+
+   // --- get the channel list depending on mode ---
+
+   DispChanVV = Create_VV(INT,0);
+   if (iChar_STR(sChan) == iChar_STR("A")) {
+      Data = Lock_EDB(EData);
+      iSymbList_DB(Data,DispChanVV,DB_SYMB_CHAN);
+   } else {
+      if (!iInteractive_SYS())
+         Abort_SYS(_("Interactive mode required for exporting selected or current channels."));
+      iDispChanList_EDB(EData,DispChanVV);
+      Data = Lock_EDB(EData);
+   }
+
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+      else {
+         if (!iInteractive_SYS())
+            Abort_SYS(_("Interactive mode required for exporting selected or current lines."));
+         if (iLine == DU_LINES_DISPLAYED) {
+            Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+            Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+         }
+      }
+   }
+
+
+   // --- export data ---
+
+   Progress_SYS(1);
+   ExportMDB_DU(Data,sCurLine,DispChanVV,iChan,iSingle,sFile);
+   Progress_SYS(0);
+
+   Destroy_VV(DispChanVV);
+
+   // --- reset starting selections
+
+   if (iLine != DU_LINES_SELECTED)
+      SetSelect_DB(Data,Select);
+
+}

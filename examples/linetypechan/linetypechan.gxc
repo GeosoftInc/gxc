@@ -1,0 +1,344 @@
+//===========================================================================
+NAME          = "Set line type based on channel values"
+#include <version.gxh>
+DESCRIPTION   = "
+
+If the first non-dummy value in the selected channel matches one of the
+defined values, the line is set to the associated type.
+
+The values may be string values, up to 16 characters long.
+
+Parameters: 
+
+    LINETYPECHAN.CHAN - Line type channel
+                .NORMAL - Definitions
+                .BASE
+                .TIE
+                .TEST
+                .TREND
+                .SPECIAL
+                .RANDOM
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Line Tools"
+
+// Revision History:
+// v6.1.3: Fixed channel lock bug
+// v5.1.6: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "linetypechan.gr"
+#include "linetypechan.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCh;            // Channel Names
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     Ch;               // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+VV          TypeVV;
+
+int         i, iN, iVal, iLineType;      
+int         iTest;       
+int(7)      iType;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+int         iChType;
+
+real rNormal, rBase, rTie, rTest, rTrend, rSpecial, rRandom, rVal;
+
+string(STR_DEFAULT_SHORT) sNormal, sBase, sTie, sTest, sTrend, sSpecial, sRandom;
+string(STR_DEFAULT_SHORT) sVal;
+string(STR_DEFAULT) sLabel, sTemp;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("LINETYPECHAN");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_LINETYPECHAN_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_0,DGW_TEXT,"LINETYPECHAN","CHAN");     
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_1,DGW_TEXT,"LINETYPECHAN","NORMAL");     
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_2,DGW_TEXT,"LINETYPECHAN","BASE");    
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_3,DGW_TEXT,"LINETYPECHAN","TIE");    
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_4,DGW_TEXT,"LINETYPECHAN","TEST");    
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_5,DGW_TEXT,"LINETYPECHAN","TREND");    
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_6,DGW_TEXT,"LINETYPECHAN","SPECIAL");    
+     SetInfoSYS_DGW(Diag,_LINETYPECHAN_7,DGW_TEXT,"LINETYPECHAN","RANDOM");   
+      
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // The user hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_0,DGW_TEXT,"LINETYPECHAN","CHAN");     
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_1,DGW_TEXT,"LINETYPECHAN","NORMAL");     
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_2,DGW_TEXT,"LINETYPECHAN","BASE");    
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_3,DGW_TEXT,"LINETYPECHAN","TIE");    
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_4,DGW_TEXT,"LINETYPECHAN","TEST");    
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_5,DGW_TEXT,"LINETYPECHAN","TREND");    
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_6,DGW_TEXT,"LINETYPECHAN","SPECIAL");    
+     GetInfoSYS_DGW(Diag,_LINETYPECHAN_7,DGW_TEXT,"LINETYPECHAN","RANDOM");   
+
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("LINETYPECHAN","CHAN",sCh);
+   GetString_SYS("LINETYPECHAN","NORMAL",sNormal);
+   GetString_SYS("LINETYPECHAN","BASE",sBase);
+   GetString_SYS("LINETYPECHAN","TIE",sTie);
+   GetString_SYS("LINETYPECHAN","TEST",sTest);
+   GetString_SYS("LINETYPECHAN","TREND",sTrend);
+   GetString_SYS("LINETYPECHAN","SPECIAL",sSpecial);
+   GetString_SYS("LINETYPECHAN","RANDOM",sRandom);
+
+
+   // --- Verify parameters ---
+
+   iType[0] = iStrMin_STR(sNormal);
+   iType[1] = iStrMin_STR(sBase);
+   iType[2] = iStrMin_STR(sTie);
+   iType[3] = iStrMin_STR(sTest);
+   iType[4] = iStrMin_STR(sTrend);
+   iType[5] = iStrMin_STR(sSpecial);
+   iType[6] = iStrMin_STR(sRandom);
+
+   iTest = 0;
+   for(i=0;i<7;i++) {
+      if(iType[i]>0) {
+         iTest = 1;
+         break;
+      }
+   }
+
+   if(iTest==0)
+      Abort_SYS(_("No codes are defined to set line types."));
+
+       
+
+   // --- Does the Line Type Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sCh))
+      Abort_SYS(_("Line type channel does not exist."));
+   Ch = FindChan_DB(Data,sCh);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- See if the channel is numeric ---
+
+   iChType = iGetChanType_DB(Data, Ch);
+
+
+   // --- Create a VV ---
+
+   TypeVV = CreateExt_VV(iChType, 0);
+
+
+   // --- For numeric line type channel, convert the input strings to numbers ---
+
+   if(iChType>=0) {
+   
+      rNormal  = rScanR_STR(sNormal);
+      rBase    = rScanR_STR(sBase);
+      rTie     = rScanR_STR(sTie);
+      rTest    = rScanR_STR(sTest);
+      rTrend   = rScanR_STR(sTrend);
+      rSpecial = rScanR_STR(sSpecial);
+      rRandom  = rScanR_STR(sRandom);
+   }
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      // --- Skip group type lines ---
+
+      if(iLineCategory_DB(Data, Line) != DB_CATEGORY_LINE_FLIGHT) {
+         UnLockSymb_DB(Data,Line);
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+         continue;
+      }
+
+
+      // --- Update the Progress Bar ---
+
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data, Line, Ch, TypeVV);
+
+      
+      iN = iLength_VV(TypeVV);
+      if(iN==0) {
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+         continue;
+      }
+
+      // --- Find first non-dummy value ---
+
+      iVal = iFindDum_VV(TypeVV, 0, iN-1, 1, 0);
+      if(-1 != iVal) {
+         
+
+         // --- Set line type by matching values ---
+
+         iLineType = iDUMMY;         
+
+         if(iChType < 0) {
+
+            GetString_VV(TypeVV, iVal, sVal);
+
+            if(iType[0]>0 && !iStrcmp_STR(sVal, sNormal, STR_CASE_TOLERANT))
+               iLineType = DB_LINE_TYPE_NORMAL;
+
+            else if(iType[1]>0 && !iStrcmp_STR(sVal, sBase, STR_CASE_TOLERANT))
+               iLineType = DB_LINE_TYPE_BASE;
+
+            else if(iType[2]>0 && !iStrcmp_STR(sVal, sTie, STR_CASE_TOLERANT))
+               iLineType = DB_LINE_TYPE_TIE;
+
+            else if(iType[3]>0 && !iStrcmp_STR(sVal, sTest, STR_CASE_TOLERANT))
+               iLineType = DB_LINE_TYPE_TEST;
+
+            else if(iType[4]>0 && !iStrcmp_STR(sVal, sTrend, STR_CASE_TOLERANT))
+               iLineType = DB_LINE_TYPE_TREND;
+
+            else if(iType[5]>0 && !iStrcmp_STR(sVal, sSpecial, STR_CASE_TOLERANT))
+               iLineType = DB_LINE_TYPE_SPECIAL;
+
+            else if(iType[6]>0 && !iStrcmp_STR(sVal, sRandom, STR_CASE_TOLERANT))
+               iLineType = DB_LINE_TYPE_RANDOM;
+         }
+         else {
+
+            // --- Convert match value to a number ---
+
+            rVal = rGetReal_VV(TypeVV, iVal);
+
+            if(iType[0]>0 && rVal == rNormal)
+               iLineType = DB_LINE_TYPE_NORMAL;
+
+            else if(iType[1]>0 && rVal == rBase)
+               iLineType = DB_LINE_TYPE_BASE;
+
+            else if(iType[2]>0 && rVal == rTie)
+               iLineType = DB_LINE_TYPE_TIE;
+
+            else if(iType[3]>0 && rVal == rTest)
+               iLineType = DB_LINE_TYPE_TEST;
+
+            else if(iType[4]>0 && rVal == rTrend)
+               iLineType = DB_LINE_TYPE_TREND;
+
+            else if(iType[5]>0 && rVal == rSpecial)
+               iLineType = DB_LINE_TYPE_SPECIAL;
+
+            else if(iType[6]>0 && rVal == rRandom)
+               iLineType = DB_LINE_TYPE_RANDOM;
+
+         }
+
+
+         // --- Set the line type ---
+
+         if(iLineType!=iDUMMY) {
+
+            LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+            SetLineType_DB(Data, Line, iLineType);
+            UnLockSymb_DB(Data,Line);
+
+         }
+
+      }
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+
+   // --- Unlock the Channel Symbol ---
+
+   UnLockSymb_DB(Data,Ch);
+
+   
+   // --- done ---
+
+   Progress_SYS(0);
+   UnLock_EDB(EData);         // --- Release the database ---
+}

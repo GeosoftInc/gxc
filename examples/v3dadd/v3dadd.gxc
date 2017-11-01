@@ -1,0 +1,153 @@
+//===========================================================================
+
+NAME          = "Draw a view or view/group on plane in a 3D view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/3D"
+
+DESCRIPTION   = "
+
+      V3DADD.VIEW          3D View
+            .PLANE         Drawing plane
+            .VIEWGROUP     View or View/Group to add
+            
+"
+
+//===========================================================================
+
+RESOURCE="v3dadd.gr"
+#include "v3dadd.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+DGW   Diag;
+LST   hVGLST,hPlaneLST;         
+MVIEW View,IView;
+
+string(STR_VIEW) sViewGroup,sView,sGroup,s3DView,sPlane;
+
+int i,iPlane;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Current Map and 3D view ---
+
+   EMap = Current_EMAP();
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   if (iInteractive_SYS())
+      GetCurrentView_EMAP(EMap,s3DView);
+   else
+      GetString_SYS("V3DADD","VIEW",s3DView);
+      
+   
+   // --- get lists ---
+   
+   Map  = Lock_EMAP(EMap);
+   hVGLST = Create_LST(256);
+   ViewListEx_MAP(Map,hVGLST,MAP_LIST_MODE_NOT3D);
+   GroupListEx_MAP(Map,hVGLST,MAP_LIST_MODE_NOT3D);
+   Sort_LST(hVGLST,0,0);
+   
+   hPlaneLST = Create_LST(256);
+   View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+   if (!iIsView3D_MVIEW(View))
+      Abort_SYS(_("The selected view is not a 3D view."));
+   SetString_SYS("V3DADD","VIEW",s3DView);
+   ListPlanes_MVIEW(View,hPlaneLST);
+   if (iSize_LST(hPlaneLST) == 0)
+      Abort_SYS(_("There are no drawing planes in this 3D view."));
+  
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      Diag = Create_DGW("V3DADD");
+      Copy_LST(GetList_DGW(Diag,_V3DADD_0),hVGLST);
+      Copy_LST(GetList_DGW(Diag,_V3DADD_1),hPlaneLST);
+      SetInfoSYS_DGW(Diag,_V3DADD_0,DGW_TEXT,"V3DADD","VIEWGROUP");
+      SetInfoSYS_DGW(Diag,_V3DADD_1,DGW_TEXT,"V3DADD","PLANE");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==-1) Cancel_SYS(); 
+
+
+      // --- Get Information ---
+
+      GetInfoSYS_DGW(Diag,_V3DADD_0,DGW_TEXT,"V3DADD","VIEWGROUP");
+      GetInfoSYS_DGW(Diag,_V3DADD_1,DGW_TEXT,"V3DADD","PLANE");
+      Destroy_DGW(Diag);
+      
+   }
+
+   
+   // --- view and group name setting ---
+
+   GetString_SYS("V3DADD","VIEWGROUP",sViewGroup);
+   i = iTokens_STR(sViewGroup,"\\");
+   if (i <= 0) Abort_SYS(_("No view/group defined"));
+   GetToken_STR(sView,sViewGroup,0);
+   if (i > 1)
+      GetToken_STR(sGroup,sViewGroup,1);
+   else
+      Strcpy_STR(sGroup,"");
+      
+
+   // --- get the map and view ---
+   
+   Map  = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+   
+   
+   // --- get the plane and make it the default ---
+   
+   GetString_SYS("V3DADD","PLANE",sPlane);
+   if (iStrlen_STR(sPlane)) {
+      iPlane = iFindItem_LST(hPlaneLST,0,sPlane);
+      if (iPlane == -1)
+         Abort_SYS(_("Selected plane does not exist in the view."));
+      SetDefPlane_MVIEW(View,sPlane);
+   }
+   
+
+   // --- Copy Groups to the default plane ---
+
+   IView = Create_MVIEW(Map,sView,MVIEW_READ);
+   if (iStrlen_STR(sGroup)!=0) {
+      MarkAllGroups_MVIEW(IView,0);
+      MarkGroup_MVIEW(IView,sGroup,1);
+   } else
+      MarkAllGroups_MVIEW(IView,1);
+      
+   CopyMarkedGroups_MVIEW(IView,View);
+   Destroy_MVIEW(IView);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+}

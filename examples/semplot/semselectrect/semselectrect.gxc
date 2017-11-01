@@ -1,0 +1,302 @@
+//===========================================================================
+NAME          = "Select Data from Map using a Rectangle"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+   Select Data from Map using a Rectangle
+   
+"
+// Revision History
+// v6.3.0: Allow for multiple mineral channels.
+// v6.2.0: Auto re-draw should be enabled by default.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.8: Added "Remove" option
+// v5.1.7: Semplot upgrade modifications.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semselectrect.gr"
+#include "semselectrect.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define XYPLOT_VIEW  ( 0 )
+#define TRIPLOT_VIEW ( 1 )
+#define LOCMAP_VIEW  ( 2 )
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+EMAP        EMap;
+MAP         Map;
+LST         Lst, GroupLst;
+MVIEW       View;
+PLY         Ply;
+VV          VVx, VVy;
+DGW         Diag;
+LST         List;
+DB_SYMB     MaskCh;
+
+string(STR_DB_SYMBOL) sView, sView2, sMaskCh, sMineralCh;
+string(STR_DEFAULT_SHORT) sVal;
+string(STR_VIEW_GROUP) sGroup, sGroup2;
+real rX0, rX1, rY0, rY1;
+real rXA, rXB, rXC, rXD, rDX;
+int i,iType,iN,iVal,iMode,iRet;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("This GX must be run interactively"));
+
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   Diag = Create_DGW("SEMSELECTRECT");
+
+
+   // --- Create Lists ---
+
+   List = GetList_DGW(Diag,_SEMSELECTRECT_0);
+   ClassChanLST_DB(Data,List,"MASK");
+   Sort_LST(List,0,0);
+
+   SetInfoSYS_DGW(Diag,_SEMSELECTRECT_0,DGW_TEXT,"SEMPLOT","MASK");
+   SetInfoSYS_DGW(Diag,_SEMSELECTRECT_1,DGW_LISTALIAS,"SEMSELECTRECT","MODE");
+                  
+   iRet = iRunDialogue_DGW(Diag);
+   if (iRet == -1) Cancel_SYS();
+
+   GetInfoSYS_DGW(Diag,_SEMSELECTRECT_0,DGW_TEXT,"SEMPLOT","MASK");
+   GetInfoSYS_DGW(Diag,_SEMSELECTRECT_1,DGW_LISTALIAS,"SEMSELECTRECT","MODE");
+
+   Destroy_DGW(Diag);
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+   iMode = iGetInt_SYS("SEMSELECTRECT", "MODE");
+   if(iMode!=1 && iMode!=2) iMode = 0;
+
+
+   // --- Create mask channel if it does not exist ---
+
+   MaskCh = FindChan_DB(Data, sMaskCh);
+   if(MaskCh==NULLSYMB) {
+
+      
+      // --- Create a new mask channel ---
+
+      SetInteractive_SYS(0);
+      UnLock_EDB(EData);
+
+      iRunGX_SYS("semmask.gx");
+
+      SetInteractive_SYS(1);
+      Data = Lock_EDB(EData);
+   }
+
+
+   // --- Get the mineral channel ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+   
+
+   EMap = Current_EMAP();
+   GetCurrentView_EMAP(EMap, sView);
+//DisplayMessage_SYS( _("sView"), sView );
+
+   // --- See if the current view is an XYPlot or TRIPlot view ---
+
+   iType = -1;
+
+   if( iStrncmp_STR( sView, "XYplot_", 7, STR_CASE_TOLERANT ) == 0 ) {
+      iType = XYPLOT_VIEW;
+   } else if( iStrncmp_STR( sView, "Triplot_", 8, STR_CASE_TOLERANT ) == 0 ) {
+      iType = TRIPLOT_VIEW;
+   } 
+
+
+   // --- If a required view is not the current view, search all the views ---
+
+   if( iType == -1 ) {
+      Map = Lock_EMAP( EMap );
+      Lst = Create_LST( 64 );
+      ViewList_MAP( Map, Lst );
+      iN = iSize_LST(Lst);
+
+      for( i = 0 ; i < iN ; i++ ) {
+         GetItem_LST( Lst, 0, i, sView );
+         if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0) {
+            iType = XYPLOT_VIEW;
+         } else if(iStrncmp_STR(sView, "Triplot_", 7, STR_CASE_TOLERANT)==0) {
+            iType = TRIPLOT_VIEW;
+         }
+
+         // --- Set to this view ---
+                  
+         if(iType!=-1) {         
+            iSetCurrentView_EMAP(EMap, sView);
+            break;
+         }
+      }
+
+      UnLock_EMAP(EMap);
+   }
+      
+
+   // --- if the map is not XYplot nor TriPlot, search for the group "SYMB" ---
+
+   if( 0 > iType ) {
+      Map = Lock_EMAP( EMap );
+      GroupLst = Create_LST(4096);     // for Group
+      GroupList_MAP( Map, GroupLst );       
+      iN = iSize_LST( GroupLst );
+
+      for( i = 0 ; ( 0 > iType ) && i < iN ; i++ ) {
+         GetItem_LST( GroupLst, 0, i, sGroup );
+         SplitString_STR( sGroup, "\\", sGroup2);
+         if( 0 == iStrncmp_STR( sGroup2, "SYMB", 4, STR_CASE_TOLERANT ) ) {
+            iType = LOCMAP_VIEW;
+         }
+      }
+
+      UnLock_EMAP(EMap);
+
+      if ( 0 > iType ) {
+         Abort_SYS( _("The current map does not appear to contain any XY/Tri/Location plot.") );
+      }
+      
+      Map = Lock_EMAP( EMap );
+      Lst = Create_LST( 64 );
+      ViewList_MAP( Map, Lst );
+      iN = iSize_LST(Lst);
+
+      for( i = 0 ; i < iN ; i++ ) {
+         GetItem_LST( Lst, 0, i, sView );
+         if(iStrncmp_STR(sView, _n("data"), 4, STR_CASE_TOLERANT)==0) {
+            Strcpy_STR( sView2, sView );
+         }
+      }
+
+      UnLock_EMAP(EMap);
+
+      iSetCurrentView_EMAP( EMap, sView2 );
+   }
+
+   // --- get rectangle ---
+
+
+   if(iGetBox_EMAP(EMap, _("Select Area"), rX0, rY0, rX1, rY1 )) {
+      Cancel_SYS();
+   }
+
+   if( rX0==rDUMMY || rY0==rDUMMY || rX1==rDUMMY || rY1==rDUMMY ) {
+      Abort_SYS(_("Rectangular region for selection not defined properly."));
+   }
+
+
+   // --- Select the data; update mask channel ---
+
+   Map = Lock_EMAP( EMap );
+   View = Create_MVIEW( Map, sView, MVIEW_READ );   
+   Ply = Create_PLY( );
+
+   if(iType == XYPLOT_VIEW ) {
+      Rectangle_PLY(Ply, rX0, rY0, rX1, rY1);
+   } else if(iType == TRIPLOT_VIEW) {
+      // --- The rectangle is distorted because of the warp on the view. It is necessary
+      //     to determine all four points in the mask. This is not simple, but a property of
+      //     the "true" rectangle is that the X coordinates of the top Y values are separated
+      //     by the same amount as the lower Y values ---
+
+      rDX = (rY1 - rY0)/2.0;     // amount that X changes from bottom to top of rectangle
+      
+      // --- Test first case; rX0 is at top right, rX1 is at bottom left ---
+      
+      rXA = rX1 - rDX;      // top left corner
+      rXB = rX0;            // top right
+      rXC = rX0 + rDX;      // bottom right
+      rXD = rX1;            // bottom left
+
+      if(rAbs_MATH((rXB - rXA) - (rXC - rXD)) > 0.01) {
+
+         // --- Must be rX0 at top left, rX1 at bottom right ---
+
+         rXA = rX0;        // top left corner
+         rXB = rX1 - rDX;  // top right
+         rXC = rX1;        // bottom right
+         rXD = rX0 + rDX;  // bottom left         
+
+         if(rAbs_MATH((rXB - rXA) - (rXC - rXD)) > 0.01 ) {
+            Abort_SYS(_("Error in rectangle transformation to Triplot coordinates."));
+         }
+      }
+
+      VVx = Create_VV(REAL, 4);
+      VVy = Create_VV(REAL, 4);
+      SetReal_VV(VVx, 0, rXA);
+      SetReal_VV(VVx, 1, rXB);
+      SetReal_VV(VVx, 2, rXC);
+      SetReal_VV(VVx, 3, rXD);
+
+      SetReal_VV(VVy, 0, rY1);
+      SetReal_VV(VVy, 1, rY1);
+      SetReal_VV(VVy, 2, rY0);
+      SetReal_VV(VVy, 3, rY0);
+
+      AddPolygon_PLY(Ply, VVx, VVy);
+
+      Destroy_VV(VVx);
+      Destroy_VV(VVy);
+
+   } else {
+      Rectangle_PLY( Ply, rX0, rY0, rX1, rY1 );
+//DisplayReal_SYS( "rX0", rX0 );
+//DisplayReal_SYS( "rY0", rY0 );
+//DisplayReal_SYS( "rX1", rX1 );
+//DisplayReal_SYS( "rY1", rY1 );
+   }
+
+   Progress_SYS(1);
+
+   
+   // --- Do the selection ---
+
+   SelectPoly_SEMPLOT( Data, View, sMaskCh, sMineralCh, Ply, iMode );
+
+
+   Progress_SYS(0);
+
+   UnLock_EDB(EData);   
+   UnLock_EMAP(EMap);   
+
+   
+   // --- Replot maps? ---
+
+   iGlobal_SYS("SEMPLOT.AUTOREDRAW",sVal);
+   iVal = iScanI_STR(sVal);
+   if( iVal != 0 ) { // yes by default
+      iRunGX_SYS("semreplotmaps");
+   }
+}

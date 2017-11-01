@@ -1,0 +1,474 @@
+//===========================================================================
+NAME          = "Caculate X, Y and Z derivative grids for Euler3D"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "euler"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D"
+DESCRIPTION   = "
+
+Creates x, y, and z derivative grids for use in Euler deconvolution
+           
+Parameters: 
+
+      E3PREP .GRID     Input Grid (T ) file name.
+      EULER3D.DX       Output X-Derivative Grid (Tx) file name.
+      EULER3D.DY       Output Y-Derivative Grid (Ty) file name.
+      EULER3D.DZ       Output Z-Derivative Grid (Tz) file name.
+      E3PREP .UPCONT - Distance to upward continue the input grid
+      E3PREP .UPGRD  - Name of output upward-continued grid file
+      E3PREP .XSHAPE - Option for grid expansion in FFT (square or rectangle)
+      E3PREP .TRNGRD - Optional parameter for output TRN grid file name.
+"
+// Revision History
+// v6.3.0: Added new script parameter for output TRN grid.
+// v6.1.0: Cancel returns -1.
+// v5.1.7: Projection info copied to new grids.
+// v5.1.6: Removed if statements for functions with void returns.
+// v5.1.5: Upgrade - changed GX parameter names.
+//===========================================================================
+
+RESOURCE = "e3prep.gr"
+#include "e3prep.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sInGrd;       // Name of input grid file
+string(STR_FILE) sDxGrd;       // Name of dx output grid file
+string(STR_FILE) sDyGrd;       // Name of dy output grid file
+string(STR_FILE) sDzGrd;       // Name of dz output grid file
+string(STR_FILE) sUpGrd;       // Name of upward continued output grid file
+string(STR_FILE) sTrnGrd;      // Name of transform grid file (_trn.grd)
+string(STR_FILE) sRefFil;      // Name of reference file (_ref.bin)
+string(STR_DEFAULT_SHORT) sUpCont;      // Distance to upward continue the input grid
+string(STR_DEFAULT_SHORT) sXShape;      // Option for grid expansion - square or rectangle
+int         iXShape;      //    0 for rectangle, 1 for square
+
+IMG         IMGi;         //
+IMG         IMGo;         //  grid images
+PG          PG1;
+PG          PG2;
+TR          TR1; 
+IPJ         Ipj;
+
+DGW         Diag;         // Dialogue handle
+ 
+int         i;            // utility int
+
+int         iNX,iNY,iNXe,iNYe,iXo,iYo;     // grid size
+int         iRollOpt, iZDist, iMxf, iMxp, iWLim, iNPass, iTOpt, iTBase;
+real        rRollBase, rALim, rELim;
+real        rDx,rDy,rXo,rYo,rRot;          // grid info
+real        rXoe,rYoe;
+
+string(STR_DEFAULT) sText;        // Line of text to write to control file
+
+VV          VVHzDrv;      // Holds convolution filter values for horiz. deriv.
+
+WA          WA_con;       // Write ascii file object for drvz.con
+
+
+//===========================================================================
+//                           EULER3D CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS())  
+   {
+      i = 1;
+      while (i)
+      {
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("E3PREPForm");
+
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_E3PREPFORM_0,DGW_FILEPATH,"E3PREP", "GRID");
+         SetInfoSYS_DGW(Diag,_E3PREPFORM_1,DGW_FILEPATH,"EULER3D","DX");
+         SetInfoSYS_DGW(Diag,_E3PREPFORM_2,DGW_FILEPATH,"EULER3D","DY");
+         SetInfoSYS_DGW(Diag,_E3PREPFORM_3,DGW_FILEPATH,"EULER3D","DZ");
+         SetInfoSYS_DGW(Diag,_E3PREPFORM_4,DGW_TEXT,    "E3PREP", "UPCONT");
+         SetInfoSYS_DGW(Diag,_E3PREPFORM_5,DGW_FILEPATH,"E3PREP", "UPGRD");
+         SetInfoSYS_DGW(Diag,_E3PREPFORM_6,DGW_LISTALIAS,    "E3PREP", "XSHAPE");
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1)
+            Cancel_SYS(); 
+
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag,_E3PREPFORM_0,DGW_FILEPATH,"E3PREP", "GRID");
+         GetInfoSYS_DGW(Diag,_E3PREPFORM_1,DGW_FILEPATH,"EULER3D","DX");
+         GetInfoSYS_DGW(Diag,_E3PREPFORM_2,DGW_FILEPATH,"EULER3D","DY");
+         GetInfoSYS_DGW(Diag,_E3PREPFORM_3,DGW_FILEPATH,"EULER3D","DZ");
+         GetInfoSYS_DGW(Diag,_E3PREPFORM_4,DGW_TEXT,    "E3PREP", "UPCONT");
+         GetInfoSYS_DGW(Diag,_E3PREPFORM_5,DGW_FILEPATH,"E3PREP", "UPGRD");
+         GetInfoSYS_DGW(Diag,_E3PREPFORM_6,DGW_LISTALIAS,    "E3PREP", "XSHAPE");
+
+         Destroy_DGW(Diag);
+      }
+   } 
+
+   // --- Get Parameters ---
+
+   GetString_SYS("E3PREP", "GRID",  sInGrd);
+   GetString_SYS("EULER3D","DX",    sDxGrd);
+   GetString_SYS("EULER3D","DY",    sDyGrd);
+   GetString_SYS("EULER3D","DZ",    sDzGrd);
+   GetString_SYS("E3PREP", "UPCONT",sUpCont);
+   GetString_SYS("E3PREP", "UPGRD", sUpGrd);
+   GetString_SYS("E3PREP", "XSHAPE",sXShape);
+   
+   // --- Validate essential parameters ---
+   
+   if (iStrlen_STR(sInGrd) <=0)
+      Abort_SYS(_("Input grid file name is invalid"));
+   if (iStrlen_STR(sDxGrd) <=0)
+      Abort_SYS(_("X-derivative grid file name is invalid"));
+   if (iStrlen_STR(sDyGrd) <=0)
+      Abort_SYS(_("Y-derivative grid file name is invalid"));
+   if (iStrlen_STR(sDzGrd) <=0)
+      Abort_SYS(_("Z-derivative grid file name is invalid"));
+   if ((iStrlen_STR(sUpCont) > 0) && (iStrlen_STR(sUpGrd) <=0))
+      Abort_SYS(_("Upward-continued grid file name is invalid"));
+
+
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+   
+   // --- CALCULATE Z-DERIVATIVE GRID ---
+
+   // Write Filter Control File
+
+   WA_con=Create_WA("drvz.con",0);
+   i=1;
+   while (i<=5)
+   {
+      NewLine_WA(WA_con);
+      i++;
+   }
+   Puts_WA(WA_con,_n("DRVZ 1 /"));
+   NewLine_WA(WA_con);
+   if (iStrcmp_STR(sUpCont,"",0))
+   {   
+      Strcat_STR(sText,"CNUP ");
+      Strcat_STR(sText,sUpCont);
+      Strcat_STR(sText," /");
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+   }
+   Destroy_WA(WA_con);
+
+   // Create trn and ref file name
+
+   if (iExistString_SYS("E3PREP","TRNGRD"))
+      GetString_SYS("E3PREP","TRNGRD",sTrnGrd);
+   else
+   {
+      FileNamePart_STR(sInGrd,sTrnGrd,STR_FILE_PART_NAME);
+      Strcat_STR(sTrnGrd,"_trn.grd(GRD;TYPE=FLOAT)");
+   }
+   FileNamePart_STR(sInGrd,sRefFil,STR_FILE_PART_NAME);
+   Strcat_STR(sRefFil,"_ref.bin");
+   
+   rDx = 1.0;
+   rDy = 1.0;
+   rXo = 0.0;
+   rYo = 0.0;
+   rRot= 0.0;
+   rXoe = 0.0;
+   rYoe = 0.0;
+   
+   // Get pager(PG1) from input grid ---
+
+   IMGi = CreateFile_IMG(GS_FLOAT,sInGrd,IMG_FILE_READONLY);
+   GetInfo_IMG(IMGi,rDx,rDy,rXo,rYo,rRot);
+   iNX = iNX_IMG(IMGi);
+   iNY = iNY_IMG(IMGi);
+   TR1 = Create_TR(1);  //iTOrder
+   PG1 = Create_PG(iNY,iNX,GS_FLOAT);
+   GetPG_IMG(IMGi,PG1);
+
+   // --- Get projection ---
+
+   Ipj = Create_IPJ();
+   GetIPJ_IMG(IMGi, Ipj);
+   
+   Destroy_IMG(IMGi);
+   
+   
+   // Grid Trend Remove ---
+
+   PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+   iTOpt = 0;
+   iTBase = 1;
+   Trend_PGU(PG1,PG2,TR1,iTOpt,iTBase,rXo,rYo,rDx,rDy);
+
+   // Grid Expand ---
+
+   if(iStrcmp_STR(sXShape,_n("0"),0)==0)
+      iXShape = 0;
+   else
+      iXShape = 1;
+   if(Expand_PGU(PG2,PG1,20.0,iXShape,0,0))
+   // Expand_PGU(PG2,PG1,rPEx,iTEx,iXX,iXY))
+      Abort_SYS(_("Error executing Expand_PGU"));
+   Destroy_PG(PG2);
+
+   iNYe = iNRows_PG(PG1);
+   iNXe = iNCols_PG(PG1);
+   iYo = (iNYe-iNY)/2;
+   iXo = (iNXe-iNX)/2;
+
+   // Grid Fill ---
+
+   RefFile_PGU(PG1,sRefFil);
+
+   iRollOpt = 1;
+   rRollBase = 0.0;
+   iZDist = -1;
+   iMxf = 0;
+   iMxp = 0;
+   rALim = 0.0;
+   rELim = -1.0;
+   iWLim = 0;
+   iNPass = 1;
+   Fill_PGU(PG1,iRollOpt,rRollBase,iZDist,iMxf,iMxp,rALim,rELim,iWLim,iNPass,sRefFil);
+
+
+   // FFT2 forward transform ---
+
+   ReAllocate_PG(PG1,iNYe,iNXe+2);
+   TransPG_FFT2(PG1,0);                    // FFT2_PG_FORWARD  0
+                                            
+   // Output transform grid _trn.grd ---
+   
+   IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNXe+2,iNYe,sTrnGrd);
+   rXoe = rXo - (real)iXo * rDx;
+   rYoe = rYo - (real)iYo * rDy;
+   SetInfo_IMG(IMGo,rDx,rDy,rXoe,rYoe,rRot);
+   SetTR_IMG(IMGo,TR1);
+   SetPG_IMG(IMGo,PG1);
+
+   // --- Copy projection ---
+
+   SetIPJ_IMG(IMGo, Ipj);
+
+   Destroy_IMG(IMGo);
+
+   
+   // FFT2 Filter ---
+
+   FilterPG_FFT2(PG1,"drvz.con",TR1,rDx,rDy,rRot);
+
+   // Inverse FFT ---
+   
+   TransPG_FFT2(PG1,1);                       // FFT2_PG_INVERSE  1
+   ReAllocate_PG(PG1,iNYe,iNXe);
+
+   
+   // Grid Bool ---
+
+   if(Bool_PGU(PG1,sRefFil))
+      Abort_SYS(_("Error executing Bool_PGU")); 
+
+   PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+   CopySubset_PG(PG2,PG1,0,0,iYo,iXo,iNY,iNX);
+
+   // Output grid ---
+
+   IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNX,iNY,sDzGrd);
+   SetInfo_IMG(IMGo,rDx,rDy,rXo,rYo,rRot);
+   SetTR_IMG(IMGo,TR1);
+   SetPG_IMG(IMGo,PG2);
+   
+      
+   // --- Copy projection ---
+
+   SetIPJ_IMG(IMGo, Ipj);
+   Destroy_IMG(IMGo);
+
+   Destroy_PG(PG1);
+   Destroy_PG(PG2);
+   Destroy_TR(TR1);
+
+
+   // --- CALCULATE UPWARD-CONTINUED GRID ---   
+   
+   if (iStrcmp_STR(sUpCont,"",0))
+   {
+      // Write Filter Control File
+
+      WA_con=Create_WA("cnup.con",0);
+      i=1;
+      while (i<=5)
+      {
+         NewLine_WA(WA_con);
+         i++;
+      }
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+      Destroy_WA(WA_con);
+
+      // Get pager(PG1) from trn grid ---
+
+      IMGi = CreateFile_IMG(GS_FLOAT,sTrnGrd,IMG_FILE_READONLY);
+      PG1 = Create_PG(iNYe,iNXe+2,GS_FLOAT);
+      GetPG_IMG(IMGi,PG1);
+      TR1 = Create_TR(1);  //iTOrder
+      GetTR_IMG(IMGi,TR1);
+      Destroy_IMG(IMGi);
+   
+      // FFT2 Filter ---
+       
+      FilterPG_FFT2(PG1,"cnup.con",TR1,rDx,rDy,rRot);
+
+      // Inverse FFT ---
+      
+      TransPG_FFT2(PG1,1);                       // FFT2_PG_INVERSE  1
+      ReAllocate_PG(PG1,iNYe,iNXe);
+
+      // Grid Bool ---
+
+      Bool_PGU(PG1,sRefFil);
+
+      PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+      CopySubset_PG(PG2,PG1,0,0,iYo,iXo,iNY,iNX);
+
+      // Output grid ---
+
+      IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNX,iNY,sUpGrd);
+      SetInfo_IMG(IMGo,rDx,rDy,rXo,rYo,rRot);
+      SetTR_IMG(IMGo,TR1);
+      SetPG_IMG(IMGo,PG2);
+
+   
+      // --- Copy projection ---
+
+      SetIPJ_IMG(IMGo, Ipj);
+
+      Destroy_IMG(IMGo);
+      Destroy_PG(PG1);
+      Destroy_PG(PG2);
+      Destroy_TR(TR1);
+   }
+   
+   if (iFileExist_SYS(sRefFil))
+      iDeleteFile_SYS(sRefFil);
+
+   
+   // --- Take X and Y derivatives of upward continued grid if it exists ---
+
+   if (iStrcmp_STR(sUpGrd,"",0))
+      Strcpy_STR(sInGrd,sUpGrd);
+   
+   
+   // --- CALCULATE X-DERIVATIVE GRID ---
+
+   // X-Derivative Step 1: Create VV with filter values
+
+   VVHzDrv = Create_VV(REAL,10);
+   for (i=0;i<9;i++)
+      SetReal_VV(VVHzDrv,i,0.0);
+   SetReal_VV(VVHzDrv,3,-0.5/rDx);
+   SetReal_VV(VVHzDrv,5,0.5/rDx);            
+
+   // X-Derivative Step 2: Create Images tied to the grids
+   
+   ProgName_SYS(_("Creating Images..."),1); 
+   
+   IMGi = CreateFile_IMG(GS_FLOAT,sInGrd,IMG_FILE_READONLY);
+   IMGo = CreateOutFile_IMG(GS_FLOAT,sDxGrd,IMGi); 
+
+
+   // X-Derivative Step 3: GridFilt 
+
+   ProgName_SYS(_("Filtering Grid..."),1);
+  
+   if (GridFilt_IMU(IMGi,IMGo,1,1.0,IMU_FILT_DUMMY_NO,IMU_FILT_HZDRV_NO,IMU_FILT_FILE_NO,"",VVHzDrv))
+   {
+      Destroy_IMG(IMGi);
+      Destroy_IMG(IMGo);
+      Destroy_VV(VVHzDrv);
+      Abort_SYS(_("Grid filter operation failed."));
+   }
+
+   // --- Copy projection ---
+
+   SetIPJ_IMG(IMGo, Ipj);
+
+
+   // --- Destroy Image ---
+   
+   Destroy_IMG(IMGo);
+   
+   
+   // --- CALCULATE Y-DERIVATIVE GRID ---
+    
+   // Y-Derivative Step 1: Create VV with filter values
+
+   for (i=0;i<9;i++)
+      SetReal_VV(VVHzDrv,i,0.0);
+   SetReal_VV(VVHzDrv,1,0.5/rDy);
+   SetReal_VV(VVHzDrv,7,-0.5/rDy);            
+   
+   // Y-Derivative Step 2: Create Images tied to the grids  
+   
+   ProgName_SYS(_("Creating Images..."),1); 
+   
+   IMGo = CreateOutFile_IMG(GS_FLOAT,sDyGrd,IMGi); 
+
+   // Y-Derivative Step 3: GridFilt
+
+   ProgName_SYS(_("Filtering Grid..."),1);
+
+   if (GridFilt_IMU(IMGi,IMGo,1,1.0,IMU_FILT_DUMMY_NO,IMU_FILT_HZDRV_NO,IMU_FILT_FILE_NO,"",VVHzDrv))
+   {
+      Destroy_IMG(IMGi);
+      Destroy_IMG(IMGo);
+      Destroy_VV(VVHzDrv);
+      Abort_SYS(_("Grid filter operation failed."));
+   }
+
+   // --- Copy projection ---
+   
+   SetIPJ_IMG(IMGo, Ipj);
+
+
+   // --- Destroy the Images and VV ---
+   
+   Destroy_IMG(IMGi);
+   Destroy_IMG(IMGo);
+   Destroy_VV(VVHzDrv);
+
+
+   // --- done ---
+    
+   Progress_SYS(0);
+
+
+   // --- Set input grid for following GXs ---
+
+   if (iStrcmp_STR(sUpGrd,"",0)) {
+      SetString_SYS("E3DECON","GRID", sUpGrd);
+      SetString_SYS("E3XYEULER", "GRID", sUpGrd);
+   }
+   else {
+      SetString_SYS("E3DECON","GRID", sInGrd);
+      SetString_SYS("E3XYEULER", "GRID", sInGrd);
+   }
+}

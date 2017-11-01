@@ -1,0 +1,288 @@
+//===========================================================================
+NAME          = "Change the fiducial numbering of a channel"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Parameters:  
+ 
+    NEWFID.CHAN      Name of the channel to modify.
+                     If set to \"Select from list\" then get CSV string
+                     of channel names to set for \".CHANNELS\" parameter
+          .START     New start fiducial.
+          .INCREMENT New fiducial increment.
+          .LINE   \"D\" for the displayed line only.
+                  \"S\" for selected lines.
+                  \"A\" for all lines.
+          .CHANNELS  CSV string of channel names to                   
+                              
+" 
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History:
+// v6.0.0 Added multiple channels option, updated line selection method.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "newfid.gr"
+#include "newfid.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCurLine,sCh;
+string(STR_DB_SYMBOL) sLine;
+string(32768) sChannels;
+
+real       rStart;            // New start
+real       rIncr;             // New end
+real       rS,rI;
+
+EDB        EData;
+DB         Data;              // Database handle
+DB_SYMB    Ch;                // Channel Handles
+DB_SYMB    Line;              // Line Handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+LST        LineLST, SelChanLST, ChLST;
+int        i, iRet;          // Utility int
+int        iCh, iNCh, iNLines, iTot, iProg;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+
+   EData = Current_EDB();
+
+
+   // --- Get the current line name ---
+   
+   if (iInteractive_SYS())
+      GetCurLine_EDB(EData,sCurLine);
+
+
+   // --- Lock the database ---
+   
+   Data = Lock_EDB(EData);   
+   
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   SelChanLST = Create_LST(2*STR_DB_SYMBOL);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("NEWFID");
+
+
+      // --- Set up input and output lists ---
+
+      List = GetList_DGW(Diag,_NEWFID_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      InsertItem_LST(List,0,_("Select from list"),"");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_NEWFID_0,DGW_TEXT,"NEWFID","CHAN");     
+      SetInfoSYS_DGW(Diag,_NEWFID_1,DGW_TEXT,"NEWFID","START");     
+      SetInfoSYS_DGW(Diag,_NEWFID_2,DGW_TEXT,"NEWFID","INCREMENT");
+      SetInfoSYS_DGW(Diag,_NEWFID_3,DGW_LISTALIAS,"NEWFID","LINE");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Exit_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_NEWFID_0,DGW_TEXT,"NEWFID","CHAN");     
+      GetInfoSYS_DGW(Diag,_NEWFID_1,DGW_TEXT,"NEWFID","START");     
+      GetInfoSYS_DGW(Diag,_NEWFID_2,DGW_TEXT,"NEWFID","INCREMENT");
+      GetInfoSYS_DGW(Diag,_NEWFID_3,DGW_LISTALIAS,"NEWFID","LINE");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+      
+      // --- Select channels from list? ---
+   
+      GetString_SYS ("NEWFID","CHAN",sCh);   
+      if(!iStrcmp_STR(sCh,_("Select from list"),STR_CASE_TOLERANT)) {
+               
+         SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+         
+         // --- Set starting selection for GUI ---
+
+         GetString_SYS("NEWFID","CHANNELS",sChannels);
+         ConvertFromCSVString_LST(SelChanLST, sChannels);
+
+         iRet = iTwoPanelSelection_GUI(ChLST, SelChanLST, _("Select Channels to Process"));
+         if(iRet!=0) Cancel_SYS();
+
+         
+         // --- Save selection ---
+      
+         ConvertToCSVString_LST(SelChanLST, sChannels);
+         SetString_SYS("NEWFID", "CHANNELS", sChannels);      
+      }
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS ("NEWFID","CHAN",sCh);   
+   if (iExistReal_SYS("NEWFID","START"))
+      rStart = rGetReal_SYS("NEWFID","START");
+   else
+      rStart = rDUMMY;
+   if (iExistReal_SYS("NEWFID","INCREMENT")) {
+      rIncr  = rGetReal_SYS("NEWFID","INCREMENT");
+      if (rIncr <= 0.0)
+         Abort_SYS(_("Increment must be > 0."));
+   } else
+      rIncr = rDUMMY;
+
+   
+   // --- set the line export mode ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   GetString_SYS ("NEWFID","LINE",sLine);
+   ToUpper_STR(sLine);
+   if (iInteractive_SYS() && iChar_STR(sLine) == iChar_STR("D")) {
+
+      AddItem_LST(LineLST, sCurLine, sCurLine);
+
+   } else if (iChar_STR(sLine) == iChar_STR("A")) {
+   
+      SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
+   }
+   else {
+      SelectedLineLST_DB(Data, LineLST);
+   }
+
+   
+   // --- Get list of channels? ---
+      
+   if(!iStrcmp_STR(sCh,_("Select from list"),STR_CASE_TOLERANT)) {
+   
+      GetString_SYS("NEWFID","CHANNELS",sChannels);
+      ConvertFromCSVString_LST(ChLST, sChannels);   
+   }
+   else {
+   
+      if (!iExistSymb_DB(Data,sCh,DB_SYMB_CHAN))
+         Abort_SYS(_("Channel does not exist."));
+   
+      Clear_LST(ChLST);
+      AddItem_LST(ChLST, sCh, sCh);
+   }
+   
+
+   // --- Prepare to do the work ---
+
+   ProgName_SYS(_("Changing fiducials:"),1);
+
+   iNCh = iSize_LST(ChLST);
+   iNLines = iSize_LST(LineLST);
+   iTot = iNCh*iNLines;
+   iProg = 0;
+   for(iCh=0;iCh<iNCh;iCh++) {
+   
+      
+      // --- Does the Input Channel Exist ? Skip channels not found ---
+
+      GetItem_LST(ChLST, 0, iCh, sCh);
+      if (!iExistSymb_DB(Data,sCh,DB_SYMB_CHAN))  continue;
+
+      Ch = FindSymb_DB(Data,sCh,DB_SYMB_CHAN);
+
+
+      // --- Lock the channel symbols ---
+
+      LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+      // --- Go through all selected Lines ---
+
+      for(i=0;i<iNLines;i++) {
+      
+         GetItem_LST(LineLST, 0, i, sLine);
+         Line = FindSymb_DB(Data, sLine, DB_SYMB_LINE);
+
+         
+         // --- Update the Progress Bar ---
+
+         ProgUpdateL_SYS(iProg,iTot);
+
+
+         // --- Get the Input Channel's Fiducial Value ---
+
+         if (rStart == rDUMMY)
+            rS = rGetFidStart_DB(Data,Line,Ch);
+         else
+            rS = rStart;
+         if (rIncr == rDUMMY)
+            rI = rGetFidIncr_DB(Data,Line,Ch);
+         else
+            rI = rIncr;
+
+
+         // --- Write out the New Fiducial ---
+
+         SetFid_DB(Data,Line,Ch,rS,rI);
+
+         iProg++;
+      }
+      
+      // --- Add maker ---
+
+      EasyMakerSymb_DB(Data,Ch,_("New fiducial"),"NEWFID;");
+
+
+      // --- Unlock the channel symbol ---
+
+      UnLockSymb_DB(Data,Ch);      
+   }
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+ 
+   
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+   
+   
+   // --- Destroy objects ---
+   
+   Destroy_LST(LineLST);
+   Destroy_LST(ChLST);
+   Destroy_LST(SelChanLST);
+}

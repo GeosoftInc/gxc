@@ -1,0 +1,187 @@
+//===========================================================================
+NAME          = "Dummy repeat values in a channel"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   DUMREP.CHANNEL    channel name
+         .METHOD     0 - dummy all but first value
+                     1 - dummy all but last value
+                     2 - dummy all mut middle value
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History:
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dumrep.gr"
+#include "dumrep.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCh;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch;
+DB_SYMB     Line;
+VV          ChVV;
+DGW         Diag;
+LST         List;                  // list handle
+int         iMethod;               // dummy method
+int         i;                     // utility int
+int         iLine,iTotLines;       // counters
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("DUMREP");
+
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_DUMREP_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_DUMREP_0,DGW_TEXT,"DUMREP","CHANNEL");
+     SetInfoSYS_DGW(Diag,_DUMREP_1,DGW_LISTALIAS,"DUMREP","METHOD");
+
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_DUMREP_0,DGW_TEXT,"DUMREP","CHANNEL");
+     GetInfoSYS_DGW(Diag,_DUMREP_1,DGW_LISTALIAS,"DUMREP","METHOD");
+
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DUMREP","CHANNEL",sCh);
+   iMethod = iGetInt_SYS("DUMREP","METHOD");
+
+
+   // --- Does the Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sCh))
+      Abort_SYS(_("Channel does not exist."));
+   Ch = FindChan_DB(Data,sCh);
+   
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- create VV ---
+
+   ChVV = Create_VV(REAL,0);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel, _("Process line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);        
+
+
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,Ch,ChVV);
+
+
+      // --- process ---
+
+      DummyRepeat_VVU(ChVV,iMethod);
+
+
+      // --- Write the VV back to database ---
+
+      PutChanVV_DB(Data,Line,Ch,ChVV);
+
+
+      // --- Advance to Next Line ---    
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+
+   // --- Clean up ---
+
+   Destroy_VV(ChVV);
+   UnLockSymb_DB(Data,Ch);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

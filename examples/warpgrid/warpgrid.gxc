@@ -1,0 +1,311 @@
+//===========================================================================
+NAME          = "Warp a grid"
+#include <version.gxh>
+DESCRIPTION   = "
+
+"
+
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates/Georeferencing"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "warpgrid.gr"
+#include "warpgrid.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_FILE)  sOldGrid;
+string(STR_FILE)  sNewGrid;
+string(STR_FILE)  sWarp;
+string(STR_DEFAULT) sTemp;
+
+IMG         hOldIMG;
+IMG         hNewIMG;
+
+DGW         Diag;                   // Dialogue handle
+IPJ         hOldIPJ,hNewIPJ,hWarpIPJ;
+
+int i;
+int iType;
+int iX,iY;
+real rXd,rYd,rX0,rY0,rZ0,rRot;
+real rCellSize;
+int onePointTranslation;
+real origCellSize;
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   
+   hNewIPJ  = Create_IPJ();
+   hOldIPJ  = Create_IPJ();
+   hWarpIPJ = Create_IPJ();
+   
+   hNewIMG  = (IMG)0;
+   hOldIMG  = (IMG)0;
+
+   rCellSize = rDUMMY;
+   
+   if (iInteractive_SYS()) {
+   
+      i = 0;
+      while (i != 99) {
+         
+         switch (i) {
+         
+            case 0:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("WARPGRID0");
+
+
+               // --- Run the Dialogue ---
+
+               SetInfoSYS_DGW(Diag,_WARPGRID0_0,DGW_FILEPATH,"WARPGRID","OLDGRID");
+               SetInfoSYS_DGW(Diag,_WARPGRID0_1,DGW_FILEPATH,"WARPGRID","WARP");
+               SetInfoSYS_DGW(Diag,_WARPGRID0_2,DGW_FILEPATH,"WARPGRID","NEWGRID");
+               SetInfoSYS_DGW(Diag,_WARPGRID0_3,DGW_TEXT,    "WARPGRID","CELL");
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+               GetInfoSYS_DGW(Diag,_WARPGRID0_0,DGW_FILEPATH,"WARPGRID","OLDGRID");    
+               GetInfoSYS_DGW(Diag,_WARPGRID0_1,DGW_FILEPATH,"WARPGRID","WARP");
+               GetInfoSYS_DGW(Diag,_WARPGRID0_2,DGW_FILEPATH,"WARPGRID","NEWGRID");
+               GetInfoSYS_DGW(Diag,_WARPGRID0_3,DGW_TEXT,    "WARPGRID","CELL");
+               Destroy_DGW(Diag);
+               
+               
+               // --- Get grids ---
+
+               GetString_SYS("WARPGRID","OLDGRID",sOldGrid);
+               GetString_SYS("WARPGRID","NEWGRID",sNewGrid);
+               if (iStrcmp_STR(sNewGrid,sOldGrid,STR_CASE_TOLERANT) == 0) {
+                   DisplayMessage_SYS(_("Grid error"), _("Grids must be different"));
+                   i = 0;
+                   break;
+               }
+               
+               
+               // --- get the warp IPJ, and a new IPJ without warp ---
+               
+               GetString_SYS("WARPGRID","WARP",sWarp);
+               Read_IPJ(hWarpIPJ,IPJ_TYPE_WRP,sWarp,"","");
+               Copy_IPJ(hWarpIPJ,hNewIPJ);
+               ClearWarp_IPJ(hNewIPJ);
+
+               onePointTranslation = 0;
+               iType = iGridType_IMU(sOldGrid);
+               if (iType != GS_LONG)
+                  iType = GS_FLOAT;
+               hOldIMG = CreateFile_IMG(iType, sOldGrid, IMG_FILE_READONLY);
+               GetIPJ_IMG(hOldIMG, hOldIPJ);
+               if (iCoordinateSystemsAreTheSame_IPJ(hOldIPJ, hWarpIPJ) &&
+                   iWarped_IPJ(hWarpIPJ) &&
+                   iWarpType_IPJ(hWarpIPJ) == IPJ_WARP_TRANS1)
+               {
+                  onePointTranslation = 1; 
+                  GetProjectedCellSize_IMG(hOldIMG, hOldIPJ, origCellSize);
+               }
+               Destroy_IMG(hOldIMG);
+               
+            
+               // --- Get the cell size (can be dummy) ---
+
+               rCellSize = rGetReal_SYS("WARPGRID","CELL");
+               if(!(rCellSize==rDUMMY || rCellSize>0.0)) {
+                  DisplayMessage_SYS(_("Invalid Cell Size"), _("Enter a number > 0.0, or leave blank for automatic determination"));
+                  i = 0;
+                  break;
+               }         
+
+            
+               if(i!=2)
+                  i = 4;
+               break;
+               
+               
+            case 2:
+            
+
+               // --- Get the default cell size in the projected IMG ---
+               
+               iType = iGridType_IMU(sOldGrid);
+               if (iType != GS_LONG) iType = GS_FLOAT;
+               hOldIMG = CreateFile_IMG(iType,sOldGrid,IMG_FILE_READONLY);
+               GetIPJ_IMG(hOldIMG,hOldIPJ);
+               if (onePointTranslation)
+               {
+                  rCellSize = origCellSize;
+               }
+               else
+               {
+                  SetIPJ_IMG(hOldIMG,hWarpIPJ);
+                  GetProjectedCellSize_IMG(hOldIMG,hNewIPJ,rCellSize);
+                  SetIPJ_IMG(hOldIMG,hOldIPJ);
+               } 
+               Destroy_IMG(hOldIMG);
+               
+               SetReal_SYS("WARPGRID","CELL",rCellSize);
+               i = 0;
+               break;
+               
+            case 4:
+            
+               // --- create projected grid ---
+               
+               iType = iGridType_IMU(sOldGrid);
+               if (iType != GS_LONG) iType = GS_FLOAT;
+               hOldIMG = CreateFile_IMG(iType,sOldGrid,IMG_FILE_READONLY);
+               GetIPJ_IMG(hOldIMG,hOldIPJ);
+
+               if (onePointTranslation &&
+                   (rCellSize == rDUMMY || rCellSize == origCellSize))
+               {
+                  GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
+                  iConvertWarp_IPJ(hWarpIPJ, rX0, rY0, rZ0, 1);
+               }
+               else
+               { 
+                  SetIPJ_IMG(hOldIMG,hWarpIPJ);
+                  CreateProjected2_IMG(hOldIMG,hNewIPJ,rCellSize);
+                  rXd=rYd=rX0=rY0=rRot=0.0;
+                  GetInfo_IMG(hOldIMG,rXd,rYd,rX0,rY0,rRot);
+               }
+
+               iX = iNX_IMG(hOldIMG);
+               iY = iNY_IMG(hOldIMG);
+               Destroy_IMG(hOldIMG);
+               
+               
+               // --- re-set old IPJ ---
+               
+               hOldIMG = CreateFile_IMG(GS_FLOAT,sOldGrid,IMG_FILE_READONLY);
+               SetIPJ_IMG(hOldIMG,hOldIPJ);
+               SetIPJ_IMG(hOldIMG,hOldIPJ);
+               Destroy_IMG(hOldIMG);
+               
+            
+               Diag = Create_DGW("WARPGRID6");
+               SetInfo_DGW(Diag,_WARPGRID6_0,DGW_TEXT,sNewGrid);
+               FormatR_STR(rXd,sTemp,14,7);
+               SetInfo_DGW(Diag,_WARPGRID6_1,DGW_TEXT,sTemp);
+               FormatI_STR(iX,sTemp,7);
+               SetInfo_DGW(Diag,_WARPGRID6_2,DGW_TEXT,sTemp);
+               FormatI_STR(iY,sTemp,7);
+               SetInfo_DGW(Diag,_WARPGRID6_3,DGW_TEXT,sTemp);
+               FormatR_STR(rX0,sTemp,14,7);
+               SetInfo_DGW(Diag,_WARPGRID6_4,DGW_TEXT,sTemp);
+               FormatR_STR(rY0,sTemp,14,7);
+               SetInfo_DGW(Diag,_WARPGRID6_5,DGW_TEXT,sTemp);
+
+               i = iRunDialogue_DGW(Diag);
+               if (i < 0) Cancel_SYS();
+               Destroy_DGW(Diag);
+               
+               if (i == 0)
+                  i = 0;
+               else if (i == 1)
+                  i = 99;
+               else {
+                  DisplayInt_SYS(_("I'm lost"),i);
+                  i = 4;
+               }
+                  
+                  
+               break;
+      
+      
+            default:
+            
+               DisplayInt_SYS(_("I'm lost"),i);
+               i = 99;
+
+         }
+
+      }
+
+   }
+
+   
+   // --- Get grids ---
+
+   GetString_SYS("WARPGRID","OLDGRID",sOldGrid);
+   GetString_SYS("WARPGRID","NEWGRID",sNewGrid);
+   if (iStrcmp_STR(sNewGrid,sOldGrid,STR_CASE_TOLERANT) == 0)
+       Abort_SYS(_("Input and output grid must be different"));
+   
+   
+   // --- Get the cell size (can be dummy) ---
+
+   rCellSize = rGetReal_SYS("WARPGRID","CELL");
+   if(!(rCellSize==rDUMMY || rCellSize>0.0))
+      Abort_SYS(_("Invalid Cell Size"));
+
+
+   if (onePointTranslation &&
+       (rCellSize == rDUMMY || rCellSize == origCellSize))
+   {
+      hOldIMG = CreateFile_IMG(iType, sOldGrid, IMG_FILE_READONLY);
+      SetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
+      hNewIMG = CreateOutFile_IMG(iType, sNewGrid, hOldIMG);
+      Copy_IMG(hOldIMG, hNewIMG);
+      Destroy_IMG(hNewIMG);
+      Destroy_IMG(hOldIMG);
+   }
+   else
+   {
+      // --- get the warp ---
+   
+      GetString_SYS("WARPGRID","WARP",sWarp);
+      Read_IPJ(hWarpIPJ,IPJ_TYPE_WRP,sWarp,"","");
+   
+
+      // --- get old grid and old IPJ ---
+      
+      iType = iGridType_IMU(sOldGrid);
+      if (iType != GS_LONG) iType = GS_FLOAT;
+      hOldIMG = CreateFile_IMG(iType,sOldGrid,IMG_FILE_READONLY);
+      GetIPJ_IMG(hOldIMG,hOldIPJ);
+      SetIPJ_IMG(hOldIMG,hWarpIPJ);
+   
+   
+      // --- remove the warp ---
+   
+      ClearWarp_IPJ(hWarpIPJ);
+   
+
+      // --- read/write the grid ---
+   
+      Progress_SYS(1);
+      CreateProjected2_IMG(hOldIMG,hWarpIPJ,rCellSize);
+      hNewIMG = CreateOutFile_IMG(iType,sNewGrid,hOldIMG);
+      Copy_IMG(hOldIMG,hNewIMG);
+      Destroy_IMG(hOldIMG);
+      Destroy_IMG(hNewIMG);
+      Progress_SYS(0);
+   
+   
+      // --- replace old IPJ ---
+   
+      hOldIMG = CreateFile_IMG(GS_FLOAT,sOldGrid,IMG_FILE_READONLY);
+      SetIPJ_IMG(hOldIMG,hOldIPJ);
+      Destroy_IMG(hOldIMG);
+   }
+   
+}

@@ -1,0 +1,150 @@
+//===========================================================================
+NAME          = "Wholeplot Hole list utility GX"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "
+   
+   This GX is called from WHOLEPLOT GXs to put together a CSV
+   list of holes to use for processing
+
+   DHHOLELST.DATA   \"LIST\"
+                    \"ALL\"
+                    \"SELECTED\"
+   DHHOLELST.GX     Calling GX.
+   DHHOLELST.HOLES  On output, holes selected
+   DHHOLELST.ASSAYDB  If specified, list holes only for the selected assay DB.
+"           
+// Revision History:
+// v7.0.0: Use Target version of the two-panel selection so it gets its own help topic.
+// v6.3.0: Added assay DB option.
+// v6.0.0: Made huge hole list string buffer.
+// v5.1.8: New GX
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DH         Drill;
+LST        HoleLST,SelHoleLST;
+
+string(STR_FILE) sDB;
+string(STR_DEFAULT) sData, sGX;
+string(STR_DH_HOLES) sHoles;
+int        iRet, iAssayDB;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- create LSTs to hold hole lists ---
+   
+   HoleLST = Create_LST(2*STR_DB_SYMBOL);
+   SelHoleLST = Create_LST(2*STR_DB_SYMBOL);
+
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("DHHOLELST","DATA",sData);
+   GetString_SYS("DHHOLELST","GX", sGX);
+   iAssayDB = iGetInt_SYS("DHHOLELST","ASSAYDB");
+
+
+   // --- Force re-set each time ---
+
+   SetString_SYS("DHHOLELST","DATA","");
+   SetString_SYS("DHHOLELST","GX", "");
+   SetString_SYS("DHHOLELST","HOLES", "");
+   SetString_SYS("DHHOLELST","ASSAYDB", "");
+   
+   
+   if (iStrcmp_STR(sData,"SELECTED",STR_CASE_TOLERANT) == 0) 
+   {
+      HoleLST_DH(Drill, HoleLST);
+
+   } else if (iStrcmp_STR(sData,"ALL",STR_CASE_TOLERANT) == 0) 
+   {
+      HoleLST2_DH(Drill, HoleLST);
+
+   } else if (iStrcmp_STR(sData,"LIST",STR_CASE_TOLERANT) == 0) {
+
+
+      // --- The holes selected from the list are saved
+      //     to unique GX parameters for each calling GX. ---
+
+      // --- Validate "GX" parameter ---
+
+      if(!iStrlen_STR(sGX)) 
+         Abort_SYS(_("GX programming error - must define DHHOLELST.GX parameter."));
+
+
+      // --- Start with all holes, or all holes in the assay DB ---
+
+      if(iAssayDB==iDUMMY)
+         HoleLST2_DH(Drill, HoleLST);
+      else
+         AssayHoleLST_DH(Drill, iAssayDB, HoleLST);
+      
+
+
+      // --- Get previous selection ---
+      
+      GetString_SYS(sGX, "LIST", sHoles);
+
+
+      // --- User selection ---
+
+      if(iInteractive_SYS()) {
+
+
+         // --- Set starting selection for GUI ---
+
+         ConvertFromCSVString_LST(SelHoleLST, sHoles);
+
+         iRet = iHoleSelectFromListGUI_DH(HoleLST, SelHoleLST);
+         if(iRet!=0) Cancel_SYS();
+
+         
+         // --- Save selection ---
+      
+         ConvertToCSVString_LST(SelHoleLST, sHoles);
+         SetString_SYS(sGX, "LIST", sHoles);
+      }
+      else 
+         SelectCSVStringItems_LST(HoleLST, sHoles, SelHoleLST);
+
+      Copy_LST(HoleLST, SelHoleLST);
+      Sort_LST(HoleLST,0,0);
+
+   } else Abort_SYS(_("Invalid hole selection option."));
+   
+   
+   // --- Save selected holes to a CSV string ---
+
+   ConvertToCSVString_LST(HoleLST, sHoles);
+   SetString_SYS("DHHOLELST", "HOLES", sHoles);
+
+
+   Destroy_DH(Drill);
+
+
+   // --- Put the current database back on top ---
+
+   MakeCurrent_EDB(EData);
+
+}

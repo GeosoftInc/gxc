@@ -1,0 +1,392 @@
+//===========================================================================
+NAME          = "Apply an FFT low-pass filter"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D"
+
+DESCRIPTION   = "\
+
+Apply an FFT low-pass filter to a channel.
+
+Parameters:
+
+     FFTLOWP.IN       - Name of the Input Channel
+            .OUT      - Name of the Ouput Channel (created if does not exist)
+            .WAVEL    - Wavelength cutoff value in ground units.
+     FFTSAMP.SAMPINCR - Required sampling distance increment.
+            .METHOD   - \"Linear\", \"Min. Curvature\", \"Akima\"
+"
+// Revision History:
+// v6.2:   Set Fiducial start/increment of input VV to 0/1 if they are dummies. 
+// v5.1.3: Using "Current" X and Y channels
+// v5.1.6: Added a message "1D-FFT does not support array channel filtering!"
+
+//===========================================================================
+
+RESOURCE = "fftlowp.gr"
+#include "fftlowp.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;                  // Channel Names
+
+DB         Data;
+DB_SYMB    InCh,OutCh;                    // Channel handles
+DB_SYMB    Line;                          // Line handle
+DGW        Diag;                          // Dialogue handle
+LST        List;                          // List handle
+real       rInterval;                     // Space interval of input channel data
+real       rWavel;                        // Wavelength cutoff value
+real       rFstart;                       // Fiducial start of input VV
+real       rFinc;                         // Fiducial increment of input VV
+
+int        i;                 // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iVVlen;            // Length of input VV
+int        iDum;              // flags if input VV is dummy
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+VV         hVVin;             // VV for input channel
+VV         hVVout;            // VV for output channel
+
+FFT        hFFT;              // FFT for data processing
+
+string(STR_DB_SYMBOL) sFid,sRes,sDist;    // Channel Names
+DB_SYMB    XCh,YCh,DisCh,FidCh,ResCh;     // Channel Handles
+real       rFidStart;                     // Fiducial start of input Chan
+real       rFidIncr;                      // Fiducial increment of input Chan
+real       rSampIncr;                     // Required sampling distance increment
+string(STR_DEFAULT) sMethod;                       // interpolation method
+int        iMethod;                       // 
+EDB        EData;                         // Database Edited
+
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      i = 1;
+      while(i!=0) {
+      
+         switch(i) {
+         
+         case 1:
+   
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("FFTLOWPFORM");
+
+            // --- Set up lists ---
+    
+            List = GetList_DGW(Diag,_FFTLOWPFORM_0);
+            SymbLST_DB(Data,List,DB_SYMB_CHAN);
+            Sort_LST(List,0,0);
+            List = GetList_DGW(Diag,_FFTLOWPFORM_1);
+            SymbLST_DB(Data,List,DB_SYMB_CHAN);
+            Sort_LST(List,0,0);
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(Diag,_FFTLOWPFORM_0,DGW_TEXT,"FFTLOWP","IN");     
+            SetInfoSYS_DGW(Diag,_FFTLOWPFORM_1,DGW_TEXT,"FFTLOWP","OUT");     
+            SetInfoSYS_DGW(Diag,_FFTLOWPFORM_2,DGW_TEXT,"FFTLOWP","WAVEL");    
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS(); 
+
+
+            // --- Get the Strings and replace in INI ---
+
+            GetInfoSYS_DGW(Diag,_FFTLOWPFORM_0,DGW_TEXT,"FFTLOWP","IN");     
+            GetInfoSYS_DGW(Diag,_FFTLOWPFORM_1,DGW_TEXT,"FFTLOWP","OUT");     
+            GetInfoSYS_DGW(Diag,_FFTLOWPFORM_2,DGW_TEXT,"FFTLOWP","WAVEL");    
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+            break;
+
+         case 2:
+               
+            iRunGX_SYS("FFTSAMP.GX");
+
+            i = 1;
+            break;
+            
+         } // end switch
+      } // end while
+   } // end if
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("FFTLOWP","IN",sInCh);
+   GetString_SYS("FFTLOWP","OUT",sOutCh);
+   rWavel = rGetReal_SYS("FFTLOWP","WAVEL");
+   
+   // --- Check for null input and output channel strings ---
+
+   if (!iStrlen_STR(sInCh))
+      Abort_SYS(_("Input Channel Name not specified"));
+
+   if (!iStrlen_STR(sOutCh))
+      Abort_SYS(_("Output Channel Name not specified"));   
+
+   if ((rWavel <= 0.0) || (rWavel == rDUMMY))
+      Abort_SYS(_("Wavelength value is invalid - must be > 0.0"));
+
+
+   // --- Get required sampling distance increment ---
+   
+   if (iExistReal_SYS("FFTSAMP","SAMPINCR"))
+      rSampIncr  = rGetReal_SYS("FFTSAMP","SAMPINCR");
+   else
+      rSampIncr = rDUMMY;
+   
+
+   // --- Interpolation method ---
+   
+   GetString_SYS("FFTSAMP","METHOD",sMethod);
+   if (iStrcmp_STR(sMethod,_n("Linear"),0) == 0)
+      iMethod = DU_REFID_LINEAR;
+   else if (iStrcmp_STR(sMethod,_n("Akima"),0) == 0)
+      iMethod = DU_REFID_AKIMA;
+   else 
+      iMethod = DU_REFID_MINCUR;
+
+
+   // --- Does the Input/Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+   if(iGetColVA_DB(Data, InCh) > 1)
+      Abort_SYS(_("1D-FFT does not support array channel filtering!"));
+
+   if (iStrcmp_STR(sInCh,sOutCh,0) == 0) {
+      OutCh = InCh;
+      LockSymb_DB(Data,InCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   } else {
+      if (iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) {
+         OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+         LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      } else {  
+         OutCh = DupSymb_DB(Data,InCh,sOutCh);       // Create it 
+         LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      }
+   }
+
+
+   // --- Does the X/Y Channel Exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (XCh==NULLSYMB || YCh==NULLSYMB)
+      Abort_SYS(_("Current X and Y channels are required for distance calculation."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+
+   // --- get distance channel ---
+ 
+   Strcpy_STR(sDist,"_Distance");
+   if (!iExistSymb_DB(Data,sDist,DB_SYMB_CHAN))
+      CreateSymb_DB(Data,sDist,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   DisCh = FindSymb_DB(Data,sDist,DB_SYMB_CHAN);
+   LockSymb_DB(Data,DisCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+
+   // --- get fiducial channel ---
+
+   Strcpy_STR(sFid,sInCh);
+   Strcat_STR(sFid,"_fid");
+	GenValidChanSymb_DB(sFid, sFid, sizeof(sFid));
+   if (!iExistSymb_DB(Data,sFid,DB_SYMB_CHAN))
+      CreateSymb_DB(Data,sFid,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   FidCh = FindSymb_DB(Data,sFid,DB_SYMB_CHAN);
+   LockSymb_DB(Data,FidCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   // --- get resample channel ---
+
+   Strcpy_STR(sRes,sInCh);
+   Strcat_STR(sRes,"_Res");
+	GenValidChanSymb_DB(sRes, sRes, sizeof(sRes));
+   if (!iExistSymb_DB(Data,sRes,DB_SYMB_CHAN))
+      CreateSymb_DB(Data,sRes,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   ResCh = FindSymb_DB(Data,sRes,DB_SYMB_CHAN);
+   LockSymb_DB(Data,ResCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   hVVin = Create_VV(REAL,0);
+   hVVout = Create_VV(REAL,0);
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Filter line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);      
+
+      // --- get input chan fid info ---
+
+      rFidStart = rGetFidStart_DB(Data,Line,InCh);
+      rFidIncr  = rGetFidIncr_DB(Data,Line,InCh);
+
+      if(rFidStart==rDUMMY)     rFidStart= 0.0;
+      if(rFidIncr ==rDUMMY)     rFidIncr = 1.0;
+
+
+      // --- Create distance channel ---
+
+      Distance_DU(Data,Line,XCh,YCh,DisCh);
+
+
+      // --- Create fiducial channel ---
+
+      MakeFid_DU(Data,Line,DisCh,FidCh);
+
+
+      // --- Refid the data ---
+
+      ReFid_DU(Data,Line, InCh,DisCh,ResCh,iMethod,rDUMMY,rSampIncr,rDUMMY);
+      ReFid_DU(Data,Line,FidCh,DisCh,FidCh,iMethod,rDUMMY,rSampIncr,rDUMMY);
+
+
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,ResCh,hVVin);
+
+      // --- Set the length of output VV = length of input VV ---
+
+      iVVlen = iLength_VV(hVVin);
+      SetLen_VV(hVVout,iVVlen);
+
+      // --- if input VV is empty or all dummy, then don't do FFT process ---
+
+      if (iVVlen)
+         iDum = iFindDum_VV(hVVin,0,(iVVlen-1),1,0);
+
+      if ((iVVlen) && (iDum != -1))
+      {  
+         // --- Use the input VV fiducial information as the output VV's
+         //     fiducial information ---
+
+         rFstart = rGetFidStart_VV(hVVin);
+         rFinc   = rGetFidIncr_VV(hVVin);
+
+         SetFidStart_VV(hVVout,rFstart);
+         SetFidIncr_VV(hVVout,rFinc);
+
+         // --- Get the space interval from input VV fiducial info. ---
+
+         rInterval = rGetFidIncr_VV(hVVin);
+
+         // --- Put the VV data into an FFT ---
+
+         hFFT = Create_FFT(hVVin,rInterval,FFT_DETREND_ALL);
+
+         // --- apply filter ---
+
+         LowPass_FFT(hFFT,rWavel);
+
+         // --- perform inverse function ---
+
+         Inverse_FFT(hFFT,hVVout,hVVin);         
+
+         Destroy_FFT(hFFT);
+      }
+
+      // --- Write the output VV back to database ---
+
+      PutChanVV_DB(Data,Line,ResCh,hVVout);
+
+      // --- Refid and mask back the data ---
+
+      ReFid_DU(Data,Line,ResCh,FidCh,OutCh,iMethod,rFidStart,rFidIncr,rDUMMY);
+      GetChanVV_DB(Data,Line,InCh,hVVin);
+      GetChanVV_DB(Data,Line,OutCh,hVVout);
+      Mask_VVU(hVVout,hVVin);
+      PutChanVV_DB(Data,Line,OutCh,hVVout);
+
+
+      // --- Advance to Next Line ---    
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("FFT low-pass filter"),"FFTLOWP;FFTSAMP");
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+   Destroy_VV(hVVin);
+   Destroy_VV(hVVout);
+   DeleteSymb_DB(Data,FidCh);
+   DeleteSymb_DB(Data,ResCh);
+   
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,InCh);
+   if(InCh!=OutCh)
+      UnLockSymb_DB(Data,OutCh);
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,DisCh);
+
+
+   // --- Display the output chan ---
+
+   UnLock_EDB(EData);
+   if (iInteractive_SYS())
+   {
+      LoadChan_EDB(EData,sOutCh);
+      LoadChan_EDB(EData,sDist);
+   }
+}

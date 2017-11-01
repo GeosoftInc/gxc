@@ -1,0 +1,266 @@
+//===========================================================================
+NAME          = "Scale or re-scale a map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map Tools"
+
+DESCRIPTION   = "
+
+   Check if current map has been scaled, and if not, let user choose
+   desired scale.
+   
+   SCLMAP.SCALE      map scale
+"
+// Revision History:
+// v7.1:   Turn off redraw when checking for a scale.
+// v6.0.0: Get display area for 3D views.
+//===========================================================================
+
+RESOURCE = "sclmap.gr"
+#include "sclmap.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sTemp;
+string(64)               sLicClass;
+
+EMAP  EMap;
+MAP   Map, NewMap;
+DGW   Diag;
+MVIEW View;
+
+real  rScale,rNewScale,rMinX,rMinY,rMaxX,rMaxY;
+
+int   i,i3D,iGrid,iGridSave,iGridOnly,iPackedFiles;
+int   iArcGIS;
+int   iManual;
+
+string(STR_VIEW) sView;
+string(STR_FILE)  sGrd;
+string(STR_FILE)  sMap;
+
+//===========================================================================
+
+{
+
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrStr_STR(sLicClass, "ArcGIS", STR_CASE_TOLERANT) != -1;
+   
+   // --- get current map ---
+   
+   if (iInteractive_SYS() == 0 && !iHaveCurrent_EMAP()) 
+      Abort_SYS(_("This GX cannot be run without a current map."));
+   
+   EMap = Current_EMAP();
+
+   iGrid = 0;
+   iGridSave = iGetInt_SYS("SCLMAP","GRID_SAVE");
+   if(iGridSave!=1) iGridSave=0;     // default is no
+   SetInt_SYS("SCLMAP","GRID_SAVE", 0);  // must set every time
+   iGridOnly = iGetInt_SYS("SCLMAP","GRID_ONLY");
+   if(iGridOnly!=1) iGridOnly=0;     // default is no
+   SetInt_SYS("SCLMAP","GRID_ONLY", 0);  // must set every time
+   
+   iGrid = iIsGrid_EMAP(EMap);
+
+   if (!iGrid && iGridOnly)
+      Exit_SYS();
+   
+   if (!iArcGIS && iInteractive_SYS())
+      GetCurrentView_EMAP(EMap,sView);
+   
+   
+   iPackedFiles = iPackedFiles_EMAP(EMap);
+   
+   if (iPackedFiles > 0)
+   {
+       if (iInteractive_SYS())
+       {
+          if (0 == iDisplayQuestion_SYS(_("Unpack Document"), 
+              _("This action is only allowed on unpacked documents.\r\n\r\nDo you want to unpack this document to continue?")))
+             Cancel_SYS();
+          
+          if (iRunGX_SYS(_n("unpackmap")) != 0) 
+             Cancel_SYS();
+       }
+       else
+          Abort_SYS(_("This action is not allowed on packed documents.\r\nUnpack this document and try again."));
+   }
+   
+   Map = Lock_EMAP(EMap);
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   
+   iManual = 1;
+
+   if (iArcGIS)
+   {
+      // --- manual scaling? ---
+
+      iManual = iGetInt_SYS("ESRI_SCLMAP","MANUAL");
+      if(iManual!=1) iManual=0;     // default is no
+      SetInt_SYS("ESRI_SCLMAP","MANUAL", 0);  // must set every time
+   }
+   
+   // --- 
+   // if a base view already exists, user has already selected
+   // the map scale, so no action is required.
+   // ---
+   
+   if (iExistView_MAP(Map,"*Base")) 
+   {
+       UnLock_EMAP(EMap);
+       Exit_SYS();
+   }      
+   
+
+   // --- get the current map scale and view area ---
+   
+   rScale = rGetMapScale_MAP(Map);
+   
+   
+   if (!iArcGIS && iInteractive_SYS())
+   {
+      // --- for 3D views, get current display area ---
+   
+      View = Create_MVIEW(Map,sView,MVIEW_READ);
+      i3D = iIsView3D_MVIEW(View);
+      Destroy_MVIEW(View);
+      if (!i3D) {
+         UnLock_EMAP(EMap);
+         rMinX = rMinY = rMaxX = rMaxY = 0.0;
+         GetDisplayArea_EMAP(EMap,rMinX,rMinY,rMaxX,rMaxY);
+         Map = Lock_EMAP(EMap);
+      }
+   }
+   
+
+   // --- user select map scale ---
+   
+   if (iGrid || iInteractive_SYS()) 
+   {
+	  if (iGrid)
+	  {
+		if (!iGridSave && 0 == iDisplayQuestion_SYS(_("Save and Open Grid as Map"), 
+		    _("This action is only allowed on maps.\n\nDo you want to save this grid as a map to continue?")))
+		{
+			UnLock_EMAP(EMap);
+			Cancel_SYS();
+		}
+		GetName_EMAP(EMap,sGrd);
+		AbsoluteFileName_SYS(sGrd,sMap);
+		RemoveQualifiers_STR(sMap,sMap);
+		FileExt_STR(sMap, "map", sMap, FILE_EXT_FORCE);	
+		
+		Diag = Create_DGW("SAVEGRDASMAP");
+		
+		SetInfo_DGW(Diag,_SAVEGRDASMAP_0,DGW_FILEPATH,sMap);
+		FormatR_STR(rScale,sTemp,16,10);
+        SetInfo_DGW(Diag,_SAVEGRDASMAP_1,DGW_TEXT,sTemp);
+		
+		i = iRunDialogue_DGW(Diag);
+        if (i == -1) 
+		{
+			UnLock_EMAP(EMap);
+			Cancel_SYS();
+		}
+		
+		GetInfo_DGW(Diag,_SAVEGRDASMAP_0,DGW_FILEPATH,sMap);
+		GetInfo_DGW(Diag,_SAVEGRDASMAP_1,DGW_TEXT,sTemp);
+      
+        Destroy_DGW(Diag);
+
+        rNewScale = rScanR_STR(sTemp);
+		
+		UnLoad_EMAP(sMap);
+		
+		NewMap = Create_MAP(sMap,MAP_WRITENEW);
+
+        DupMap_MAP(Map,NewMap,DUPMAP_COPY);
+      
+		UnLock_EMAP(EMap);
+		UnLoad_EMAP(sGrd);
+		
+		Destroy_MAP(NewMap);
+		EMap = Load_EMAP(sMap);
+		
+		Map = Lock_EMAP(EMap);
+        SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+		
+		// --- Save the scale for scripts ---
+
+		SetReal_SYS("SCLMAP","SCALE",rNewScale);
+	  }
+      else if (iManual)
+      {
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("SCLMAP");
+      
+         FormatR_STR(rScale,sTemp,16,10);
+         SetInfo_DGW(Diag,_SCLMAP_0,DGW_TEXT,sTemp);
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) 
+			{
+				UnLock_EMAP(EMap);
+				Cancel_SYS();
+			}
+         GetInfo_DGW(Diag,_SCLMAP_0,DGW_TEXT,sTemp);
+      
+         Destroy_DGW(Diag);
+
+         rNewScale = rScanR_STR(sTemp);      
+      } else 
+         rNewScale = rScale;
+
+      // --- Save the scale for scripts ---
+
+      SetReal_SYS("SCLMAP","SCALE",rNewScale);
+      
+   }
+   else 
+   {
+	  if (iGrid)
+		Abort_SYS(_("Cannot draw on grid documents."));
+
+      rNewScale = rGetReal_SYS("SCLMAP","SCALE");
+
+   }
+   
+    if (!iInteractive_SYS() && rNewScale == rDUMMY)
+        rNewScale = rScale;
+      
+   // --- reset the map scale ---
+   
+   if (rNewScale <= 0.0) Abort_SYS(_("Scale must be > 0."));
+   
+   
+   // --- change must be significant ---
+   
+   if ( (rScale/rNewScale > 1.0000001) ||
+        (rScale/rNewScale < 0.9999999) )
+      SetMapScale_MAP(Map,rNewScale);
+      
+      
+   // --- create an empty base view ---
+   
+   View = Create_MVIEW(Map,"*Base",MVIEW_WRITENEW);
+   TranScale_MVIEW(View,0.0,0.0,1.0,1.0);
+   Destroy_MVIEW(View);         
+
+   UnLock_EMAP(EMap);
+   
+   if (!iArcGIS && iInteractive_SYS())
+   {
+      if (iSetCurrentView_EMAP(EMap,sView) == 0 && !i3D)
+         SetDisplayArea_EMAP(EMap,rMinX,rMinY,rMaxX,rMaxY);
+   }
+   
+}

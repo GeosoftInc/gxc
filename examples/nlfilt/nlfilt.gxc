@@ -1,0 +1,210 @@
+//===========================================================================
+NAME          = "Apply a non-linear filter"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "\r\n\
+   Apply a non-linear filter to a channel.  Non-linear filters are very good
+   for removing high amplitude noise spikes from data.  A non-linear filter
+   can be followed by a linear low-pass filter to smooth any low-amplitude
+   noise that may remain.
+
+    NLFILT.IN       : Name of the Input Channel
+          .OUT      : Name of the Ouput Channel (created if does not exist)
+          .WIDTH    : Maximum width of the noise in data points.  Features
+                      that are wider than this width will not be changed.
+          .TOLERANCE: Only noise of greater amplitude than this tolerance
+                      will be changed.
+"
+// Revision History
+// v6.1.0: Moved progress updates into the NLFilt code.
+// v5.1.4: Changed DupSymb_DB to DupSymbNoLock_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "nlfilt.gr"
+#include "nlfilt.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;      // Channel Names
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh,OutCh;        // Channel handles
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        iWidth;            // filter width in points
+real       rTolerance;        // filter tolerance
+int        i;                 // utility int
+int        iLines;            // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("NLFiltForm");
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_NLFILTFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_NLFILTFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_NLFILTFORM_0,DGW_TEXT,"NLFILT","IN");     
+     SetInfoSYS_DGW(Diag,_NLFILTFORM_1,DGW_TEXT,"NLFILT","OUT");     
+     SetInfoSYS_DGW(Diag,_NLFILTFORM_2,DGW_TEXT,"NLFILT","WIDTH");    
+     SetInfoSYS_DGW(Diag,_NLFILTFORM_3,DGW_TEXT,"NLFILT","TOLERANCE");    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_NLFILTFORM_0,DGW_TEXT,"NLFILT","IN");     
+     GetInfoSYS_DGW(Diag,_NLFILTFORM_1,DGW_TEXT,"NLFILT","OUT");     
+     GetInfoSYS_DGW(Diag,_NLFILTFORM_2,DGW_TEXT,"NLFILT","WIDTH");    
+     GetInfoSYS_DGW(Diag,_NLFILTFORM_3,DGW_TEXT,"NLFILT","TOLERANCE");    
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("NLFilt","IN",sInCh);
+   GetString_SYS("NLFilt","OUT",sOutCh);
+   iWidth = iGetInt_SYS("NLFilt","Width");
+   rTolerance = rGetReal_SYS("NLFilt","Tolerance");
+   if (rTolerance < 0.0) Abort_SYS(_("Invalid tolerance"));
+   if (iWidth < 0 || iWidth >= 30000) Abort_SYS(_("Width must be between 0 and 29999"));
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))   // if channel does not exist 
+      OutCh = DupSymbNoLock_DB(Data,InCh,sOutCh);
+   else
+      OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) 
+      LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   
+   // --- Make sure channels are of same size ---
+   
+   if (iGetColVA_DB(Data, InCh) != iGetColVA_DB(Data, OutCh))
+      Abort_SYS(_("Input and output channels are different in array sizes."));
+   
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar. The progress percent is
+      //     now handled internally in the NLFilt code ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Non-linear filter line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,1);
+
+      
+      // --- apply filter ---
+
+      NLFilt_DU(Data,Line,InCh,OutCh,iWidth,rTolerance);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Non-linear filter"),"NLFILT;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+   // --- display the new channel ---
+
+		LoadChan_EDB( EData, sOutCh );
+}

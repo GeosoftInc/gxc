@@ -1,0 +1,423 @@
+//===========================================================================
+NAME          = "Symbol line plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Plot Solution Symbols"
+
+DESCRIPTION   = "
+
+   SYMBOLS.SYMBOL       - symbol number          
+          .MASK         - optional mask channel
+          .SIZE         - symbol size in mm.
+          .WEIGHT       - symbol weight
+          .LINE_COLOR   - symbol color 
+          .FILL_COLOR   - fill color
+          .GROUP        - plot individually?
+"
+// Revision History:
+// v7.0.0: Symbol font weight fix-up.
+// v6.3.0: Turn on the group clipping instead of previous changes.
+// v6.2.1: Reverted data view clipping to reconsider.
+// v6.2.0: Now clips the data to the data view.
+// v6.0.0: Both X and Y should be refidded against mask channel.
+// v5.1.6: If no MASK class channels are located, fill mask channel list with all of them.
+// v5.1.5: Added optional mask channel
+//         Map group name changed to "SYMB_Database"
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+
+RESOURCE = "symbols.gr"
+#include "symbols.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sLcolor,sFcolor,sFont,sSize;
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sLine,sMask;
+string(STR_GROUP) sGroup;
+string(STR_FILE) sName;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,ZCh,MCh;     // Channel handles
+DB_SYMB    Line;        // Line handle
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+IPJ	ViewIPJ;
+PJ		Pj;
+DGW   Diag;
+LST   List;
+LST   SymbolList;
+VV    VVx,VVy,VVz,VVs,VVm;
+IPJ   DataIPJ;
+PLY   Ply;
+int   iSymb,iLines,iTotLines,iWeight,iGroup,iMask;
+real  rScale,rSize;
+int iListSize;
+int iOrientation, iHasOrientation;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+	ViewIPJ = Create_IPJ();
+	iHasOrientation = 0;
+
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+	 
+
+   // --- get current map and database ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+	// --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+
+	// --- Check for non-plan orientations ---
+
+	GetIPJ_MVIEW(View, ViewIPJ);
+
+	iOrientation = iGetOrientation_IPJ(ViewIPJ);
+	if(iOrientation != IPJ_ORIENT_DEFAULT && iOrientation != IPJ_ORIENT_PLAN)
+	{
+		iHasOrientation = 1;
+
+		ZCh = GetXYZChanSymb_DB(Data, DB_CHAN_Z);
+		if (ZCh==NULLSYMB)
+			Abort_SYS(_("A current Z channel is required to correctly locate symbols on an oriented view"));
+	}
+
+
+   // --- Set all defaults ---
+   
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("symbols"));
+
+   DefaultString_SYS("SYMBOLS","MASK","");
+   DefaultInt_SYS("SYMBOLS","SYMBOL",20);
+   DefaultReal_SYS("SYMBOLS","SIZE",2.0);
+   DefaultInt_SYS("SYMBOLS","WEIGHT",2);
+   DefaultString_SYS("SYMBOLS","LINE_COLOR","K");
+   DefaultString_SYS("SYMBOLS","FILL_COLOR","N");
+   DefaultInt_SYS("SYMBOLS","GROUP",1);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("Symbols");
+
+      
+      // --- Create mask channel list ---
+
+      List = GetList_DGW(Diag,_SYMBOLS_0);
+      ClassChanLST_DB(Data,List,"MASK");
+
+      if(iSize_LST(List)==0)
+         SymbLST_DB(Data, List, DB_SYMB_CHAN);
+
+      // --- For MapInfo symbols, replace the current list of items with the MapInfo ones ---
+      if (iStrcmp_STR(sFont, "MapInfo(gfn)", STR_CASE_TOLERANT)==0)
+      {
+         SymbolList = GetList_DGW(Diag, _SYMBOLS_1);
+         iListSize = iSize_LST(SymbolList);
+         Clear_LST(SymbolList);
+         
+            AddItem_LST(SymbolList, _("Filled square"), "1");
+            AddItem_LST(SymbolList, _("Filled diamond"), "2");
+            AddItem_LST(SymbolList, _("Filled circle"), "3");
+            AddItem_LST(SymbolList, _("Filled five-point star "), "4");
+            AddItem_LST(SymbolList, _("Filled triangle point up "), "5");
+            AddItem_LST(SymbolList, _("Filled triangle point down"), "6");
+            AddItem_LST(SymbolList, _("Filled square with offset shadow"), "13");
+            AddItem_LST(SymbolList, _("Filled triangle point up with offset shadow"), "14");
+            AddItem_LST(SymbolList, _("Filled circle with offset shadow"), "15");
+            AddItem_LST(SymbolList, _("Arrow pointing up to right"), "16");
+            AddItem_LST(SymbolList, _("Arrow pointing down to left"), "17");
+            AddItem_LST(SymbolList, "+", "18");
+            AddItem_LST(SymbolList, "X", "19");
+            AddItem_LST(SymbolList, _("+ and X"), "20");
+            AddItem_LST(SymbolList, _("Jet"), "21");
+            AddItem_LST(SymbolList, _("School"), "22");
+            AddItem_LST(SymbolList, _("Flag"), "23");
+            AddItem_LST(SymbolList, _("Hospital"), "24");
+            AddItem_LST(SymbolList, _("Medical cross"), "25");
+            AddItem_LST(SymbolList, _("Teepee"), "26");
+            AddItem_LST(SymbolList, _("Anchor"), "27");
+            AddItem_LST(SymbolList, _("Filled diamond in a circle"), "28");
+            AddItem_LST(SymbolList, _("House"), "29");
+            AddItem_LST(SymbolList, _("Interstate highway sign"), "30");
+            AddItem_LST(SymbolList, _("State highway sign"), "31");
+            AddItem_LST(SymbolList, _("Oil derrick"), "32");
+            AddItem_LST(SymbolList, _("Pick axes"), "33");
+            AddItem_LST(SymbolList, _("Church"), "34");
+            AddItem_LST(SymbolList, _("Monument"), "35");
+            AddItem_LST(SymbolList, _("Stick pin"), "36");
+      }
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_SYMBOLS_0,DGW_TEXT      ,"SYMBOLS","MASK");     
+      SetInfoSYS_DGW(Diag,_SYMBOLS_1,DGW_LISTALIAS ,"SYMBOLS","SYMBOL");     
+      SetInfoSYS_DGW(Diag,_SYMBOLS_2,DGW_TEXT      ,"SYMBOLS","SIZE");     
+      SetInfoSYS_DGW(Diag,_SYMBOLS_3,DGW_LISTALIAS ,"SYMBOLS","WEIGHT");     
+      SetInfoSYS_DGW(Diag,_SYMBOLS_4,DGW_TEXT      ,"SYMBOLS","LINE_COLOR");     
+      SetInfoSYS_DGW(Diag,_SYMBOLS_5,DGW_TEXT      ,"SYMBOLS","FILL_COLOR");     
+      SetInfoSYS_DGW(Diag,_SYMBOLS_6,DGW_LISTALIAS ,"SYMBOLS","GROUP");     
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_SYMBOLS_0,DGW_TEXT      ,"SYMBOLS","MASK");     
+      GetInfoSYS_DGW(Diag,_SYMBOLS_1,DGW_LISTALIAS ,"SYMBOLS","SYMBOL");     
+      GetInfoSYS_DGW(Diag,_SYMBOLS_2,DGW_TEXT      ,"SYMBOLS","SIZE");     
+      GetInfoSYS_DGW(Diag,_SYMBOLS_3,DGW_LISTALIAS ,"SYMBOLS","WEIGHT");     
+      GetInfoSYS_DGW(Diag,_SYMBOLS_4,DGW_TEXT      ,"SYMBOLS","LINE_COLOR");     
+      GetInfoSYS_DGW(Diag,_SYMBOLS_5,DGW_TEXT      ,"SYMBOLS","FILL_COLOR");     
+      GetInfoSYS_DGW(Diag,_SYMBOLS_6,DGW_LISTALIAS ,"SYMBOLS","GROUP");     
+
+   }   
+
+   // --- Get Parameters ---
+
+   iSymb = iGetInt_SYS("SYMBOLS","SYMBOL");
+
+		
+   rSize = rGetReal_SYS("SYMBOLS","SIZE");     
+   iWeight = iGetInt_SYS("SYMBOLS","WEIGHT");    
+   GetString_SYS("SYMBOLS","LINE_COLOR",sLcolor);
+   GetString_SYS("SYMBOLS","FILL_COLOR",sFcolor);
+   iGroup = iGetInt_SYS("SYMBOLS","GROUP");
+   if(!iGroup)
+      GetString_SYS("SYMBOLS","SIZE",sSize);
+
+
+   // --- Apply mask? ---
+
+   iMask = 0;
+   GetString_SYS("SYMBOLS","MASK",sMask);
+   if(iStrlen_STR(sMask)) {
+      if (!iExistChan_DB(Data,sMask))  
+         Abort_SYS(_("Mask channel does not exist."));
+      MCh = FindChan_DB(Data,sMask);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+      iMask = 1;
+   }
+   
+
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   
+
+	if(iHasOrientation == 1)
+		  Pj = CreateIPJ_PJ(DataIPJ, ViewIPJ);
+	else
+		  SetWorkingIPJ_MVIEW(View,DataIPJ);
+   
+   
+   // --- set thining and local scale ---
+   
+   SetThinRes_MVIEW(View,0.02);
+   rScale = rScaleMM_MVIEW(View);
+
+
+   // --- Set the group clip mode ---
+   
+   GroupClipMode_MVIEW(View, CLIP_ON);
+   
+   
+   // --- start a group ---
+
+   GetName_DB(Data,DB_NAME_FILE,sName);
+   FileNamePart_STR(sName,sName,STR_FILE_PART_NAME);
+   GenGroupName_STR("SYMB",sName,"",sGroup);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- maker ---
+
+   Maker_MVIEW(View,1,1,"symbols",MAKER_GX,_("Symbol plot..."),"SYMBOLS;");
+
+
+   // --- Create link to database ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+
+   // --- set parameters ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("symbols"));
+   SymbFont_MVIEW(View,sFont,TRUE,iWeight,FALSE);
+   SymbColor_MVIEW(View,iColor_MVIEW(sLcolor));
+   SymbFillColor_MVIEW(View,iColor_MVIEW(sFcolor));
+   SymbNumber_MVIEW(View,iSymb);
+   SymbSize_MVIEW(View,rSize*rScale);
+   SymbAngle_MVIEW(View,0.0);
+
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+	if(iHasOrientation == 1)
+		  VVz = Create_VV(REAL,0);
+  	if(!iGroup) {
+       VVs = Create_VV(REAL,0);
+   }
+   VVm = Create_VV(INT,0);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+	if(iHasOrientation == 1)
+		  LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   // --- Get the view's clip PLY ---
+   
+   Ply = Create_PLY();
+   GetClipPLY_MVIEW(View, Ply);
+   
+
+   // --- Draw lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Drawing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get X and Y ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+		if(iHasOrientation == 1)
+		  GetChanVV_DB(Data,Line,ZCh,VVz);
+
+      if(iMask) {
+         GetChanVV_DB(Data,Line,MCh,VVm);
+         ReFidVV_VV(VVx,VVm);
+         ReFidVV_VV(VVy,VVm);
+			if(iHasOrientation == 1)
+				ReFidVV_VV(VVz,VVm);
+         Mask_VVU(VVx, VVm);
+      }
+      else
+		{
+         ReFidVV_VV(VVx,VVy);
+			if(iHasOrientation == 1)
+				 ReFidVV_VV(VVz,VVy);
+		}
+
+      // --- add line link ---
+
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine);
+
+
+		if(iHasOrientation == 1)
+			ConvertVV3_PJ(Pj, VVx, VVy, VVz);
+
+      // --- Draw ---
+
+      if(iGroup)
+         Symbols_MVIEW(View,VVx,VVy);
+      else {         // Force symbols to draw one by one....
+         SetLen_VV(VVs, iLength_VV(VVx));
+         SetRealN_VV(VVs, 0, -1, 1.0);         
+         ClassifiedSymbols_MVIEW(View,VVx,VVy,VVs,rScale,0.0,"2",sSize,sFcolor);
+      }
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+   Progress_SYS(0);
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+	if(iHasOrientation == 1) UnLockSymb_DB(Data,ZCh);
+   if(iMask) UnLockSymb_DB(Data,MCh);
+
+
+   // --- done ---
+
+	if(iHasOrientation == 1)
+		Destroy_PJ(Pj);
+   Destroy_MVIEW(View);
+	Destroy_IPJ(ViewIPJ);
+
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+
+}

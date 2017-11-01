@@ -1,0 +1,220 @@
+//===========================================================================
+NAME          = "Filter data on Mineral and/or Position"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+
+      SEMMINPOS.MINERAL
+      SEMMINPOS.POSITION   
+"
+// Revision History
+// v6.3.0: Ensure Mineral and Position channels are initialized.
+//         Allow selection of mineral channel.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.7: Version 2 upgrade.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semminpos.gr"
+#include "semminpos.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define DUP_LINE(A, B)  \
+   A = FindSymb_DB( Data, B, DB_SYMB_LINE);   \
+   if(A==NULLSYMB) {                          \
+      A = DupSymb_DB( Data, hRawGroup, B);         \
+   }  \
+   else  \
+      LockSymb_DB(Data, A, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+LST         List;
+DB_SYMB     MaskCh;
+
+int         i;                // Utility 
+
+string(STR_DB_SYMBOL) sCurLine, sMaskCh, sMineralCh;
+string(20) sMineral, sVal;
+int iPos, iVal;
+int iSuppress;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- See if we are to suppress group re-creation and auto-redraw ---
+
+   iSuppress = iGetInt_SYS("SEMMINPOS","SUPPRESS");
+   if(iSuppress!=1) iSuppress = 0;
+
+   SetInt_SYS("SEMMINPOS","SUPPRESS", 0);    // must be set every time
+
+
+   EData = Current_EDB();
+
+   // --- Get the current line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+
+   // --- See if the Mineral and/or Position channels exist. If not, create them. ---
+   
+   if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.Geochemistry.InitMineralChannel;Run)")!=0) Cancel_SYS();
+   if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.Geochemistry.InitPositionChannel;Run)")!=0) Cancel_SYS();
+   
+
+   // --- Lock the database ---
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {                 
+           
+      Diag = Create_DGW("SEMMINPOS");      
+      
+      Progress_SYS(1);
+
+      List = GetList_DGW(Diag,_SEMMINPOS_0);
+      ClassChanLST_DB(Data,List,"MINERAL");
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_SEMMINPOS_1);
+      GetFullMineralLST_SEMPLOT(List);
+
+      List = GetList_DGW(Diag,_SEMMINPOS_2);
+      GetCurrentPositionLST_SEMPLOT(Data, List);
+
+      Progress_SYS(0);
+
+      List = GetList_DGW(Diag,_SEMMINPOS_3);
+      ClassChanLST_DB(Data,List,"MASK");
+      Sort_LST(List,0,0);
+
+      SetInfoSYS_DGW(Diag,_SEMMINPOS_0,DGW_TEXT,"SEMPLOT","MINERAL_CHANNEL");
+      SetInfoSYS_DGW(Diag,_SEMMINPOS_1,DGW_LISTALIAS,"SEMMINPOS","MINERAL");
+      SetInfoSYS_DGW(Diag,_SEMMINPOS_2,DGW_LISTALIAS,"SEMMINPOS","POSITION");
+      SetInfoSYS_DGW(Diag,_SEMMINPOS_3,DGW_TEXT,"SEMPLOT","MASK");
+   
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+   
+      GetInfoSYS_DGW(Diag,_SEMMINPOS_0,DGW_TEXT,"SEMPLOT","MINERAL_CHANNEL");
+      GetInfoSYS_DGW(Diag,_SEMMINPOS_1,DGW_LISTALIAS,"SEMMINPOS","MINERAL");
+      GetInfoSYS_DGW(Diag,_SEMMINPOS_2,DGW_LISTALIAS,"SEMMINPOS","POSITION");
+      GetInfoSYS_DGW(Diag,_SEMMINPOS_3,DGW_TEXT,"SEMPLOT","MASK");
+   
+      Destroy_DGW(Diag);      
+   }
+
+   // --- get file and template name ---
+   
+   GetString_SYS("SEMMINPOS","MINERAL", sMineral);
+   iPos = iGetInt_SYS("SEMMINPOS","POSITION");
+
+   Progress_SYS(1);
+
+
+   // --- get the mineral channel ---
+
+   GetString_SYS("SEMPLOT","MINERAL_CHANNEL", sMineralCh);
+   if(!iStrlen_STR(sMineralCh))
+      Abort_SYS(_("No mineral channel specified."));
+
+
+   // --- get the mask channel ---
+
+   GetString_SYS("SEMPLOT","MASK", sMaskCh);
+   if(!iStrlen_STR(sMaskCh))
+      Abort_SYS(_("No mask channel specified."));
+
+
+   // --- Create mask channel if it does not exist ---
+
+   MaskCh = FindChan_DB(Data, sMaskCh);
+   if(MaskCh==NULLSYMB) {
+
+      // --- Create a new mask channel ---
+
+      MaskCh = CreateSymb_DB(Data,sMaskCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+     
+      // --- Set the mask channel class to "MASK" ---
+
+      SetRegSymbSetting_DB(Data, MaskCh, "CLASS", "MASK");
+
+
+      // --- Associate the new channel ---
+
+      AssociateClass_DB(Data, MaskCh, "Semplot");
+      UnLockSymb_DB(Data, MaskCh);
+
+
+      // --- Initialize the values to 1 ---
+
+      ProgName_SYS(_("Initializing New Mask"),1);
+      SetMask_SEMPLOT(Data, sMaskCh, "", "", 0, 1);
+   }
+
+
+   // --- Filter the data ---
+
+   ProgName_SYS(_("Filtering Raw Data by Mineral/Position"),1);
+   FilterMineralPosData_SEMPLOT(Data, sMaskCh, sMineralCh, sMineral, iPos);
+
+
+   // --- display data ---
+   
+   UnLock_EDB(EData);
+   
+   Progress_SYS(0);
+
+
+   // --- Skip refresh of groups and auto-replot of maps? ---
+
+   if(iSuppress) Exit_SYS();
+
+    
+   // --- Refresh groups? ---
+/*
+   iGlobal_SYS("SEMPLOT.REFRESH_GROUPS",sVal);
+   iVal = iScanI_STR(sVal);
+   if(iVal==1) {  // no by default
+
+      // --- Create Default grouping ---
+
+      Data = Lock_EDB(EData);
+      DefaultGroups_SEMPLOT(Data);
+      UnLock_EDB(EData);
+   }
+*/      
+   
+   // --- Replot maps? ---
+
+
+   iGlobal_SYS("SEMPLOT.AUTOREDRAW",sVal);
+   iVal = iScanI_STR(sVal);
+   if(iVal==1) {  // no by default
+      iRunGX_SYS("semreplotmaps");
+   }
+
+}

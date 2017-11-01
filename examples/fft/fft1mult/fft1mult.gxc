@@ -1,0 +1,1339 @@
+//===========================================================================
+NAME          = "1D-FFT multiple filtering"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D"
+
+DESCRIPTION   = "
+
+Apply 1D-FFT multiple filtering to a channel.
+
+Parameters:
+
+    FFT1MULT.IN       - Name of the Input Channel
+            .OUT      - Name of the Ouput Channel (created if does not exist)
+     FFTSAMP.SAMPINCR - Required sampling distance increment.
+            .METHOD   - \"Linear\", \"Min. Curvature\", \"Akima\"
+"
+// Revision History:
+// v6.2:   Set Fiducial start/increment of input VV to 0/1 if they are dummies. 
+// v6.2:   Fixed a bug of not retaining the previous filters' parameter values.
+// v6.2:   Fixed a bug of not retaining the previous filter's parameters.
+// v6.0.1: Remove dialog for integration telling user there are
+//         no user parameters.
+// v6.0.0: New GX.
+
+//===========================================================================
+
+RESOURCE = "fft1mult.gr"
+#include "fft1mult.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;      // Channel Names
+
+DB         Data;
+EDB        EData;             // Database Edited
+DB_SYMB    InCh,OutCh;        // Channel handles
+DB_SYMB    Line;              // Line handle
+DB_SYMB    XCh,YCh,DisCh,FidCh,ResCh;     // Channel Handles
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+VV         hVVin;             // VV for input channel
+VV         hVVout;            // VV for output channel
+FFT        hFFT;              // FFT for data processing
+VM         VM_FilterNames;                // VM holds all filter names
+VM         VM_FilterPars;                 // VM holds all filter pars
+
+int        i;                 // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iVVlen;            // input VV length
+int        iDum;              // Flags if input VV is all dummy
+int        iMethod;                       // 
+int        iName,iPass;
+
+
+real       rInterval;         // Space interval of input channel data
+real       rFstart;           // Fiducial start of input VV
+real       rFinc;             // Fiducial increment of input VV
+real       rFidStart;                     // Fiducial start of input Chan
+real       rFidIncr;                      // Fiducial increment of input Chan
+real       rSampIncr;                     // Required sampling distance increment
+real       rShortW,rLongW,rWavel,rDegree,rStddev,rWstart,rWend;
+real       rDist,rLP,rOrder,rInc,rDec,rDir,rAcInc,rStrength,rDepth,rThick,rDens;
+real       rPar0,rPar1,rPar2,rPar3,rPar4,rPar5,rPar6;
+
+string(STR_DEFAULT_SHORT) sTemp;    // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sFid,sRes,sDist;    // Channel Names
+string(STR_DEFAULT) sMethod;        // interpolation method
+string(STR_DEFAULT_LONG)  sFilterName;     // name of filter
+string(STR_DEFAULT_LONG)  sTitle,sMakeName;
+string(STR_DEFAULT_SHORT) sPass,sDir;
+string(STR_DEFAULT_SHORT) sPar0,sPar1,sPar2,sPar3,sPar4,sPar5,sPar6;
+
+#define MAX_FILTER_COUNTER      6
+
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Main Dialogue ---
+
+   if (iInteractive_SYS())
+   {
+      i = 1;
+      while(i!=0) {
+      
+         switch(i) {
+         
+         case 1:
+      
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("FFT1MDIAG");
+
+
+            // --- Set up lists ---
+      
+            List = GetList_DGW(Diag,_FFT1MDIAG_0);
+            SymbLST_DB(Data,List,DB_SYMB_CHAN);
+            Sort_LST(List,0,0);
+            List = GetList_DGW(Diag,_FFT1MDIAG_1);
+            SymbLST_DB(Data,List,DB_SYMB_CHAN);
+            Sort_LST(List,0,0);
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_0,DGW_TEXT,"FFT1MULT","IN");     
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_1,DGW_TEXT,"FFT1MULT","OUT");     
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_2,DGW_LISTALIAS,"FFT1MULT","FILTER1");    
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_3,DGW_LISTALIAS,"FFT1MULT","FILTER2");    
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_4,DGW_LISTALIAS,"FFT1MULT","FILTER3");    
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_5,DGW_LISTALIAS,"FFT1MULT","FILTER4");    
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_6,DGW_LISTALIAS,"FFT1MULT","FILTER5");    
+            SetInfoSYS_DGW(Diag,_FFT1MDIAG_7,DGW_LISTALIAS,"FFT1MULT","FILTER6");    
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
+
+
+            // --- Get the Strings and replace in INI ---
+
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_0,DGW_TEXT,"FFT1MULT","IN");     
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_1,DGW_TEXT,"FFT1MULT","OUT");     
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_2,DGW_LISTALIAS,"FFT1MULT","FILTER1");    
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_3,DGW_LISTALIAS,"FFT1MULT","FILTER2");    
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_4,DGW_LISTALIAS,"FFT1MULT","FILTER3");    
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_5,DGW_LISTALIAS,"FFT1MULT","FILTER4");    
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_6,DGW_LISTALIAS,"FFT1MULT","FILTER5");    
+            GetInfoSYS_DGW(Diag,_FFT1MDIAG_7,DGW_LISTALIAS,"FFT1MULT","FILTER6");    
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+            break;
+
+         case 2:
+               
+            iRunGX_SYS("FFTSAMP.GX");
+
+            i = 1;
+            break;
+            
+         } // end switch
+      } // end while
+   } // end if
+
+
+   // --- Check for null input and output channel strings ---
+
+   GetString_SYS("FFT1MULT","IN",sInCh);
+   GetString_SYS("FFT1MULT","OUT",sOutCh);
+   if (!iStrlen_STR(sInCh))
+      Abort_SYS(_("Input Channel Name not specified"));
+
+   if (!iStrlen_STR(sOutCh))
+      Abort_SYS(_("Output Channel Name not specified"));   
+
+   // --- Get required sampling distance increment ---
+   
+   if (iExistReal_SYS("FFTSAMP","SAMPINCR"))
+      rSampIncr  = rGetReal_SYS("FFTSAMP","SAMPINCR");
+   else
+      rSampIncr = rDUMMY;
+   
+
+   // --- Interpolation method ---
+   
+   GetString_SYS("FFTSAMP","METHOD",sMethod);
+   if (iStrcmp_STR(sMethod,_n("Linear"),0) == 0)
+      iMethod = DU_REFID_LINEAR;
+   else if (iStrcmp_STR(sMethod,_n("Akima"),0) == 0)
+      iMethod = DU_REFID_AKIMA;
+   else 
+      iMethod = DU_REFID_MINCUR;
+
+
+   // --- Does the Input/Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+   if(iGetColVA_DB(Data, InCh) > 1)
+      Abort_SYS(_("1D-FFT does not support array channel filtering!"));
+
+
+   // --- Get filter names ---
+
+   VM_FilterNames=Create_VM(-100,6);
+
+   GetString_SYS("FFT1MULT","FILTER1",sFilterName);
+   SetString_VM(VM_FilterNames,0,sFilterName);
+   GetString_SYS("FFT1MULT","FILTER2",sFilterName);
+   SetString_VM(VM_FilterNames,1,sFilterName);
+   GetString_SYS("FFT1MULT","FILTER3",sFilterName);
+   SetString_VM(VM_FilterNames,2,sFilterName);
+   GetString_SYS("FFT1MULT","FILTER4",sFilterName);
+   SetString_VM(VM_FilterNames,3,sFilterName);
+   GetString_SYS("FFT1MULT","FILTER5",sFilterName);
+   SetString_VM(VM_FilterNames,4,sFilterName);
+   GetString_SYS("FFT1MULT","FILTER6",sFilterName);
+   SetString_VM(VM_FilterNames,5,sFilterName);
+
+
+   // --- Create Filter parameters VM ---
+
+   VM_FilterPars = Create_VM(-100,80);
+
+
+   // --- Get filter-specific dialogue for each filter used ---
+
+   if (iInteractive_SYS())
+   {
+      iName=0;
+	  
+      for (iName = 0; iName < MAX_FILTER_COUNTER; ++iName)
+      {
+         // --- Get name of filter from VM_FilterNames ---
+         GetString_VM(VM_FilterNames,iName,sFilterName);
+         Printf_STR(sTemp, sizeof(sTemp), _n("FFT1MULT%d_"), iName+1); 
+
+         if (iStrcmp_STR(sFilterName,"",0)==0)  
+            continue;
+         
+         if (iStrcmp_STR(sFilterName,_n("Bandpass Filter"),0)==0)    
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Bandpass Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTBANDPDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"BPAS");
+   
+            SetInfoSYS_DGW(Diag,_FFTBANDPDIAG_0,DGW_TEXT,sLabel,"SHORTW");     
+            SetInfoSYS_DGW(Diag,_FFTBANDPDIAG_1,DGW_TEXT,sLabel,"LONGW");     
+            SetInfoSYS_DGW(Diag,_FFTBANDPDIAG_2,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTBANDPDIAG_0,DGW_TEXT,sLabel,"SHORTW");     
+            GetInfoSYS_DGW(Diag,_FFTBANDPDIAG_1,DGW_TEXT,sLabel,"LONGW");     
+            GetInfoSYS_DGW(Diag,_FFTBANDPDIAG_2,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("High-Pass Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("High-Pass Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTHIGHPDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"HPAS");
+         
+            SetInfoSYS_DGW(Diag,_FFTHIGHPDIAG_0,DGW_TEXT,sLabel,"WAVEL");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTHIGHPDIAG_0,DGW_TEXT,sLabel,"WAVEL");     
+
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Low-Pass Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Low-Pass Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTLOWPDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"LPAS");
+         
+            SetInfoSYS_DGW(Diag,_FFTLOWPDIAG_0,DGW_TEXT,sLabel,"WAVEL");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTLOWPDIAG_0,DGW_TEXT,sLabel,"WAVEL");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Butterworth Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Butterworth Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTBUTTWDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"BTWR");
+         
+            SetInfoSYS_DGW(Diag,_FFTBUTTWDIAG_0,DGW_TEXT,sLabel,"WAVEL");     
+            SetInfoSYS_DGW(Diag,_FFTBUTTWDIAG_1,DGW_TEXT,sLabel,"DEGREE");     
+            SetInfoSYS_DGW(Diag,_FFTBUTTWDIAG_2,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTBUTTWDIAG_0,DGW_TEXT,sLabel,"WAVEL");     
+            GetInfoSYS_DGW(Diag,_FFTBUTTWDIAG_1,DGW_TEXT,sLabel,"DEGREE");     
+            GetInfoSYS_DGW(Diag,_FFTBUTTWDIAG_2,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Gaussian Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Gaussian Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTGAUSSDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"GAUS");
+         
+            SetInfoSYS_DGW(Diag,_FFTGAUSSDIAG_0,DGW_TEXT,sLabel,"STDDEV");     
+            SetInfoSYS_DGW(Diag,_FFTGAUSSDIAG_1,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTGAUSSDIAG_0,DGW_TEXT,sLabel,"STDDEV");     
+            GetInfoSYS_DGW(Diag,_FFTGAUSSDIAG_1,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Cosine Roll-off Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Cosine Roll-off Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTCOSNDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"COSN");
+         
+            SetInfoSYS_DGW(Diag,_FFTCOSNDIAG_0,DGW_TEXT,sLabel,"WSTART");     
+            SetInfoSYS_DGW(Diag,_FFTCOSNDIAG_1,DGW_TEXT,sLabel,"WEND");     
+            SetInfoSYS_DGW(Diag,_FFTCOSNDIAG_2,DGW_TEXT,sLabel,"DEGREE");     
+            SetInfoSYS_DGW(Diag,_FFTCOSNDIAG_3,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTCOSNDIAG_0,DGW_TEXT,sLabel,"WSTART");     
+            GetInfoSYS_DGW(Diag,_FFTCOSNDIAG_1,DGW_TEXT,sLabel,"WEND");     
+            GetInfoSYS_DGW(Diag,_FFTCOSNDIAG_2,DGW_TEXT,sLabel,"DEGREE");     
+            GetInfoSYS_DGW(Diag,_FFTCOSNDIAG_3,DGW_LISTALIAS,sLabel,"PASS");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Continuation Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Continuation Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTCONTDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"CONT");
+         
+            SetInfoSYS_DGW(Diag,_FFTCONTDIAG_0,DGW_LISTALIAS,sLabel,"DIR");     
+            SetInfoSYS_DGW(Diag,_FFTCONTDIAG_1,DGW_TEXT,sLabel,"DIST");     
+            SetInfoSYS_DGW(Diag,_FFTCONTDIAG_2,DGW_TEXT,sLabel,"LP");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTCONTDIAG_0,DGW_LISTALIAS,sLabel,"DIR");     
+            GetInfoSYS_DGW(Diag,_FFTCONTDIAG_1,DGW_TEXT,sLabel,"DIST");     
+            GetInfoSYS_DGW(Diag,_FFTCONTDIAG_2,DGW_TEXT,sLabel,"LP");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Horizontal Derivative Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Horizontal Derivative Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTHZDRVDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"HDRV");
+         
+            SetInfoSYS_DGW(Diag,_FFTHZDRVDIAG_0,DGW_TEXT,sLabel,"ORDER");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTHZDRVDIAG_0,DGW_TEXT,sLabel,"ORDER");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Horizontal Integration Filter"),0)==0)
+         {
+            // Nothing to get... just do the integration.
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Vertical Derivative Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Vertical Derivative Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTVDRVDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"VDRV");
+         
+            SetInfoSYS_DGW(Diag,_FFTVDRVDIAG_0,DGW_TEXT,sLabel,"ORDER");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTVDRVDIAG_0,DGW_TEXT,sLabel,"ORDER");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Vertical Integration Filter"),0)==0)
+         {
+              // Nothing to get... just do the integration.
+         }
+         else if (iStrcmp_STR(sFilterName,_n("Reduce to Magnetic Pole Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Reduce to Magnetic Pole Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTRPOLEDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"REDP");
+         
+            SetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_0,DGW_TEXT,sLabel,"INC");     
+            SetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_1,DGW_TEXT,sLabel,"DEC");     
+            SetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_2,DGW_TEXT,sLabel,"ACINC");     
+            SetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_3,DGW_TEXT,sLabel,"DIR");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_0,DGW_TEXT,sLabel,"INC");     
+            GetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_1,DGW_TEXT,sLabel,"DEC");     
+            GetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_2,DGW_TEXT,sLabel,"ACINC");     
+            GetInfoSYS_DGW(Diag,_FFTRPOLEDIAG_3,DGW_TEXT,sLabel,"DIR");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Apparent Susceptibility Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Apparent Susceptibility Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTSUSCDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"SUSC");
+         
+            SetInfoSYS_DGW(Diag,_FFTSUSCDIAG_0,DGW_TEXT,sLabel,"INC");     
+            SetInfoSYS_DGW(Diag,_FFTSUSCDIAG_1,DGW_TEXT,sLabel,"DEC");     
+            SetInfoSYS_DGW(Diag,_FFTSUSCDIAG_2,DGW_TEXT,sLabel,"ACINC");     
+            SetInfoSYS_DGW(Diag,_FFTSUSCDIAG_3,DGW_TEXT,sLabel,"DIR");     
+            SetInfoSYS_DGW(Diag,_FFTSUSCDIAG_4,DGW_TEXT,sLabel,"DEPTH");     
+            SetInfoSYS_DGW(Diag,_FFTSUSCDIAG_5,DGW_TEXT,sLabel,"LP");     
+            SetInfoSYS_DGW(Diag,_FFTSUSCDIAG_6,DGW_TEXT,sLabel,"STRENGTH");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTSUSCDIAG_0,DGW_TEXT,sLabel,"INC");     
+            GetInfoSYS_DGW(Diag,_FFTSUSCDIAG_1,DGW_TEXT,sLabel,"DEC");     
+            GetInfoSYS_DGW(Diag,_FFTSUSCDIAG_2,DGW_TEXT,sLabel,"ACINC");     
+            GetInfoSYS_DGW(Diag,_FFTSUSCDIAG_3,DGW_TEXT,sLabel,"DIR");     
+            GetInfoSYS_DGW(Diag,_FFTSUSCDIAG_4,DGW_TEXT,sLabel,"DEPTH");     
+            GetInfoSYS_DGW(Diag,_FFTSUSCDIAG_5,DGW_TEXT,sLabel,"LP");     
+            GetInfoSYS_DGW(Diag,_FFTSUSCDIAG_6,DGW_TEXT,sLabel,"STRENGTH");     
+            
+            Destroy_DGW(Diag);
+         }
+
+         else if (iStrcmp_STR(sFilterName,_n("Apparent Density Filter"),0)==0)
+         {
+            // --- Set Filter Diag Title ---
+            Printf_STR(sTitle, sizeof(sTitle), _("Apparent Density Filter  (Filter %d)"), iName+1);
+
+            Diag = Create_DGW("FFTDENSDIAG");                   
+            SetTitle_DGW(Diag,sTitle);
+            Strcpy_STR(sLabel,sTemp);
+            Strcat_STR(sLabel,"DENS");
+         
+            SetInfoSYS_DGW(Diag,_FFTDENSDIAG_0,DGW_TEXT,sLabel,"DEPTH");     
+            SetInfoSYS_DGW(Diag,_FFTDENSDIAG_1,DGW_TEXT,sLabel,"THICK");     
+            SetInfoSYS_DGW(Diag,_FFTDENSDIAG_2,DGW_TEXT,sLabel,"LP");     
+            SetInfoSYS_DGW(Diag,_FFTDENSDIAG_3,DGW_TEXT,sLabel,"DENS");     
+            
+            if (iRunDialogue_DGW(Diag)==-1)   Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_FFTDENSDIAG_0,DGW_TEXT,sLabel,"DEPTH");     
+            GetInfoSYS_DGW(Diag,_FFTDENSDIAG_1,DGW_TEXT,sLabel,"THICK");     
+            GetInfoSYS_DGW(Diag,_FFTDENSDIAG_2,DGW_TEXT,sLabel,"LP");     
+            GetInfoSYS_DGW(Diag,_FFTDENSDIAG_3,DGW_TEXT,sLabel,"DENS");     
+            
+            Destroy_DGW(Diag);
+         }
+      }
+   }
+
+
+   // --- Get filter-specific parameters for each filter used ---
+
+   iName=0;
+   while(iName<6)
+   {
+      // --- Get name of filter from VM_FilterNames ---
+      GetString_VM(VM_FilterNames,iName,sFilterName);
+      Strcpy_STR(sTemp,"FFT1MULT");
+      FormatI_STR(iName+1,sLabel,2);
+      Strcat_STR(sTemp,sLabel);
+      Strcat_STR(sTemp,"_");
+
+      if (iStrcmp_STR(sFilterName,"",0)==0)  {
+         iName++;
+         continue;
+      }
+
+      if (iStrcmp_STR(sFilterName,_n("Bandpass Filter"),0)==0)    
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"BPAS");
+         rPar0 = rGetReal_SYS(sLabel,"SHORTW");
+         rPar1 = rGetReal_SYS(sLabel,"LONGW");
+         GetString_SYS(sLabel,"PASS",sPar2);
+         
+         FormatR_STR(rPar0,sPar0,20,10);
+         FormatR_STR(rPar1,sPar1,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         SetString_VM(VM_FilterPars,2+iName*10,sPar2);
+       
+         rShortW = rScanR_STR(sPar0);
+         rLongW  = rScanR_STR(sPar1);
+         Strcpy_STR(sPass,sPar2);
+
+         if ((rShortW <= 0.0) || (rShortW == rDUMMY))
+            Abort_SYS(_("Low wavelength value is invalid - must be > 0.0"));
+
+         if ((rLongW < 0.0) || (rLongW == rDUMMY))
+            Abort_SYS(_("High wavelength value is invalid - must be >= 0.0"));
+
+         if (iStrcmp_STR(sPass,_n("Reject"),0) == 0)
+            iPass = 0;
+         else if (iStrcmp_STR(sPass,_n("Pass"),0) == 0)
+            iPass = 1;
+         else
+            Abort_SYS(_("Defined band parameter must be: Pass or Reject."));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("High-Pass Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"HPAS");
+         rPar0 = rGetReal_SYS(sLabel,"WAVEL");
+         FormatR_STR(rPar0,sPar0,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         
+         rWavel = rScanR_STR(sPar0);
+
+         if ((rWavel < 0.0) || (rWavel == rDUMMY))
+            Abort_SYS(_("Wavelength value is invalid - must be >= 0.0"));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Low-Pass Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"LPAS");
+         rPar0 = rGetReal_SYS(sLabel,"WAVEL");
+         FormatR_STR(rPar0,sPar0,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         
+         rWavel = rScanR_STR(sPar0);
+
+         if ((rWavel <= 0.0) || (rWavel == rDUMMY))
+            Abort_SYS(_("Wavelength value is invalid - must be > 0.0"));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Butterworth Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"BTWR");
+         rPar0 = rGetReal_SYS(sLabel,"WAVEL");
+         rPar1 = rGetReal_SYS(sLabel,"DEGREE");
+         GetString_SYS(sLabel,"PASS",sPar2);
+         FormatR_STR(rPar0,sPar0,20,10);
+         FormatR_STR(rPar1,sPar1,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         SetString_VM(VM_FilterPars,2+iName*10,sPar2);
+         
+         rWavel = rScanR_STR(sPar0);
+         rDegree = rScanR_STR(sPar1);
+         Strcpy_STR(sPass,sPar2);
+
+         if ((rWavel <= 0.0) || (rWavel == rDUMMY))
+            Abort_SYS(_("Wavelength value is invalid - must be > 0.0"));
+         
+         if (rDegree == 0.0)
+            rDegree = 8.0;
+         else if ((rDegree < 0.0) || (rDegree == rDUMMY))
+            Abort_SYS(_("Degree parameter was invalid: should be >= 0.0"));
+         
+         if (iStrcmp_STR(sPass,_n("High"),0) == 0)
+            iPass = 0;
+         else if (iStrcmp_STR(sPass,_n("Low"),0) == 0)
+            iPass = 1;             
+         else
+            Abort_SYS(_("Pass Filter parameter must be: Low or High."));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Gaussian Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"GAUS");
+         rPar0 = rGetReal_SYS(sLabel,"STDDEV");
+         GetString_SYS(sLabel,"PASS",sPar1);
+         FormatR_STR(rPar0,sPar0,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         
+         rStddev = rScanR_STR(sPar0);
+         Strcpy_STR(sPass,sPar1);
+
+         if ((rStddev <= 0.0) || (rStddev == rDUMMY))
+            Abort_SYS(_("Standard deviation is invalid: should be > 0"));
+
+         if (iStrcmp_STR(sPass,_n("High"),0) == 0)
+            iPass = 0;
+         else if (iStrcmp_STR(sPass,_n("Low"),0) == 0)
+            iPass = 1;                  
+         else
+            Abort_SYS(_("Pass Filter parameter must be: Low or High."));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Cosine Roll-off Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"COSN");
+         rPar0 = rGetReal_SYS(sLabel,"WSTART");
+         rPar1 = rGetReal_SYS(sLabel,"WEND");
+         rPar2 = rGetReal_SYS(sLabel,"DEGREE");
+         GetString_SYS(sLabel,"PASS",sPar3);
+         FormatR_STR(rPar0,sPar0,20,10);
+         FormatR_STR(rPar1,sPar1,20,10);
+         FormatR_STR(rPar2,sPar2,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         SetString_VM(VM_FilterPars,2+iName*10,sPar2);
+         SetString_VM(VM_FilterPars,3+iName*10,sPar3);
+         
+         rWstart = rScanR_STR(sPar0);
+         rWend   = rScanR_STR(sPar1);
+         rDegree = rScanR_STR(sPar2);
+         Strcpy_STR(sPass,sPar3);
+
+         if ((rWstart <= 0.0) || (rWstart == rDUMMY))
+            Abort_SYS(_("Start wavelength value is invalid: should be > 0"));
+         
+         if ((rWend < 0.0) || (rWend == rDUMMY))
+            Abort_SYS(_("End wavelength value is invalid: should be >= 0"));
+         if ((rWend <= rWstart) && (rWend != 0.0))
+            Abort_SYS(_("Start wavelength must be < End wavelength"));
+         
+         if (rDegree == 0.0)
+            rDegree = 2.0;
+         else if ((rDegree < 0.0) || (rDegree == rDUMMY))
+            Abort_SYS(_("Degree wavelength must be >= 0.0"));
+         
+         if (iStrcmp_STR(sPass,_n("High"),0) == 0)
+            iPass = 0;
+         else if (iStrcmp_STR(sPass,_n("Low"),0) == 0)
+            iPass = 1;  
+         else
+            Abort_SYS(_("Pass Filter parameter must be: Low or High."));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Continuation Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"CONT");
+         GetString_SYS(sLabel,"DIR",sPar0);
+         rPar1 = rGetReal_SYS(sLabel,"DIST");
+         rPar2 = rGetReal_SYS(sLabel,"LP");
+         FormatR_STR(rPar1,sPar1,20,10);
+         FormatR_STR(rPar2,sPar2,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         SetString_VM(VM_FilterPars,2+iName*10,sPar2);
+         
+         Strcpy_STR(sDir,sPar0);
+         rDist = rScanR_STR(sPar1);
+         rLP  = rScanR_STR(sPar2);
+
+         if ((rDist < 0.0) || (rDist == rDUMMY))
+            Abort_SYS(_("Distance parameter must be >= 0."));
+            
+         if (iStrcmp_STR(sDir,_n("Up"),0) == 0)
+            rDist = -rDist;
+         else if (iStrcmp_STR(sDir,_n("Down"),0) != 0)      
+           Abort_SYS(_("Direction parameter must be: Down or Up."));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Horizontal Derivative Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"HDRV");
+         rPar0 = rGetReal_SYS(sLabel,"ORDER");
+         FormatR_STR(rPar0,sPar0,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+     
+         rOrder = rScanR_STR(sPar0);
+
+         if ((rOrder < 0.0) || (rOrder == rDUMMY))
+            Abort_SYS(_("Derivative order parameter is invalid: should be an integer and >= 0"));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Horizontal Integration Filter"),0)==0)
+      {
+         // Nothing to get... just do the integration.
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Vertical Derivative Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"VDRV");
+         rPar0 = rGetReal_SYS(sLabel,"ORDER");
+         FormatR_STR(rPar0,sPar0,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+     
+         rOrder = rScanR_STR(sPar0);
+
+         if ((rOrder < 0.0) || (rOrder == rDUMMY))
+            Abort_SYS(_("Degree of derivative is invalid: should be an integer and >= 0"));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Vertical Integration Filter"),0)==0)
+      {
+         // Nothing to get... just do the integration.
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Reduce to Magnetic Pole Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"REDP");
+         rPar0 = rGetReal_SYS(sLabel,"INC");
+         rPar1 = rGetReal_SYS(sLabel,"DEC");
+         rPar2 = rGetReal_SYS(sLabel,"ACINC");
+         rPar3 = rGetReal_SYS(sLabel,"DIR");
+         FormatR_STR(rPar0,sPar0,20,10);
+         FormatR_STR(rPar1,sPar1,20,10);
+         FormatR_STR(rPar2,sPar2,20,10);
+         FormatR_STR(rPar3,sPar3,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         SetString_VM(VM_FilterPars,2+iName*10,sPar2);
+         SetString_VM(VM_FilterPars,3+iName*10,sPar3);
+     
+         rInc  = rScanR_STR(sPar0);
+         rDec  = rScanR_STR(sPar1);
+         rAcInc= rScanR_STR(sPar2);
+         rDir  = rScanR_STR(sPar3);
+
+         if ((rInc < -90.0) || (rInc > 90.0) || (rInc == rDUMMY))
+            Abort_SYS(_("Inclination parameter is invalid: should be from -90.0 to 90.0"));
+
+         if ((rDec < -180.0) || (rDec > 180.0) || (rDec == rDUMMY))
+            Abort_SYS(_("Declination parameter is invalid: should be from -180.0 to 180.0"));
+
+         if ((rDir < -180.0) || (rDir > 180.0) || (rDir == rDUMMY))
+            Abort_SYS(_("Line direction parameter is invalid: should be from -180.0 to 180.0"));
+
+         // --- Set amplitude correction inclination default ---
+         
+         if (rAcInc == rDUMMY) {
+            if(rInc>=0.0)  rAcInc = 20.0;    
+            else           rAcInc = -20.0;    
+         }
+         if ((rAcInc < -90.0) || (rAcInc > 90.0) || (rAcInc == rDUMMY))
+            Abort_SYS(_("Amplitude inclination parameter is invalid: should be from -90.0 to 90.0"));
+
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Apparent Susceptibility Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"SUSC");
+         rPar0 = rGetReal_SYS(sLabel,"INC");
+         rPar1 = rGetReal_SYS(sLabel,"DEC");
+         rPar2 = rGetReal_SYS(sLabel,"ACINC");
+         rPar3 = rGetReal_SYS(sLabel,"DIR");
+         rPar4 = rGetReal_SYS(sLabel,"DEPTH");
+         rPar5 = rGetReal_SYS(sLabel,"LP");
+         rPar6 = rGetReal_SYS(sLabel,"STRENGTH");
+         FormatR_STR(rPar0,sPar0,20,10);
+         FormatR_STR(rPar1,sPar1,20,10);
+         FormatR_STR(rPar2,sPar2,20,10);
+         FormatR_STR(rPar3,sPar3,20,10);
+         FormatR_STR(rPar4,sPar4,20,10);
+         FormatR_STR(rPar5,sPar5,20,10);
+         FormatR_STR(rPar6,sPar6,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         SetString_VM(VM_FilterPars,2+iName*10,sPar2);
+         SetString_VM(VM_FilterPars,3+iName*10,sPar3);
+         SetString_VM(VM_FilterPars,4+iName*10,sPar4);
+         SetString_VM(VM_FilterPars,5+iName*10,sPar5);
+         SetString_VM(VM_FilterPars,6+iName*10,sPar6);
+     
+         rInc = rScanR_STR(sPar0);
+         rDec = rScanR_STR(sPar1);
+         rAcInc = rScanR_STR(sPar2);
+         rDir = rScanR_STR(sPar3);
+         rDist = rScanR_STR(sPar4);
+         rLP = rScanR_STR(sPar5);
+         rStrength = rScanR_STR(sPar6);
+
+         if ((rInc < -90.0) || (rInc > 90.0) || (rInc == rDUMMY))
+            Abort_SYS(_("Inclination parameter is invalid: should be from -90 to 90.0"));
+
+         if ((rDec < -180.0) || (rDec > 180.0) || (rDec == rDUMMY))
+            Abort_SYS(_("Declination parameter is invalid: should be from -180.0 to 180.0"));
+
+         if ((rAcInc < -90.0) || (rAcInc > 90.0) || (rAcInc == rDUMMY))
+            Abort_SYS(_("Amplitude inclination parameter is invalid: should be from -90.0 to 90.0"));
+
+         if ((rDir < -180.0) || (rDir > 180.0) || (rDir == rDUMMY))
+            Abort_SYS(_("Line direction parameter is invalid: should be from -180.0 to 180.0"));
+
+         if (rStrength <= 0.0 || (rStrength == rDUMMY))
+            Abort_SYS(_("Field strength parametrer is invalid: should be > 0"));
+      }
+
+      else if (iStrcmp_STR(sFilterName,_n("Apparent Density Filter"),0)==0)
+      {
+         Strcpy_STR(sLabel,sTemp);
+         Strcat_STR(sLabel,"DENS");
+         rPar0 = rGetReal_SYS(sLabel,"DEPTH");
+         rPar1 = rGetReal_SYS(sLabel,"THICK");
+         rPar2 = rGetReal_SYS(sLabel,"LP");
+         rPar3 = rGetReal_SYS(sLabel,"DENS");
+         FormatR_STR(rPar0,sPar0,20,10);
+         FormatR_STR(rPar1,sPar1,20,10);
+         FormatR_STR(rPar2,sPar2,20,10);
+         FormatR_STR(rPar3,sPar3,20,10);
+         SetString_VM(VM_FilterPars,0+iName*10,sPar0);
+         SetString_VM(VM_FilterPars,1+iName*10,sPar1);
+         SetString_VM(VM_FilterPars,2+iName*10,sPar2);
+         SetString_VM(VM_FilterPars,3+iName*10,sPar3);
+     
+         rDepth = rScanR_STR(sPar0);
+         rThick = rScanR_STR(sPar1);
+         rLP    = rScanR_STR(sPar2);
+         rDens  = rScanR_STR(sPar3);
+       
+         if ((rThick <= 0.0) || (rThick == rDUMMY))
+            Abort_SYS(_("Model thickness parameter is invalid: should be > 0"));
+                        
+         if ((rDens < 0.0) || (rDens == rDUMMY))
+            Abort_SYS(_("Density parameter is invalid: should be >= 0"));
+      }
+
+      else
+      {
+      }
+
+      iName++;
+   }
+
+
+   // --- Set OutCh ---
+
+   if (iStrcmp_STR(sInCh,sOutCh,0) == 0) {
+      OutCh = InCh;
+      LockSymb_DB(Data,InCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   } else {
+      if (iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) {
+         OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+         LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      } else {  
+         OutCh = DupSymb_DB(Data,InCh,sOutCh);       // Create it 
+         LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      }
+   }
+
+
+   // --- Does the X/Y Channel Exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (XCh==NULLSYMB || YCh==NULLSYMB)
+      Abort_SYS(_("Current X and Y channels are required for distance calculation."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+
+   // --- get distance channel ---
+ 
+   Strcpy_STR(sDist,"_Distance");
+   if (!iExistSymb_DB(Data,sDist,DB_SYMB_CHAN))
+      CreateSymb_DB(Data,sDist,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   DisCh = FindSymb_DB(Data,sDist,DB_SYMB_CHAN);
+   LockSymb_DB(Data,DisCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+
+   // --- get fiducial channel ---
+
+   Strcpy_STR(sFid,sInCh);
+   Strcat_STR(sFid,"_fid");
+	GenValidChanSymb_DB(sFid, sFid, sizeof(sFid));
+   if (!iExistSymb_DB(Data,sFid,DB_SYMB_CHAN))
+      CreateSymb_DB(Data,sFid,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   FidCh = FindSymb_DB(Data,sFid,DB_SYMB_CHAN);
+   LockSymb_DB(Data,FidCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   // --- get resample channel ---
+
+   Strcpy_STR(sRes,sInCh);
+   Strcat_STR(sRes,"_Res");
+	GenValidChanSymb_DB(sRes, sRes, sizeof(sRes));
+   if (!iExistSymb_DB(Data,sRes,DB_SYMB_CHAN))
+      CreateSymb_DB(Data,sRes,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   ResCh = FindSymb_DB(Data,sRes,DB_SYMB_CHAN);
+   LockSymb_DB(Data,ResCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- create input and output VV's ---
+
+   hVVin = Create_VV(REAL,0);
+   hVVout = Create_VV(REAL,0);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Filter line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);        
+
+
+      // --- get input chan fid info ---
+
+      rFidStart = rGetFidStart_DB(Data,Line,InCh);
+      rFidIncr  = rGetFidIncr_DB(Data,Line,InCh);
+
+      if(rFidStart==rDUMMY)     rFidStart= 0.0;
+      if(rFidIncr ==rDUMMY)     rFidIncr = 1.0;
+
+
+      // --- Create distance channel ---
+
+      Distance_DU(Data,Line,XCh,YCh,DisCh);
+
+
+      // --- Create fiducial channel ---
+
+      MakeFid_DU(Data,Line,DisCh,FidCh);
+
+
+      // --- Refid the data ---
+
+      ReFid_DU(Data,Line, InCh,DisCh,ResCh,iMethod,rDUMMY,rSampIncr,rDUMMY);
+      ReFid_DU(Data,Line,FidCh,DisCh,FidCh,iMethod,rDUMMY,rSampIncr,rDUMMY);
+
+
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,ResCh,hVVin);
+
+
+      // --- Set the length of output VV = length of input VV ---
+
+      iVVlen = iLength_VV(hVVin);
+      SetLen_VV(hVVout,iVVlen);
+
+      // --- if input VV is empty or all dummy, then don't do FFT process ---
+
+      if (iVVlen)
+         iDum = iFindDum_VV(hVVin,0,(iVVlen-1),1,0);
+
+      if ((iVVlen) && (iDum != -1))
+      {
+         // --- Use the input VV fiducial information as the output VV's
+         //     fiducial information ---
+
+         rFstart = rGetFidStart_VV(hVVin);
+         rFinc   = rGetFidIncr_VV(hVVin);
+
+         SetFidStart_VV(hVVout,rFstart);
+         SetFidIncr_VV(hVVout,rFinc);
+
+         // --- Get the space interval from input VV fiducial info. ---
+
+         rInterval = rGetFidIncr_VV(hVVin);
+
+         // --- Put the VV data into an FFT ---
+
+         hFFT = Create_FFT(hVVin,rInterval,FFT_DETREND_ALL);
+
+         // --- apply filters ---
+
+         for (iName = 0; iName < MAX_FILTER_COUNTER; ++iName)
+         {
+            // --- Get name of filter from VM_FilterNames ---
+            GetString_VM(VM_FilterNames,iName,sFilterName);
+
+            if (iStrcmp_STR(sFilterName,"",0)==0)  
+               continue;
+
+            // --- Filter-Specific process...       
+
+            if (iStrcmp_STR(sFilterName,_n("Bandpass Filter"),0)==0)    
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               GetString_VM(VM_FilterPars,2+iName*10,sPar2);
+               rShortW = rScanR_STR(sPar0);
+               rLongW  = rScanR_STR(sPar1);
+               Strcpy_STR(sPass,sPar2);
+               if (iStrcmp_STR(sPass,_n("Reject"),0) == 0)
+                  iPass = 0;
+               else if (iStrcmp_STR(sPass,_n("Pass"),0) == 0)
+                  iPass = 1;
+               else
+                  Abort_SYS(_("Defined band parameter must be: Pass or Reject."));
+
+               BandPass_FFT(hFFT,rShortW,rLongW,iPass);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("High-Pass Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               rWavel = rScanR_STR(sPar0);
+
+               HighPass_FFT(hFFT,rWavel,rFinc);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Low-Pass Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               rWavel = rScanR_STR(sPar0);
+
+               LowPass_FFT(hFFT,rWavel);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Butterworth Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               GetString_VM(VM_FilterPars,2+iName*10,sPar2);
+               rWavel = rScanR_STR(sPar0);
+               rDegree = rScanR_STR(sPar1);
+               Strcpy_STR(sPass,sPar2);
+               if (rDegree == 0.0)
+                  rDegree = 8.0;
+               else if ((rDegree < 0.0) || (rDegree == rDUMMY))
+                  Abort_SYS(_("Degree parameter was invalid: should be >= 0.0"));
+               if (iStrcmp_STR(sPass,_n("High"),0) == 0)
+                  iPass = 0;
+               else if (iStrcmp_STR(sPass,_n("Low"),0) == 0)
+                  iPass = 1;             
+               else
+                  Abort_SYS(_("Pass Filter parameter must be: Low or High."));
+
+               BWorth_FFT(hFFT,rWavel,rDegree,iPass);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Gaussian Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               rStddev = rScanR_STR(sPar0);
+               Strcpy_STR(sPass,sPar1);
+               if (iStrcmp_STR(sPass,_n("High"),0) == 0)
+                  iPass = 0;
+               else if (iStrcmp_STR(sPass,_n("Low"),0) == 0)
+                  iPass = 1;                  
+               else
+                  Abort_SYS(_("Pass Filter parameter must be: Low or High."));
+
+               Gaus_FFT(hFFT,rStddev,iPass);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Cosine Roll-off Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               GetString_VM(VM_FilterPars,2+iName*10,sPar2);
+               GetString_VM(VM_FilterPars,3+iName*10,sPar3);
+               rWstart = rScanR_STR(sPar0);
+               rWend   = rScanR_STR(sPar1);
+               rDegree = rScanR_STR(sPar2);
+               Strcpy_STR(sPass,sPar3);
+               if (rDegree == 0.0)
+                  rDegree = 2.0;
+               else if ((rDegree < 0.0) || (rDegree == rDUMMY))
+                  Abort_SYS(_("Degree wavelength must be >= 0.0"));
+               if (iStrcmp_STR(sPass,_n("High"),0) == 0)
+                  iPass = 0;
+               else if (iStrcmp_STR(sPass,_n("Low"),0) == 0)
+                  iPass = 1;  
+               else
+                  Abort_SYS(_("Pass Filter parameter must be: Low or High."));
+
+               CosRoll_FFT(hFFT,rWstart,rWend,rDegree,iPass);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Continuation Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               GetString_VM(VM_FilterPars,2+iName*10,sPar2);
+               Strcpy_STR(sDir,sPar0);
+               rDist = rScanR_STR(sPar1);
+               rLP  = rScanR_STR(sPar2);
+               if (iStrcmp_STR(sDir,_n("Up"),0) == 0)
+                  rDist = -rDist;
+               else if (iStrcmp_STR(sDir,_n("Down"),0) != 0)      
+                 Abort_SYS(_("Direction parameter must be: Down or Up."));
+               
+               Contin_FFT(hFFT,rDist);
+               
+               if (rLP > 0.0)     BWorth_FFT(hFFT,rLP,8.0,1);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Horizontal Derivative Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               rOrder = rScanR_STR(sPar0);
+
+               HDrv_FFT(hFFT,rOrder);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Horizontal Integration Filter"),0)==0)
+            {
+               HInt_FFT(hFFT);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Vertical Derivative Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               rOrder = rScanR_STR(sPar0);
+
+               VDrv_FFT(hFFT,rOrder);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Vertical Integration Filter"),0)==0)
+            {
+               VInt_FFT(hFFT);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Reduce to Magnetic Pole Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               GetString_VM(VM_FilterPars,2+iName*10,sPar2);
+               GetString_VM(VM_FilterPars,3+iName*10,sPar3);
+               rInc  = rScanR_STR(sPar0);
+               rDec  = rScanR_STR(sPar1);
+               rAcInc= rScanR_STR(sPar2);
+               rDir  = rScanR_STR(sPar3);
+               if (rAcInc == rDUMMY) {
+                  if(rInc>=0.0)  rAcInc = 20.0;    
+                  else           rAcInc = -20.0;    
+               }
+               if ((rAcInc < -90.0) || (rAcInc > 90.0) || (rAcInc == rDUMMY))
+                  Abort_SYS(_("Amplitude inclination parameter is invalid: should be from -90.0 to 90.0"));
+
+               RedPol_FFT(hFFT,rInc,rDec,rAcInc,rDir);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Apparent Susceptibility Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               GetString_VM(VM_FilterPars,2+iName*10,sPar2);
+               GetString_VM(VM_FilterPars,3+iName*10,sPar3);
+               GetString_VM(VM_FilterPars,4+iName*10,sPar4);
+               GetString_VM(VM_FilterPars,5+iName*10,sPar5);
+               GetString_VM(VM_FilterPars,6+iName*10,sPar6);
+               rInc = rScanR_STR(sPar0);
+               rDec = rScanR_STR(sPar1);
+               rAcInc = rScanR_STR(sPar2);
+               rDir = rScanR_STR(sPar3);
+               rDist = rScanR_STR(sPar4);
+               rLP = rScanR_STR(sPar5);
+               rStrength = rScanR_STR(sPar6);
+
+               // --- apply reduction to pole filter ---
+
+               RedPol_FFT(hFFT,rInc,rDec,rAcInc,rDir);
+
+               // --- apply low-pass filter ---
+
+               if (rLP > 0.0) BWorth_FFT(hFFT,rLP,8.0,1);
+
+               // --- apply continuation filter ---
+
+               Contin_FFT(hFFT,rDist);
+
+               // --- apply the apparent susceptibilty filter ---
+
+               AppSusc_FFT(hFFT,rStrength);
+            }
+
+            else if (iStrcmp_STR(sFilterName,_n("Apparent Density Filter"),0)==0)
+            {
+               GetString_VM(VM_FilterPars,0+iName*10,sPar0);
+               GetString_VM(VM_FilterPars,1+iName*10,sPar1);
+               GetString_VM(VM_FilterPars,2+iName*10,sPar2);
+               GetString_VM(VM_FilterPars,3+iName*10,sPar3);
+               rDepth = rScanR_STR(sPar0);
+               rThick = rScanR_STR(sPar1);
+               rLP    = rScanR_STR(sPar2);
+               rDens  = rScanR_STR(sPar3);
+       
+               // --- apply low-pass filter ---
+
+               if (rLP > 0.0) BWorth_FFT(hFFT,rLP,8.0,1);
+
+               // --- apply continuation filter ---
+
+               Contin_FFT(hFFT,rDepth);
+
+               // --- apparent density filter ---
+
+               AppDens_FFT(hFFT,rThick,rDens);
+            }
+         }
+
+
+         // --- perform inverse function ---
+
+         Inverse_FFT(hFFT,hVVout,hVVin);         
+
+         Destroy_FFT(hFFT);
+      }
+
+      // --- Write the output VV back to database ---
+
+      PutChanVV_DB(Data,Line,ResCh,hVVout);
+
+      // --- Refid and mask back the data ---
+
+      ReFid_DU(Data,Line,ResCh,FidCh,OutCh,iMethod,rFidStart,rFidIncr,rDUMMY);
+      GetChanVV_DB(Data,Line,InCh,hVVin);
+      GetChanVV_DB(Data,Line,OutCh,hVVout);
+      Mask_VVU(hVVout,hVVin);
+      PutChanVV_DB(Data,Line,OutCh,hVVout);
+
+
+      // --- Advance to Next Line ---    
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+   }
+
+
+   // --- Add maker ---
+
+   Strcpy_STR(sMakeName,"FFT1MULT;FFTSAMP;");
+   Strcat_STR(sMakeName,"FFTBANDPMULT;FFTHIGHPMULT;FFTLOWPMULT;FFTBUTTWMULT;FFTGAUSSMULT;FFTCOSNMULT;");
+   Strcat_STR(sMakeName,"FFTCONTMULT;FFTHZDRVMULT;FFTVDRVMULT;FFTRPOLEMULT;FFTSUSCMULT;FFTDENSMULT;");
+   EasyMakerSymb_DB(Data,OutCh,_("FFT Multiple filters"),sMakeName);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+   Destroy_VV(hVVin);
+   Destroy_VV(hVVout);
+   Destroy_VM(VM_FilterNames);
+   Destroy_VM(VM_FilterPars);
+   DeleteSymb_DB(Data,FidCh);
+   DeleteSymb_DB(Data,ResCh);
+   
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,InCh);
+   if(InCh!=OutCh)
+      UnLockSymb_DB(Data,OutCh);
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,DisCh);
+
+
+   // --- Display the output chan ---
+
+   UnLock_EDB(EData);
+   if (iInteractive_SYS())
+   {
+      LoadChan_EDB(EData,sOutCh);
+      LoadChan_EDB(EData,sDist);
+   }
+}

@@ -1,0 +1,136 @@
+//===========================================================================
+NAME          = "Gravity Project"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "\
+
+Allows the user to edit project information.
+
+Parameters: 
+
+        GRPROJ.NAME        - Project name
+              .DESCR       - Description
+              .SCIENTIST   - Geologist
+              .DATE        - Date
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grproj.gr"
+#include "grproj.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+REG         hReg;
+DGW         Diag;             // Dialogue handle
+int         i;
+string(STR_DEFAULT_LONG) sName,sDescr,sGeo,sDate,sCompany;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- get the workspace REG ---
+      
+   hReg = Create_REG(128);
+   GetWorkspaceREG_SYS(hReg);
+      
+   Get_REG(hReg,"GRAVRED.PROJECT",sName,sizeof(sName));
+   Get_REG(hReg,"GRAVRED.DESCR",sDescr,sizeof(sDescr));
+   Get_REG(hReg,"GRAVRED.SCIENTIST",sGeo,sizeof(sGeo));  
+   Get_REG(hReg,"GRAVRED.COMPANY",sCompany,sizeof(sCompany));  
+   Get_REG(hReg,"GRAVRED.DATE",sDate,sizeof(sDate));
+   
+   
+   // --- defaults ---
+   
+   if (iStrlen_STR(sDate) == 0)
+      FormatDate_STR(rDate_SYS(),sDate,10,DATE_FORMAT_YYYYMMDD);
+   if (iStrlen_STR(sCompany) == 0)
+      iGlobal_SYS("USER.COMPANY",sCompany);  
+   if (iStrlen_STR(sGeo) == 0)
+      iGlobal_SYS("USER.NAME",sGeo);  
+      
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRPROJ");
+
+
+      // --- Set any Defaults ---
+
+      SetInfo_DGW(Diag,_GRPROJ_0,DGW_TEXT,sCompany);
+      SetInfo_DGW(Diag,_GRPROJ_1,DGW_TEXT,sName);
+      SetInfo_DGW(Diag,_GRPROJ_2,DGW_TEXT,sDescr); 
+      SetInfo_DGW(Diag,_GRPROJ_3,DGW_TEXT,sGeo);    
+      SetInfo_DGW(Diag,_GRPROJ_4,DGW_TEXT,sDate);
+      
+
+      // --- Run the Dialogue ---
+
+      do {
+         i = iRunDialogue_DGW(Diag);
+         if (i==-1) Cancel_SYS();
+         if (i==1) iRunGX_SYS("gpfcmnt.gx");
+      } while (i!=0);   
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_GRPROJ_0,DGW_TEXT,"GRPROJ","COMPANY"  );
+      GetInfoSYS_DGW(Diag,_GRPROJ_1,DGW_TEXT,"GRPROJ","PROJECT"     );
+      GetInfoSYS_DGW(Diag,_GRPROJ_2,DGW_TEXT,"GRPROJ","DESCR"    ); 
+      GetInfoSYS_DGW(Diag,_GRPROJ_3,DGW_TEXT,"GRPROJ","SCIENTIST");      
+      GetInfoSYS_DGW(Diag,_GRPROJ_4,DGW_TEXT,"GRPROJ","DATE"     );
+      
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+
+   }
+
+   // --- Get Values ---
+
+   GetString_SYS("GRPROJ","PROJECT"  ,sName);     
+   GetString_SYS("GRPROJ","DESCR"    ,sDescr);     
+   GetString_SYS("GRPROJ","SCIENTIST",sGeo);    
+   GetString_SYS("GRPROJ","COMPANY"  ,sCompany);    
+   GetString_SYS("GRPROJ","DATE"     ,sDate);
+   
+   
+   Set_REG(hReg,"GRAVRED.PROJECT",sName);
+   Set_REG(hReg,"GRAVRED.DESCR",sDescr);
+   Set_REG(hReg,"GRAVRED.SCIENTIST",sGeo);  
+   Set_REG(hReg,"GRAVRED.COMPANY",sCompany);  
+   Set_REG(hReg,"GRAVRED.DATE",sDate);
+   
+   
+   // --- save project ---
+   
+   SetWorkspaceREG_SYS(hReg);
+   Destroy_REG(hReg);
+   
+}
+

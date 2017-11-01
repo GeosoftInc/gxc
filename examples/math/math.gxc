@@ -1,0 +1,161 @@
+//===========================================================================
+NAME          = "Math"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Apply an expression to the entire database.
+
+      MATH.EXP  -  Formula to apply (up to 2000 characters)
+
+Only 60 character formulas may be applied using the interactive OE
+interface. All channels must exist.  Use ';' character to separate
+expressions.
+
+For example, here are two expressions in a single formula:
+
+               \"mag=rawmag-igrf;residual=mag-trend;\"
+
+The final ';' is optional.
+
+See also: MATHFILE GX
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+// Revision History:
+// 7.1.0: Added line names to progress.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "math.gr"
+#include "math.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(2048) sFormula;                  // Formula string;
+string(STR_DB_SYMBOL) sLine;            // Line name
+string(STR_DEFAULT) sProg;
+
+EDB         EData;
+DB          Data;                      // database handle
+
+EXP         Exp;
+DB_SYMB     Line;                      // Line Handle
+DGW         Diag;                      // Dialogue handle
+
+int         i;
+int         iLines;                    // Number of Lines Processed
+int         iTotLines;                 // Total Number of Lines to Process
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("MATHForm");
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_MATHFORM_0,DGW_TEXT,"MATH","EXP");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_MATHFORM_0,DGW_TEXT,"MATH","EXP");   
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("MATH","EXP",sFormula);
+   Strcat_STR(sFormula,";");
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(sFormula,1);
+
+   // --- Create the Expression ---
+
+   Exp = Create_EXP(Data,sFormula,2048);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+	  // --- Get the line name ---
+	  
+ 	  LOCK_R(Data, Line);
+ 	  GetSymbName_DB(Data, Line, sLine);
+ 	  UNLOCK(Data, Line);
+
+
+     // --- Update the Progress Bar ---
+
+ 	  Strcpy_STR(sProg, _("Applying formula: "));
+ 	  Strcat_STR(sProg, sLine);
+ 	  ProgName_SYS(sProg, 0);
+     ProgUpdateL_SYS(iLines,iTotLines);
+
+
+     // --- Apply the Correction ---
+
+     Math_DU(Data,Line,Exp);
+
+     // --- Advance to Next Line ---        
+
+     Line = NextSelLine_DB(Data,Line);
+     iLines++;
+  }
+
+
+  // --- Done ---
+
+  Destroy_EXP(Exp);
+  Progress_SYS(0);
+
+   // --- Release the Database ---
+
+  UnLock_EDB(EData);
+}

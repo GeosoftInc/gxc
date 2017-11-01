@@ -1,0 +1,122 @@
+//===========================================================================
+NAME          = "Edit map parameters and replot the map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+   Edit map parameters and replot the map
+   
+"
+// Revision History
+// v6.3.0: Allow for multiple mineral channels.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.7: Semplot upgrade - using template names.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+EMAP        EMap;
+MAP         Map;
+LST         Lst;
+
+string(STR_DB_SYMBOL) sView;
+string(STR_DB_SYMBOL) sMaskCh, sMineralCh;
+int i,iType,iN;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("This GX must be run interactively"));
+
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   EMap = Current_EMAP();
+   GetCurrentView_EMAP(EMap, sView);
+
+   // --- See if the current view is an XYPlot or TRIPlot view ---
+
+   iType = -1;
+   if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0)
+      iType = SEMPLOT_PLOT_XYPLOT;
+   else if(iStrncmp_STR(sView, "Triplot_", 8, STR_CASE_TOLERANT)==0)
+      iType = SEMPLOT_PLOT_TRIPLOT;
+
+   // --- If a required view is not the current view, search all the views ---
+
+   if(iType==-1) {
+
+      Map = Lock_EMAP(EMap);
+
+      Lst = Create_LST(64);
+      ViewList_MAP(Map, Lst);
+
+      iN = iSize_LST(Lst);
+      for(i=0;i<iN;i++) {
+
+         GetItem_LST(Lst,0,i,sView);
+         if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0)
+            iType = SEMPLOT_PLOT_XYPLOT;
+         else if(iStrncmp_STR(sView, "Triplot_", 7, STR_CASE_TOLERANT)==0)
+            iType = SEMPLOT_PLOT_TRIPLOT;
+         
+         // --- Set to this view ---
+                  
+         if(iType!=-1) {
+            iSetCurrentView_EMAP(EMap, sView);
+            break;
+         }
+      }
+
+      UnLock_EMAP(EMap);
+   }
+
+   if(iType==-1) {
+      Abort_SYS(_("The current map does not appear to contain any XYPlot or TriPlot views."));
+   }
+
+
+   // --- Get the current mask channel ---
+
+   GetString_SYS("SEMPLOT","MASK",sMaskCh);
+
+
+   // --- Get the mineral channel ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+   
+
+   // --- Call the parameters GUI and replot the map ---
+
+   Map = Lock_EMAP(EMap);
+   EditMapPlotParameters_SEMPLOT(Data, sMaskCh, sMineralCh, Map, sView);
+
+   UnLock_EDB(EData);   
+   UnLock_EMAP(EMap);   
+
+   // --- Reset the map view to what it was at the start ---
+
+   iSetCurrentView_EMAP(EMap, sView);
+   
+}

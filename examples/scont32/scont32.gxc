@@ -1,0 +1,711 @@
+//===========================================================================
+NAME          = "Make a contour map from a grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Contour"
+
+DESCRIPTION   = "
+   Make a contour map from a grid.  The GX will create a control file named
+   \"_contour.con\", which will be used to create a contour plot.
+"
+// Revision History
+// v6.3.0: Remove obsolete GTITLE parameter from output line #2 comments.
+// v5.1.8: Altered Label colour option to allow no labels at all.
+// v5.1.7: Added Label colour option to line 7 of the control file.
+//===========================================================================
+
+RESOURCE = "scont32.gr"
+#include "scont32.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         MainDiag,OptionDiag,ColorDiag,StyleDiag,LabelDiag;
+
+string(STR_GROUP) sGrpName;
+string(STR_FILE) sGrid;
+string(STR_DEFAULT_LONG) sType;
+string(STR_DEFAULT_LONG) sDec;
+int         iDec;
+string(STR_DEFAULT_LONG) sSmooth;
+string(STR_DEFAULT_LONG) sSuppress;
+string(STR_DEFAULT_LONG) sDense;
+string(STR_DEFAULT_LONG) sLotick;
+string(STR_DEFAULT_SHORT) sXval,sXvalEx;
+string(STR_DEFAULT_LONG) sLabup, sLabelCol;
+string(STR_DEFAULT_LONG) sLabsize;
+string(STR_DEFAULT_LONG) sDefline;
+string(STR_DEFAULT_LONG) sLev1,sLev2,sLev3,sLev4,sLev5,sLev6,sLev7,sLev8;
+string(STR_DEFAULT_LONG) sLab1,sLab2,sLab3,sLab4,sLab5,sLab6,sLab7,sLab8;
+string(STR_DEFAULT_LONG) sCol1,sCol2,sCol3,sCol4,sCol5,sCol6,sCol7,sCol8;
+string(STR_DEFAULT_LONG) sSty1,sSty2,sSty3,sSty4,sSty5,sSty6,sSty7,sSty8;
+
+int         i,iSty,iDone;
+
+string(STR_DEFAULT_LONG) sText;
+WA          WA_con;
+int         iNextLev;
+
+string(STR_DEFAULT_LONG) sGroup;
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+
+
+//===========================================================================
+//                           CONTOUR CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS()) {
+   
+   
+      // --- setup the dialog ---
+
+      MainDiag = Create_DGW("SCONT32");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_0,DGW_FILEPATH,"CONTOUR","GRID");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_1,DGW_LISTALIAS,"CONTOUR","TYPE");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_2,DGW_TEXT,"CONTOUR","LEV1");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_3,DGW_TEXT,"CONTOUR","LEV2");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_4,DGW_TEXT,"CONTOUR","LEV3");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_5,DGW_TEXT,"CONTOUR","LEV4");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_6,DGW_TEXT,"CONTOUR","LEV5");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_7,DGW_TEXT,"CONTOUR","LEV6");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_8,DGW_TEXT,"CONTOUR","LEV7");
+      SetInfoSYS_DGW(MainDiag,_SCONT32_9,DGW_TEXT,"CONTOUR","LEV8");
+      
+      OptionDiag = Create_DGW("CONTOPT");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_0,DGW_LISTALIAS,"CONTOUR","SMOOTH");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_1,DGW_LISTALIAS,"CONTOUR","SUPPRESS");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_2,DGW_TEXT,     "CONTOUR","DENSE");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_3,DGW_LISTALIAS,"CONTOUR","HILOW");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_4,DGW_TEXT     ,"CONTOUR","HILOWEX");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_5,DGW_LISTALIAS,"CONTOUR","LABELCOL");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_6,DGW_LISTALIAS,"CONTOUR","LABUP");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_7,DGW_TEXT,     "CONTOUR","LABSIZE");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_8,DGW_TEXT,     "CONTOUR","DEC");
+      SetInfoSYS_DGW(OptionDiag,_CONTOPT_9,DGW_LISTALIAS,"CONTOUR","DEFLINE");
+      
+      ColorDiag = Create_DGW("COLOR");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_0,DGW_LISTALIAS,"CONTOUR","COL1");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_1,DGW_LISTALIAS,"CONTOUR","COL2");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_2,DGW_LISTALIAS,"CONTOUR","COL3");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_3,DGW_LISTALIAS,"CONTOUR","COL4");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_4,DGW_LISTALIAS,"CONTOUR","COL5");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_5,DGW_LISTALIAS,"CONTOUR","COL6");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_6,DGW_LISTALIAS,"CONTOUR","COL7");
+      SetInfoSYS_DGW(ColorDiag,_COLOR_7,DGW_LISTALIAS,"CONTOUR","COL8");
+
+      StyleDiag = Create_DGW("STYLE");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_0,DGW_LISTALIAS,"CONTOUR","STY1");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_1,DGW_LISTALIAS,"CONTOUR","STY2");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_2,DGW_LISTALIAS,"CONTOUR","STY3");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_3,DGW_LISTALIAS,"CONTOUR","STY4");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_4,DGW_LISTALIAS,"CONTOUR","STY5");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_5,DGW_LISTALIAS,"CONTOUR","STY6");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_6,DGW_LISTALIAS,"CONTOUR","STY7");
+      SetInfoSYS_DGW(StyleDiag,_STYLE_7,DGW_LISTALIAS,"CONTOUR","STY8");
+
+      LabelDiag = Create_DGW("LABEL");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_0,DGW_LISTALIAS,"CONTOUR","LAB1");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_1,DGW_LISTALIAS,"CONTOUR","LAB2");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_2,DGW_LISTALIAS,"CONTOUR","LAB3");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_3,DGW_LISTALIAS,"CONTOUR","LAB4");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_4,DGW_LISTALIAS,"CONTOUR","LAB5");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_5,DGW_LISTALIAS,"CONTOUR","LAB6");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_6,DGW_LISTALIAS,"CONTOUR","LAB7");
+      SetInfoSYS_DGW(LabelDiag,_LABEL_7,DGW_LISTALIAS,"CONTOUR","LAB8");
+                        
+      iDone = FALSE;
+      while (!iDone) {
+      
+         // --- main dialogue ---
+
+         i = iRunDialogue_DGW(MainDiag);
+         
+         switch (i) {
+         
+            case -1: 
+               Cancel_SYS();
+               
+            case 0: 
+               iDone = TRUE; 
+               break;
+               
+            case 1:
+            
+               if (iRunDialogue_DGW(OptionDiag)) Cancel_SYS();
+               iDone = FALSE; 
+               break;
+               
+            case 2:
+            
+               // --- line styles ---
+            
+               iSty = 1; // --- color dialogue
+               
+               while (iSty > 0) {
+            
+                  switch (iSty) {
+                  
+                     case 1:
+                     
+                        iSty = iRunDialogue_DGW(ColorDiag);
+                        if (iSty == -1) Cancel_SYS();
+                        break;
+
+                     case 2:
+                     
+                        iSty = iRunDialogue_DGW(StyleDiag);
+                        if (iSty == -1) Cancel_SYS();
+                        break;
+                        
+                     case 3:
+                     
+                        iSty = iRunDialogue_DGW(LabelDiag);
+                        if (iSty == -1) Cancel_SYS();
+                        break;
+                        
+                     default:
+                        Abort_SYS(_("Invalid dialog."));                        
+
+                  }               
+                  
+               }                  
+               
+               iDone = FALSE; 
+               break;
+                  
+         }
+
+      }
+      
+      
+      // --- Save values in main parameter block ---
+
+      GetInfoSYS_DGW(MainDiag,_SCONT32_0,DGW_FILEPATH,"CONTOUR","GRID");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_1,DGW_LISTALIAS,"CONTOUR","TYPE");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_2,DGW_TEXT,"CONTOUR","LEV1");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_3,DGW_TEXT,"CONTOUR","LEV2");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_4,DGW_TEXT,"CONTOUR","LEV3");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_5,DGW_TEXT,"CONTOUR","LEV4");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_6,DGW_TEXT,"CONTOUR","LEV5");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_7,DGW_TEXT,"CONTOUR","LEV6");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_8,DGW_TEXT,"CONTOUR","LEV7");
+      GetInfoSYS_DGW(MainDiag,_SCONT32_9,DGW_TEXT,"CONTOUR","LEV8");
+
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_0,DGW_LISTALIAS,"CONTOUR","SMOOTH");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_1,DGW_LISTALIAS,"CONTOUR","SUPPRESS");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_2,DGW_TEXT,     "CONTOUR","DENSE");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_3,DGW_LISTALIAS,"CONTOUR","HILOW");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_4,DGW_TEXT,     "CONTOUR","HILOWEX");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_5,DGW_LISTALIAS,"CONTOUR","LABELCOL");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_6,DGW_LISTALIAS,"CONTOUR","LABUP");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_7,DGW_TEXT,     "CONTOUR","LABSIZE");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_8,DGW_TEXT,     "CONTOUR","DEC");
+      GetInfoSYS_DGW(OptionDiag,_CONTOPT_9,DGW_LISTALIAS,"CONTOUR","DEFLINE");
+      
+      GetInfoSYS_DGW(ColorDiag,_COLOR_0,DGW_LISTALIAS,"CONTOUR","COL1");
+      GetInfoSYS_DGW(ColorDiag,_COLOR_1,DGW_LISTALIAS,"CONTOUR","COL2");
+      GetInfoSYS_DGW(ColorDiag,_COLOR_2,DGW_LISTALIAS,"CONTOUR","COL3");
+      GetInfoSYS_DGW(ColorDiag,_COLOR_3,DGW_LISTALIAS,"CONTOUR","COL4");
+      GetInfoSYS_DGW(ColorDiag,_COLOR_4,DGW_LISTALIAS,"CONTOUR","COL5");
+      GetInfoSYS_DGW(ColorDiag,_COLOR_5,DGW_LISTALIAS,"CONTOUR","COL6");
+      GetInfoSYS_DGW(ColorDiag,_COLOR_6,DGW_LISTALIAS,"CONTOUR","COL7");
+      GetInfoSYS_DGW(ColorDiag,_COLOR_7,DGW_LISTALIAS,"CONTOUR","COL8");
+                        
+      GetInfoSYS_DGW(StyleDiag,_STYLE_0,DGW_LISTALIAS,"CONTOUR","STY1");
+      GetInfoSYS_DGW(StyleDiag,_STYLE_1,DGW_LISTALIAS,"CONTOUR","STY2");
+      GetInfoSYS_DGW(StyleDiag,_STYLE_2,DGW_LISTALIAS,"CONTOUR","STY3");
+      GetInfoSYS_DGW(StyleDiag,_STYLE_3,DGW_LISTALIAS,"CONTOUR","STY4");
+      GetInfoSYS_DGW(StyleDiag,_STYLE_4,DGW_LISTALIAS,"CONTOUR","STY5");
+      GetInfoSYS_DGW(StyleDiag,_STYLE_5,DGW_LISTALIAS,"CONTOUR","STY6");
+      GetInfoSYS_DGW(StyleDiag,_STYLE_6,DGW_LISTALIAS,"CONTOUR","STY7");
+      GetInfoSYS_DGW(StyleDiag,_STYLE_7,DGW_LISTALIAS,"CONTOUR","STY8");
+                        
+      GetInfoSYS_DGW(LabelDiag,_LABEL_0,DGW_LISTALIAS,"CONTOUR","LAB1");
+      GetInfoSYS_DGW(LabelDiag,_LABEL_1,DGW_LISTALIAS,"CONTOUR","LAB2");
+      GetInfoSYS_DGW(LabelDiag,_LABEL_2,DGW_LISTALIAS,"CONTOUR","LAB3");
+      GetInfoSYS_DGW(LabelDiag,_LABEL_3,DGW_LISTALIAS,"CONTOUR","LAB4");
+      GetInfoSYS_DGW(LabelDiag,_LABEL_4,DGW_LISTALIAS,"CONTOUR","LAB5");
+      GetInfoSYS_DGW(LabelDiag,_LABEL_5,DGW_LISTALIAS,"CONTOUR","LAB6");
+      GetInfoSYS_DGW(LabelDiag,_LABEL_6,DGW_LISTALIAS,"CONTOUR","LAB7");
+      GetInfoSYS_DGW(LabelDiag,_LABEL_7,DGW_LISTALIAS,"CONTOUR","LAB8");
+      
+   }
+
+
+   // --- Get values from parameter block as strings ---
+   // --- Change descriptive strings for control file codes as necessary ---
+
+   GetString_SYS("CONTOUR","GRID",sGrid);
+   if (iStrlen_STR(sGrid)<=0) Abort_SYS(_("You must specify the input grid"));
+
+   GetString_SYS("CONTOUR","TYPE",sType);
+
+   GetString_SYS("CONTOUR","LEV1",sLev1);
+   //if (iStrlen_STR(sLev1)<=0) Abort_SYS(_("You must specify the first contour level"));
+
+   GetString_SYS("CONTOUR","LEV2",sLev2);
+   GetString_SYS("CONTOUR","LEV3",sLev3);
+   GetString_SYS("CONTOUR","LEV4",sLev4);
+   GetString_SYS("CONTOUR","LEV5",sLev5);
+   GetString_SYS("CONTOUR","LEV6",sLev6);
+   GetString_SYS("CONTOUR","LEV7",sLev7);
+   GetString_SYS("CONTOUR","LEV8",sLev8);
+
+   GetString_SYS("CONTOUR","DEC",sDec);
+   if (iStrlen_STR(sDec)<=0) 
+      Strcpy_STR(sDec,"0");  // "0" means determine decimals automatically
+   else
+   {
+      iDec=iScanI_STR(sDec);
+      if (iDec==0) iDec=-1;  // Change to control file decimal convention
+      else if (iDec>0) iDec=iDec+1; 
+      else iDec=0;
+      FormatI_STR(iDec,sDec,3);
+   }
+
+   
+   // --- The following parameters are set by CONTOPT.GX ---
+
+   GetString_SYS("CONTOUR","SMOOTH",sSmooth);
+   GetString_SYS("CONTOUR","SUPPRESS",sSuppress);
+   GetString_SYS("CONTOUR","DENSE",sDense);
+   GetString_SYS("CONTOUR","LABUP",sLabup);
+   GetString_SYS("CONTOUR","LABELCOL",sLabelCol);
+   GetString_SYS("CONTOUR","LABSIZE",sLabsize);
+   GetString_SYS("CONTOUR","DEFLINE",sDefline);
+
+   // --- set high-low annotation option ---
+
+   i = iGetInt_SYS("CONTOUR","HILOW");
+   if ((i == 0) || (i == iDUMMY)) 
+   {
+      Strcpy_STR(sLotick,"1");
+      Strcpy_STR(sXval,"0");
+      Strcpy_STR(sXvalEx,"");
+   } 
+   else if (i == -1)
+   {
+      Strcpy_STR(sLotick,"0");
+      Strcpy_STR(sXval,"0");
+      Strcpy_STR(sXvalEx,"");
+   } 
+   else 
+   {
+      Strcpy_STR(sLotick,"0");
+      FormatI_STR(i,sXval,3);
+      i = iGetInt_SYS("CONTOUR","HILOWEX");
+      FormatI_STR(i,sXvalEx,3);
+   }
+
+
+   // --- The following parameters are set by CLAB.GX ---
+
+   GetString_SYS("CONTOUR","LAB1",sLab1); 
+   GetString_SYS("CONTOUR","LAB2",sLab2);
+   GetString_SYS("CONTOUR","LAB3",sLab3);
+   GetString_SYS("CONTOUR","LAB4",sLab4);
+   GetString_SYS("CONTOUR","LAB5",sLab5);
+   GetString_SYS("CONTOUR","LAB6",sLab6);
+   GetString_SYS("CONTOUR","LAB7",sLab7);
+   GetString_SYS("CONTOUR","LAB8",sLab8);
+                        
+   
+   // --- line colour/style ---
+
+   if (iExistString_SYS("CONTOUR","COL1"))
+      GetString_SYS("CONTOUR","COL1",sCol1); 
+   else
+      Strcpy_STR(sCol1,"kt150");
+
+   if (iExistString_SYS("CONTOUR","STY1"))
+      GetString_SYS("CONTOUR","STY1",sSty1); 
+   else
+      Strcpy_STR(sSty1,"0");
+
+   if (iExistString_SYS("CONTOUR","COL2"))
+      GetString_SYS("CONTOUR","COL2",sCol2);
+   else
+      Strcpy_STR(sCol2,"kt300");
+
+   if (iExistString_SYS("CONTOUR","STY2"))
+      GetString_SYS("CONTOUR","STY2",sSty2);     
+   else
+      Strcpy_STR(sSty2,"0");
+
+   if (iExistString_SYS("CONTOUR","COL3"))
+      GetString_SYS("CONTOUR","COL3",sCol3);
+   else
+      Strcpy_STR(sCol3,"kt450");
+
+   if (iExistString_SYS("CONTOUR","STY3"))
+      GetString_SYS("CONTOUR","STY3",sSty3);     
+   else
+      Strcpy_STR(sSty3,"0");
+
+   if (iExistString_SYS("CONTOUR","COL4"))
+      GetString_SYS("CONTOUR","COL4",sCol4);
+   else
+      Strcpy_STR(sCol4,"kt600");
+
+   if (iExistString_SYS("CONTOUR","STY4"))
+      GetString_SYS("CONTOUR","STY4",sSty4);     
+   else
+      Strcpy_STR(sSty4,"0");
+
+   if (iExistString_SYS("CONTOUR","COL5"))
+      GetString_SYS("CONTOUR","COL5",sCol5);
+   else
+      Strcpy_STR(sCol5,"kt600");
+
+   if (iExistString_SYS("CONTOUR","STY5"))
+      GetString_SYS("CONTOUR","STY5",sSty5);     
+   else
+      Strcpy_STR(sSty5,"0");
+
+   if (iExistString_SYS("CONTOUR","COL6"))
+      GetString_SYS("CONTOUR","COL6",sCol6);
+   else
+      Strcpy_STR(sCol6,"kt600");
+
+   if (iExistString_SYS("CONTOUR","STY6"))
+      GetString_SYS("CONTOUR","STY6",sSty6);     
+   else
+      Strcpy_STR(sSty6,"0");
+
+   if (iExistString_SYS("CONTOUR","COL7"))
+      GetString_SYS("CONTOUR","COL7",sCol7);
+   else
+      Strcpy_STR(sCol7,"kt600");
+
+   if (iExistString_SYS("CONTOUR","STY7"))
+      GetString_SYS("CONTOUR","STY7",sSty7);     
+   else
+      Strcpy_STR(sSty7,"0");
+
+   if (iExistString_SYS("CONTOUR","COL8"))
+      GetString_SYS("CONTOUR","COL8",sCol8);
+   else
+      Strcpy_STR(sCol8,"kt600");
+
+   if (iExistString_SYS("CONTOUR","STY8"))
+      GetString_SYS("CONTOUR","STY8",sSty8);     
+   else
+      Strcpy_STR(sSty8,"0");
+                        
+   
+   // --- create an MDF file from the map name ---
+
+   iRunGX_SYS("sclmap");
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   
+   MapMDF_MVU(Map,"_contour.mdf","*Data");
+ 
+ 
+   // --- write contour control file
+
+   WA_con=Create_WA("_contour.con",0);
+   Puts_WA(WA_con,_n("_contour.mdf /MDF|scale, ufac, x0, y0"));
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,"0,");
+   Strcat_STR(sText,sLotick);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sSmooth);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sSuppress);
+   Strcat_STR(sText,_n(" /border, lowtic, smooth, suppop, nth"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,sDefline);
+   Strcat_STR(sText,_n(" /pdef, ptick, pxval, pframe, psidel"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,sLabsize);
+   Strcat_STR(sText,_n(" /hlb, htl, hcr, htk, hxv, hsl"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Puts_WA(WA_con,_n("     /ominl,cminl,skipa,skipb,skipc,skipd,skipe,skipf"));
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,sXval);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sDec);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sXvalEx);
+   Strcat_STR(sText,_n(" /xval, digxv, minxv, markxv"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,sType);
+   Strcat_STR(sText,",,,");
+   Strcat_STR(sText,sLabup);
+   if(iStrlen_STR(sLabelCol)) {
+      Strcat_STR(sText,",,,");
+      Strcat_STR(sText,sLabelCol);
+   }
+   Strcat_STR(sText,_n(" /levopt, conbeg, conend, lbup, lbmult, logopt, labelcol"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,sLev1);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sSty1);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,"C1=");
+   Strcat_STR(sText,sCol1);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLab1);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sDense);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sDec);
+   Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   if (iStrlen_STR(sLev2)<=0)
+      iNextLev=0;
+   else
+      iNextLev=1;
+
+   if (iNextLev)
+   {
+      Strcpy_STR(sText,sLev2);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sSty2);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"C2=");
+      Strcat_STR(sText,sCol2);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sLab2);
+      Strcat_STR(sText,",");
+      if (iStrlen_STR(sLev3)<=0)
+      {
+         Strcat_STR(sText,"0.0");
+         iNextLev=0;
+      }
+      else
+      {
+         Strcat_STR(sText,sDense);
+         iNextLev=1;
+      }
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sDec);
+      Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+   }
+
+   if (iNextLev)
+   {
+      Strcpy_STR(sText,sLev3);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sSty3);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"C3=");
+      Strcat_STR(sText,sCol3);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sLab3);
+      Strcat_STR(sText,",");
+      if (iStrlen_STR(sLev4)<=0)
+      {
+         Strcat_STR(sText,"0.0");
+         iNextLev=0;
+      }
+      else
+      {
+         Strcat_STR(sText,sDense);
+         iNextLev=1;
+      }
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sDec);
+      Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+   }
+
+   if (iNextLev)
+   {
+      Strcpy_STR(sText,sLev4);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sSty4);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"C4=");
+      Strcat_STR(sText,sCol4);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sLab4);
+      Strcat_STR(sText,",");
+      if (iStrlen_STR(sLev5)<=0)
+      {
+         Strcat_STR(sText,"0.0");
+         iNextLev=0;
+      }
+      else
+      {
+         Strcat_STR(sText,sDense);
+         iNextLev=1;
+      }
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sDec);
+      Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+   }
+
+   if (iNextLev)
+   {
+      Strcpy_STR(sText,sLev5);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sSty5);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"C5=");
+      Strcat_STR(sText,sCol5);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sLab5);
+      Strcat_STR(sText,",");
+      if (iStrlen_STR(sLev6)<=0)
+      {
+         Strcat_STR(sText,"0.0");
+         iNextLev=0;
+      }
+      else
+      {
+         Strcat_STR(sText,sDense);
+         iNextLev=1;
+      }
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sDec);
+      Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+   }
+
+   if (iNextLev)
+   {
+      Strcpy_STR(sText,sLev6);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sSty6);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"C6=");
+      Strcat_STR(sText,sCol6);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sLab6);
+      Strcat_STR(sText,",");
+      if (iStrlen_STR(sLev7)<=0)
+      {
+         Strcat_STR(sText,"0.0");
+         iNextLev=0;
+      }
+      else
+      {
+         Strcat_STR(sText,sDense);
+         iNextLev=1;
+      }
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sDec);
+      Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+   }
+
+   if (iNextLev)
+   {
+      Strcpy_STR(sText,sLev7);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sSty7);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"C7=");
+      Strcat_STR(sText,sCol7);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sLab7);
+      Strcat_STR(sText,",");
+      if (iStrlen_STR(sLev8)<=0)
+      {
+         Strcat_STR(sText,"0.0");
+         iNextLev=0;
+      }
+      else
+      {
+         Strcat_STR(sText,sDense);
+         iNextLev=1;
+      }
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sDec);
+      Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+      Puts_WA(WA_con,sText);
+      NewLine_WA(WA_con);
+   }
+
+   if (iNextLev)
+   {
+      Strcpy_STR(sText,sLev8);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sSty8);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"C8=");
+      Strcat_STR(sText,sCol8);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sLab8);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,"0.0");
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sDec);
+      Strcat_STR(sText,_n(" /cint,lintyp,catt,label,dense,digits,conlo,conhi"));
+      Puts_WA(WA_con,sText);
+   }
+
+   Destroy_WA(WA_con);
+
+   
+   // --- start a group ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   FileNamePart_STR(sGrid,sGroup,STR_FILE_PART_NAME);
+//   Strcat_STR(sGroup,"_contour");
+   GenGroupName_STR("CONTOUR",sGroup,"",sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   LineStyle_MVIEW(View,0,0.0);
+   
+
+   // --- Add maker object ---
+
+   Maker_MVIEW(View,0,1,"SCONT32",MAKER_GX,_("Contours..."),"CONTOUR;");
+   
+
+   // --- draw contours ---
+
+   Progress_SYS(1);
+   Contour_MVU(View,"_contour.con",sGrid);
+   Progress_SYS(0);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   
+   // --- Show any errors, then redraw ---
+   
+   ShowError_SYS();
+   Redraw_EMAP(EMap);
+
+} 
+

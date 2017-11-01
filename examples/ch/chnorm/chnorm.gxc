@@ -1,0 +1,341 @@
+
+//===========================================================================
+NAME          = "Create normalised versions of assay channels"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis/GeochemUtilities"
+
+DESCRIPTION   = " 
+
+         CHNORM.CHANNELS - One of ASSAY, DISPLAYED_ASSAY or LIST
+         CHNORM.OUTLIERS - One of 0:INCLUDE
+                                  1:CLIP 
+                                  2:DUMMY
+               .RANGE    - Output range (default = 1).
+"
+// Revision History:
+// v6.0.0: Fixed bug with single-character channel names; bad call to Substr_STR
+// v5.1.8: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "CHNORM.gr"
+#include "CHNORM.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch,ChNew,Line;
+DGW         Diag;
+LST         ChLST;
+ST          St;
+REG         Reg;
+
+
+VV          VVd;
+
+string(STR_DEFAULT) sChOpt, sMsg, sVal;
+string(STR_DB_SYMBOL) sChan, sCh;
+string(32768) sChannels, sAllowed;
+
+real rMax, rMaxD, rRange, rOutlier, rScale, rVal;
+
+int i,iChans,iRet,iOutliers,iDec,iD,iNew,iN;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Open current database ---
+
+   EData = Current_EDB();
+
+   if(iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHNORM");
+
+      SetInfoSYS_DGW(Diag,_CHNORM_0,DGW_LISTALIAS,"CHNORM","CHANNELS");     
+      SetInfoSYS_DGW(Diag,_CHNORM_1,DGW_TEXT,"CHNORM","RANGE");     
+      SetInfoSYS_DGW(Diag,_CHNORM_2,DGW_LISTALIAS,"CHNORM","OUTLIERS");     
+
+      iRet = iRunDialogue_DGW(Diag);
+      if(iRet==-1) Cancel_SYS();
+      
+      GetInfoSYS_DGW(Diag,_CHNORM_0,DGW_LISTALIAS,"CHNORM","CHANNELS");     
+      GetInfoSYS_DGW(Diag,_CHNORM_1,DGW_TEXT,"CHNORM","RANGE");     
+      GetInfoSYS_DGW(Diag,_CHNORM_2,DGW_LISTALIAS,"CHNORM","OUTLIERS");     
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHNORM","CHANNELS",sChOpt);
+   iOutliers = iGetInt_SYS("CHNORM","OUTLIERS");
+   if(iOutliers<0 || iOutliers>2) iOutliers = 0;   // leave by default
+   rRange = rGetReal_SYS("CHNORM","RANGE");
+   if(rRange<=0.0) rRange = 1.0;
+
+   
+   // --- create LSTs to hold channels ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   ClassChanLST_DB(Data, ChLST, "ASSAY");
+   UnLock_EDB(EData);
+
+
+   // --- Remove all channels with "_N" at the end - already normalised ---
+
+   iChans = iSize_LST(ChLST);
+   for(i=iChans-1;i>=0;i--) {
+      GetItem_LST(ChLST,0, i, sChan);
+      iN = iStrlen_STR(sChan);
+      if(iN<3) continue;
+      
+      Substr_STR (sVal, sChan, iN-2, 2);
+      if(iStrcmp_STR(sVal, "_N", STR_CASE_TOLERANT)==0)
+         DelItem_LST(ChLST, i);
+   }
+
+
+   // --- The remaining items are those which can be selected from ---
+
+   ConvertToCSVString_LST(ChLST, sAllowed);
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChOpt);
+   SetString_SYS("CHCHANLST","GX","CHNORM");
+   SetString_SYS("CHCHANLST","ALLOWED",sAllowed);
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- Get channel LST ---
+      
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+   iChans = iSize_LST(ChLST);
+   if(iChans==0)
+      Abort_SYS(_("No assay channels found (\"_N\" channels are excluded)"));
+
+   
+   // --- get objects ---
+
+   VVd = Create_VV(REAL,0);
+   St = Create_ST();   
+   Reg = Create_REG(128);
+   
+   Progress_SYS(1);  
+
+
+   // --- Scan all the data once to get the range ---
+
+   Data = Lock_EDB(EData);
+   for (i=0;i<iChans;i++) {
+            
+      Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetItem_LST(ChLST,0,i,sChan);
+
+      LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+      
+      // --- Create new channel ---
+
+      Strcpy_STR(sCh, sChan);
+      Strcat_STR(sCh, "_N");
+
+      iNew = 0;
+      if(!iExistChan_DB(Data, sCh)) {
+         ChNew = DupSymbNoLock_DB(Data, Ch, sCh);
+         iNew = 1;
+      }
+      else
+         ChNew = FindChan_DB(Data, sCh);
+
+      LockSymb_DB(Data,ChNew,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+      Strcpy_STR(sMsg,_("Processing: "));
+      Strcat_STR(sMsg,sChan);
+      ProgName_SYS(sMsg, 0);
+      ProgUpdateL_SYS(i,iChans);
+
+      Reset_ST(St);
+
+
+      // --- Get outlier limit ---
+
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+
+ 		   // --- get data ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+    	   GetChanVV_DB(Data,Line,Ch,VVd);
+
+         // --- stat ---
+
+         Statistics_VV(St,VVd);
+
+         UnLockSymb_DB(Data,Line);
+         Line = NextSelLine_DB(Data, Line);
+      }
+
+
+      // --- Set the normalization scaling. If there is an outlier limit, use the
+      //     minimum of the data max and the outlier value ---
+
+      rMaxD = rGetInfo_ST(St, ST_MAX);
+      rMax = rMaxD;
+
+      GetRegSymb_DB(Data,Ch,Reg);
+      GetReal_REG(Reg,"OUTLIERLIMIT",rOutlier);
+
+      if(rOutlier!=rDUMMY) {
+         if(rMaxD > rOutlier) rMax = rOutlier;
+      }
+      
+      // --- Set number of decimals based on new range of data ---
+
+      if(iNew && rMax > 0.0) {
+
+         iD = iGetChanDecimal_DB(Data, Ch);
+         iDec = 3 - (int)rFloor_MATH(rLog10_MATH(rRange));
+
+         if(iDec>iD) {
+            SetChanDecimal_DB(Data, ChNew, iDec);
+         }
+
+
+         // --- Scale attributes by same values ---
+
+         rScale = rRange / rMax;
+         if(rOutlier!=rDUMMY) {
+            rOutlier *= rScale;
+            SetReal_REG(Reg,"OUTLIERLIMIT",rOutlier);
+         }
+
+         GetReal_REG(Reg,"DETECTLIMIT",rVal);
+         if(rVal!=rDUMMY) {
+            rVal *= rScale;
+            SetReal_REG(Reg,"DETECTLIMIT",rVal);
+         }
+
+         GetReal_REG(Reg,"STANDARDMIN",rVal);
+         if(rVal!=rDUMMY) {
+            rVal *= rScale;
+            SetReal_REG(Reg,"STANDARDMIN",rVal);
+         }
+
+         GetReal_REG(Reg,"STANDARDMAX",rVal);
+         if(rVal!=rDUMMY) {
+            rVal *= rScale;
+            SetReal_REG(Reg,"STANDARDMAX",rVal);
+         }
+
+         SetRegSymb_DB(Data,ChNew,Reg);
+      }
+
+
+      // --- Go through all selected Lines and normalize ---
+
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+  		   // --- get data ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+    	   GetChanVV_DB(Data,Line,Ch,VVd);
+
+
+         // --- Normalise ---
+
+         if(rMax>0.0) {
+
+            Trans_VV(VVd, 0.0, rRange/rMax);
+
+
+            // --- Handle outliers ---
+
+            if(rMaxD > rMax) {
+            
+               if(iOutliers == 1) {  // clip outliers 
+
+                  Clip_VVU(VVd, 0.0, rRange, VVU_CLIP_LIMIT);
+               }
+               else if(iOutliers == 2) {  // dummy outliers
+
+                  Clip_VVU(VVd, 0.0, rRange, VVU_CLIP_DUMMY);
+               }               
+            }
+         }
+    	   PutChanVV_DB(Data,Line,ChNew,VVd);
+
+         
+         // --- Need to associate new channel? ---
+
+         if(iLineCategory_DB(Data,Line)==DB_CATEGORY_LINE_GROUP)
+            AddAssociatedLoad_DB(Data,Line,ChNew);            
+
+
+         UnLockSymb_DB(Data,Line);
+         Line = NextSelLine_DB(Data, Line);
+      }
+
+
+      // --- Unlock the channel ---
+
+      UnLockSymb_DB(Data,Ch);
+      UnLockSymb_DB(Data,ChNew);
+
+
+      // --- Save the new name to the channel LST ---
+
+      SetItem_LST(ChLST, 0, i, sCh);
+
+   }
+
+
+   Progress_SYS(0);  
+
+   Destroy_SYS(VVd);
+   Destroy_ST(St);
+
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+
+   // --- Load new channels into database ---
+
+   for (i=0;i<iChans;i++) {
+            
+      Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetItem_LST(ChLST,0,i,sChan);
+      LoadChan_EDB(EData, sChan);
+   }
+}

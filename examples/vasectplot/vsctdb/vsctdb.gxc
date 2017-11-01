@@ -1,0 +1,294 @@
+//===========================================================================
+NAME          = "Extract Array section data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Array Channels"
+
+DESCRIPTION   = "\
+
+Parameters: 
+
+"
+// Revision History:
+// v6.2:   Fixed a bug when no data in the line.
+// v5.1.8: New GX.
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "VSCTDB.gr"
+#include "VSCTDB.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;             // Database handle
+DB_SYMB     CondCh;           // Channel Handle
+DB_SYMB     DepthCh;          // Channel Handle
+DB_SYMB     StatCh;
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+VA          CondVA,DepthVA;
+VV          StatVV;
+
+int         i;                // Utility 
+int         iChSize;
+int         iLen;
+
+string(DB_SYMB_NAME_SIZE)  sCondCh,sDepthCh,sStatCh,sLine;
+string(GS_MAX_PATH)        sDBs;
+string(60)  sLabel;           // Label for progress bar
+
+//EDB         EDatas;
+DB          Datas;
+DB_SYMB     XsCh,YsCh,ZsCh;
+DB_SYMB     Lines;
+VV          XsVV,YsVV,ZsVV;
+string(DB_SYMB_NAME_SIZE)  sX,sY,sZ;
+string(DB_SYMB_NAME_SIZE)  sD,sTmp;
+real        rD;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+ 
+  // --- Initialize ---
+   
+   Strcpy_STR(sX,"X");
+   Strcpy_STR(sY,"Y");
+   Strcpy_STR(sZ,"Z");
+   
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("VSCTDB");
+
+     
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_VSCTDB_0);
+     SymbLST_DB(Data,List,DB_SYMB_LINE);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_VSCTDB_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_VSCTDB_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_VSCTDB_3);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_VSCTDB_0,DGW_TEXT,"VSCTDB","LINE");
+     SetInfoSYS_DGW(Diag,_VSCTDB_1,DGW_TEXT,"VSCTDB","COND");
+     SetInfoSYS_DGW(Diag,_VSCTDB_2,DGW_TEXT,"VSCTDB","DEPTH");
+     SetInfoSYS_DGW(Diag,_VSCTDB_3,DGW_TEXT,"VSCTDB","STATION");
+     SetInfoSYS_DGW(Diag,_VSCTDB_4,DGW_FILEPATH,"VSCTDB","SECDB");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_VSCTDB_0,DGW_TEXT,"VSCTDB","LINE");
+     GetInfoSYS_DGW(Diag,_VSCTDB_1,DGW_TEXT,"VSCTDB","COND");
+     GetInfoSYS_DGW(Diag,_VSCTDB_2,DGW_TEXT,"VSCTDB","DEPTH");
+     GetInfoSYS_DGW(Diag,_VSCTDB_3,DGW_TEXT,"VSCTDB","STATION");
+     GetInfoSYS_DGW(Diag,_VSCTDB_4,DGW_FILEPATH,"VSCTDB","SECDB");
+
+     
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VSCTDB","LINE",sLine);
+   GetString_SYS("VSCTDB","COND",sCondCh);
+   GetString_SYS("VSCTDB","DEPTH",sDepthCh);
+   GetString_SYS("VSCTDB","STATION",sStatCh);
+   GetString_SYS("VSCTDB","SECDB", sDBs);
+
+   
+   // --- Do Channels Exist ? ---
+
+   if (!iExistSymb_DB(Data,sCondCh,DB_SYMB_CHAN))
+      Abort_SYS(_("The specified Conductivity channel does not exist in the database."));
+   CondCh = FindSymb_DB(Data,sCondCh,DB_SYMB_CHAN);
+   iChSize = iGetColVA_DB(Data,CondCh);
+   
+   if (!iExistSymb_DB(Data,sDepthCh,DB_SYMB_CHAN))
+      Abort_SYS(_("The specified Depth channel does not exist in the database."));
+   DepthCh = FindSymb_DB(Data,sDepthCh,DB_SYMB_CHAN);
+   
+   if (iChSize != iGetColVA_DB(Data,DepthCh)) 
+      Abort_SYS(_("The specified Conductivity and Depth channels do not have same array size."));
+   if (iChSize == 1) 
+      Abort_SYS(_("The specified Conductivity and Depth channels have one column of data only and cannot be used to create section."));
+      
+
+   if (!iExistSymb_DB(Data,sStatCh,DB_SYMB_CHAN))
+      Abort_SYS(_("The specified Station channel does not exist in the database."));
+   StatCh = FindSymb_DB(Data,sStatCh,DB_SYMB_CHAN);
+   
+   //  --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,CondCh, DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,DepthCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,StatCh, DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   
+   // --- Line exist ? ---
+   
+   if (!iExistSymb_DB(Data,sLine,DB_SYMB_LINE))
+      Abort_SYS(_("The specified Line does not exist in the database."));
+   Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);
+   
+   
+   // --- Create VV/VA ---
+   
+   StatVV = Create_VV(REAL,0);
+   
+   CondVA  = Create_VA(REAL,0,iChSize);
+   DepthVA = Create_VA(REAL,0,iChSize);
+      
+   XsVV = Create_VV(REAL,0);
+   YsVV = Create_VV(REAL,0);
+   ZsVV = Create_VV(REAL,0);
+   SetLen_VV(XsVV,iChSize);
+   SetLen_VV(YsVV,iChSize);
+   SetLen_VV(ZsVV,iChSize);
+   
+      
+   // --- Get data ---
+   
+   GetChanVV_DB(Data,Line,StatCh,StatVV);
+   
+   GetChanVA_DB(Data,Line,CondCh,CondVA);
+   GetChanVA_DB(Data,Line,DepthCh,DepthVA);
+   
+   
+   // --- VV/VA size ---
+   
+   iLen = iLength_VV(StatVV);
+   if (iLen > iLen_VA(CondVA))  iLen = iLen_VA(CondVA);
+   if (iLen > iLen_VA(DepthVA)) iLen = iLen_VA(DepthVA);
+   
+   if(iLen<1)
+      Abort_SYS(_("There are no data to process!"));
+
+
+   // --- Create section DB and its channels ---
+   
+   if (iLoaded_EDB(sDBs)) UnLoad_EDB(sDBs);
+   CreateEx_DB(sDBs,iLen,10,iLen+50,10,100,"SUPER","",1024);
+   Datas = Open_DB(sDBs,"SUPER","");
+
+   XsCh = CreateSymb_DB(Datas,sX,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   YsCh = CreateSymb_DB(Datas,sY,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   ZsCh = CreateSymb_DB(Datas,sZ,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   LockSymb_DB(Datas,XsCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Datas,YsCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Datas,ZsCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+   
+   // --- Get section data ---
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Section DB"),1);
+   for (i = 0; i<iLen; i++) {
+
+      // --- Update the Progress Bar ---
+
+      FormatI_STR(i,sTmp,10);
+      Strcpy_STR(sD,"L");
+      Strcat_STR(sD,sTmp);
+      
+      Strcpy_STR(sLabel,_("Section DB: "));
+      Strcat_STR(sLabel,sD);
+      ProgName_SYS(sLabel,0);
+      ProgUpdate_SYS( (int) ((real) i / (real) iLen * 100.0) );
+   
+
+      // --- Get 'X' ---
+      
+      rD = rGetReal_VV(StatVV,i);
+      FillReal_VV(XsVV,rD);
+      
+      
+      // --- Get 'Y' ---
+      
+      GetVV_VA (DepthVA,i,VA_ROW,YsVV);
+      Trans_VV(YsVV,0.0,-1.0);
+      
+      
+      // --- Get conductivity ---
+      
+      GetVV_VA (CondVA,i,VA_ROW,ZsVV);
+   
+   
+      // --- Save results into section DB ---
+      
+      Lines = CreateSymb_DB(Datas,sD,DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_FLIGHT);
+      PutChanVV_DB(Datas,Lines,XsCh,XsVV);
+      PutChanVV_DB(Datas,Lines,YsCh,YsVV);
+      PutChanVV_DB(Datas,Lines,ZsCh,ZsVV);
+   }   
+   
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,CondCh);
+   UnLockSymb_DB(Data,DepthCh);
+   UnLockSymb_DB(Data,StatCh);
+   UnLock_EDB(EData);
+   
+   UnLockSymb_DB(Datas,XsCh);
+   UnLockSymb_DB(Datas,YsCh);
+   UnLockSymb_DB(Datas,ZsCh);
+   Destroy_DB(Datas);
+   
+   Destroy_VA(CondVA);
+   Destroy_VA(DepthVA);
+   Destroy_VV(StatVV);
+   
+   Destroy_VV(XsVV);
+   Destroy_VV(YsVV);
+   Destroy_VV(ZsVV);
+   
+   // --- done ---
+
+   Progress_SYS(0);
+}
+

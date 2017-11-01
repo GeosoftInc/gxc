@@ -1,0 +1,308 @@
+//===========================================================================
+NAME          = "GRIDFLT5"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Filters"
+
+DESCRIPTION   = "\Apply a 5x5 symmetric Filter to a Grid using any number of passes.
+Parameters:
+       GRIDFILT.GRD      File Name of the Input Grid.
+               .NEW      File Name of New Grid.                          
+               .DEFFILT  Name of pre-defined 6 point filter.
+                           (optional)
+               .FILT     Name of file containing 6 point filter.
+                           (optional)
+               .FILTSTR  filter coef. string - 6 comma delimited numbers: e.g. 1,2,3,4,5,6
+                           (optional)
+               .PASS     Number of filter Passes to apply to create the new grid.
+"
+// Revision History:
+// v6.0:   Modified delete reference file at the end of GX process.
+// v5.1.5: Correct the filter point number to 6 in above parameters description.
+
+//===========================================================================
+
+RESOURCE = "gridflt5.gr"
+#include "gridflt5.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+int        iSet;              // flags if filter is set
+int        iToks;             // Tokens in filter point string
+int        iUseFile;          // flags to use file for filter values
+int        iPass;             // Number of passes to apply
+real       rVal;
+int        iNX,iNY;                  // grid size
+real       rDx,rDy,rXo,rYo,rRot;     // grid info
+
+string(STR_FILE)  sGrd;            // Name of input grid
+string(STR_FILE)  sNew;            // Name of new resultant grid
+string(STR_FILE)  sFiltFile;       // Name of filter file
+string(STR_FILE)  sRefFil;         // Name of reference file (_ref.bin)
+string(STR_DEFAULT) sDefFilt;        // Pre-Defined filter
+string(STR_DEFAULT_LONG) sFiltStr;        // Filter string
+
+string(STR_DEFAULT) sTemp;           // Temporary string
+
+IMG         IMGi;             // Image tied to the input grid
+IMG         IMGo;             // Image for the output grid
+
+VV          hVV;              // Holds the 6 coef. values in filter
+PG          hPG;
+TR          hTR;
+IPJ         hIPJ;
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDFLT5Form");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDFLT5FORM_0,DGW_FILEPATH,"GRIDFLT5","GRD");     
+      SetInfoSYS_DGW(Diag,_GRIDFLT5FORM_1,DGW_FILEPATH,"GRIDFLT5","NEW");    
+      SetInfoSYS_DGW(Diag,_GRIDFLT5FORM_2,DGW_LISTALIAS,    "GRIDFLT5","DEFFILT");     
+      SetInfoSYS_DGW(Diag,_GRIDFLT5FORM_3,DGW_FILEPATH,"GRIDFLT5","FILT");     
+      SetInfoSYS_DGW(Diag,_GRIDFLT5FORM_4,DGW_TEXT,    "GRIDFLT5","FILTSTR");     
+      SetInfoSYS_DGW(Diag,_GRIDFLT5FORM_5,DGW_TEXT,    "GRIDFLT5","PASS");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDFLT5FORM_0,DGW_FILEPATH,"GRIDFLT5","GRD");     
+      GetInfoSYS_DGW(Diag,_GRIDFLT5FORM_1,DGW_FILEPATH,"GRIDFLT5","NEW");    
+      GetInfoSYS_DGW(Diag,_GRIDFLT5FORM_2,DGW_LISTALIAS,    "GRIDFLT5","DEFFILT");     
+      GetInfoSYS_DGW(Diag,_GRIDFLT5FORM_3,DGW_FILEPATH,"GRIDFLT5","FILT");     
+      GetInfoSYS_DGW(Diag,_GRIDFLT5FORM_4,DGW_TEXT,    "GRIDFLT5","FILTSTR");     
+      GetInfoSYS_DGW(Diag,_GRIDFLT5FORM_5,DGW_TEXT,    "GRIDFLT5","PASS");
+           
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDFLT5","GRD",sGrd);
+   GetString_SYS("GRIDFLT5","NEW",sNew);
+   GetString_SYS("GRIDFLT5","DEFFILT",sDefFilt);
+   GetString_SYS("GRIDFLT5","FILT",sFiltFile);
+   GetString_SYS("GRIDFLT5","FILTSTR",sFiltStr);
+
+   
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrd))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   if (!iStrlen_STR(sNew))
+      Abort_SYS(_("New Resultant Grid Not Specified!"));   
+
+   if (!iStrcmp_STR(sGrd,sNew,STR_CASE_TOLERANT))
+      Abort_SYS(_("Names of Input Grid and New Resultant Grid Must be Different!"));
+
+   iSet = 0;                  // Filter is not set
+
+
+   // --- Create and initialize a VV to hold the filter values ---
+
+   hVV = Create_VV(REAL,10);
+   for (i=0;i<6;i++)
+      SetReal_VV(hVV,i,0.0);
+
+   // --- Check the defined filter and set values in ---
+
+   if (!iStrcmp_STR(sDefFilt,_n("Least Square"),STR_CASE_TOLERANT))
+   {
+      // References:
+      // Savitzky A. and Golay M., 'Smoothing and differentiation of data by simplified least squares procedures', 
+      //    Analytical Chemistry 36 (1964) no. 8, pp1627-1639.
+      // Press W. etc. 'Numerical Recipes in C: The art of scientific computing', 
+      //    Cambridge Univ. Press, 2nd ed. 1992, (Savitzky-Golay Smoothing Filters, pp650-655)
+
+      iSet = 1;
+      SetReal_VV(hVV,0, 0.15428);
+      SetReal_VV(hVV,1, 0.12571);
+      SetReal_VV(hVV,2, 0.09714);
+      SetReal_VV(hVV,3, 0.04000);
+      SetReal_VV(hVV,4, 0.01142);
+      SetReal_VV(hVV,5,-0.07428);
+   }
+   else if (!iStrcmp_STR(sDefFilt,_n("Minimum Curvature"),STR_CASE_TOLERANT))
+   {
+      iSet = 1;      
+      SetReal_VV(hVV,0, 0.0 );
+      SetReal_VV(hVV,1, 0.4 );
+      SetReal_VV(hVV,2,-0.1 );
+      SetReal_VV(hVV,3,-0.05);
+      SetReal_VV(hVV,4, 0.0 );
+      SetReal_VV(hVV,5, 0.0 );
+   }
+
+
+   // --- If filter not set, then try to get it from the file ---
+
+   iUseFile = 0;
+
+   if ( (!iSet) && (iStrlen_STR(sFiltFile)) )
+   {
+      iUseFile = 1;
+      iSet = 1;    
+   }
+
+   // --- if filter still not set, try to get it from filter edit box ---
+
+   if ( (!iSet) && (iStrlen_STR(sFiltStr)) )
+   {
+      iSet = 1;
+
+      // --- Tokenize the string and get the 9 points ---
+
+      iToks = iTokens_STR(sFiltStr,",");
+      if (iToks != 6)
+      {
+         Destroy_VV(hVV);
+         Abort_SYS(_("Invalid Filter Value string. Must have 6 numbers delimited by commas"));
+      }
+
+      // --- Get the values and put into the VV ---
+
+      for (i=0;i<6;i++)
+      {
+         rVal = 0.0;
+         GetToken_STR(sTemp,sFiltStr,i);
+         rVal = rScanR_STR(sTemp);
+         if (rVal == rDUMMY)
+         {
+            Destroy_VV(hVV);
+            Abort_SYS(_("Invalid Value in Filter string. Must have 6 numbers delimited by commas"));
+         }
+         SetReal_VV(hVV,i,rVal);      
+      }
+   }
+
+   // --- If the filter is still not set - default to Least Square filter ---   
+
+   if (!iSet)
+   {
+      iSet = 1;
+      SetReal_VV(hVV,0, 0.15428);
+      SetReal_VV(hVV,1, 0.12571);
+      SetReal_VV(hVV,2, 0.09714);
+      SetReal_VV(hVV,3, 0.04000);
+      SetReal_VV(hVV,4, 0.01142);
+      SetReal_VV(hVV,5,-0.07428);
+   }
+
+
+   // --- Check for pass ---
+
+   GetString_SYS("GRIDFLT5","PASS",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iPass = 1;
+   else
+      iPass = iGetInt_SYS("GRIDFLT5","PASS");
+
+
+   // --- Check the multiplier and pass parameters ---
+
+   if ((iPass < 1) || (iPass > iMAX) || (iPass == iDUMMY))
+   {
+      Destroy_VV(hVV);
+      Abort_SYS(_("Number of Passes is Invalid. Must be an integer from 1 to 2147483647"));
+   }
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   IMGi = CreateFile_IMG(GS_FLOAT,sGrd,IMG_FILE_READONLY);
+   IMGo = CreateOutFile_IMG(GS_FLOAT,sNew,IMGi); 
+
+   rDx = 1.0;
+   rDy = 1.0;
+   rXo = 0.0;
+   rYo = 0.0;
+   rRot= 0.0;
+   GetInfo_IMG(IMGi,rDx,rDy,rXo,rYo,rRot);
+   iNX = iNX_IMG(IMGi);
+   iNY = iNY_IMG(IMGi);
+   hPG = Create_PG(iNY,iNX,GS_FLOAT);
+   hTR = Create_TR(3);    // iOrder
+   hIPJ = Create_IPJ();
+   GetPG_IMG(IMGi,hPG);
+   GetTR_IMG(IMGi,hTR);
+   GetIPJ_IMG(IMGi,hIPJ);
+
+   ProgName_SYS(_("Filtering Grid..."),1);
+
+
+   // --- Create reference file ---
+
+   FileNamePart_STR(sGrd,sRefFil,STR_FILE_PART_NAME);
+   Strcat_STR(sRefFil,"_ref.bin");
+   RefFile_PGU(hPG,sRefFil);
+
+
+   // --- Filter the grid ---
+
+   FiltSym5_PGU(hPG,iPass,iUseFile,sFiltFile,hVV);   
+   
+   // --- Grid Bool ---
+
+   Bool_PGU(hPG,sRefFil);
+   
+   SetPG_IMG(IMGo,hPG);
+   SetTR_IMG(IMGo,hTR);
+   SetIPJ_IMG(IMGo,hIPJ);
+
+
+   // --- Destroy the Images and VV ---
+   
+   Destroy_IMG(IMGi);
+   Destroy_IMG(IMGo);
+   Destroy_VV(hVV);
+   Destroy_PG(hPG);
+   Destroy_TR(hTR);
+   Destroy_IPJ(hIPJ);
+        
+   if (iFileExist_SYS(sRefFil))
+      iDeleteFile_SYS(sRefFil);
+
+   // --- done ---
+   
+   Progress_SYS(0);
+
+   
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sNew,"Grid",1);
+      
+}

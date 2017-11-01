@@ -1,0 +1,675 @@
+//===========================================================================
+
+NAME          = "Create a grid profile line"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+
+      GRIDPROF.GRID1     grid name
+              .GRID2     grid name
+              .GRID3     grid name
+              .GRID4     grid name
+              .GRID5     grid name
+              .LINE      line name (including type; default type is \"S\")
+              .SAMPLE    sample interval (default is grid cell size)
+              .METHOD    method to set profile coordinates: 0 - digitizing
+                                                            1 - manual input
+                                                            2 - manual - map coordinates
+"
+//===========================================================================
+// Revision History:
+//
+// v8.4.0: Restore minimized map before digitizing.
+//         Call the Create DB GX if there is no current database.
+// v7.0.0: Ensure unique output channel names for same grid files in different directories.
+// v6.4.2: Delete empty L0. Display channels except if in OMS.
+// v6.0.0: Added a check for translation across datums without local datum info
+// v5.1.8: Added option to use map coordinates for manual digitization.
+//         Removed IPJ warp for digitizing option.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "gridprof.gr"
+#include "gridprof.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define NEW(A) Strcpy_STR(sMessage,A)
+#define ADD(A) Strcat_STR(sMessage," "); Strcat_STR(sMessage,A)
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrid1;            // Name of grid file
+string(STR_FILE) sGrid2;            // Name of grid file
+string(STR_FILE) sGrid3;            // Name of grid file
+string(STR_FILE) sGrid4;            // Name of grid file
+string(STR_FILE) sGrid5;            // Name of grid file
+string(STR_FILE) sZG;
+string(STR_DB_SYMBOL) sLine,sChanName;
+string(STR_DB_SYMBOL) sZ,sZ1,sZ2,sZ3,sZ4,sZ5,sXCh,sYCh;
+string(512) sMessage;
+string(STR_DEFAULT_SHORT) sTmp;
+
+int         i,iLen;
+real        r,rD,rX0,rY0,rX,rY,rSample;
+real        rTmpX,rTmpY;
+
+IMG         hIMG1,hIMG2,hIMG3,hIMG4,hIMG5;
+EDB         EData;
+DB          Data;
+EMAP        EMap;
+MAP         hMAP;
+MVIEW       View;
+DGW         Diag;                                   // Dialogue handle
+VV          VVx,VVy,VVd;                            // polyline VV's
+DB_SYMB     XCh,YCh,ZCh1,ZCh2,ZCh3,ZCh4,ZCh5,Line;
+LST         List, ChanLST;
+IPJ         hIPJxy,hIPJpr;
+PJ          hPJ;
+
+int         i2,i3,i4,i5;
+int         j,iMethod,iCount,iSame;
+
+//===========================================================================
+//                            PROJECTION CODE
+//===========================================================================
+
+{
+
+   // --- current database or create a new one ---
+
+	if(iHaveCurrent_EDB() == 0)
+	{
+		if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")!=0)
+			Cancel_SYS();
+	}
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   hIPJpr = (IPJ)0;
+   
+   
+   // --- Get current X,Y channels ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   
+   // --- get database IPJ ---
+   
+   hIPJxy = Create_IPJ();
+   
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the 1st Dialogue ---
+
+      Diag = Create_DGW("GRIDPROF");
+      
+
+      // --- Set up list ---
+
+      List = GetList_DGW(Diag,_GRIDPROF_5);
+      SymbLST_DB(Data,List,DB_SYMB_LINE);
+
+      do {
+
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_GRIDPROF_0,DGW_FILEPATH,"GRIDPROF","GRID1");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF_1,DGW_FILEPATH,"GRIDPROF","GRID2");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF_2,DGW_FILEPATH,"GRIDPROF","GRID3");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF_3,DGW_FILEPATH,"GRIDPROF","GRID4");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF_4,DGW_FILEPATH,"GRIDPROF","GRID5");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF_5,DGW_TEXT    ,"GRIDPROF","LINE");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF_6,DGW_TEXT    ,"GRIDPROF","SAMPLE");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF_7,DGW_LISTALIAS,"GRIDPROF","METHOD");     
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i != 0) Cancel_SYS();    // He hit cancel
+
+    
+         // --- Get the Strings and replace in INI ---
+
+         GetInfoSYS_DGW(Diag,_GRIDPROF_0,DGW_FILEPATH,"GRIDPROF","GRID1");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF_1,DGW_FILEPATH,"GRIDPROF","GRID2");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF_2,DGW_FILEPATH,"GRIDPROF","GRID3");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF_3,DGW_FILEPATH,"GRIDPROF","GRID4");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF_4,DGW_FILEPATH,"GRIDPROF","GRID5");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF_5,DGW_TEXT    ,"GRIDPROF","LINE");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF_6,DGW_TEXT    ,"GRIDPROF","SAMPLE");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF_7,DGW_LISTALIAS,"GRIDPROF","METHOD");     
+
+         GetString_SYS("GRIDPROF","LINE",sLine);
+         if (iIsLineName_DB(sLine))
+            break;
+         else
+            DisplayMessage_SYS(_("Extract profile"),_("You have entered an invalid Line Name. Line names must begin with a letter (L,B,T,R,D,S) and a number (may contain a version). An example is \"L100.0\"."));
+
+      } while (1);
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+   }
+
+             
+   // --- Get Grid ---
+
+   GetString_SYS("GRIDPROF","GRID1",sGrid1);
+   GetString_SYS("GRIDPROF","GRID2",sGrid2);
+   GetString_SYS("GRIDPROF","GRID3",sGrid3);
+   GetString_SYS("GRIDPROF","GRID4",sGrid4);
+   GetString_SYS("GRIDPROF","GRID5",sGrid5);
+   GetString_SYS("GRIDPROF","LINE",sLine);
+   if (iExistReal_SYS("GRIDPROF","SAMPLE"))
+      rSample = rGetReal_SYS("GRIDPROF","SAMPLE");
+   else
+      rSample = 0.0;
+   iMethod = iGetInt_SYS("GRIDPROF","METHOD");
+   if(iMethod<0 || iMethod>2) 
+      iMethod = 1;   // default to manual method
+
+
+   // --- Check Line Name ---
+   
+   if (!iIsLineName_DB(sLine))
+      Abort_SYS(_("Invalid Line Name"));
+
+   i2 = iStrlen_STR(sGrid2);
+   i3 = iStrlen_STR(sGrid3);
+   i4 = iStrlen_STR(sGrid4);
+   i5 = iStrlen_STR(sGrid5);
+
+   // --- get default sample interval ---
+
+   if (rSample <= 0.0) {
+
+      i = 0;
+      rX = rY = r = 0.0;
+      GridStat_IMU(sGrid1,i,i,i,rX,rY,i,r,r,r,r,r);
+
+      if (rX <= rY)
+         rSample = rX;
+      else
+         rSample = rY;
+
+   }
+
+
+   // --- create VV's ---
+
+   VVx  = Create_VV(REAL,0);
+   VVy  = Create_VV(REAL,0);
+   VVd  = Create_VV(REAL,0);
+
+
+   // --- Create a grid handle ---
+
+   hIMG1 = CreateFile_IMG(GS_DOUBLE,sGrid1,IMG_FILE_READONLY);
+
+   if(i2)  hIMG2 = CreateFile_IMG(GS_DOUBLE,sGrid2,IMG_FILE_READONLY);
+   if(i3)  hIMG3 = CreateFile_IMG(GS_DOUBLE,sGrid3,IMG_FILE_READONLY);
+   if(i4)  hIMG4 = CreateFile_IMG(GS_DOUBLE,sGrid4,IMG_FILE_READONLY);
+   if(i5)  hIMG5 = CreateFile_IMG(GS_DOUBLE,sGrid5,IMG_FILE_READONLY);
+
+
+   // --- Get map projection for digitizing and manual/map coordinate methods
+
+   if(iMethod==0 || iMethod==2) {
+
+
+      // --- get the profile projection ---
+         
+      EMap = Current_EMAP();
+      hIPJpr = Create_IPJ();
+      hMAP = Lock_EMAP(EMap);
+      View = Create_MVIEW(hMAP,"*data",MVIEW_READ);
+      GetIPJ_MVIEW(View,hIPJpr);
+      ClearWarp_IPJ(hIPJpr);
+      Destroy_MVIEW(View);
+      UnLock_EMAP(EMap);
+
+		if (iMethod == 0)
+		{
+
+		}
+   }
+
+
+   // --- get profile points ---
+
+   i = 0;
+
+   if (iInteractive_SYS()) 
+	{
+   
+      if (iMethod == 0) 
+		{
+			if (iGetWindowState_EMAP(EMap) == EMAP_WINDOW_MINIMIZE)
+				SetWindowState_EMAP(EMap, EMAP_WINDOW_RESTORE);
+      
+		   NEW(_("Enter points on profile, Right button when done, Esc to cancel."));
+      
+         DisplayMessage_SYS(_("Extract profile"),sMessage);
+
+         iSetCurrentView_EMAP(EMap,"*data");
+         i = iGetPolyLine_EMAP(EMap,_("Click on profile points..."),VVx,VVy);
+         
+
+      } else {
+      
+
+         // --- Create the 2nd Dialogue ---
+
+         Diag = Create_DGW("GRIDPROF1");
+
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_0,DGW_TEXT,"GRIDPROF1","1X");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_1,DGW_TEXT,"GRIDPROF1","1Y");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_2,DGW_TEXT,"GRIDPROF1","2X");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_3,DGW_TEXT,"GRIDPROF1","2Y");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_4,DGW_TEXT,"GRIDPROF1","3X");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_5,DGW_TEXT,"GRIDPROF1","3Y");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_6,DGW_TEXT,"GRIDPROF1","4X");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_7,DGW_TEXT,"GRIDPROF1","4Y");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_8,DGW_TEXT,"GRIDPROF1","5X");     
+         SetInfoSYS_DGW(Diag,_GRIDPROF1_9,DGW_TEXT,"GRIDPROF1","5Y");     
+
+
+         // --- Run the Dialogue ---
+
+         j = iRunDialogue_DGW(Diag);
+         if (j != 0) Cancel_SYS();    // He hit cancel
+
+    
+         // --- Get the Strings and replace in INI ---
+
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_0,DGW_TEXT,"GRIDPROF1","1X");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_1,DGW_TEXT,"GRIDPROF1","1Y");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_2,DGW_TEXT,"GRIDPROF1","2X");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_3,DGW_TEXT,"GRIDPROF1","2Y");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_4,DGW_TEXT,"GRIDPROF1","3X");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_5,DGW_TEXT,"GRIDPROF1","3Y");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_6,DGW_TEXT,"GRIDPROF1","4X");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_7,DGW_TEXT,"GRIDPROF1","4Y");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_8,DGW_TEXT,"GRIDPROF1","5X");     
+         GetInfoSYS_DGW(Diag,_GRIDPROF1_9,DGW_TEXT,"GRIDPROF1","5Y");     
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+      }
+      
+   }
+
+       
+   if (!iInteractive_SYS() || iMethod!=0) {
+    
+      // --- Get coordinates ---
+
+      iCount = -1;
+      for (j = 1; j <= 5; j++) {
+
+         FormatI_STR(j,sTmp,10);
+         Strcat_STR(sTmp,"X");
+         rTmpX = rGetReal_SYS("GRIDPROF1",sTmp);
+
+         FormatI_STR(j,sTmp,10);
+         Strcat_STR(sTmp,"Y");
+         rTmpY = rGetReal_SYS("GRIDPROF1",sTmp);
+
+
+         // --- skip if dummies ---
+
+         if ((rTmpX == rDUMMY) || (rTmpY == rDUMMY))  continue;
+
+         iCount++;
+
+         SetReal_VV(VVx,iCount,rTmpX);
+         SetReal_VV(VVy,iCount,rTmpY);        
+      }
+
+      if (iCount < 1) Abort_SYS(_("Coordinates of at least 2 points must be given."));
+
+   }
+
+   // --- if not cancelled, and there are 2 or more points, process ---
+
+   iLen = iLength_VV(VVx);
+   if ((i == 0) && (iLen >= 2)) {
+
+
+      // --- create a distance channel ---
+
+      rX0 = rGetReal_VV(VVx,0);
+      rY0 = rGetReal_VV(VVy,0);
+                
+      rD  = 0.0;
+      SetReal_VV(VVd,0,rD);
+
+      for (i=1;i<iLen;i++) {
+
+         rX = rGetReal_VV(VVx,i);
+         rY = rGetReal_VV(VVy,i);
+
+         rD += rPow_MATH((rX-rX0)*(rX-rX0)+(rY-rY0)*(rY-rY0),0.5);
+         SetReal_VV(VVd,i,rD);
+
+         rX0 = rX;
+         rY0 = rY;
+
+      }
+
+
+      // --- spline on distance ---
+
+      Spline_VVU(VVd,VVx,VVx,(int)(rD/rSample)+1,0.0,rSample,1.0e32,0,VVU_SPL_LINEAR);
+      Spline_VVU(VVd,VVy,VVy,(int)(rD/rSample)+1,0.0,rSample,1.0e32,0,VVU_SPL_LINEAR);
+
+
+      // --- add default line type ---
+
+      ToUpper_STR(sLine);
+      if (!(iCharComp_STR(sLine,"L") ||
+            iCharComp_STR(sLine,"B") ||
+            iCharComp_STR(sLine,"T") ||
+            iCharComp_STR(sLine,"R") ||
+            iCharComp_STR(sLine,"D") ||
+            iCharComp_STR(sLine,"S"))) {
+         Strcpy_STR(sZ,"S");
+         Strcat_STR(sZ,sLine);
+         Strcpy_STR(sLine,sZ);
+      }
+
+
+      // --- Does the Output Line Exist ? ---
+
+      if (iExistSymb_DB(Data,sLine,DB_SYMB_LINE)) {
+
+         if(iInteractive_SYS()) {
+             if (iDisplayQuestion_SYS(_("Line exists"),_("Line exists, overwrite?")) == 0)
+              Cancel_SYS();
+         }
+         Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         DeleteSymb_DB(Data,Line);
+
+      }
+      Line = CreateSymb_DB(Data,sLine,DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_FLIGHT);
+
+
+      // --- X and Y channels ---
+
+      XCh = FindChan_DB(Data, sXCh);
+      if (XCh==NULLSYMB)
+         XCh = CreateSymb_DB(Data,sXCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+
+      YCh = FindChan_DB(Data, sYCh);
+      if (YCh==NULLSYMB)
+         YCh = CreateSymb_DB(Data,sYCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+
+
+	   // --- Prevent duplicate channel names if gridding same grid file name in different directories ---
+	   
+	   ChanLST = Create_LST(2*STR_DB_SYMBOL);
+	   
+
+      // --- Z channel ---
+
+      Strcpy_STR(sChanName,"G_");
+      FileNamePart_STR(sGrid1,sZG,STR_FILE_PART_NAME);
+      Strcat_STR(sChanName,sZG);
+      GenValidChanSymb_DB(sChanName,sZ1,sizeof(sZ1));
+      AddItem_LST(ChanLST, sChanName, "");
+      
+      if (!iExistChan_DB(Data,sZ1))
+         ZCh1 = CreateSymb_DB(Data,sZ1,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      else 
+         ZCh1 = FindChan_DB(Data,sZ1);
+
+      if(i2)  {
+      
+         Strcpy_STR(sChanName,"G_");
+         FileNamePart_STR(sGrid2,sZG,STR_FILE_PART_NAME);
+         Strcat_STR(sChanName,sZG);
+         GenValidChanSymb_DB(sChanName,sZ2,sizeof(sZ2));
+         
+         
+         // --- Prevent duplicate channel names ---
+         
+         if(iFindItem_LST(ChanLST, LST_ITEM_NAME, sChanName)!=-1)
+			{
+				Strcat_STR(sChanName, "_2");
+		      AddItem_LST(ChanLST, sChanName, "");
+		      Strcpy_STR(sZ2,sChanName);
+		   }
+      
+         if (!iExistChan_DB(Data,sZ2))
+            ZCh2 = CreateSymb_DB(Data,sZ2,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+         else 
+            ZCh2 = FindChan_DB(Data,sZ2);
+      }
+
+      if(i3)  {
+      
+         Strcpy_STR(sChanName,"G_");
+         FileNamePart_STR(sGrid3,sZG,STR_FILE_PART_NAME);
+         Strcat_STR(sChanName,sZG);
+         GenValidChanSymb_DB(sChanName,sZ3,sizeof(sZ3));
+         
+
+         // --- Prevent duplicate channel names ---
+         
+         if(iFindItem_LST(ChanLST, LST_ITEM_NAME, sChanName)!=-1)
+			{
+				Strcat_STR(sChanName, "_3");
+		      AddItem_LST(ChanLST, sChanName, "");
+		      Strcpy_STR(sZ3,sChanName);
+		   }
+			
+			if (!iExistChan_DB(Data,sZ3))
+            ZCh3 = CreateSymb_DB(Data,sZ3,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+         else 
+            ZCh3 = FindChan_DB(Data,sZ3);
+      }
+
+      if(i4)  {
+      
+         Strcpy_STR(sChanName,"G_");
+         FileNamePart_STR(sGrid4,sZG,STR_FILE_PART_NAME);
+         Strcat_STR(sChanName,sZG);
+         GenValidChanSymb_DB(sChanName,sZ4,sizeof(sZ4));
+         
+
+         // --- Prevent duplicate channel names ---
+         
+         if(iFindItem_LST(ChanLST, LST_ITEM_NAME, sChanName)!=-1)
+			{
+				Strcat_STR(sChanName, "_4");
+		      AddItem_LST(ChanLST, sChanName, "");
+		      Strcpy_STR(sZ4,sChanName);
+		   }
+			
+         if (!iExistChan_DB(Data,sZ4))
+            ZCh4 = CreateSymb_DB(Data,sZ4,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+         else 
+            ZCh4 = FindChan_DB(Data,sZ4);
+      }
+
+      if(i5)  {    
+      
+         Strcpy_STR(sChanName,"G_");
+         FileNamePart_STR(sGrid5,sZG,STR_FILE_PART_NAME);
+         Strcat_STR(sChanName,sZG);
+         GenValidChanSymb_DB(sChanName,sZ5,sizeof(sZ5));
+         
+
+         // --- Prevent duplicate channel names ---
+         
+         if(iFindItem_LST(ChanLST, LST_ITEM_NAME, sChanName)!=-1)
+			{
+				Strcat_STR(sChanName, "_5");
+		      AddItem_LST(ChanLST, sChanName, "");
+		      Strcpy_STR(sZ5,sChanName);
+		   }
+			
+
+         if (!iExistChan_DB(Data,sZ5))
+            ZCh5 = CreateSymb_DB(Data,sZ5,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+         else 
+            ZCh5 = FindChan_DB(Data,sZ5);
+      }
+
+
+      // --- put X and Y in channels ---
+
+      Progress_SYS(1);
+
+      LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      
+      
+      // --- get/set the projection ---
+
+      hIPJxy = Create_IPJ();
+      GetIPJ_DB(Data,XCh,hIPJxy);
+      
+      if (iMethod == 0 || iMethod == 2) {
+      
+         // --- reproject map coordinates to match database ---
+         
+         iSame = 0;
+         if (!iHasProjection_IPJ(hIPJpr) || !iHasProjection_IPJ(hIPJxy) ||
+			(iCoordinateSystemsAreTheSame_IPJ(hIPJpr, hIPJxy) &&
+			iWarpsAreTheSame_IPJ(hIPJpr, hIPJxy) &&
+			iOrientationsAreTheSame_IPJ(hIPJpr, hIPJxy)))
+			iSame = 1;
+         
+         if ((iSourceType_IPJ(hIPJxy) != IPJ_TYPE_NONE) &&
+             (iSourceType_IPJ(hIPJpr) != IPJ_TYPE_NONE) &&
+             !iSame ) {
+             
+            // --- check if local datum transform required/supported ---
+   
+            if (iInteractive_SYS() && iSupportDatumTransform_IPJ(hIPJxy,hIPJpr) == 0) {
+               if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between map and database coordinate systems may be inaccurate because the local datum transform for one or both systems is not defined.  Do want to continue?")) == 0)
+                     Exit_SYS();
+            }
+         
+         
+            // --- set up the projection ---
+                
+            hPJ = CreateIPJ_PJ(hIPJpr,hIPJxy);
+            ConvertVV_PJ(hPJ,VVx,VVy);
+            Destroy_PJ(hPJ);
+            
+         }
+         
+         
+         if (iSourceType_IPJ(hIPJxy) == IPJ_TYPE_NONE)
+            SetIPJ_DB(Data,XCh,YCh,hIPJpr);
+            
+      } else {
+      
+      
+         // --- if no projection for manual points, assume first grid ---
+         
+         if (iSourceType_IPJ(hIPJxy) == IPJ_TYPE_NONE)
+            GetIPJ_IMG(hIMG1,hIPJxy);
+         
+         SetIPJ_DB(Data,XCh,YCh,hIPJxy);
+         
+      } 
+   
+   
+      // --- put profile into database ---
+      
+      PutChanVV_DB(Data,Line,XCh,VVx);
+      PutChanVV_DB(Data,Line,YCh,VVy);
+      
+      
+      // --- sample the grids ---
+               
+      ProgName_SYS(_("Grid Profile 1"),1);
+
+      LockSymb_DB(Data,ZCh1,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SampleIMG_DU (Data,Line,XCh,YCh,ZCh1,hIMG1);
+      UnLockSymb_DB(Data,ZCh1);
+
+      if(i2)  {
+         ProgName_SYS(_("Grid Profile 2"),1);
+         LockSymb_DB(Data,ZCh2,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         SampleIMG_DU (Data,Line,XCh,YCh,ZCh2,hIMG2);
+         UnLockSymb_DB(Data,ZCh2);
+      }
+      if(i3)  {
+         ProgName_SYS(_("Grid Profile 3"),1);
+         LockSymb_DB(Data,ZCh3,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         SampleIMG_DU (Data,Line,XCh,YCh,ZCh3,hIMG3);
+         UnLockSymb_DB(Data,ZCh3);
+      }
+      if(i4)  {
+         ProgName_SYS(_("Grid Profile 4"),1);
+         LockSymb_DB(Data,ZCh4,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         SampleIMG_DU (Data,Line,XCh,YCh,ZCh4,hIMG4);
+         UnLockSymb_DB(Data,ZCh4);
+      }
+      if(i5)  {
+         ProgName_SYS(_("Grid Profile 5"),1);
+         LockSymb_DB(Data,ZCh5,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         SampleIMG_DU (Data,Line,XCh,YCh,ZCh5,hIMG5);
+         UnLockSymb_DB(Data,ZCh5);
+      }
+
+      UnLockSymb_DB(Data,XCh);
+      UnLockSymb_DB(Data,YCh);
+   }
+
+   Destroy_IMG(hIMG1);
+   if(i2)  Destroy_IMG(hIMG2);
+   if(i3)  Destroy_IMG(hIMG3);
+   if(i4)  Destroy_IMG(hIMG4);
+   if(i5)  Destroy_IMG(hIMG5);
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_VV(VVd);
+
+   UnLock_EDB(EData);
+
+
+   // --- Delete empty line 0 ---
+   
+   DelLine0_EDB(EData);
+   
+
+   // --- Display chanels ---
+
+   if (!iScript_SYS())
+   {
+      GotoLine_EDB(EData,Line);
+
+      LoadChan_EDB(EData,sXCh);
+      LoadChan_EDB(EData,sYCh);
+      LoadChan_EDB(EData,sZ1);
+      if(i2)  LoadChan_EDB(EData,sZ2);
+      if(i3)  LoadChan_EDB(EData,sZ3);
+      if(i4)  LoadChan_EDB(EData,sZ4);
+      if(i5)  LoadChan_EDB(EData,sZ5);
+   }
+   
+}

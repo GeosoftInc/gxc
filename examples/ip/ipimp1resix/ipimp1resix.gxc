@@ -1,0 +1,286 @@
+//===========================================================================
+NAME          = "Import an Interpex RESIX2DI I2X format file."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Import an Interpex RESIX2DI I2X format file..
+
+    IP.I2X_FILE               : File to import
+    IP.I2X_RES_DATA           : Resistivity data   (required)
+    IP.I2X_IP_DATA            : IP data            (required)
+    IP.I2X_RES_IMAGE_MODEL    : Image model data   (optional)
+    IP.I2X_IP_IMAGE_MODEL                          (optional)
+    IP.I2X_RES_IMAGE_SYNTH    : Synthetic model data  (optional)
+    IP.I2X_IP_IMAGE_SYNTH                          (optional)
+    IP.I2X_RES_IMAGE_POLY     : Polygon model data (optional)
+    IP.I2X_IP_IMAGE_POLY                           (optional)
+    IP.I2X_RES_IMAGE_ZONGE    : Zonge data         (optional)
+    IP.I2X_IP_IMAGE_ZONGE                          (optional)
+    IP.I2X_IMPMODE            : Import Mode: R : Replace
+                                             M : Merge
+
+"
+// Revision History:
+// v6.1.0: Added Zonge Res and IP imports.
+// v5.1.3: Using "Current" X, Y and Z channels - WinnowChanList2_IP.
+//         Unload all channels before loading, X, Y then all channels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPIMP1RESIX.gr"
+#include "IPIMP1RESIX.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define TESTCHAN(A) \
+   if(iStrlen_STR(A) && !iExistChan_DB(Data, A)) { \
+      iWarning = 1; \
+      if(iStrlen_STR(sChans)) Strcat_STR(sChans, ", ");  \
+      Strcat_STR(sChans, A);  \
+   }
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+LST         List;
+
+int         i,j;                // Utility 
+
+string(STR_DB_SYMBOL) sCurLine;
+string(STR_DB_SYMBOL) sLine, sXCh, sYCh, sZCh;
+string(STR_DB_SYMBOL) sResData, sResModel, sResSynth, sResPoly, sResZonge;
+string(STR_DB_SYMBOL) sIPData, sIPModel, sIPSynth, sIPPoly, sIPZonge;
+string(STR_DEFAULT) sMode;
+string(STR_DEFAULT_LONG) sChans, sMsg;
+
+string(STR_FILE) sFile, sFiles;
+int iDone, iMode, iWarning, iFileCount, idx;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();
+   
+   // --- Get currently selected line and set default line to import to ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   GetString_SYS("IP","LINE",sLine);
+   if(!iStrlen_STR(sLine))
+      SetString_SYS("IP", "LINE", sCurLine);
+
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   iDone = 0;
+   while (iInteractive_SYS() && !iDone)
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPIMP1RESIX");
+
+      // --- Create channel lists ---
+
+      j = (int)_IPIMP1RESIX_2;
+      for(i=0;i<8;i++) {
+         List = GetList_DGW(Diag,(DGW_OBJ)(j+i));
+         SymbLST_DB(Data,List,DB_SYMB_CHAN);
+         WinnowChanList2_IP(List, Data);
+         Sort_LST(List,0,0);
+      }
+
+      // --- Create line list ---
+
+      List = GetList_DGW(Diag,_IPIMP1RESIX_1);
+      SymbLST_DB(Data,List,DB_SYMB_LINE);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_0,DGW_FILEPATH,"IP","I2X_FILE");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_1,DGW_TEXT,"IP","I2X_LINE");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_2,DGW_TEXT,"IP","I2X_RES_DATA");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_3,DGW_TEXT,"IP","I2X_IP_DATA");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_4,DGW_TEXT,"IP","I2X_RES_IMAGE_MODEL");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_5,DGW_TEXT,"IP","I2X_IP_IMAGE_MODEL");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_6,DGW_TEXT,"IP","I2X_RES_IMAGE_SYNTH");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_7,DGW_TEXT,"IP","I2X_IP_IMAGE_SYNTH");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_8,DGW_TEXT,"IP","I2X_RES_POLY");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_9,DGW_TEXT,"IP","I2X_IP_POLY");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_10,DGW_TEXT,"IP","I2X_RES_ZONGE");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_11,DGW_TEXT,"IP","I2X_IP_ZONGE");
+      SetInfoSYS_DGW(Diag,_IPIMP1RESIX_12,DGW_LISTALIAS,"IP","I2X_IMPMODE");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_0,DGW_FILEPATH,"IP","I2X_FILE");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_1,DGW_TEXT,"IP","I2X_LINE");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_2,DGW_TEXT,"IP","I2X_RES_DATA");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_3,DGW_TEXT,"IP","I2X_IP_DATA");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_4,DGW_TEXT,"IP","I2X_RES_IMAGE_MODEL");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_5,DGW_TEXT,"IP","I2X_IP_IMAGE_MODEL");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_6,DGW_TEXT,"IP","I2X_RES_IMAGE_SYNTH");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_7,DGW_TEXT,"IP","I2X_IP_IMAGE_SYNTH");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_8,DGW_TEXT,"IP","I2X_RES_POLY");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_9,DGW_TEXT,"IP","I2X_IP_POLY");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_10,DGW_TEXT,"IP","I2X_RES_ZONGE");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_11,DGW_TEXT,"IP","I2X_IP_ZONGE");
+      GetInfoSYS_DGW(Diag,_IPIMP1RESIX_12,DGW_LISTALIAS,"IP","I2X_IMPMODE");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+      // --- Verify input ---
+
+
+      GetString_SYS("IP","I2X_LINE",sLine);
+      if(!iIsLineName_DB(sLine)) {
+         DisplayMessage_SYS(_("Line Name Error"), _("Enter a line name in the form \"L1000\""));
+         SetString_SYS("IP","I2X_LINE","");
+         continue;
+      }
+ 
+      iDone = 1;
+   } 
+  
+   // --- Get Parameters ---
+
+
+   GetString_SYS("IP","I2X_RES_DATA",sResData);
+   if(!iStrlen_STR(sResData))
+      Abort_SYS(_("No Resistivity Data channel specified"));
+   
+   GetString_SYS("IP","I2X_IP_DATA",sIPData);
+   GetString_SYS("IP","I2X_RES_IMAGE_MODEL",sResModel);
+   GetString_SYS("IP","I2X_IP_IMAGE_MODEL",sIPModel);
+   GetString_SYS("IP","I2X_RES_IMAGE_SYNTH",sResSynth);
+   GetString_SYS("IP","I2X_IP_IMAGE_SYNTH",sIPSynth);
+   GetString_SYS("IP","I2X_RES_POLY",sResPoly);
+   GetString_SYS("IP","I2X_IP_POLY",sIPPoly);
+   GetString_SYS("IP","I2X_RES_ZONGE",sResZonge);
+   GetString_SYS("IP","I2X_IP_ZONGE",sIPZonge);
+
+   
+   GetString_SYS("IP","I2X_LINE",sLine);
+   if(!iStrlen_STR(sLine))
+      Abort_SYS(_("No import line specified"));
+   
+   GetString_SYS("IP","I2X_FILE",sFiles);
+   if(!iStrlen_STR(sFiles))
+      Abort_SYS(_("No import file specified"));
+
+   GetString_SYS("IP","I2X_IMPMODE",sMode);
+   if(!iStrcmp_STR(sMode,"R",STR_CASE_TOLERANT))
+      iMode = IP_I2XIMPMODE_REPLACE;
+   else if(!iStrcmp_STR(sMode,"M",STR_CASE_TOLERANT))
+      iMode = IP_I2XIMPMODE_MERGE;
+   else
+      Abort_SYS(_("Import mode invalid or undefined; use \"R\" or \"M\""));
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing data in I2X format"),1);
+
+   iFileCount = iCountTokens_STR(sFiles,_n("|"));
+   // --- import ---
+   for (idx = 0; idx < iFileCount; idx++)
+   {
+      GetMFile_STR(sFiles,sFile, idx); 
+
+      Strcpy_STR(sMsg, _("Importing "));
+      Strcat_STR(sMsg, sFile);
+      ProgName_SYS(sMsg, 0);
+      ProgUpdateL_SYS(idx,iFileCount);
+      if(iCheckStop_SYS()) Cancel_SYS();
+
+      ImportI2XEx_IP(Ip, Data, sFile, sLine, sResData, sIPData, sResModel, sIPModel, 
+                    sResSynth, sIPSynth, sResPoly, sIPPoly, sResZonge, sIPZonge, iMode);
+   }
+
+   // --- Display a warning message if one or more channels did not import ---
+   
+   iWarning = 0;
+   Strcpy_STR(sChans, "");
+   
+   TESTCHAN(sResData)
+   TESTCHAN(sIPData)
+   TESTCHAN(sResModel)
+   TESTCHAN(sIPModel)
+   TESTCHAN(sResSynth)
+   TESTCHAN(sIPSynth)
+   TESTCHAN(sResPoly)
+   TESTCHAN(sIPPoly)
+   TESTCHAN(sResZonge)
+   TESTCHAN(sIPZonge)
+   if(iWarning) {
+      Printf_STR(sMsg, sizeof(sMsg), _("The following channels were not imported because\r\nthe corresponding data blocks were not found in the data:\r\n%s."), sChans);
+      DisplayMessage_SYS(_("I2X Import"), sMsg);
+   }
+
+
+   // --- Get current X, Y, and Z channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   
+   // --- display data ---
+   
+   DelLine0_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+   LoadChan_EDB(EData, sXCh);
+   LoadChan_EDB(EData, sYCh);
+   LoadChan_EDB(EData, sZCh);
+   LoadChan_EDB(EData,"IP");
+   LoadChan_EDB(EData,"IP_Avg");
+   LoadChan_EDB(EData,"TN");
+   LoadChan_EDB(EData,"N");
+   LoadAllChans_EDB(EData);
+   DelLine0_EDB(EData);
+   
+   
+     
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+   
+}

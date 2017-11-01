@@ -1,0 +1,795 @@
+//===========================================================================
+NAME          = "FFT2PREP Gridding Program"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP/Step-By-Step Filtering"
+
+DESCRIPTION   = "\
+
+Creates a Grid file with FFT2 grid pre-processing.
+
+Parameters: 
+
+     FFT2PREP.INGRD   - Name of Old Grid file
+             .OUTGRD  - Name of New Grid file
+             .TORDER  - Order of trend surface to remove
+             .TBASE   - Trend based on (edge points/all points)
+             .PEX     - % expansion
+             .TEX     - Square or rectangular expansion
+             .FILL    - Grid fill method
+             .ZDIST   - Roll off to zero at distance of (cells)
+             .ALIM    - Limit all amplitudes to be less than
+             .ELIM    - Edge amplitude limit
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+RESOURCE = "fft2prep.gr"
+#include "fft2prep.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sInGrd;       // Name of old grid file
+string(STR_FILE) sOutGrd;      // Name of new grid file
+string(STR_FILE) sRefFil;      // Name of reference file (_ref.bin)
+
+string(STR_DEFAULT) sTOrder;      //    .
+string(STR_DEFAULT) sTBase;       //    .
+string(STR_DEFAULT) sPEx;         //    .
+string(STR_DEFAULT) sTEx;         //  optional parameters
+string(STR_DEFAULT) sFill;        //    .
+string(STR_DEFAULT) sZDist;       //    .
+string(STR_DEFAULT) sALim;        //    .
+string(STR_DEFAULT) sELim;        //    .
+                                           
+IMG         IMGi;         //
+IMG         IMGo;         //  grid images
+PG          PG1;
+PG          PG2;
+TR          hTR; 
+IPJ         hIPJ;
+
+DGW         Diag;         // Dialogue handle
+ 
+int         i;            // utility int
+int         iFlag;	  // used in Multiplestep Expansion method to control interactive mode changes for testing system
+int         iNX,iNY,iNXe,iNYe,iXo,iYo;     // grid size
+real        rDx,rDy,rXo,rYo,rRot;          // grid info
+real        rXoe,rYoe,rBkd;
+int         iTOrder, iTBase, iTOpt;                      // grid trend parameters
+real        rPEx;                                        // grid expansion parameters
+int         iTEx, iXX, iXY;               
+real        rALim, rELim, rRollBase;                     // grid fill parameters
+int         iZDist, iRollOpt, iMxf, iMxp, iWLim, iNPass;       
+
+// --- linear prediction parameters ---
+
+int        iItems;              // Items in grid
+int        iDummies;            // Dummies in grid
+real       rTmp;
+real       rMin;                // Minimum grid value
+real       rMax;                // Maximum grid value
+real       rMean;               // Mean grid value
+real       rStddev;             // Standard deviation of grid values
+string(STR_FILE)    sPlugGrd;    // Name of plugged output grid
+string(STR_FILE)    sLPInGrd;    // Name of LP prep input grid
+string(STR_FILE)    sLPInGdb;    // Name of LP prep gdb
+string(STR_DEFAULT) sTemp;    // Temporary string
+
+// --- for rangrid ---
+
+WA          WA_con;             // Handle to write control file
+VV          xVV,yVV,zVV,rVVx,rVVy;
+string(STR_FILE) sCtl;           // Name of control file
+string(STR_FILE) sGrid;          // Name of new grid file
+string(STR_DEFAULT) sCS;         // grid cell size       
+string(STR_DEFAULT_LONG) sXY;    //    . 
+string(STR_DEFAULT) sLogOpt;     //    .
+string(STR_DEFAULT) sLogMin;     //    .
+string(STR_DEFAULT) sDSF;        //    . 
+string(STR_DEFAULT) sBKD;        //    .
+string(STR_DEFAULT) sTol;        //    .
+string(STR_DEFAULT) sPasTol;     //   optional parameters
+string(STR_DEFAULT) sItrMax;     //    .
+string(STR_DEFAULT) sICGR;       //    . 
+string(STR_DEFAULT) sSRD;        //    .
+string(STR_DEFAULT) sEdgClp;     //    .
+string(STR_DEFAULT) sIWT;        //    .
+string(STR_DEFAULT) sWtSlp;      //    .
+string(STR_DEFAULT_LONG) sText;  // Line of text to write to control file
+int        iPxy;
+real       rPx,rPy;
+
+                                           
+// --- for gridpanel ---
+
+IMG        hIMGIn;
+IMG        hIMGOut;
+IMG        hIMGXpnd;
+VV         rVV,rVV0,rVV1,rVV2;
+int        iXx2, iXy2, j1,j2,j3,k;
+int        iXx, iXy, iPx, iPy; 	// Xpand and Panel NX/NY
+real       rX1,rY1,rD,rXp,rYp;
+string(STR_FILE)    sGrdXpnd;         
+string(STR_FILE)    sGrdPanel;         
+string(STR_FILE)    sGrdRgrd;         
+string(STR_DEFAULT) sShape;
+string(STR_DEFAULT) sXmin,sYmin,sXmax,sYmax;
+
+// --- for gridinfill ---
+
+string(STR_FILE)    sGrdInfill;         
+string(STR_FILE)    sGrdInfillTmp;         
+string(STR_FILE)    sTmpFile;         
+int        iRibbonWidth;		// RibbonWidth for gridinfill
+int        iIter;               // Iteration number for gridinfill
+
+int  iNX4,iNY4;
+
+//===========================================================================
+//                           FFT2PREP CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS()) 
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFT2PREPForm");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_0,DGW_FILEPATH,"FFT2PREP","INGRD");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_1,DGW_FILEPATH,"FFT2PREP","OUTGRD");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_2,DGW_LISTALIAS,"FFT2PREP","TORDER");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_3,DGW_LISTALIAS,"FFT2PREP","TBASE");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_4,DGW_TEXT,"FFT2PREP","PEX");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_5,DGW_LISTALIAS,"FFT2PREP","TEX");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_6,DGW_LISTALIAS,"FFT2PREP","FILL");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_7,DGW_TEXT,"FFT2PREP","ZDIST");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_8,DGW_TEXT,"FFT2PREP","ALIM");
+      SetInfoSYS_DGW(Diag,_FFT2PREPFORM_9,DGW_TEXT,"FFT2PREP","ELIM");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS(); 
+
+         
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_0,DGW_FILEPATH,"FFT2PREP","INGRD");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_1,DGW_FILEPATH,"FFT2PREP","OUTGRD");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_2,DGW_LISTALIAS,"FFT2PREP","TORDER");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_3,DGW_LISTALIAS,"FFT2PREP","TBASE");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_4,DGW_TEXT,"FFT2PREP","PEX");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_5,DGW_LISTALIAS,"FFT2PREP","TEX");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_6,DGW_LISTALIAS,"FFT2PREP","FILL");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_7,DGW_TEXT,"FFT2PREP","ZDIST");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_8,DGW_TEXT,"FFT2PREP","ALIM");
+      GetInfoSYS_DGW(Diag,_FFT2PREPFORM_9,DGW_TEXT,"FFT2PREP","ELIM");
+   
+      Destroy_DGW(Diag);
+   } 
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FFT2PREP","INGRD",sInGrd);
+   GetString_SYS("FFT2PREP","OUTGRD",sOutGrd);
+   GetString_SYS("FFT2PREP","TORDER",sTOrder);
+   GetString_SYS("FFT2PREP","TBASE",sTBase);
+   GetString_SYS("FFT2PREP","PEX",sPEx);
+   GetString_SYS("FFT2PREP","TEX",sTEx);
+   GetString_SYS("FFT2PREP","FILL",sFill);
+   GetString_SYS("FFT2PREP","ZDIST",sZDist);
+   GetString_SYS("FFT2PREP","ALIM",sALim);
+   GetString_SYS("FFT2PREP","ELIM",sELim);
+
+   
+   // --- Validate required parameters ---
+   
+   if (iStrlen_STR(sInGrd) <=0)
+      Abort_SYS(_("Old grid file name is invalid"));
+
+   if (iStrlen_STR(sOutGrd) <=0)
+      Abort_SYS(_("New grid file name is invalid"));
+
+   FileNamePart_STR(sInGrd,sRefFil,STR_FILE_PART_NAME);
+   Strcat_STR(sRefFil,"_ref.bin");
+
+   rDx = 1.0;
+   rDy = 1.0;
+   rXo = 0.0;
+   rYo = 0.0;
+   rRot= 0.0;
+   rXoe = 0.0;
+   rYoe = 0.0;
+   
+   
+   // --- Set grid trend parameters ---
+
+   if (iStrcmp_STR(sTOrder,_n("remove mean"),0)==0)  iTOrder=0;
+   else if (iStrcmp_STR(sTOrder,_n("second order"),0)==0)  iTOrder=2;
+   else if (iStrcmp_STR(sTOrder,_n("third order"),0)==0)  iTOrder=3;
+   else iTOrder=1;
+
+   if (iStrcmp_STR(sTBase,_n("all points"),0)==0)  iTBase=0;   // PGU_TREND_ALL    0
+   else iTBase=1;                                          // PGU_TREND_EDGE   1
+
+
+   // --- Set grid expansion parameters ---
+
+   if (iStrlen_STR(sPEx)>0)
+      rPEx=rScanR_STR(sPEx);
+   else 
+      rPEx=10.0;
+   if (rPEx < 0.0)  rPEx=0.0;
+
+   if (iStrcmp_STR(sTEx,_n("rectangular"),0)==0)  iTEx=0;   // PGU_EXPAND_SHAPE_RECTANGLE  0
+   else iTEx=1;                                         // PGU_EXPAND_SHAPE_SQUARE     1
+
+   iXX   =0;
+   iXY   =0;
+
+   // --- Set grid fill parameters --- 
+
+   if (iStrcmp_STR(sFill,_n("inverse distance"),0)==0)
+   {
+      iMxf=-1;
+      iMxp=0;
+   } else {
+      iMxf=0;
+      iMxp=0;
+   }
+
+   if (iStrlen_STR(sZDist)>0) 
+      iZDist=iScanI_STR(sZDist);
+   else
+      iZDist=-1;
+   if(iZDist<0 && iZDist!=-1)  iZDist=0;   
+
+   if (iStrlen_STR(sALim)>0)
+      rALim=rScanR_STR(sALim);
+   else
+      rALim=0.0;
+
+   if (iStrlen_STR(sELim)>0)
+   {
+      rELim=rScanR_STR(sELim);
+      iWLim=0;
+   } else {
+      rELim=-1.0;
+      iWLim=-1;
+   }
+
+   rRollBase=0.0;
+   iRollOpt=2;     // PGU_FILL_ROLLWT_LINEAR  1
+                   // PGU_FILL_ROLLWT_SQUARE  2
+   iNPass=1;
+
+
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- Get pager(PG1) from input grid ---
+
+   IMGi = CreateFile_IMG(GS_FLOAT,sInGrd,IMG_FILE_READONLY);
+   GetInfo_IMG(IMGi,rDx,rDy,rXo,rYo,rRot);
+   iNX = iNX_IMG(IMGi);
+   iNY = iNY_IMG(IMGi);
+   hTR = Create_TR(iTOrder);
+   PG1 = Create_PG(iNY,iNX,GS_FLOAT);
+   GetPG_IMG(IMGi,PG1);
+   hIPJ = Create_IPJ();
+   GetIPJ_IMG(IMGi,hIPJ);
+   Destroy_IMG(IMGi);
+
+   
+   // --- Grid Trend Remove ---
+
+   PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+   iTOpt = 0;   // trend calculate and remove
+   Trend_PGU(PG1,PG2,hTR,iTOpt,iTBase,rXo,rYo,rDx,rDy);
+
+
+   // --- Grid Expand and Fill ---
+
+   if (iStrcmp_STR(sFill,_n("multistep expansion"),0)==0)	{
+
+       if(iNX > 16384 || iNY > 16384) Abort_SYS(_("Grid dimension exceeds 16384"));
+
+       Strcpy_STR(sLPInGrd,"PreLP_");
+       FileNamePart_STR(sInGrd,sTemp,STR_FILE_PART_NAME_EXTENSION);
+       Strcat_STR(sLPInGrd,sTemp);
+	   FileExt_STR(sLPInGrd,".grd",sLPInGrd,FILE_EXT_FORCE);
+
+       IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNX,iNY,sLPInGrd);
+       SetInfo_IMG(IMGo,rDx,rDy,rXo,rYo,rRot);
+       SetTR_IMG(IMGo,hTR);
+       SetPG_IMG(IMGo,PG2);
+       SetIPJ_IMG(IMGo,hIPJ);
+       Destroy_IMG(IMGo);
+
+       // --- Check dummies in the grid ---
+
+       GridStatExt_IMU(sLPInGrd,iGetYesNo_SYS("USGS_PREP4","RECALC"),iItems,iDummies,rMin,rMax,rMean,rStddev);
+
+       if(iDummies == 0)
+       {
+           Strcpy_STR(sPlugGrd,sLPInGrd);
+       }
+       else
+       {
+           // --- Create a new plugged grid ---
+
+           Strcpy_STR(sPlugGrd,"_");
+           Strcat_STR(sPlugGrd,sLPInGrd);
+           FileNamePart_STR(sLPInGrd,sLPInGdb,STR_FILE_PART_NAME);
+           FileExt_STR(sLPInGdb,".gdb",sLPInGdb,FILE_EXT_FORCE);
+    	   FileExt_STR(sPlugGrd,".grd",sPlugGrd,FILE_EXT_FORCE);
+
+          if (iInteractive_SYS())
+	  {
+           SetInteractive_SYS(0);  // Interactive mode off
+	   iFlag = 1;
+	  }
+     
+
+
+
+           // --- GridInFill: Fill in a ribbon along the edge and inside hollow areas of the grid ---
+
+           ProgName_SYS(_("GridInFill"),1);
+
+           FileNamePart_STR(sInGrd,sTemp,STR_FILE_PART_NAME);
+           Strcpy_STR(sGrdInfillTmp,"InfillTmp_");
+           Strcat_STR(sGrdInfillTmp,sTemp);
+		   FileExt_STR(sGrdInfillTmp,".grd",sGrdInfillTmp,FILE_EXT_FORCE);
+           Strcpy_STR(sGrdInfill,"Infill_");
+           Strcat_STR(sGrdInfill,sTemp);
+		   FileExt_STR(sGrdInfill,".grd",sGrdInfill,FILE_EXT_FORCE);
+
+           AbsoluteFileName_SYS(sGrdInfillTmp,sTmpFile);
+           if(iFileExist_SYS(sTmpFile))
+              iDeleteFile_SYS(sTmpFile);
+
+           hIMGIn = CreateFile_IMG(GS_FLOAT,sLPInGrd,IMG_FILE_READONLY);
+		   iRibbonWidth = 3;
+		   iIter = iRound_MATH((real)(iNX+iNY)/200.0);
+		   
+		   GridInFill_IMU(hIMGIn,sGrdInfillTmp,iRibbonWidth,iIter);
+
+           Destroy_IMG(hIMGIn);
+
+
+           // --- Grid window to the original input grid size ---
+           
+           FormatI_STR(1+iRibbonWidth,sXmin,10);
+           FormatI_STR(1+iRibbonWidth,sYmin,10);
+           FormatI_STR(iNX+iRibbonWidth,sXmax,10);
+           FormatI_STR(iNY+iRibbonWidth,sYmax,10);
+
+           SetString_SYS("GRIDWIND","GRD",sGrdInfillTmp);
+           SetString_SYS("GRIDWIND","NEW",sGrdInfill);
+           SetString_SYS("GRIDWIND","COORD","GRID");
+           SetString_SYS("GRIDWIND","XMIN",sXmin);
+           SetString_SYS("GRIDWIND","XMAX",sXmax);
+           SetString_SYS("GRIDWIND","YMIN",sYmin);
+           SetString_SYS("GRIDWIND","YMAX",sYmax);
+           SetString_SYS("GRIDWIND","ZMIN","");
+           SetString_SYS("GRIDWIND","ZMAX","");
+           SetString_SYS("GRIDWIND","CLIP","CLIP");
+           SetString_SYS("GRIDWIND","CSIZE","");
+           SetString_SYS("GRIDWIND","DEC","");
+           
+           if (iRunGX_SYS("gridwind.gx")) Cancel_SYS();
+
+           hIMGOut = CreateFile_IMG(GS_FLOAT,sGrdInfill,IMG_FILE_READONLY);
+           SetInfo_IMG(hIMGOut,rDx,rDy,rXo,rYo,rRot);
+           Destroy_IMG(hIMGOut);
+		   
+           ProgName_SYS(_("GridPanel"),1);
+
+           // --- Get expand grid size ---
+
+           Strcpy_STR(sGrdXpnd,"Xpnd_");
+           FileNamePart_STR(sInGrd,sTemp,STR_FILE_PART_NAME);
+           Strcat_STR(sGrdXpnd,sTemp);
+		   FileExt_STR(sGrdXpnd,".grd",sGrdXpnd,FILE_EXT_FORCE);
+           FormatR_STR(rPEx,sPEx,20,10);
+           if (iStrcmp_STR(sTEx,_n("rectangular"),0)==0)  
+              Strcpy_STR(sShape,"RECTANGLE");
+           else
+              Strcpy_STR(sShape,"SQUARE");
+           
+           SetString_SYS("GRIDXPND","GRDIN",sLPInGrd);
+           SetString_SYS("GRIDXPND","GRDOUT",sGrdXpnd);
+           SetString_SYS("GRIDXPND","MINPER",sPEx);
+           SetString_SYS("GRIDXPND","SHAPE",sShape);
+           SetString_SYS("GRIDXPND","XDIM","");
+           SetString_SYS("GRIDXPND","YDIM","");
+           
+           if (iRunGX_SYS("gridxpnd.gx")) Cancel_SYS();
+           
+           hIMGXpnd = CreateFile_IMG(GS_FLOAT,sGrdXpnd,IMG_FILE_READONLY);
+           iXx = iNX_IMG(hIMGXpnd);
+           iXy = iNY_IMG(hIMGXpnd);
+           Destroy_IMG(hIMGXpnd);
+           
+           
+           // --- Panel the grids ---
+           
+		   iNX4 = iNX/4;
+		   iNY4 = iNY/4;
+		   iPx = iNX+4*iNX4;
+		   iPy = iNY+4*iNY4;
+		   rXp = rXo - (real)(2*iNX4)*rDx;
+		   rYp = rYo - (real)(2*iNY4)*rDy;
+           
+           Strcpy_STR(sGrdPanel,"Panel_");
+           FileNamePart_STR(sInGrd,sTemp,STR_FILE_PART_NAME);
+           Strcat_STR(sGrdPanel,sTemp);
+           FileExt_STR(sGrdPanel,".grd(GRD;Type=Float)",sGrdPanel,FILE_EXT_FORCE);
+           hIMGIn = CreateFile_IMG(GS_FLOAT,sGrdInfill,IMG_FILE_READONLY);
+           hIMGOut = CreateNewFile_IMG(GS_FLOAT,1,iPx,iPy,sGrdPanel);
+           SetInfo_IMG(hIMGOut,rDx,rDy,rXp,rYp,rRot);
+           
+           rVV = Create_VV(REAL, iPx);
+           FillReal_VV(rVV,rDUMMY);
+           
+           for(i=0; i<iPy; i++) {
+              WriteY_IMG(hIMGOut, i, 0, iPx, rVV);
+           }
+           
+           iXx2 = iXx/2;
+           iXy2 = iXy/2;
+		   k = iNX+3*iNX4;
+           rVV0 = Create_VV(REAL, iNX);
+           rVV1 = Create_VV(REAL, iNX4);
+           rVV2 = Create_VV(REAL, iNX4);
+
+           for(i=0; i<iNY; i++) {
+              
+              ReadY_IMG (hIMGIn,  i, 0, iNX, rVV);
+              FillReal_VV(rVV0,rDUMMY);
+			  Copy2_VV(rVV0,0,rVV,0,iNX);
+			  Copy2_VV(rVV1,0,rVV0,0,iNX4);
+			  Copy2_VV(rVV2,0,rVV0,iNX-iNX4,iNX4);
+
+              j1 = i+2*iNY4;
+              j2 = j1+iNY+iNY4;
+              j3 = j1-iNY-iNY4;
+
+              WriteY_IMG(hIMGOut, j1, 2*iNX4, iNX, rVV);
+              WriteY_IMG(hIMGOut, j1, 0, iNX4, rVV2);
+              WriteY_IMG(hIMGOut, j1, k, iNX4, rVV1);
+              
+              if(i<iNY4) {
+                 WriteY_IMG(hIMGOut, j2, 2*iNX4, iNX, rVV);
+                 WriteY_IMG(hIMGOut, j2, 0, iNX4, rVV2);
+                 WriteY_IMG(hIMGOut, j2, k, iNX4, rVV1);
+              }	else if(i>=(iNY-iNY4)) {
+                 WriteY_IMG(hIMGOut, j3, 2*iNX4, iNX, rVV);
+                 WriteY_IMG(hIMGOut, j3, 0, iNX4, rVV2);
+                 WriteY_IMG(hIMGOut, j3, k, iNX4, rVV1);
+              }
+
+           }
+           
+           Destroy_IMG(hIMGIn);
+           Destroy_VV(rVV0);
+           Destroy_VV(rVV1);
+           Destroy_VV(rVV2);
+           
+           // --- Rangrid to fill the dummies in the rectagular area ---	       
+           
+           ProgName_SYS(_("Rangrid"),1);
+
+           FormatR_STR(rXp,sXY,20,10);
+           Strcat_STR(sXY,",");
+           FormatR_STR(rYp,sTemp,20,10);
+           Strcat_STR(sXY,sTemp);
+           Strcat_STR(sXY,",");
+           
+           rX1 = rXp + (real)(iPx-1)*rDx;
+           rY1 = rYp + (real)(iPy-1)*rDy;
+           
+           FormatR_STR(rX1,sTemp,20,10);
+           Strcat_STR(sXY,sTemp);
+           Strcat_STR(sXY,",");
+           FormatR_STR(rY1,sTemp,20,10);
+           Strcat_STR(sXY,sTemp);
+           
+           rD = (rDx + rDy)/2.0;
+           FormatR_STR(rD,sCS,20,10);
+           
+           rBkd = (real)(iPx)*rDx/2.0;
+           rTmp = (real)(iPy)*rDy/2.0;
+           if (rTmp>rBkd)  rBkd=rTmp;
+           FormatR_STR(rBkd,sBKD,20,10);
+           
+           Strcpy_STR(sGrdRgrd,"PanelFill_");
+           FileNamePart_STR(sInGrd,sTemp,STR_FILE_PART_NAME);
+           Strcat_STR(sGrdRgrd,sTemp);
+           FileExt_STR(sGrdRgrd,".grd",sGrdRgrd,FILE_EXT_FORCE);
+           
+           // --- Get input chaneel and output grid Parameters ---
+           
+          
+           // --- Get Control File Parameters ---
+  
+           Strcpy_STR(sGrid, sGrdRgrd);
+
+           GetString_SYS("FFT2PREP","LOGOPT",sLogOpt);     
+           if (iStrcmp_STR(sLogOpt,"-2",STR_CASE_TOLERANT)!=0 &&
+               iStrcmp_STR(sLogOpt,"-1",STR_CASE_TOLERANT)!=0 &&
+               iStrcmp_STR(sLogOpt,"0",STR_CASE_TOLERANT)!=0 &&
+               iStrcmp_STR(sLogOpt,"1",STR_CASE_TOLERANT)!=0 &&
+               iStrcmp_STR(sLogOpt,"2",STR_CASE_TOLERANT)!=0)
+            {
+                   Strcpy_STR(sLogOpt,_n("0"));
+            }
+
+           GetString_SYS("FFT2PREP","LOGMIN",sLogMin);
+           GetString_SYS("FFT2PREP","DSF",sDSF);    
+           GetString_SYS("FFT2PREP","TOL",sTol);
+           GetString_SYS("FFT2PREP","PASTOL",sPasTol);              
+           GetString_SYS("FFT2PREP","ITRMAX",sItrMax);
+           GetString_SYS("FFT2PREP","EDGCLP",sEdgClp);
+           GetString_SYS("FFT2PREP","IWT",sIWT);
+           GetString_SYS("FFT2PREP","WTSLP",sWtSlp);
+           
+           
+           // --- Coarse grid is NOT a required parameter for the Rangrid control file, but the internal default is 8, not 16 ---
+           
+           GetString_SYS("FFT2PREP","ICGR",sICGR);  
+           if(!iStrlen_STR(sICGR))
+              Strcpy_STR(sICGR,"16");
+           
+                 
+           GetString_SYS("FFT2PREP","SRD",sSRD);
+           
+           
+           // --- Line 1: cs ---
+           
+           Strcpy_STR(sCtl, "_rangrid.con");
+           WA_con=Create_WA(sCtl,0);
+
+           Strcpy_STR(sText,sCS);
+           Strcat_STR(sText,_n("     / cs"));
+           Puts_WA(WA_con,sText);
+           NewLine_WA(WA_con);
+           
+           // --- line 2: xmin,ymin,xmax,ymax ---
+           
+           Strcpy_STR(sText,sXY);
+           Strcat_STR(sText,_n("     / xmin,ymin,xmax,ymax"));
+           Puts_WA(WA_con,sText);
+           NewLine_WA(WA_con);
+           
+           // --- line 3: chan,zb,zm,logopt,logmin
+           
+           Strcpy_STR(sText,",,,");
+           Strcat_STR(sText,sLogOpt);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sLogMin);
+           Strcat_STR(sText,_n("     / chan,zb,zm,logopt,logmin"));
+           Puts_WA(WA_con,sText);
+           NewLine_WA(WA_con);
+           
+           // --- line 4: idsf,bkd,srd,iwt,edgclp,wtslp
+           
+           Strcpy_STR(sText,sDSF);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sBKD);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sSRD);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sIWT);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sEdgClp);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sWtSlp);
+           Strcat_STR(sText,_n("     / idsf,bkd,srd,iwt,edgclp,wtslp"));
+           Puts_WA(WA_con,sText);
+           NewLine_WA(WA_con);
+           
+           // --- line 5: tol,pastol,itrmax,ti,icgr
+           
+           Strcpy_STR(sText,sTol);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sPasTol);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sItrMax);
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,"1.0");
+           Strcat_STR(sText,",");
+           Strcat_STR(sText,sICGR);
+           Strcat_STR(sText,_n("     / tol,pastol,itrmax,ti,icgr"));
+           Puts_WA(WA_con,sText);
+           NewLine_WA(WA_con);
+           
+           Destroy_WA(WA_con);
+           
+		   // --- Delete existing file ---
+		   
+		   if(iFileExist_SYS(sGrid))
+		   {
+		   	    if (iInteractive_SYS())
+		   		    iRemoveDocument_PROJ(sGrid);
+		   	    iDeleteGridFile_SYS(sGrid);
+		   }
+		   
+           // --- make VVs ---
+              
+           iPxy = iPx*iPy;
+           rVVx = Create_VV(REAL, iPx);
+           rVVy = Create_VV(REAL, iPx);
+           xVV = Create_VV(REAL, 0);
+           yVV = Create_VV(REAL, 0);
+           zVV = Create_VV(REAL, 0);
+           
+           for(i=0; i<iPx; i++) {
+              rPx = rXp + (real)i*rDx;
+              SetReal_VV(rVVx,i,rPx);
+           }
+           for(i=0; i<iPy; i++) {
+              Append_VV(xVV,rVVx);
+              rPy = rYp + (real)i*rDy;
+              FillReal_VV(rVVy,rPy);
+              Append_VV(yVV,rVVy);
+              ReadY_IMG(hIMGOut, i, 0, iPx, rVV);
+              Append_VV(zVV,rVV);
+           }
+                   
+           RunVV_RGRD(xVV, yVV, zVV, hIPJ, sCtl, sGrdRgrd);
+                   
+           Destroy_VV(rVV);
+           Destroy_VV(rVVx);
+           Destroy_VV(rVVy);
+           Destroy_VV(xVV);
+           Destroy_VV(yVV);
+           Destroy_VV(zVV);
+
+           // --- Grid window to the original input grid size ---
+           
+           FormatI_STR(2*iNX4+1,sXmin,10);
+           FormatI_STR(2*iNY4+1,sYmin,10);
+           FormatI_STR(iNX+2*iNX4,sXmax,10);
+           FormatI_STR(iNY+2*iNY4,sYmax,10);
+           Strcpy_STR(sTemp,sXmax);
+           Strcat_STR(sTemp,", ");
+           Strcat_STR(sTemp,sYmax);
+
+           SetString_SYS("GRIDWIND","GRD",sGrdRgrd);
+           SetString_SYS("GRIDWIND","NEW",sPlugGrd);
+           SetString_SYS("GRIDWIND","COORD","GRID");
+           SetString_SYS("GRIDWIND","XMIN",sXmin);
+           SetString_SYS("GRIDWIND","XMAX",sXmax);
+           SetString_SYS("GRIDWIND","YMIN",sYmin);
+           SetString_SYS("GRIDWIND","YMAX",sYmax);
+           SetString_SYS("GRIDWIND","ZMIN","");
+           SetString_SYS("GRIDWIND","ZMAX","");
+           SetString_SYS("GRIDWIND","CLIP","CLIP");
+           SetString_SYS("GRIDWIND","CSIZE","");
+           SetString_SYS("GRIDWIND","DEC","");
+           
+           if (iRunGX_SYS("gridwind.gx")) Cancel_SYS();
+           
+           if (hIMGOut)
+               Destroy_IMG(hIMGOut);
+           hIMGOut = CreateFile_IMG(GS_FLOAT,sPlugGrd,IMG_FILE_READONLY);
+           iNX = iNX_IMG(hIMGOut);
+           iNY = iNY_IMG(hIMGOut);
+           SetInfo_IMG(hIMGOut,rDx,rDy,rXo,rYo,rRot);
+           Destroy_IMG(hIMGOut);
+
+           if (iFlag)
+	   {
+             SetInteractive_SYS(1);  // Interactive mode on
+       	   }
+	}
+
+       ProgName_SYS(_("Extend and fill grid..."),1);
+
+       GridExpFill_IMU(sPlugGrd,sOutGrd,rPEx,iTEx);
+
+
+      // --- Output pre-processing grid ---
+      
+      IMGo = CreateFile_IMG(GS_FLOAT,sOutGrd,IMG_FILE_READWRITE);
+      SetTR_IMG(IMGo,hTR);
+      SetIPJ_IMG(IMGo,hIPJ);
+      Destroy_IMG(IMGo);
+
+      // --- delete the temp files ---
+
+      iDeleteFile_SYS(sGrdInfill);
+      iDeleteFile_SYS(sGrdInfillTmp);
+      iDeleteFile_SYS(sGrdXpnd);
+      iDeleteFile_SYS(sGrdPanel);
+      iDeleteFile_SYS(sGrdRgrd);
+      iDeleteFile_SYS(sPlugGrd);
+      iDeleteFile_SYS(sLPInGrd);
+
+   } else {
+
+      // --- Grid Expand ---
+
+      Expand_PGU(PG2,PG1,rPEx,iTEx,iXX,iXY);
+
+      iNYe = iNRows_PG(PG1);
+      iNXe = iNCols_PG(PG1);
+      iYo = (iNYe-iNY)/2;
+      iXo = (iNXe-iNX)/2;
+
+
+      // --- Grid Fill ---
+
+      RefFile_PGU(PG1,sRefFil);
+
+      Fill_PGU(PG1,iRollOpt,rRollBase,iZDist,iMxf,iMxp,rALim,rELim,iWLim,iNPass,sRefFil);
+
+
+      // --- Output pre-processing grid ---
+      
+      IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNXe,iNYe,sOutGrd);
+      rXoe = rXo - (real)iXo * rDx;
+      rYoe = rYo - (real)iYo * rDy;
+      SetInfo_IMG(IMGo,rDx,rDy,rXoe,rYoe,rRot);
+      SetPG_IMG(IMGo,PG1);
+      SetTR_IMG(IMGo,hTR);
+      SetIPJ_IMG(IMGo,hIPJ);
+      Destroy_IMG(IMGo);
+   }
+
+
+   // --- Set parameter values for fft2 gxes ---
+
+   SetString_SYS("FFT2IN","IN",sOutGrd);
+   SetString_SYS("FFT2FLT","REF",sInGrd);
+	SetString_SYS("FFT2CON","INPUT_GRID",sInGrd);	
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+   Destroy_PG(PG1);
+   Destroy_PG(PG2);
+   Destroy_TR(hTR);
+   Destroy_IPJ(hIPJ);
+
+   if (iFileExist_SYS(sRefFil))
+      iDeleteFile_SYS(sRefFil);
+
+   if (iFileExist_SYS(sGrdPanel))
+	  iDeleteGridFile_SYS(sGrdPanel);
+      
+
+   // --- Add grid to the current project ---
+
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sOutGrd,"Grid",1);
+}
+
+
+//-----------------------------------------------------------------------

@@ -1,0 +1,286 @@
+//===========================================================================
+NAME          = "Apply a lag correction"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Corrections"
+
+DESCRIPTION   = "\
+
+Shift a channel by a specified lag in fiducials.
+
+Parameters: 
+
+    LAG.IN       : Name of the channel to lag.
+       .OUT      : Name of the output lagged channel.
+       .SHIFT    : Lag to be subtracted from the start fiducial.
+" 
+// Revision History
+// v6.2.0: Fixed to work with lines with undefined fid start and increment values.
+// v6.1.0: Fixed bug - always called the VA methods, even for 1 column.
+// v5.1.6: Altered to use iExistChan_DB and FindChan_DB instead of
+//         iExistSymb_DB and FindSymb_DB.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "lag.gr"
+#include "lag.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;      // Channel Names
+real       rLag;              // Amount of Lag to correct for
+
+EDB        EData;
+DB         Data;              // Database handle
+DB_SYMB    InCh,OutCh;        // Channel Handles
+DB_SYMB    Line;              // Line Handle
+DB_SYMB    __XCh, __YCh;      // Mask backup channels
+VV         hVV;               // data
+VA         hVA;               // data
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        i;                 // Utility int
+int        iLines;            // Number of Lines Processed
+int        iCol;              // Number of columns in channel
+int        iTotLines;         // Total Number of Lines to Process
+real       rStart,rIncr;      // Start And Increment
+int        iType;
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("LAGForm");
+
+      // --- Set up input and output lists ---
+
+      List = GetList_DGW(Diag,_LAGFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_LAGFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_LAGFORM_0,DGW_TEXT,"LAG","IN");     
+      SetInfoSYS_DGW(Diag,_LAGFORM_1,DGW_TEXT,"LAG","OUT");     
+      SetInfoSYS_DGW(Diag,_LAGFORM_2,DGW_TEXT,"LAG","SHIFT");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Exit_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_LAGFORM_0,DGW_TEXT,"LAG","IN");     
+      GetInfoSYS_DGW(Diag,_LAGFORM_1,DGW_TEXT,"LAG","OUT");     
+      GetInfoSYS_DGW(Diag,_LAGFORM_2,DGW_TEXT,"LAG","SHIFT");    
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS ("LAG","IN",sInCh);
+   GetString_SYS ("LAG","OUT",sOutCh);
+   rLag   = rGetReal_SYS  ("LAG","SHIFT");
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sInCh))  
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindChan_DB(Data,sInCh);
+   
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sOutCh)) 
+      DupSymbNoLock_DB(Data,InCh,sOutCh); // Create it 
+   OutCh = FindChan_DB(Data,sOutCh);
+
+
+   // --- get VV or VA ---
+   
+   iType = iGetChanType_DB(Data,InCh);
+   GS_SIMPLE_TYPE(iType)
+   iCol = iGetColVA_DB(Data,InCh);
+   if (iCol == 1)
+      hVV = Create_VV(iType,0);
+   else   
+      hVA = Create_VA(iType,0,iCol);
+   
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   ProgName_SYS(_("Lag Correction"),1);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+
+      if (iCol == 1) {
+      
+         // --- get the data ---
+         
+         GetChanVV_DB(Data,Line,InCh,hVV);
+         
+         
+         // --- Update the Fiducial ---
+         
+         rIncr  = rGetFidIncr_VV(hVV);
+         rStart = rGetFidStart_VV(hVV);
+            
+         if(rIncr==rDUMMY) rIncr = 1.0;
+         if(rStart==rDUMMY) rStart = 0.0;
+         
+         SetFidStart_VV(hVV,rStart-rLag);
+         
+         
+         // --- refid back to old start/increment ---
+
+         ReFid_VV(hVV,rStart,rIncr,iLength_VV(hVV));
+
+
+         // --- write data ---
+         
+         PutChanVV_DB(Data,Line,OutCh,hVV);
+         
+      } else {
+      
+      
+         // --- get the data ---
+         
+         GetChanVA_DB(Data,Line,InCh,hVA);
+         
+         
+         // --- Update the Fiducial ---
+         
+         rIncr  = rGetFidIncr_VA(hVA);
+         rStart = rGetFidStart_VA(hVA);
+
+         if(rIncr==rDUMMY) rIncr = 1.0;
+         if(rStart==rDUMMY) rStart = 0.0;
+         
+         SetFidStart_VA(hVA,rStart-rLag);
+         
+         
+         // --- refid back to old start/increment ---
+
+         ReFid_VA(hVA,rStart,rIncr,iLen_VA(hVA));
+
+
+         // --- write data ---
+         
+         PutChanVA_DB(Data,Line,OutCh,hVA);
+         
+      }         
+      
+      
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Lag correction"),"LAG;");
+   
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+   // --- If the __X or __Y channels exist, they will no longer be
+   //     valid if the user does a masking operation, so delete them. ---
+
+   if (iExistSymb_DB(Data,"__X",DB_SYMB_CHAN)) {
+      __XCh = FindSymb_DB(Data,"__X",DB_SYMB_CHAN);
+      LockSymb_DB(Data,__XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      DeleteSymb_DB(Data,__XCh);
+   }
+
+   if (iExistSymb_DB(Data,"__Y",DB_SYMB_CHAN)) {
+      __YCh = FindSymb_DB(Data,"__Y",DB_SYMB_CHAN);
+      LockSymb_DB(Data,__YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      DeleteSymb_DB(Data,__YCh);
+   }
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("LAG GX (Apply lag correction)"), FALSE);
+   AddComment_DB(Data, "Input channel", sInCh, TRUE);
+   AddComment_DB(Data, "Output channel", sOutCh, TRUE);
+   AddRealComment_DB(Data, _n("Shift"), rLag, TRUE);
+
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

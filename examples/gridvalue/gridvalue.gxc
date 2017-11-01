@@ -1,0 +1,244 @@
+//===========================================================================
+NAME          = "GRIDVALUE"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+Display grid values at a point.  Interactive only.
+"
+
+//===========================================================================
+
+RESOURCE = "gridvalue.gr"
+#include "gridvalue.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+
+int  i;  // utility int
+
+string(STR_FILE) sGrd1,sGrd2,sGrd3,sGrd4;  
+string(STR_DEFAULT) sTemp;
+
+real rX,rY,rXi,rYi,rZ;
+
+IMG  hIMG1,hIMG2,hIMG3,hIMG4;
+IPJ  hIPJ1,hIPJ2,hIPJ3,hIPJ4;
+IPJ  hViewIPJ;
+
+PJ   hPJ;
+
+EMAP hEMAP;
+MAP  hMAP;
+MVIEW hMVIEW;
+
+DGW  hDGW1,hDGW2; 
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS()) {
+
+      hIMG1 = (IMG)0;   
+      hIMG2 = (IMG)0;   
+      hIMG3 = (IMG)0;   
+      hIMG4 = (IMG)0;
+      hIPJ1 = (IPJ)0;   
+      hIPJ2 = (IPJ)0;   
+      hIPJ3 = (IPJ)0;   
+      hIPJ4 = (IPJ)0;
+      
+      hDGW1 = Create_DGW("GRIDVALUE1");
+      hDGW2 = Create_DGW("GRIDVALUE2");
+   
+      i = 0;
+      while (i != -1) 
+      
+         switch (i) {
+      
+            case 0:
+            
+               if (hIMG1) {Destroy_IMG(hIMG1); hIMG1 = (IMG)0;}
+               if (hIMG2) {Destroy_IMG(hIMG2); hIMG2 = (IMG)0;}
+               if (hIMG3) {Destroy_IMG(hIMG3); hIMG3 = (IMG)0;}
+               if (hIMG4) {Destroy_IMG(hIMG4); hIMG4 = (IMG)0;}
+
+               if (hIPJ1) {Destroy_IPJ(hIPJ1); hIPJ1 = (IPJ)0;}
+               if (hIPJ2) {Destroy_IPJ(hIPJ2); hIPJ2 = (IPJ)0;}
+               if (hIPJ3) {Destroy_IPJ(hIPJ3); hIPJ3 = (IPJ)0;}
+               if (hIPJ4) {Destroy_IPJ(hIPJ4); hIPJ4 = (IPJ)0;}
+                  
+               SetInfoSYS_DGW(hDGW1,_GRIDVALUE1_0,DGW_FILEPATH,"GRIDVALUE","GRD1");     
+               SetInfoSYS_DGW(hDGW1,_GRIDVALUE1_1,DGW_FILEPATH,"GRIDVALUE","GRD2");     
+               SetInfoSYS_DGW(hDGW1,_GRIDVALUE1_2,DGW_FILEPATH,"GRIDVALUE","GRD3");     
+               SetInfoSYS_DGW(hDGW1,_GRIDVALUE1_3,DGW_FILEPATH,"GRIDVALUE","GRD4");     
+               i = iRunDialogue_DGW(hDGW1);
+               if (i ==-1) Cancel_SYS();
+               GetInfoSYS_DGW(hDGW1,_GRIDVALUE1_0,DGW_FILEPATH,"GRIDVALUE","GRD1");     
+               GetInfoSYS_DGW(hDGW1,_GRIDVALUE1_1,DGW_FILEPATH,"GRIDVALUE","GRD2");     
+               GetInfoSYS_DGW(hDGW1,_GRIDVALUE1_2,DGW_FILEPATH,"GRIDVALUE","GRD3");     
+               GetInfoSYS_DGW(hDGW1,_GRIDVALUE1_3,DGW_FILEPATH,"GRIDVALUE","GRD4");
+               
+               GetString_SYS("GRIDVALUE","GRD1",sGrd1);
+               if (iStrlen_STR(sGrd1)) {
+                  hIMG1 = CreateFile_IMG(GS_DOUBLE,sGrd1,IMG_FILE_READONLY);
+                  hIPJ1 = Create_IPJ();
+                  GetIPJ_IMG(hIMG1, hIPJ1);
+                  FileNamePart_STR(sGrd1,sTemp,STR_FILE_PART_NAME);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_2,DGW_LABEL,sTemp);     
+               } else   
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_2,DGW_LABEL,"");     
+                  
+               GetString_SYS("GRIDVALUE","GRD2",sGrd2);
+               if (iStrlen_STR(sGrd2)) {
+                  hIMG2 = CreateFile_IMG(GS_DOUBLE,sGrd2,IMG_FILE_READONLY);
+                  hIPJ2 = Create_IPJ();
+                  GetIPJ_IMG(hIMG2, hIPJ2);
+                  FileNamePart_STR(sGrd2,sTemp,STR_FILE_PART_NAME);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_3,DGW_LABEL,sTemp);     
+               } else   
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_3,DGW_LABEL,"");     
+                  
+               GetString_SYS("GRIDVALUE","GRD3",sGrd3);
+               if (iStrlen_STR(sGrd3)) {
+                  hIMG3 = CreateFile_IMG(GS_DOUBLE,sGrd3,IMG_FILE_READONLY);
+                  hIPJ3 = Create_IPJ();
+                  GetIPJ_IMG(hIMG3, hIPJ3);
+                  FileNamePart_STR(sGrd3,sTemp,STR_FILE_PART_NAME);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_4,DGW_LABEL,sTemp);     
+               } else   
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_4,DGW_LABEL,"");     
+                  
+               GetString_SYS("GRIDVALUE","GRD4",sGrd4);
+               if (iStrlen_STR(sGrd4)) {
+                  hIMG4 = CreateFile_IMG(GS_DOUBLE,sGrd4,IMG_FILE_READONLY);
+                  hIPJ4 = Create_IPJ();
+                  GetIPJ_IMG(hIMG4, hIPJ4);
+                  FileNamePart_STR(sGrd4,sTemp,STR_FILE_PART_NAME);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_5,DGW_LABEL,sTemp);     
+               } else   
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_5,DGW_LABEL,"");     
+                  
+               break;
+               
+            case 1:
+               hEMAP = Current_EMAP();
+
+               iGetPoint_EMAP(hEMAP,_("Select a location at which to find grid value(s)"),rX,rY);
+               i = 3;
+               break;
+               
+            case 2:
+            
+               GetInfo_DGW(hDGW2,_GRIDVALUE2_0,DGW_TEXT,sTemp);     
+               rX = rScanR_STR(sTemp);
+               GetInfo_DGW(hDGW2,_GRIDVALUE2_1,DGW_TEXT,sTemp);     
+               rY = rScanR_STR(sTemp);
+               i = 3;
+               break;
+               
+            case 3:
+               // --- Make sure the coordinates are reprojected correctly. ---
+
+               hEMAP = Current_EMAP();
+               hMAP = Lock_EMAP(hEMAP);
+               hMVIEW = Create_MVIEW(hMAP,"*Data",MVIEW_READ);
+               hViewIPJ = Create_IPJ();
+               GetIPJ_MVIEW(hMVIEW,hViewIPJ);
+               Destroy_MVIEW(hMVIEW);
+               UnLock_EMAP(hEMAP);
+            
+               FormatR_STR(rX,sTemp,16,10);
+               SetInfo_DGW(hDGW2,_GRIDVALUE2_0,DGW_TEXT,sTemp);     
+               FormatR_STR(rY,sTemp,16,10);
+               SetInfo_DGW(hDGW2,_GRIDVALUE2_1,DGW_TEXT,sTemp);
+               
+               if (hIMG1) {
+                  rXi = rX; rYi = rY;
+                  hPJ = CreateIPJ_PJ(hViewIPJ, hIPJ1);
+                  ConvertXY_PJ(hPJ,rXi,rYi);
+                  Destroy_PJ(hPJ);
+
+                  rZ = rGetZ_IMG(hIMG1,rXi,rYi);
+                  FormatR_STR(rZ,sTemp,16,10);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_2,DGW_TEXT,sTemp);
+               } else
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_2,DGW_TEXT,"");
+                  
+               if (hIMG2) {
+                  rXi = rX; rYi = rY;
+                  hPJ = CreateIPJ_PJ(hViewIPJ, hIPJ2);
+                  ConvertXY_PJ(hPJ,rXi,rYi);
+                  Destroy_PJ(hPJ);
+
+                  rZ = rGetZ_IMG(hIMG2,rXi,rYi);
+                  FormatR_STR(rZ,sTemp,16,10);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_3,DGW_TEXT,sTemp);
+               } else
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_3,DGW_TEXT,"");
+                  
+               if (hIMG3) {
+                  rXi = rX; rYi = rY;
+                  hPJ = CreateIPJ_PJ(hViewIPJ, hIPJ3);
+                  ConvertXY_PJ(hPJ,rXi,rYi);
+                  Destroy_PJ(hPJ);
+
+                  rZ = rGetZ_IMG(hIMG3,rXi,rYi);
+                  FormatR_STR(rZ,sTemp,16,10);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_4,DGW_TEXT,sTemp);
+               } else
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_4,DGW_TEXT,"");
+                  
+               if (hIMG4) {
+                  rXi = rX; rYi = rY;
+                  hPJ = CreateIPJ_PJ(hViewIPJ, hIPJ4);
+                  ConvertXY_PJ(hPJ,rXi,rYi);
+                  Destroy_PJ(hPJ);
+
+                  rZ = rGetZ_IMG(hIMG4,rXi,rYi);
+                  FormatR_STR(rZ,sTemp,16,10);
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_5,DGW_TEXT,sTemp);
+               } else
+                  SetInfo_DGW(hDGW2,_GRIDVALUE2_5,DGW_TEXT,"");
+             
+               i = iRunDialogue_DGW(hDGW2);
+               if (i ==-1) Cancel_SYS();
+               
+               Destroy_IPJ(hViewIPJ);
+
+               break;
+               
+            default:
+            
+               DisplayMessage_SYS(_("Lost"),_("I'm lost..."));
+               i = 0;               
+               
+         }
+               
+
+      Destroy_DGW(hDGW1);
+      Destroy_DGW(hDGW2);
+
+      if (hIMG1) Destroy_IMG(hIMG1);
+      if (hIMG2) Destroy_IMG(hIMG2);
+      if (hIMG3) Destroy_IMG(hIMG3);
+      if (hIMG4) Destroy_IMG(hIMG4);
+
+      if (hIPJ1) Destroy_IPJ(hIPJ1);
+      if (hIPJ2) Destroy_IPJ(hIPJ2);
+      if (hIPJ3) Destroy_IPJ(hIPJ3);
+      if (hIPJ4) Destroy_IPJ(hIPJ4);
+   }
+}

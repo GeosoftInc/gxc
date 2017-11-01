@@ -1,0 +1,176 @@
+//===========================================================================
+NAME          = "Create an HXYZ from a GDB"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/DAP Prep/Prepare Hyper Datasets"
+
+DESCRIPTION   = "
+
+   Export data to a Geosoft point data file (HXYZ).  Either displayed
+   data channels or all data channels may be exported, and either
+   the displayed line, selected lines or all lines may be exported.
+	
+   HXYZGDB.FILE   HXYZ file name,
+
+          .CHAN   \"D\" for displayed channels.
+                  \"A\" for all channels.
+
+          .LINE   \"D\" for the displayed line only.
+                  \"S\" for selected lines.
+                  \"A\" for all lines.
+"
+
+//===========================================================================
+
+RESOURCE = "hxyzgdb.gr"
+#include "hxyzgdb.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define DISPLAYED 0
+#define SELECTED  1
+#define ALL       2
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;
+string(STR_DB_SYMBOL) sChan,sLine,sCurLine;
+
+int         i;
+int         iLine;         // Output line mode
+
+EDB         EData;         // database handle
+DB          Data;          // database handle
+VV          hVV;           // VV handle
+DGW         Diag;          // dialogue box
+DB_SELECT   Select;        // current selection mode
+HXYZ        hHXYZ;         // HXYZ handle
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("HXYZGDB");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_HXYZGDB_0,DGW_FILEPATH,"HXYZGDB","FILE");     
+      SetInfoSYS_DGW(Diag,_HXYZGDB_1,DGW_TEXT,"HXYZGDB","CHAN");    
+      SetInfoSYS_DGW(Diag,_HXYZGDB_2,DGW_TEXT,"HXYZGDB","LINE");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_HXYZGDB_0,DGW_FILEPATH,"HXYZGDB","FILE");     
+      GetInfoSYS_DGW(Diag,_HXYZGDB_1,DGW_TEXT,"HXYZGDB","CHAN");    
+      GetInfoSYS_DGW(Diag,_HXYZGDB_2,DGW_TEXT,"HXYZGDB","LINE");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("HXYZGDB","FILE",sFile);
+   GetString_SYS("HXYZGDB","CHAN",sChan);
+   GetString_SYS("HXYZGDB","LINE",sLine);
+
+
+   // --- get currently selected line ---
+
+   EData = Current_EDB();
+   GetCurLine_EDB(EData,sCurLine);
+
+
+   // --- get the channel list depending on mode ---
+
+   hVV = Create_VV(INT,0);
+   ToUpper_STR(sChan);
+   if (iChar_STR(sChan) == iChar_STR("A")) {
+      if (iInteractive_SYS())
+      {
+         iAllChanList_EDB(EData,hVV);
+         Data = Lock_EDB(EData);
+      } else {
+         Data = Lock_EDB(EData);
+         iSymbList_DB(Data,hVV,DB_SYMB_CHAN);
+      }
+   } else {
+      if (!iInteractive_SYS())
+         Abort_SYS(_("Interactive mode required."));
+      iDispChanList_EDB(EData,hVV);
+      Data = Lock_EDB(EData);
+   }
+
+
+   // --- set the line export mode ---
+
+   ToUpper_STR(sLine);
+   if (iChar_STR(sLine) == iChar_STR("D")) {
+      if (!iInteractive_SYS())
+         Abort_SYS(_("Interactive mode required."));
+      iLine = DISPLAYED;
+   } else if (iChar_STR(sLine) == iChar_STR("A"))
+      iLine = ALL;
+   else
+      iLine = SELECTED;
+
+
+   // --- save current selection ---
+
+   if (iLine != SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+
+   // --- export data ---
+
+   Progress_SYS(1);
+   
+   hHXYZ = hCreateDB_HXYZ(Data,hVV,sFile);
+   
+   Progress_SYS(0);
+   
+
+   // --- clean up ---
+
+   Destroy_HXYZ(hHXYZ);
+   Destroy_VV(hVV);
+
+
+   // --- reset starting selections ---
+
+   if (iLine != SELECTED)
+      SetSelect_DB(Data,Select);
+
+}

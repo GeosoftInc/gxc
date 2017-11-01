@@ -1,0 +1,319 @@
+//===========================================================================
+NAME          = "Add a two-grid composite to a map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Display Grid"
+
+DESCRIPTION   = "
+
+   GRIDIMG2.NEW      - 1 to create a new map, 0 to use current map
+           .GRID1    - first grid name
+           .ZONE1    - zoning method:  0 - default
+                                       1 - linear
+                                       5 - log-linear
+                                       2 - normal distribution
+                                       3 - histogram equalization
+                                       4 - shaded relief
+           .COLOR1   - color table name (.TBL .ZON .ITR or .AGG)
+                       Default is the default table file defined in Geosoft.ini.
+                       If undefined in ini file, Colour.tbl is used.
+           .CONTOUR1 - contour interval
+
+           .GRID2    - second grid name
+           .ZONE2    - zoning method
+           .COLOR2   - color table name (.TBL .ZON .ITR or .AGG)
+           .CONTOUR2 - contour interval
+           .METHOD   - rendering method
+
+"
+//===========================================================================
+//  The following 8 GXs are very similar in structure and should probably be updated
+//  together (except, perhaps for GRIDIMG3D) whenever something fundamental is 
+//  changed in any one of them. 
+//
+//  Eventually, they should be replaced by a GX.Net method which consolidates 
+//  the duplication.
+//
+// GRIDIMG1.GX:  Display 1 grid (GRD, etc) on a map
+// GRIDIMG.GX    Display 1 image (TIF, BMP etc) on a map
+// GRIDIMGS.GX   Display a colour-shaded grid on a map
+// GRIDIMGT.GX   Display a 3-grid ternary image (e.g. RGB) on a map.
+// GRIDIMG2/3/4.GX  Display 2,3 or 4 grid composite on a map (creates one Agg).
+// GRIDIMG3D     Display a grid in a 3D map: not so much like the others because 
+//               of the 3D handling.
+//===========================================================================
+// Revision History:
+//
+// v7.0.1   Oriented grids plotted to new maps now give real-world XYZ on the status bar.
+// v6.0.0   Add images to the grid explorer
+//===========================================================================
+
+RESOURCE = "gridimg2.gr"
+#include "gridimg2.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrid1,sColor1,sMap;
+string(STR_FILE) sGrid2,sColor2,sGridName;
+string(STR_GROUP) sAgg, sGroup;
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+DGW         Diag;
+AGG         Agg;
+IMG         hIMG;
+IPJ         hIPJ, hUserIPJ;
+int         iZone1,iZone2,iNew,iRun,iMethod,iOrient;
+real        rContour1,rContour2;
+
+
+//===========================================================================
+//                           GRIDIMG2 CODE
+//===========================================================================
+
+{
+	// --- Set required defaults ---
+
+	DefaultInt_SYS("GRIDIMG2","ZONE1",3);
+	DefaultInt_SYS("GRIDIMG2","ZONE2",3);
+	DefaultInt_SYS("GRIDIMG2","METHOD",1);
+
+
+	// --- Are we running interactively ? ---
+
+	if (iInteractive_SYS()) {
+
+
+		// --- Create the Dialogue ---
+
+		Diag = Create_DGW("GRIDIMG2");
+		
+
+		// --- Set any Defaults from INI ---
+
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_0,DGW_FILEPATH, "GRIDIMG2","GRID1");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_1,DGW_LISTALIAS,"GRIDIMG2","ZONE1");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_2,DGW_FILEPATH, "GRIDIMG2","COLOR1");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_3,DGW_TEXT,     "GRIDIMG2","CONTOUR1");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_4,DGW_FILEPATH, "GRIDIMG2","GRID2");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_5,DGW_LISTALIAS,"GRIDIMG2","ZONE2");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_6,DGW_FILEPATH, "GRIDIMG2","COLOR2");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_7,DGW_TEXT,     "GRIDIMG2","CONTOUR2");     
+		SetInfoSYS_DGW(Diag,_GRIDIMG2_8,DGW_LISTALIAS,"GRIDIMG2","METHOD");     
+		
+
+		// --- Run the Dialogue ---
+
+		while (1)
+		{
+			iRun = iRunDialogue_DGW(Diag);
+			if (iRun == -1)
+				Cancel_SYS();
+			
+			// --- Ensure we have a map and that we are not drawing on grid documents ---
+			if (iRun != 0 || iRunGX_SYS("sclgrd") != -1)
+				break;
+		}
+		SetInt_SYS("GRIDIMG2","NEW",iRun);
+
+		
+		// --- Put values back in INI ---
+
+
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_0,DGW_FILEPATH, "GRIDIMG2","GRID1");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_1,DGW_LISTALIAS,"GRIDIMG2","ZONE1");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_2,DGW_FILEPATH, "GRIDIMG2","COLOR1");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_3,DGW_TEXT,     "GRIDIMG2","CONTOUR1");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_4,DGW_FILEPATH, "GRIDIMG2","GRID2");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_5,DGW_LISTALIAS,"GRIDIMG2","ZONE2");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_6,DGW_FILEPATH, "GRIDIMG2","COLOR2");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_7,DGW_TEXT,     "GRIDIMG2","CONTOUR2");     
+		GetInfoSYS_DGW(Diag,_GRIDIMG2_8,DGW_LISTALIAS,"GRIDIMG2","METHOD");     
+		
+	}
+
+
+	// --- Get Parameters ---
+
+	GetString_SYS("GRIDIMG2","GRID1",sGrid1);
+	GetString_SYS("GRIDIMG2","COLOR1",sColor1);
+	iZone1 = iGetInt_SYS("GRIDIMG2","ZONE1");
+	if (iExistReal_SYS("GRIDIMG2","CONTOUR1"))
+		rContour1 = rGetReal_SYS("GRIDIMG2","CONTOUR1");
+	else
+		rContour1 = rDUMMY;
+
+	GetString_SYS("GRIDIMG2","GRID2",sGrid2);
+	GetString_SYS("GRIDIMG2","COLOR2",sColor2);
+	iZone2 = iGetInt_SYS("GRIDIMG2","ZONE2");
+	if (iExistReal_SYS("GRIDIMG2","CONTOUR2"))
+		rContour2 = rGetReal_SYS("GRIDIMG2","CONTOUR2");
+	else
+		rContour2 = rDUMMY;
+	iMethod = iGetInt_SYS("GRIDIMG2","METHOD");
+
+
+	// --- Verify Color table file ---
+
+	if (iStrlen_STR(sColor1) == 0)                             // undefined in dialogue
+		if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor1) == 1)  // undefined in parm block
+			Strcpy_STR(sColor1,"colour.tbl");                   // hardwire to 
+
+	if (iStrlen_STR(sColor2) == 0)                             // undefined in dialogue
+		if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor2) == 1)  // undefined in parm block
+			Strcpy_STR(sColor2,"colour.tbl");                   // hardwire to 
+
+	// --- create a new map if required ---
+
+	iNew = iGetInt_SYS("GRIDIMG2","NEW");
+	if (iNew != 0) 
+	{
+
+		// --- range the grid ---
+		
+		SetString_SYS("IMGRANGE","FILE",sGrid1);
+		if (iRunGX_SYS("imgrange.gx"))
+			Abort_SYS(_("Failed to determine grid range."));
+
+		
+		// --- For running in a script: When recording, DEFMAP was called, and the user may
+		//     have input a different name than that created from the grid name. Get the name
+		//     created by DEFMAP ---
+
+		if(!iInteractive_SYS()) {
+			GetString_SYS("DEFMAP","NEWMAP",sMap);         
+			if(!iStrlen_STR(sMap)) {     // if not found, revert back to normal behaviour
+				FileNamePart_STR(sGrid1,sMap,STR_FILE_PART_NAME);   
+				Strcat_STR(sMap, ".map");
+			}
+			SetString_SYS("DEFMAP","NEWMAP","");   // use it just once
+		}
+		else       
+		{
+			FileNamePart_STR(sGrid1,sMap,STR_FILE_PART_NAME);
+			Strcat_STR(sMap, ".map");
+		}
+
+		SetString_SYS("DEFMAP","MAP",sMap);
+		if (iRunGX_SYS("defmap.gx"))
+			Cancel_SYS();
+	}
+
+	// --- Ensure we have a map and that we are not drawing on grid documents ---
+	if (iNew == 0 && iRunGX_SYS("sclgrd") == -1) 
+		Cancel_SYS();
+
+	// --- create aggregate ---
+
+	Agg = Create_AGG();
+	SetRenderMethod_AGG(Agg,iMethod);
+
+	// --- add grids to the agg ---
+
+	Progress_SYS(1);
+	LayerIMG_AGG(Agg,sGrid1,iZone1,sColor1,rContour1);
+	LayerIMG_AGG(Agg,sGrid2,iZone2,sColor2,rContour2);
+	Progress_SYS(0);
+
+
+	// --- create the map ---
+
+	EMap = Current_EMAP();
+	Map = Lock_EMAP(EMap);
+
+
+	// --- open data view ---
+
+	View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+
+
+	// --- put the AGG in the view ---
+
+	Strcpy_STR(sAgg,"AGG_");
+	FileNamePart_STR(sGrid1,sGridName,STR_FILE_PART_NAME);
+	ToLower_STR(sGridName);
+	Strcat_STR(sAgg,sGridName);
+	if (iZone1 == AGG_LAYER_ZONE_SHADE) 
+		Strcat_STR(sAgg,"_s_");
+	else 
+		Strcat_STR(sAgg,"_");
+	FileNamePart_STR(sGrid2,sGridName,STR_FILE_PART_NAME);
+	ToLower_STR(sGridName);
+	Strcat_STR(sAgg,sGridName);
+	if (iZone2 == AGG_LAYER_ZONE_SHADE) 
+		Strcat_STR(sAgg,"_s");
+
+
+	// --- For long file names, ensure that the group name is unique. ---
+
+	if(iStrlen_STR(sAgg)==STR_GROUP-1) {
+		Strcpy_STR(sGroup, sAgg);
+		GenNewGroupName_MVIEW(View, sGroup, sAgg);
+	}
+
+	Aggregate_MVIEW(View,Agg,sAgg);
+
+
+	// --- clip the aggregate group ---
+
+	MarkAllGroups_MVIEW(View,0);
+	MarkGroup_MVIEW(View,sAgg,1);
+	ClipMarkedGroups_MVIEW(View,CLIP_ON);
+	MarkAllGroups_MVIEW(View,0);
+
+
+	// --- add the maker ---
+
+	Maker_MVIEW(View,0,1,"gridimg2",MAKER_GX,_("2-grid Composite..."),"GRIDIMG2;");
+
+
+	// --- For new views, if the grid is oriented in 3D, set the user IPJ
+	//     to be the view IPJ without the orientation, so the status bar gives
+	//     the true location in XYZ ---
+
+	if(iNew==1)
+	{
+		hIMG = CreateFile_IMG(GS_TYPE_DEFAULT,sGrid1,IMG_FILE_READONLY);
+		hIPJ = Create_IPJ();
+		GetIPJ_IMG(hIMG,hIPJ);
+
+		iOrient = iGetOrientation_IPJ(hIPJ);
+		if(iOrient!=IPJ_ORIENT_DEFAULT)
+		{
+			hUserIPJ = Create_IPJ();
+			Copy_IPJ(hIPJ, hUserIPJ);	
+			SetPlanView_IPJ(hUserIPJ, 0.0, 0.0, 0.0, 0.0);
+			SetUserIPJ_MVIEW(View, hUserIPJ);
+			SetWorkingIPJ_MVIEW(View, hIPJ);		// Need to reset, because SetUserIPJ_MVIEW changes it
+		}
+		
+		Destroy_IMG(hIMG);
+		Destroy_IPJ(hIPJ);
+	}
+
+
+	// --- done ---
+
+	Destroy_AGG(Agg);
+	Destroy_MVIEW(View);
+
+
+	// --- Add to the current project ---
+
+	if (!iScript_SYS()) {
+		iAddDocument_PROJ(sGrid1,"Grid",0);
+		iAddDocument_PROJ(sGrid2,"Grid",0);
+	}
+	
+	UnLock_EMAP(EMap);
+}

@@ -1,0 +1,272 @@
+//===========================================================================
+NAME          = "Calculate Free-air anomaly"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav/Corrections by Steps"
+
+DESCRIPTION   = "
+
+   AGFREEAIR.OUTCH   Output Free-air anomaly channel
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3: New GX.
+    
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "agfreeair.gr"
+#include "agfreeair.grh"
+
+//===========================================================================
+//                                INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DB          Data;                   // Database handle
+EDB         EData;                  // Edited database handle
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // Channel list handle
+EXP         Exp;
+VV          hVV;
+
+DB_SYMB     Line,InCh,VaccCh,EotvosCh,TideCh,LatCh,FaCh,OutCh;
+
+int         i,iTideCor,iVaccCor; 
+
+string(STR_DEFAULT)  sInCh,sVaccCh,sEotvosCh,sTideCh,sLatCh,sFaCh,sOutCh;
+string(512)          sFormula;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGFREEAIR");
+                                                 
+
+      // --- Set up channel lists ---
+      
+      List = GetList_DGW(Diag,_AGFREEAIR_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGFREEAIR_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGFREEAIR_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGFREEAIR_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGFREEAIR_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGFREEAIR_5);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGFREEAIR_6);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+
+      // --- Set any Defaults ---
+  
+      SetInfoSYS_DGW(Diag,_AGFREEAIR_0,DGW_TEXT,"AGFREEAIR","INCH");
+      SetInfoSYS_DGW(Diag,_AGFREEAIR_1,DGW_TEXT,"AGFREEAIR","EOTVOSCORCH");
+      SetInfoSYS_DGW(Diag,_AGFREEAIR_2,DGW_TEXT,"AGFREEAIR","VACCCORCH");
+      SetInfoSYS_DGW(Diag,_AGFREEAIR_3,DGW_TEXT,"AGFREEAIR","TIDECORCH");
+      SetInfoSYS_DGW(Diag,_AGFREEAIR_4,DGW_TEXT,"AGFREEAIR","LATCORCH");
+      SetInfoSYS_DGW(Diag,_AGFREEAIR_5,DGW_TEXT,"AGFREEAIR","FACORCH");
+      SetInfoSYS_DGW(Diag,_AGFREEAIR_6,DGW_TEXT,"AGFREEAIR","OUTCH");
+                           
+                             
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();           // They hit cancel
+                                                 
+     
+      // --- Read inputs from the dialogue box ---
+      
+      GetInfoSYS_DGW(Diag,_AGFREEAIR_0,DGW_TEXT,"AGFREEAIR","INCH");
+      GetInfoSYS_DGW(Diag,_AGFREEAIR_1,DGW_TEXT,"AGFREEAIR","EOTVOSCORCH");
+      GetInfoSYS_DGW(Diag,_AGFREEAIR_2,DGW_TEXT,"AGFREEAIR","VACCCORCH");
+      GetInfoSYS_DGW(Diag,_AGFREEAIR_3,DGW_TEXT,"AGFREEAIR","TIDECORCH");
+      GetInfoSYS_DGW(Diag,_AGFREEAIR_4,DGW_TEXT,"AGFREEAIR","LATCORCH");
+      GetInfoSYS_DGW(Diag,_AGFREEAIR_5,DGW_TEXT,"AGFREEAIR","FACORCH");
+      GetInfoSYS_DGW(Diag,_AGFREEAIR_6,DGW_TEXT,"AGFREEAIR","OUTCH");
+     
+      // --- Destroy the Dialogue ---
+     
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGFREEAIR","INCH",sInCh);
+   GetString_SYS("AGFREEAIR","EOTVOSCORCH",sEotvosCh);
+   GetString_SYS("AGFREEAIR","VACCCORCH",sVaccCh);
+   GetString_SYS("AGFREEAIR","TIDECORCH",sTideCh);
+   GetString_SYS("AGFREEAIR","LATCORCH",sLatCh);
+   GetString_SYS("AGFREEAIR","FACORCH",sFaCh);
+   GetString_SYS("AGFREEAIR","OUTCH",sOutCh);
+    
+   if(iStrlen_STR(sVaccCh)>0)  {
+      if (!iExistChan_DB(Data,sVaccCh)) 
+         Abort_SYS(_("The Vacc correction channel does not exist."));
+      iVaccCor = 1;
+   } else
+      iVaccCor = 0;
+
+   if(iStrlen_STR(sTideCh)>0)  {
+      if (!iExistChan_DB(Data,sTideCh)) 
+         Abort_SYS(_("The Tide correction channel does not exist."));
+      iTideCor = 1;
+   } else
+      iTideCor = 0;
+
+   
+   // --- Get handles to the input data channels ---
+
+   if (!iExistChan_DB(Data,sInCh)) 
+      Abort_SYS(_("The Absolute Gravity channel does not exist."));
+   if (!iExistChan_DB(Data,sEotvosCh)) 
+      Abort_SYS(_("The Eotvos correction channel does not exist."));
+   if (!iExistChan_DB(Data,sLatCh)) 
+      Abort_SYS(_("The Latitude correction channel does not exist."));
+   if (!iExistChan_DB(Data,sFaCh)) 
+      Abort_SYS(_("The Free-air correction channel does not exist."));
+
+   InCh = FindChan_DB(Data,sInCh);
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   EotvosCh = FindChan_DB(Data,sEotvosCh);
+   LockSymb_DB(Data,EotvosCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LatCh = FindChan_DB(Data,sLatCh);
+   LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   FaCh = FindChan_DB(Data,sFaCh);
+   LockSymb_DB(Data,FaCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   if(iVaccCor) {
+      VaccCh = FindChan_DB(Data,sVaccCh);
+      LockSymb_DB(Data,VaccCh,DB_LOCK_READONLY,DB_WAIT_NONE);                                  
+      SetChanProtect_DB(Data,VaccCh,DB_CHAN_UNPROTECTED);
+   }
+   if(iTideCor) {
+      TideCh = FindChan_DB(Data,sTideCh);
+      LockSymb_DB(Data,TideCh,DB_LOCK_READONLY,DB_WAIT_NONE);                                  
+      SetChanProtect_DB(Data,TideCh,DB_CHAN_UNPROTECTED);
+   }
+
+
+   // --- Get handle to the output channel ---
+
+   if (!iExistChan_DB(Data,sOutCh)) 
+      OutCh = DupSymb_DB(Data,InCh,sOutCh);
+   else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   }   
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);     
+                         
+
+   // --- Create expression ---
+
+   if(iVaccCor && iTideCor)
+      Strcpy_STR(sFormula,"$sOutCh=$sInCh-($sVaccCh-$sEotvosCh+$sLatCh-$sFaCh-$sTideCh);");
+   else if(iVaccCor && !iTideCor)
+      Strcpy_STR(sFormula,"$sOutCh=$sInCh-($sVaccCh-$sEotvosCh+$sLatCh-$sFaCh);");
+   else if(!iVaccCor && iTideCor)
+      Strcpy_STR(sFormula,"$sOutCh=$sInCh-(-$sEotvosCh+$sLatCh-$sFaCh-$sTideCh);");
+   else
+      Strcpy_STR(sFormula,"$sOutCh=$sInCh-(-$sEotvosCh+$sLatCh-$sFaCh);");
+
+   Exp = Create_EXP(Data,sFormula,512);
+
+   hVV = Create_VV(REAL,0);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating Free-air Anomaly"),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, InCh) > 0) {
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Free-air Anomaly"),"AGFREEAIR;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Free-air Anomaly"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,EotvosCh);
+   UnLockSymb_DB(Data,LatCh);
+   UnLockSymb_DB(Data,FaCh);
+   UnLockSymb_DB(Data,OutCh);
+   if(iVaccCor)
+      UnLockSymb_DB(Data,VaccCh);
+   if(iTideCor)
+      UnLockSymb_DB(Data,TideCh);
+   UnLock_EDB(EData);
+
+
+   // --- Load channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);
+}

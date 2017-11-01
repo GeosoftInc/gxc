@@ -1,0 +1,443 @@
+//===========================================================================
+NAME          = "Import an ASCII file"
+#include <version.gxh>
+DESCRIPTION   = "
+   Import an ASCII file into a Geosoft database.
+   
+      IMPASC.FILE       Input data file name
+            .TEMPLATE   Template
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v6.2.0: Load and reload only if current X and Y are not already first.
+// v6.1.0: Cancelling out of template dialog now returns you to the main dialog.
+// v6.0.0: Shouldn't ask for current/new database in interactive mode.
+// v5.1.6: Added ImportQa.log file to collect import data errors upto maximum of 100.
+// v5.1.3: Using "Current" X and Y channels
+//         Unload all channels before loading, X, Y then all channels
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "impasc.gr"
+#include "impasc.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+WA          hWA;
+RA          hRA;
+LST         Lst;
+int         i,ii, iLen,iIsHeaderInTemplate;                // Utility 
+int         iNChan, iUnLoad, iRet, iPromptToSkipFile;
+int         iFile, iNFiles, iMode, iNFieldsMaster, iNFields, iReturnToMainDialog;
+
+string(STR_FILE) sImportQaLog;
+string(STR_FILE) sData,sName,sTemplate, sLineName, sFileName;
+string(STR_MULTI_FILE) sFiles, sFilesAfterSkipPrompts;
+string(STR_DB_SYMBOL) sXCh, sYCh, sCh1, sCh2;
+string(STR_DEFAULT_SHORT) sMode;
+string(STR_FILE) sMasterFile, sExtMaster, sExt, sMsg, sLine, sFieldsMaster, sFields, sField1, sField2, sTemp1, sTemp2, sDefaultTemplate, sDrive, sDirectory;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   if (iHaveCurrent_EDB())
+   {
+      if (iInteractive_SYS())
+	  {
+         if (0 == iDisplayQuestion_SYS(_("Import ASCII"),_("Import data into the current database ?")))
+		 {
+            if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)"))
+               Cancel_SYS();
+         }
+      }
+   }
+   else
+   {
+      if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)"))
+         Cancel_SYS();
+   }
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      i = 1;
+      while (i != 0) {
+
+         switch (i) {
+         
+            case 1:
+            
+               iReturnToMainDialog = 1;
+
+               // --- file name ---
+            
+               Diag = Create_DGW("IMPASC");
+               SetInfoSYS_DGW(Diag,_IMPASC_0,DGW_FILEPATH,"IMPASC","FILE");
+               SetInfoSYS_DGW(Diag,_IMPASC_1,DGW_FILEPATH,"IMPASC","TEMPLATE");
+               SetInfoSYS_DGW(Diag,_IMPASC_2,DGW_LISTALIAS,"IMPASC","MODE");
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+               GetInfoSYS_DGW(Diag,_IMPASC_0,DGW_FILEPATH,"IMPASC","FILE");
+               GetInfo_DGW(Diag,_IMPASC_1,DGW_FILEPATH,sTemplate);
+               GetInfoSYS_DGW(Diag,_IMPASC_2,DGW_LISTALIAS,"IMPASC","MODE");
+               Destroy_DGW(Diag);
+               if (i == 0)
+                  iReturnToMainDialog = 0;
+               if (iStrlen_STR(sTemplate) == 0 || iFileExist_SYS(sTemplate) == 0)
+                  i = 2;
+               break;
+               
+            case 2:
+            
+               // --- wizard ---
+
+               Strcpy_STR(sDefaultTemplate, "wizard.i3");
+               
+               GetString_SYS("IMPASC","FILE",sFiles);
+					GetMFile_STR(sFiles, sData, 0);
+
+               if (iImportAsciiWizard_GUI(sData, sDefaultTemplate)) { // --- Did user cancel ? ---
+                  i=1;
+                  break;
+               }
+
+               // --- default template name ---
+                  
+               FileToClipboard_SYS(sDefaultTemplate);
+
+               if (iStrlen_STR(sTemplate) > 0)
+               {
+                  FileNamePart_STR(sTemplate, sDrive, STR_FILE_PART_VOLUME);
+                  FileNamePart_STR(sTemplate, sDirectory, STR_FILE_PART_DIRECTORY);
+                  FileNamePart_STR(sTemplate, sName, STR_FILE_PART_NAME);
+               }
+               else
+               {
+                  FileNamePart_STR(sData, sDrive, STR_FILE_PART_VOLUME);
+                  FileNamePart_STR(sData, sDirectory, STR_FILE_PART_DIRECTORY);
+                  FileNamePart_STR(sData, sName, STR_FILE_PART_NAME);
+               }
+               FileCombineParts_STR(sDrive, sDirectory, sName, "i3", "", sTemplate);
+                  
+               if (iFileExist_SYS(sDefaultTemplate) == 1)
+                  iDeleteFile_SYS(sDefaultTemplate);
+                  
+               // --- copy template ---
+                  
+               ClipboardToFile_SYS(sTemplate);
+
+               if (iReturnToMainDialog)
+               {
+                  SetString_SYS("IMPASC", "TEMPLATE", sTemplate);
+                  i = 1;
+               }
+               else
+                  i = 0;
+               break;
+         }                              
+      }
+      
+      SetString_SYS("IMPASC","TEMPLATE",sTemplate);
+      
+   }
+   
+   
+   // --- get file and template name ---
+   
+   GetString_SYS("IMPASC","FILE",sFiles);
+   GetString_SYS("IMPASC","TEMPLATE",sTemplate);
+   GetString_SYS("IMPASC","MODE",sMode);
+
+   Strcpy_STR(sFilesAfterSkipPrompts, "");
+
+   iNFiles = iCountTokens_STR(sFiles,"|");
+   if (iNFiles > 1)
+   {
+      GetMFile_STR(sFiles, sMasterFile, 0);
+      if (1 != iFileExist_SYS(sMasterFile))
+      {
+         Printf_STR(sMsg, sizeof(sMsg), _("The file %s does not exist."), sMasterFile);
+         Abort_SYS(sMsg);
+      }
+      FileNamePart_STR(sMasterFile, sExtMaster, STR_FILE_PART_EXTENSION);
+      Strcpy_STR(sFilesAfterSkipPrompts, sMasterFile);
+
+      for (iFile = 1; iFile < iNFiles; iFile++)
+      {
+         GetMFile_STR(sFiles, sData, iFile);
+         if (1 != iFileExist_SYS(sData))
+         {
+            Printf_STR(sMsg, sizeof(sMsg), _("The file %s does not exist."), sData);
+            Abort_SYS(sMsg);
+         }
+         FileNamePart_STR(sData, sExt, STR_FILE_PART_EXTENSION);
+         if (0 != iStrcmp_STR(sExt, sExtMaster, STR_CASE_TOLERANT))
+         {
+            Abort_SYS(_("The selected files are not of the same type.\r\rCorrect the discrepancy in the input files, then try again."));
+         }
+      }
+
+      hRA = Create_RA(sMasterFile);
+      iRet = iGets_RA(hRA, sLine);
+      if (0 == iRet)
+         TrimSpace_STR(sLine, STR_TRIMLEFT);
+      while (0 == iRet && (0 == iStrlen_STR(sLine) || 0 == iStrncmp_STR(sLine, "/", 1, STR_CASE_TOLERANT)))
+      {
+         iRet = iGets_RA(hRA, sLine);
+         if (0 == iRet)
+            TrimSpace_STR(sLine, STR_TRIMLEFT);
+      }
+      Destroy_SYS(hRA);
+      if (0 == iRet)
+      {
+         Strcpy_STR(sFieldsMaster, sLine);
+         iNFieldsMaster = iTokens_STR(sLine, ",");
+      }
+
+	  iIsHeaderInTemplate = 0;
+	  hRA = Create_RA(sTemplate);
+      iLen = iLen_RA(hRA);
+      for(ii=0;ii<iLen;ii++)
+      {
+           iGets_RA(hRA, sLine);
+           if(0 == iStrncmp_STR(sLine, _n("FILEHEADER"), 10, STR_CASE_TOLERANT) && -1 != iStrStr_STR(sLine, "0", STR_CASE_TOLERANT))
+           {		
+                iIsHeaderInTemplate = 1;							 	
+                break;
+           }
+      }
+      Destroy_RA(hRA);
+
+      if (0 == iRet)
+      {
+         for (iFile = 1; iFile < iNFiles; iFile++)
+         {
+            GetMFile_STR(sFiles, sData, iFile);
+            hRA = Create_RA(sData);
+            iRet = iGets_RA(hRA, sLine);
+            if (0 == iRet)
+               TrimSpace_STR(sLine, STR_TRIMLEFT);
+            while (0 == iRet && (0 == iStrlen_STR(sLine) || 0 == iStrncmp_STR(sLine, "/", 1, STR_CASE_TOLERANT)))
+            {
+               iRet = iGets_RA(hRA, sLine);
+               if (0 == iRet)
+                  TrimSpace_STR(sLine, STR_TRIMLEFT);
+            }
+            Destroy_SYS(hRA);
+
+            iPromptToSkipFile = 1;
+            if (0 == iRet && 0 == iIsHeaderInTemplate)
+            {
+               iPromptToSkipFile = 0;
+               Strcpy_STR(sFields, sLine);
+               iNFields = iTokens_STR(sLine, ",");
+               if (iNFields == iNFieldsMaster)
+               {
+                  Strcpy_STR(sTemp1, sFields);
+                  Strcpy_STR(sTemp2, sFieldsMaster);
+                  iTokens_STR(sTemp1, ",");
+                  iTokens_STR(sTemp2, ",");
+                  for (i = 0; i < iNFields; i++)
+                  {
+                     GetToken_STR(sField1, sTemp1, i);
+                     GetToken_STR(sField2, sTemp2, i);
+                     TrimSpace_STR(sField1, STR_TRIMBOTH);
+                     TrimSpace_STR(sField2, STR_TRIMBOTH);
+                     if (0 != iStrcmp_STR(sField1, sField2, STR_CASE_SENSITIVE))
+                     {
+                        iPromptToSkipFile = 1;
+                        break;
+                     }
+                  }
+               }
+               else
+               {
+                  iPromptToSkipFile = 1;
+               }
+            }
+			else
+			{
+				iPromptToSkipFile = 0;
+			}
+
+            if (iPromptToSkipFile)
+            {
+               Printf_STR(sMsg, sizeof(sMsg), _("The format of %s differs from the format of the first input file %s.\r\rClick Yes to skip this file and continue.\rClick No to stop the import."), sData, sMasterFile);
+               if (1 != iDisplayQuestion_SYS(_("Import ASCII"), sMsg))
+               {
+                  Cancel_SYS();
+               }
+            }
+            else
+            {
+               Strcat_STR(sFilesAfterSkipPrompts, "|");
+               Strcat_STR(sFilesAfterSkipPrompts, sData);
+            }
+         }
+      }
+   }
+   else
+   {
+      Strcpy_STR(sFilesAfterSkipPrompts, sFiles);
+   }
+
+
+   if (0 == iStrcmp_STR(sMode, _n("APPEND"), STR_CASE_TOLERANT))
+      iMode = DU_IMPORT_APPEND;
+   else
+      iMode = DU_IMPORT_REPLACE;
+
+   
+   // --- Run Import ---
+   
+   
+   // --- QAQC ---
+
+   Strcpy_STR(sImportQaLog,"ImportQa.log");
+   hWA = Create_WA (sImportQaLog,WA_NEW);
+
+   // --- import ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing Data"),1);
+
+
+	// --- There can be zero files specified on import, in which case it might be in the template ---
+
+   iNFiles = iCountTokens_STR(sFilesAfterSkipPrompts,"|");
+	if(iNFiles > 0)
+	{
+		for(iFile = 0; iFile < iNFiles; iFile++)
+		{
+			GetMFile_STR(sFilesAfterSkipPrompts, sData, iFile);
+			FileNamePart_STR(sData, sFileName, STR_FILE_PART_NAME);
+			Strcpy_STR(sLineName, "L");   // Assume flight lines
+			Strcat_STR(sLineName, sFileName);
+			_GenValidLineSymb_DB(sLineName, sLineName);
+			ImportBIN4_DU(Data,iMode,sData,sTemplate,sLineName,iDUMMY,rDUMMY,hWA);
+		}
+	}
+	else
+	{
+		FileNamePart_STR(sData, sFileName, STR_FILE_PART_NAME);
+		Strcpy_STR(sLineName, "L");   // Assume flight lines
+		Strcat_STR(sLineName, sFileName);
+		_GenValidLineSymb_DB(sLineName, sLineName);
+		ImportBIN4_DU(Data,iMode,sData,sTemplate,sLineName,iDUMMY,rDUMMY,hWA);
+	}
+
+   
+   if(hWA)  Destroy_WA(hWA);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("IMPASC GX (ASCII file import)"), FALSE);
+
+   GetString_SYS("IMPASC","FILE",sFilesAfterSkipPrompts);
+   AddComment_DB(Data, _n("Imported"), sFilesAfterSkipPrompts, TRUE);
+   AddComment_DB(Data, _n("Import Template"), sTemplate, TRUE);
+
+
+   // --- get current X, Y channels ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+   // --- release database ---
+   
+   UnLock_EDB(EData);
+   
+   
+   if (!iScript_SYS())
+   {
+      // --- display data ---
+   
+      DelLine0_EDB(EData);
+
+
+      // --- Unload all channels if X and Y are not first ---
+
+      iUnLoad = 1;      // reload by default
+      Lst = Create_LST(2*STR_DB_SYMBOL);
+      iNChan = iDispChanLST_EDB(EData, Lst);
+      if(iNChan>=2) {
+         GetItem_LST(Lst, 0, 0, sCh1);    // First loaded channel
+         GetItem_LST(Lst, 0, 1, sCh2);    // Second loaded channel
+
+         if(!iStrcmp_STR(sXCh, sCh1, STR_CASE_TOLERANT) &&
+            !iStrcmp_STR(sYCh, sCh2, STR_CASE_TOLERANT)) iUnLoad = 0;
+      }
+
+      if(iUnLoad) {
+         UnLoadAllChans_EDB(EData);
+         LoadChan_EDB(EData,sXCh);
+         LoadChan_EDB(EData,sYCh);
+      }
+      LoadAllChans_EDB(EData);
+      DelLine0_EDB(EData);
+   }
+   
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+
+   // --- Display Errors ---
+
+   if (iInteractive_SYS()) {
+   
+   
+      // --- Anything to display ---
+
+      if (iFileSize_SYS("import_error.log")>3) // 3 characters could be UTF-8 BOM only
+      {
+
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE","import_error.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");
+         
+      }
+      
+      // --- Error data to display ---
+
+      if (iFileSize_SYS(sImportQaLog) > 3) // 3 characters could be UTF-8 BOM only
+      {
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE",sImportQaLog);
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+
+      }
+   } 
+
+   Progress_SYS(0);
+}

@@ -1,0 +1,682 @@
+//============================================================================
+NAME          = "VARIOGRM GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Gridding"
+
+DESCRIPTION   = "\
+
+   Use this GX to prepare a variogram map.
+
+   VARIOGRM.FILE      Variogram file
+           .WIDTH     Width of the variogram plot in mm
+           .HEIGHT    Height of the variogram plot in mm
+
+"
+// Revision History:
+// v6.4:   ArcGIS Support.
+//         Set view name for the call to the RESZMAP.GX.
+// v6.2:   Modified to sort VVs for correct plotting.
+//         Modifications for GRIDVOX GX.
+//         No longer need *Data view when called non-interactively.
+//         Origin stored for scripting.
+// v6.0.0: Fixed map locking problem in call to iGetPoint_EMAP
+//===========================================================================
+
+RESOURCE = "VARIOGRM.gr"
+#include "VARIOGRM.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         Diag;                  
+RA          hRA;                   
+VV          hVVvh,hVVvg,hVVvgm,hVVind;
+VV          hVVnp,hVVi;            
+MAP         Map;
+EMAP        EMap;
+MVIEW       View;
+MVG         Mvg;
+
+string(STR_FILE)  sFile;           // variogram file name
+string(STR_FILE)  sName;
+string(STR_FILE)  sVarMap;
+string(STR_DEFAULT_LONG) sFont;       
+string(1024) sRALine;               // line of info from a RA file
+string(STR_DEFAULT_SHORT) sModel;
+string(STR_DEFAULT_SHORT) s0,s1,s2,s3,s4;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_DEFAULT_SHORT) sNugget,sSlope,sPower;
+string(STR_DEFAULT_SHORT) sSigma,sSill,sRange;
+string(STR_VIEW) sViewName;
+string(64) sLicClass;
+
+
+real         r0,r1,r2,r3,r4;
+real         rBotMX,rBotMY,rTopMX,rTopMY;
+real         rXo,rYo,Xmin,Xmax,Ymin,Ymax;
+real         rWidth,rHeight;
+real         rMaxVH,rMaxVG,rMaxNP;
+real         rIntervalVH,rIntervalVG,rIntervalNP;
+real         rTemp;
+
+int          i;
+int          iTemp;
+int          iTok,iCount;
+
+
+int          iArcGIS;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, "ArcGIS", STR_CASE_TOLERANT) == 0;
+
+   if (iInteractive_SYS())
+   {   
+
+      // --- Create the initial dialogue ---
+
+      Diag = Create_DGW("VARIOGRMFORM0");
+
+
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_VARIOGRMFORM0_0,DGW_FILEPATH,"VARIOGRM","FILE");
+      SetInfoSYS_DGW(Diag,_VARIOGRMFORM0_1,DGW_TEXT,"VARIOGRM","WIDTH");
+      SetInfoSYS_DGW(Diag,_VARIOGRMFORM0_2,DGW_TEXT,"VARIOGRM","HEIGHT");
+
+      // --- Run the dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // User hit cancel or ESC
+
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_VARIOGRMFORM0_0,DGW_FILEPATH,"VARIOGRM","FILE");
+      GetInfoSYS_DGW(Diag,_VARIOGRMFORM0_1,DGW_TEXT,"VARIOGRM","WIDTH");
+      GetInfoSYS_DGW(Diag,_VARIOGRMFORM0_2,DGW_TEXT,"VARIOGRM","HEIGHT");
+
+
+
+      // --- Destroy the initial dialogue ---
+       
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get the parameters ---
+
+   GetString_SYS("VARIOGRM","FILE",sFile);
+   rWidth = rGetReal_SYS("VARIOGRM","WIDTH");
+   rHeight = rGetReal_SYS("VARIOGRM","HEIGHT");
+
+   if (rWidth == rDUMMY) rWidth = 297.0;    // A4 size width 
+   if (rHeight == rDUMMY) rHeight = 210.0;  // A4 size height
+
+
+
+   // --- Create VVs ---
+
+   hVVvh  = Create_VV(REAL,0);
+   hVVvg  = Create_VV(REAL,0);
+   hVVvgm = Create_VV(REAL,0);
+   hVVnp  = Create_VV(REAL,0);
+   hVVi   = Create_VV(REAL,0);
+
+
+
+
+
+
+   // --- Read variogram file ---
+
+   iCount = -1;
+   Strcpy_STR(sModel,"");
+   rMaxVH = -rMAX;
+   rMaxVG = -rMAX;
+   rMaxNP = -rMAX;
+
+   hRA = Create_RA(sFile);
+
+			
+   if (iGets_RA(hRA,sRALine) != 0)
+      Abort_SYS(_("This is an empty variogram file."));
+
+   do {
+
+
+      // --- Tokenize ---
+
+      iTok = iTokens_STR(sRALine," ");
+
+      if (iTok >= 4) {
+
+         GetToken_STR(s0,sRALine,0);
+         GetToken_STR(s1,sRALine,1);
+         GetToken_STR(s2,sRALine,2);
+         GetToken_STR(s3,sRALine,3);
+
+
+
+         if ((iStrcmp_STR(s0, "/", STR_CASE_TOLERANT) == 0) &&
+             (iStrcmp_STR(s2, "=", STR_CASE_TOLERANT) == 0))
+         {
+
+
+            // --- Get parameters ---
+
+            if (iStrcmp_STR(s1, "MODEL", STR_CASE_TOLERANT) == 0)
+               Strcpy_STR(sModel,s3);
+            else if (iStrcmp_STR(s1, "NUGGET", STR_CASE_TOLERANT) == 0)
+               Strcpy_STR(sNugget,s3);
+            else if (iStrcmp_STR(s1, "SLOPE", STR_CASE_TOLERANT) == 0)
+               Strcpy_STR(sSlope,s3);
+            else if (iStrcmp_STR(s1, "POWER", STR_CASE_TOLERANT) == 0)
+               Strcpy_STR(sPower,s3);
+            else if (iStrcmp_STR(s1, "SIGMA", STR_CASE_TOLERANT) == 0)
+               Strcpy_STR(sSigma,s3);
+            else if (iStrcmp_STR(s1, "SILL", STR_CASE_TOLERANT) == 0)
+               Strcpy_STR(sSill,s3);
+            else if (iStrcmp_STR(s1, "RANGE", STR_CASE_TOLERANT) == 0)
+               Strcpy_STR(sRange,s3);
+            else {
+               Printf_STR(sTemp, sizeof(sTemp), _("Unknown parameter '%s' in the variogram file given."), s1);
+               Abort_SYS(sTemp);
+            }
+
+         } else {
+
+            // --- Get data ---
+
+            if ((iTok == 5) && (iStrcmp_STR(s0, "/", STR_CASE_TOLERANT) != 0))
+            {
+
+               iCount ++;
+
+               GetToken_STR(s4,sRALine,4);
+
+               r0 = rScanR_STR(s0);
+               r1 = rScanR_STR(s1);
+               r2 = rScanR_STR(s2);
+               r3 = rScanR_STR(s3);
+               r4 = rScanR_STR(s4);
+
+
+               SetReal_VV(hVVvh,iCount,r0);
+               SetReal_VV(hVVvg,iCount,r1);
+               SetReal_VV(hVVvgm,iCount,r2);
+               SetReal_VV(hVVnp,iCount,r3);
+               SetReal_VV(hVVi,iCount, r4);
+
+
+               // --- Get data range ---
+
+               if (r0 > rMaxVH) rMaxVH = r0;
+               if (r1 > rMaxVG) rMaxVG = r1;
+               if (r3 > rMaxNP) rMaxNP = r3;
+
+            }
+         }
+      }         
+
+   } while (iGets_RA(hRA,sRALine) == 0);
+
+
+   // --- Sort VVs for plotting ---
+
+   hVVind = Create_VV(INT, 0);
+   SortIndex1_VV(hVVvh, hVVind, VV_SORT_ASCENDING);
+   IndexOrder_VV(hVVind, hVVvh);
+   IndexOrder_VV(hVVind, hVVvg);
+   IndexOrder_VV(hVVind, hVVvgm);
+   IndexOrder_VV(hVVind, hVVnp);
+
+
+
+   // --- Error ---
+
+   if ((iCount < 1) || (iStrcmp_STR(sModel,"", STR_CASE_TOLERANT) == 0))
+      Abort_SYS(_("The specified Variogram file is either empty or contains incorrect data."));
+
+
+
+   // --- Get nice intervals ---
+
+   iTemp = iDUMMY;
+   rIntervalVH = rDUMMY;
+   rIntervalVG = rDUMMY;
+   rIntervalNP = rDUMMY;
+   rTemp = 0.0;     
+   NicerScale_MATH(rTemp, rMaxVH, rIntervalVH, iTemp);
+   rTemp = 0.0;     
+   NicerScale_MATH(rTemp, rMaxVG, rIntervalVG, iTemp);
+   rTemp = 0.0;     
+   NicerScale_MATH(rTemp, rMaxNP, rIntervalNP, iTemp);
+
+
+   if (iArcGIS && iInteractive_SYS())
+   {
+      // --- Create variogram map from variogram file name ---
+      
+      FileNamePart_STR(sFile, sName, STR_FILE_PART_NAME);
+      Strcpy_STR(sVarMap, sName);
+      Strcat_STR(sVarMap, "_variogram.map");
+      
+      
+      // --- Delete existing variogram map ---
+      
+      if(iFileExist_SYS(sVarMap)) {
+         if(iLoaded_EMAP(sVarMap)) UnLoad_EMAP(sVarMap);
+         iDeleteFile_SYS(sVarMap);
+      }
+
+
+      // --- Create new map ---
+
+      Map = Create_MAP(sVarMap, MAP_WRITENEW);
+      
+
+      // --- Create a Data view ---      
+      
+      View = Create_MVIEW(Map, "Data", MVIEW_WRITENEW);    // Variogram GX needs a Data view to run      
+      Destroy_MVIEW(View);
+      Destroy_MAP(Map);
+
+
+      // --- Load the map ---
+
+      EMap = Load_EMAP(sVarMap);
+   }
+
+   // --- Get map ---
+
+   EMap = Current_EMAP();
+
+   // --- Where to plot ---
+
+   rXo = rYo = rDUMMY;
+   Xmin = Ymin = Xmax = Ymax = rDUMMY;
+   if (!iArcGIS && iInteractive_SYS()) {
+
+      
+      // --- Need a current data view in interactive mode ---
+      
+      if (iSetCurrentView_EMAP(EMap,"*Data") == 1)
+         Abort_SYS(_("Data view does not exist."));
+         
+         
+      // --- Get the coordinates of a user selected box ---
+
+      DisplayMessage_SYS(_("Place to draw variogram"),_("Click on the location for the bottom left corner of the variogram."));
+      if (iGetPoint_EMAP(EMap,_("Place to draw legend..."),rXo,rYo)) Cancel_SYS();
+
+      Map = Lock_EMAP(EMap);
+      View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+   
+      // --- Convert to plot coordinates ---
+
+      UserToView_MVIEW(View,rXo,rYo);
+      ViewToPlot_MVIEW(View,rXo,rYo);
+
+
+      // --- Close 'Data' view ---
+
+      Destroy_MVIEW(View);
+      
+   } else {
+
+      Map = Lock_EMAP(EMap);
+
+      rXo = rGetReal_SYS("VARIOGRM", "XMIN");
+      rYo = rGetReal_SYS("VARIOGRM", "YMIN");
+      if(rXo==rDUMMY) rXo = 0.0;
+      if(rYo==rDUMMY) rYo = 0.0;
+      
+   }
+
+
+   // --- Save origin for scripting ---
+   
+   SetReal_SYS("VARIOGRM", "XMIN", rXo);
+   SetReal_SYS("VARIOGRM", "YMIN", rYo);
+
+
+   // --- Create Variogram_Border view ---
+
+   FileNamePart_STR(sFile,sFile,STR_FILE_PART_NAME);
+   Strcpy_STR(sViewName, sFile);
+   Strcat_STR(sViewName,"_Border");
+   View = Create_MVIEW(Map,sViewName,MVIEW_WRITENEW);
+
+
+   // --- Set coordinates ---
+
+   rBotMX = rXo;
+   rBotMY = rYo;
+   rTopMX = rXo + rWidth;
+   rTopMY = rYo + rHeight;
+
+
+   // --- Fit a view ---
+
+   FitWindow_MVIEW(View,rBotMX,rBotMY,rTopMX,rTopMY,rBotMX,rBotMY,rTopMX,rTopMY);
+
+   // --- Set a title group ---
+
+   StartGroup_MVIEW(View,"Border",MVIEW_GROUP_APPEND);
+   
+   // --- Set thin to 0.0 ---
+   
+   SetThinRes_MVIEW(View, 0.0);
+
+   // --- Set line style ---
+
+   LineStyle_MVIEW(View, 0, 0.0);
+   LineThick_MVIEW(View, 0.15);
+   LineColor_MVIEW(View, iColor_MVIEW("k"));
+
+   // --- Draw border ---
+
+   Line_MVIEW(View,rBotMX,rBotMY,rTopMX,rBotMY);
+   Line_MVIEW(View,rBotMX,rBotMY,rBotMX,rTopMY);
+   Line_MVIEW(View,rTopMX,rTopMY,rTopMX,rBotMY);
+   Line_MVIEW(View,rTopMX,rTopMY,rBotMX,rTopMY);
+
+
+
+   // --- Draw legend ----
+
+   LineStyle_MVIEW(View, 0, 0.0);
+   LineThick_MVIEW(View, 0.3*rWidth/250.0);
+   LineColor_MVIEW(View, iColor_MVIEW("k"));
+   Line_MVIEW(View,rXo + 200.0*rWidth/250.0,rYo + 145.0*rHeight/176.0,
+                   rXo + 240.0*rWidth/250.0,rYo + 145.0*rHeight/176.0);
+
+   LineStyle_MVIEW(View, 1, 10.0*rWidth/250.0);
+   LineThick_MVIEW(View, 0.3*rWidth/250.0);
+   LineColor_MVIEW(View, iColor_MVIEW("r"));
+   Line_MVIEW(View,rXo + 200.0*rWidth/250.0,rYo + 130.0*rHeight/176.0,
+                   rXo + 240.0*rWidth/250.0,rYo + 130.0*rHeight/176.0);
+
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   TextRef_MVIEW(View,3);
+
+
+   TextSize_MVIEW(View,3.0*rWidth/250.0);
+   Text_MVIEW(View,"OBSERVED",rXo + 200.0*rWidth/250.0,rYo + 140.0*rHeight/176.0);
+   Text_MVIEW(View,sModel,rXo + 200.0*rWidth/250.0,rYo + 123.0*rHeight/176.0);
+
+   TextSize_MVIEW(View,2.0*rWidth/250.0);
+   if (iStrcmp_STR(sModel, "POWER", STR_CASE_TOLERANT) == 0)
+   {
+      Text_MVIEW(View,_("POWER  "),rXo + 200.0*rWidth/250.0,rYo + 115.0*rHeight/176.0);
+      Text_MVIEW(View,_("SLOPE  "),rXo + 200.0*rWidth/250.0,rYo + 110.0*rHeight/176.0);
+      Text_MVIEW(View,_("NUGGET "),rXo + 200.0*rWidth/250.0,rYo + 105.0*rHeight/176.0);
+      Text_MVIEW(View,sPower,rXo + 221.0*rWidth/250.0,rYo + 115.0*rHeight/176.0);
+      Text_MVIEW(View,sSlope,rXo + 221.0*rWidth/250.0,rYo + 110.0*rHeight/176.0);
+      Text_MVIEW(View,sNugget,rXo + 221.0*rWidth/250.0,rYo + 105.0*rHeight/176.0);
+   } else 
+   {
+      Text_MVIEW(View,_("NUGGET "),rXo + 200.0*rWidth/250.0,rYo + 115.0*rHeight/176.0);
+      Text_MVIEW(View,_("SILL   "),rXo + 200.0*rWidth/250.0,rYo + 110.0*rHeight/176.0);
+      Text_MVIEW(View,_("RANGE  "),rXo + 200.0*rWidth/250.0,rYo + 105.0*rHeight/176.0);
+      Text_MVIEW(View,sNugget,rXo + 221.0*rWidth/250.0,rYo + 115.0*rHeight/176.0);
+      Text_MVIEW(View,sSill,rXo + 221.0*rWidth/250.0,rYo + 110.0*rHeight/176.0);
+      Text_MVIEW(View,sRange,rXo + 221.0*rWidth/250.0,rYo + 105.0*rHeight/176.0);
+   } 
+
+
+   TextSize_MVIEW(View,3.0*rWidth/250.0);
+   Text_MVIEW(View,_("Sample Pairs"),rXo + 200.0*rWidth/250.0,rYo + 40.0*rHeight/176.0);
+
+   TextRef_MVIEW(View,4);
+   TextSize_MVIEW(View,5.0*rWidth/250.0);
+   Text_MVIEW(View,_("VARIOGRAM"),rXo + 110.0*rWidth/250.0,rYo + 160.0*rHeight/176.0);
+
+
+   // --- Close the view ---
+
+   Destroy_MVIEW(View);
+
+
+
+
+
+
+
+   // --- Create model variogram ---
+
+   rBotMX = rXo + 0.112*rWidth;
+   rBotMY = rYo + 0.438*rHeight;
+   rTopMX = rXo + 0.780*rWidth;
+   rTopMY = rYo + 0.875*rHeight;
+
+ 
+   // --- Create Variogram_Border view ---
+
+   Strcpy_STR(sViewName, sFile);
+   Strcat_STR(sViewName,"_VG");
+  
+  
+   Mvg = Create_MVG(Map,sViewName,rBotMX,rBotMY,rTopMX,rTopMY,
+                                  rBotMX,rBotMY,rTopMX,rTopMY);
+   View = GetMVIEW_MVG(Mvg);
+
+
+   // --- Rescale X and Y ---
+
+   RescaleXRange_MVG (Mvg, MVG_SCALE_LINEAR, 0.0, rMaxVH, 1.0);
+   RescaleYRange_MVG (Mvg, MVG_SCALE_LINEAR, 0.0, rMaxVG, 1.0);
+   
+      
+   // --- Group ---
+
+   StartGroup_MVIEW(View,"VG_VGM",MVIEW_GROUP_APPEND);
+
+   
+   // --- Set thin to 0.0 ---
+   
+   SetThinRes_MVIEW(View, 0.0);
+
+   
+   // --- Set text style ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   TextSize_MVIEW(View,2.5*rWidth/250.0);
+
+
+   // --- Set line style ---
+
+   LineStyle_MVIEW(View, 0, 0.0);
+   LineThick_MVIEW(View, 0.15*rWidth/250.0);
+   LineColor_MVIEW(View, iColor_MVIEW("k"));
+
+
+   // --- Draw axes and grid ---
+   
+   AxisX_MVG(Mvg,rBotMY,
+             0.0,rMaxVH,rIntervalVH,rIntervalVH*0.5,-2.0*rWidth/250.0);
+   LabelX_MVG( Mvg,rBotMY-2.0*rWidth/250.0,
+               0.0,rMaxVH,rIntervalVH,
+               MVG_LABEL_JUST_TOP,
+               MVG_LABEL_ORIENT_HORIZONTAL,
+               MVG_LABEL_BOUND_NO);
+               
+   AxisY_MVG(Mvg,rBotMX,
+             0.0,rMaxVG,rIntervalVG,rIntervalVG*0.5,-2.0*rWidth/250.0);
+   LabelY_MVG( Mvg,rBotMX-2.0*rWidth/250.0,
+               0.0,rMaxVG,rIntervalVG,
+               MVG_LABEL_JUST_RIGHT,
+               MVG_LABEL_ORIENT_HORIZONTAL,
+               MVG_LABEL_BOUND_NO);
+
+   Line_MVIEW(View,rTopMX,rBotMY,rTopMX,rTopMY);
+   Line_MVIEW(View,rBotMX,rTopMY,rTopMX,rTopMY);
+
+   LineColor_MVIEW(View, iColor_MVIEW("k200"));
+   Grid_MVG(Mvg,0.0,0.0,
+            rIntervalVH,rIntervalVG,
+            rIntervalVH*0.2,rIntervalVG*0.2,
+            MVG_GRID_DOT);
+
+   // --- Draw curves ---
+
+   ClipMode_MVIEW(View,TRUE);
+   LineColor_MVIEW(View, iColor_MVIEW("k"));
+   LineThick_MVIEW(View, 0.3*rWidth/250.0);
+   PolyLineVV_MVG(Mvg,MVG_DRAW_POLYLINE,MVG_WRAP_NO,hVVvh,hVVvg);
+
+   
+   LineStyle_MVIEW(View, 1, 10.0*rWidth/250.0);
+   LineColor_MVIEW(View, iColor_MVIEW("r"));
+
+   PolyLineVV_MVG(Mvg,MVG_DRAW_POLYLINE,MVG_WRAP_NO,hVVvh,hVVvgm);
+   ClipMode_MVIEW(View,FALSE);
+
+
+   TextRef_MVIEW(View,7);
+   TextSize_MVIEW(View,4.0*rWidth/250.0);
+   Text_MVIEW(View,_("h"),0.5*(rBotMX+rTopMX),rBotMY-10.0*rWidth/250.0);
+   TextRef_MVIEW(View,2);
+   Text_MVIEW(View,_("(h)"),rBotMX-1.0*rWidth/250.0,rTopMY + 5.0*rHeight/176.0);
+   
+   TextFont_MVIEW(View,_n("sg"),TRUE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("x"),rBotMX-11.0*rWidth/250.0,rTopMY + 6.0*rHeight/176.0);
+
+
+
+   // --- Close the view ---
+
+   Destroy_MVIEW(View);
+   Destroy_MVG(Mvg);
+
+
+
+
+
+   // --- Create VH variogram ---
+
+   rBotMX = rXo + 0.112*rWidth;
+   rBotMY = rYo + 0.063*rHeight;
+   rTopMX = rXo + 0.780*rWidth;
+   rTopMY = rYo + 0.313*rHeight;
+
+
+   // --- Create Variogram_Border view ---
+
+   Strcpy_STR(sViewName, sFile);
+   Strcat_STR(sViewName,"_NP");
+   Mvg = Create_MVG(Map,sViewName,rBotMX,rBotMY,rTopMX,rTopMY,
+                                  rBotMX,rBotMY,rTopMX,rTopMY);
+   View = GetMVIEW_MVG(Mvg);      
+
+
+   // --- Rescale X nad Y ---
+
+   RescaleXRange_MVG (Mvg, MVG_SCALE_LINEAR, 0.0, rMaxVH, 1.0);
+   RescaleYRange_MVG (Mvg, MVG_SCALE_LINEAR, 0.0, rMaxNP, 1.0);
+
+   // --- Group ---
+
+   StartGroup_MVIEW(View,"NP",MVIEW_GROUP_APPEND);
+
+   // --- Set text style ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   TextSize_MVIEW(View,2.5*rWidth/250.0);
+
+   // --- Set thin to 0.0 ---
+   
+   SetThinRes_MVIEW(View, 0.0);
+
+
+   // --- Set line style ---
+
+   LineStyle_MVIEW(View, 0, 0.0);
+   LineThick_MVIEW(View, 0.15*rWidth/250.0);
+   LineColor_MVIEW(View, iColor_MVIEW("k"));
+
+
+   // --- Draw axes and grid ---
+   
+   AxisX_MVG(Mvg,rBotMY,
+             0.0,rMaxVH,rIntervalVH,rIntervalVH*0.5,-2.0*rWidth/250.0);
+   LabelX_MVG( Mvg,rBotMY-2.0*rWidth/250.0,
+               0.0,rMaxVH,rIntervalVH,
+               MVG_LABEL_JUST_TOP,
+               MVG_LABEL_ORIENT_HORIZONTAL,
+               MVG_LABEL_BOUND_NO);
+   AxisY_MVG(Mvg,rBotMX,
+             0.0,rMaxNP,rIntervalNP,rIntervalNP*0.5,-2.0*rWidth/250.0);
+   LabelY_MVG( Mvg,rBotMX-2.0*rWidth/250.0,
+               0.0,rMaxNP,rIntervalNP,
+               MVG_LABEL_JUST_RIGHT,
+               MVG_LABEL_ORIENT_HORIZONTAL,
+               MVG_LABEL_BOUND_NO);
+
+   Line_MVIEW(View,rTopMX,rBotMY,rTopMX,rTopMY);
+   Line_MVIEW(View,rBotMX,rTopMY,rTopMX,rTopMY);
+
+   LineColor_MVIEW(View, iColor_MVIEW("k200"));
+   Grid_MVG(Mvg,0.0,0.0,
+            rIntervalVH,rIntervalNP,
+            rIntervalVH*0.2,rIntervalNP*0.2,
+            MVG_GRID_DOT);
+
+
+   // --- Draw curves ---
+
+   LineColor_MVIEW(View, iColor_MVIEW("k"));
+   LineThick_MVIEW(View, 0.3*rWidth/250.0);
+   PolyLineVV_MVG(Mvg,MVG_DRAW_POLYLINE,MVG_WRAP_NO,hVVvh,hVVnp);
+
+   TextSize_MVIEW(View,4.0*rWidth/250.0);
+   TextRef_MVIEW(View,2);
+   Text_MVIEW(View,"n(h)",rBotMX-1.0*rWidth/250.0,rTopMY + 5.0*rHeight/176.0);
+
+
+   // --- Close the view ---
+
+   Destroy_MVIEW(View);
+   Destroy_MVG(Mvg);
+   
+
+   // --- Set this view for map sizing on exit ---
+      
+   SetString_SYS("RESZMAP","CURRENTVIEW",sViewName);
+   
+
+   if (iArcGIS && iInteractive_SYS())
+      SimpleMapDialog_GUI(Map, _("Variogram"), "The_Variogram");
+
+   // --- Clean up ---
+
+   UnLock_EMAP(EMap);
+}
+
+
+
+

@@ -1,0 +1,75 @@
+//===========================================================================
+NAME          = "FFT set extension fill method"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D/Advanced Usage"
+
+DESCRIPTION   = "
+
+Apply an FFT extension fill method setup.
+
+Parameters:
+
+    FFTEXTFILL.METHOD - 'Maximum Entropy' or 'Constrained LP'
+"
+// Revision History:
+// v7.1:   New GX.
+
+//===========================================================================
+
+RESOURCE = "fftsetextmd.gr"
+#include "fftsetextmd.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sMethod;    // 'Maximum Entropy' or 'Constrained LP'
+
+DGW   Diag;              // Dialogue handle
+int   i;
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+       Diag = Create_DGW("FFTSETEXTMDFORM");
+
+       // --- Set any Defaults from INI ---
+
+       SetInfoSYS_DGW(Diag,_FFTSETEXTMDFORM_0,DGW_TEXT,"FFTEXTFILL","METHOD");    
+
+       // --- Run the Dialogue ---
+
+       i = iRunDialogue_DGW(Diag);
+       if (i == -1) Cancel_SYS();
+
+
+       // --- Get the Strings and replace in INI ---
+
+       GetInfoSYS_DGW(Diag,_FFTSETEXTMDFORM_0,DGW_TEXT,"FFTEXTFILL","METHOD");    
+
+
+       // --- Destroy the Dialogue ---
+
+       Destroy_DGW(Diag);
+
+   } // end if
+
+   // --- Get and set Parameter ---
+
+   GetString_SYS("FFTEXTFILL","METHOD",sMethod);
+   
+   GlobalSet_SYS("FFTEXTFILL.METHOD",sMethod);
+
+}

@@ -1,0 +1,175 @@
+//===========================================================================
+NAME          = "Import record formatted (archive) data"
+#include <version.gxh>
+DESCRIPTION   = "
+   Import record formatted (archive) data into an Oasis database.
+   This GX requires an ASCII template file that describes the data
+   contained in the archive data file.  See IMPARC.I3
+   for a description and example.
+
+      IMPARC.DATA     : Input data file name
+            .TEMPLATE : Import template file name (.I3 assumed)
+            .LINE     : Optional Line name, blank for no line.
+            .FLIGHT   : Optional flight number.
+            .DATE     : Optional date.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//         Use EDIT GX for displaying import log.
+//         Unload all channels before loading, X, Y then all channels
+//         Added projection setting if enabled.
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "imparc.gr"
+#include "imparc.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+
+int         i;                // Utility 
+
+string(STR_FILE) sData;
+string(STR_FILE) sTemplate;
+string(STR_DB_SYMBOL) sLine, sXCh, sYCh;
+int         iFlight;
+real        rDate;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("imparc");
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_IMPARC_0,DGW_FILEPATH,"IMPARC","DATA");
+     SetInfoSYS_DGW(Diag,_IMPARC_1,DGW_FILEPATH,"IMPARC","TEMPLATE");
+     SetInfoSYS_DGW(Diag,_IMPARC_2,DGW_TEXT,"IMPARC","LINE");
+     SetInfoSYS_DGW(Diag,_IMPARC_3,DGW_TEXT,"IMPARC","FLIGHT");
+     SetInfoSYS_DGW(Diag,_IMPARC_4,DGW_TEXT,"IMPARC","DATE");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_IMPARC_0,DGW_FILEPATH,"IMPARC","DATA");
+     GetInfoSYS_DGW(Diag,_IMPARC_1,DGW_FILEPATH,"IMPARC","TEMPLATE");
+     GetInfoSYS_DGW(Diag,_IMPARC_2,DGW_TEXT,"IMPARC","LINE");
+     GetInfoSYS_DGW(Diag,_IMPARC_3,DGW_TEXT,"IMPARC","FLIGHT");
+     GetInfoSYS_DGW(Diag,_IMPARC_4,DGW_TEXT,"IMPARC","DATE");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IMPARC","DATA",sData);
+   GetString_SYS("IMPARC","TEMPLATE",sTemplate);
+   if (iExistInt_SYS("IMPARC","FLIGHT"))
+      iFlight = iGetInt_SYS("IMPARC","FLIGHT");
+   else
+      iFlight = iDUMMY;
+   if (iExistString_SYS("IMPARC","DATE")) {
+      GetString_SYS("IMPARC","DATE",sLine);
+      rDate = rScanDate_STR(sLine,DATE_FORMAT_YYYYMMDD);
+   }
+   else
+      rDate = rDUMMY;
+   GetString_SYS("IMPARC","LINE",sLine);
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import IMPARC data"),1);
+
+   // --- import ---
+
+   ImportBIN_DU(Data,sData,sTemplate,sLine,iFlight,rDate);
+
+
+   // --- get current X, Y channels ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+   // --- release database to DBE ---
+
+   UnLock_EDB(EData);
+   
+
+   // --- display data ---
+
+   DelLine0_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+   LoadChan_EDB(EData,sXCh);
+   LoadChan_EDB(EData,sYCh);
+   LoadAllChans_EDB(EData);
+   DelLine0_EDB(EData);
+   
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+
+   // --- Report Errors ---
+
+   if (iInteractive_SYS()) {
+   
+      // --- Anything to display ---
+
+      if (iFileSize_SYS("import_error.log")>3) // 3 characters could be UTF-8 BOM only
+      {
+          
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE","import_error.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }      
+   }
+    
+      
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+}

@@ -1,0 +1,248 @@
+//===========================================================================
+NAME          = "GRIDCALC"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "\
+
+Apply a math formula to Grids
+
+Parameters: 
+
+       GRIDCALC.G1-G6   Grid file names. Up to 6 grids (G1 - G6) can be 
+                        defined.  These are refered to as G1 through G6 in
+                        the expression.  G1 must be an existing grid.
+               .EXP     The expression to apply (ie \"G3=G1+G2;\").
+               .FILE    OR a file name containing an expression.  The
+                        expression cannot be longer than 1023 characters.
+
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+RESOURCE = "gridcalc.gr"
+#include "gridcalc.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;                 // Dialogue handle
+int        i;                    // utility int
+int        iG2,iG3,iG4,iG5,iG6;  // flag TRUE if new grids
+
+string(STR_FILE)  sG1;             // Name of grid 1
+string(STR_FILE)  sG2;             // Name of grid 2
+string(STR_FILE)  sG3;             // Name of grid 3
+string(STR_FILE)  sG4;             // Name of grid 4
+string(STR_FILE)  sG5;             // Name of grid 5
+string(STR_FILE)  sG6;             // Name of grid 6
+string(STR_FILE)  sFile;           // Expression file
+string(1024) sExp;            // Expression string
+
+IMG   IMG1,IMG2,IMG3,IMG4,IMG5,IMG6;      // Images tied to the grids
+IEXP  IEXP0;
+RA    File;
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDCALCForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_0,DGW_FILEPATH,"GRIDCALC","G1");     
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_1,DGW_FILEPATH,"GRIDCALC","G2");     
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_2,DGW_FILEPATH,"GRIDCALC","G3");     
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_3,DGW_FILEPATH,"GRIDCALC","G4");     
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_4,DGW_FILEPATH,"GRIDCALC","G5");     
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_5,DGW_FILEPATH,"GRIDCALC","G6");     
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_6,DGW_TEXT,"GRIDCALC","EXP");    
+      SetInfoSYS_DGW(Diag,_GRIDCALCFORM_7,DGW_FILEPATH,"GRIDCALC","FILE");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_0,DGW_FILEPATH,"GRIDCALC","G1");     
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_1,DGW_FILEPATH,"GRIDCALC","G2");     
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_2,DGW_FILEPATH,"GRIDCALC","G3");     
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_3,DGW_FILEPATH,"GRIDCALC","G4");     
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_4,DGW_FILEPATH,"GRIDCALC","G5");     
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_5,DGW_FILEPATH,"GRIDCALC","G6");     
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_6,DGW_TEXT,"GRIDCALC","EXP");    
+      GetInfoSYS_DGW(Diag,_GRIDCALCFORM_7,DGW_FILEPATH,"GRIDCALC","FILE");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDCALC","G1",sG1);
+   GetString_SYS("GRIDCALC","G2",sG2);
+   GetString_SYS("GRIDCALC","G3",sG3);
+   GetString_SYS("GRIDCALC","G4",sG4);
+   GetString_SYS("GRIDCALC","G5",sG5);
+   GetString_SYS("GRIDCALC","G6",sG6);
+   GetString_SYS("GRIDCALC","EXP",sExp);
+   GetString_SYS("GRIDCALC","FILE",sFile);
+
+
+   // --- if there is an expression file, get it ---
+
+   if (iStrlen_STR(sFile)) {
+
+      File = Create_RA(sFile);
+      Strcpy_STR(sExp,"");
+      while (iGets_RA(File,sFile) == 0)
+         Strcat_STR(sExp,sFile);
+      Destroy_RA(File);
+
+   } else
+      Strcat_STR(sExp,";");
+
+   
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sG1))
+      Abort_SYS(_("Input Grid #1 Not Specified!"));
+
+
+   Progress_SYS(1);
+
+   IEXP0 = Create_IEXP();
+
+
+   // --- set new grid flags to FALSE ---
+   
+   iG2 = iG3 = iG4 = iG5 = iG6 = FALSE;
+   
+   
+   // --- Create Images tied to the grids ---  
+   
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   IMG1 = CreateFile_IMG(GS_DOUBLE,sG1,IMG_FILE_READWRITE);
+   AddGrid_IEXP(IEXP0,IMG1,"G1");
+
+   if (iStrlen_STR(sG2))  {
+      if (iFileExist_SYS(sG2)) {
+         IMG2 = CreateFile_IMG(GS_DOUBLE,sG2,IMG_FILE_READWRITE);
+      } else {
+         IMG2 = CreateOutFile_IMG(GS_DOUBLE,sG2,IMG1); 
+         iG2 = TRUE;
+      }         
+
+      InheritIMG_IMG(IMG2,IMG1);
+      AddGrid_IEXP(IEXP0,IMG2,"G2");
+   }
+   if (iStrlen_STR(sG3))  {
+      if(iFileExist_SYS(sG3)) {
+         IMG3 = CreateFile_IMG(GS_DOUBLE,sG3,IMG_FILE_READWRITE);
+      } else {
+         IMG3 = CreateOutFile_IMG(GS_DOUBLE,sG3,IMG1); 
+         iG3 = TRUE;
+      }         
+
+      InheritIMG_IMG(IMG3,IMG1);
+      AddGrid_IEXP(IEXP0,IMG3,"G3");
+   }
+   if (iStrlen_STR(sG4))  {
+      if(iFileExist_SYS(sG4)) {
+         IMG4 = CreateFile_IMG(GS_DOUBLE,sG4,IMG_FILE_READWRITE);
+      } else { 
+         IMG4 = CreateOutFile_IMG(GS_DOUBLE,sG4,IMG1); 
+         iG4 = TRUE;
+      }         
+
+      InheritIMG_IMG(IMG4,IMG1);
+      AddGrid_IEXP(IEXP0,IMG4,"G4");
+   }
+   if (iStrlen_STR(sG5))  {
+      if(iFileExist_SYS(sG5)) {
+         IMG5 = CreateFile_IMG(GS_DOUBLE,sG5,IMG_FILE_READWRITE);
+      } else { 
+         IMG5 = CreateOutFile_IMG(GS_DOUBLE,sG5,IMG1); 
+         iG5 = TRUE;
+      }         
+
+      InheritIMG_IMG(IMG5,IMG1);
+      AddGrid_IEXP(IEXP0,IMG5,"G5");
+   }
+   if (iStrlen_STR(sG6))  {
+      if(iFileExist_SYS(sG6)) {
+         IMG6 = CreateFile_IMG(GS_DOUBLE,sG6,IMG_FILE_READWRITE);
+      } else { 
+         IMG6 = CreateOutFile_IMG(GS_DOUBLE,sG6,IMG1); 
+         iG6 = TRUE;
+      }         
+
+      InheritIMG_IMG(IMG6,IMG1);
+      AddGrid_IEXP(IEXP0,IMG6,"G6");
+      
+   }
+
+
+   // --- Apply formula to grids ---
+
+   ProgName_SYS(_("Apply expression to Grids..."),1);
+
+   DoFormula_IEXP(IEXP0,sExp,1024);
+
+
+   // --- Destroy the Images ---
+
+   if (iStrlen_STR(sG1))   Destroy_IMG(IMG1);
+   if (iStrlen_STR(sG2))   Destroy_IMG(IMG2);
+   if (iStrlen_STR(sG3))   Destroy_IMG(IMG3);
+   if (iStrlen_STR(sG4))   Destroy_IMG(IMG4);
+   if (iStrlen_STR(sG5))   Destroy_IMG(IMG5);
+   if (iStrlen_STR(sG6))   Destroy_IMG(IMG6);
+        
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+
+   // --- Add grids to the current project ---
+
+   if (iInteractive_SYS()) {
+   
+      if (iG2) iAddDocument_PROJ(sG2,"Grid",1);
+      if (iG3) iAddDocument_PROJ(sG3,"Grid",1);
+      if (iG4) iAddDocument_PROJ(sG4,"Grid",1);
+      if (iG5) iAddDocument_PROJ(sG5,"Grid",1);
+      if (iG6) iAddDocument_PROJ(sG6,"Grid",1);
+      
+   }      
+   
+}

@@ -1,0 +1,136 @@
+//===========================================================================
+NAME          = "Chimera Project"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport"
+
+DESCRIPTION   = "\
+
+Allows the user to edit the project information.
+
+Parameters: 
+
+        CHPROJ.NAME        - Project name
+              .DESCR       - Description
+              .SCIENTIST   - Geologist
+              .DATE        - Date
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chproj.gr"
+#include "chproj.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+REG         hReg;
+DGW         Diag;             // Dialogue handle
+int         i;
+string(STR_DEFAULT_LONG) sName,sDescr,sGeo,sDate,sCompany;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- get the workspace REG ---
+      
+   hReg = Create_REG(128);
+   GetWorkspaceREG_SYS(hReg);
+      
+   Get_REG(hReg,"CHPROJ.NAME",sName,sizeof(sName));
+   Get_REG(hReg,"CHPROJ.DESCR",sDescr,sizeof(sDescr));
+   Get_REG(hReg,"CHPROJ.SCIENTIST",sGeo,sizeof(sGeo));  
+   Get_REG(hReg,"CHPROJ.COMPANY",sCompany,sizeof(sCompany));  
+   Get_REG(hReg,"CHPROJ.DATE",sDate,sizeof(sDate));
+   
+   
+   // --- defaults ---
+   
+   if (iStrlen_STR(sDate) == 0)
+      FormatDate_STR(rDate_SYS(),sDate,10,DATE_FORMAT_YYYYMMDD);
+   if (iStrlen_STR(sCompany) == 0)
+      iGlobal_SYS("USER.COMPANY",sCompany);  
+   if (iStrlen_STR(sGeo) == 0)
+      iGlobal_SYS("USER.NAME",sGeo);  
+      
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHProj");
+
+
+      // --- Set any Defaults ---
+
+      SetInfo_DGW(Diag,_CHPROJ_0,DGW_TEXT,sCompany);
+      SetInfo_DGW(Diag,_CHPROJ_1,DGW_TEXT,sName);
+      SetInfo_DGW(Diag,_CHPROJ_2,DGW_TEXT,sDescr); 
+      SetInfo_DGW(Diag,_CHPROJ_3,DGW_TEXT,sGeo);    
+      SetInfo_DGW(Diag,_CHPROJ_4,DGW_TEXT,sDate);
+      
+
+      // --- Run the Dialogue ---
+
+      do {
+         i = iRunDialogue_DGW(Diag);
+         if (i==-1) Cancel_SYS();
+         if (i==1) iRunGX_SYS("gpfcmnt.gx");
+      } while (i!=0);   
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_CHPROJ_0,DGW_TEXT,"CHPROJ","COMPANY"  );
+      GetInfoSYS_DGW(Diag,_CHPROJ_1,DGW_TEXT,"CHPROJ","NAME"     );
+      GetInfoSYS_DGW(Diag,_CHPROJ_2,DGW_TEXT,"CHPROJ","DESCR"    ); 
+      GetInfoSYS_DGW(Diag,_CHPROJ_3,DGW_TEXT,"CHPROJ","SCIENTIST");      
+      GetInfoSYS_DGW(Diag,_CHPROJ_4,DGW_TEXT,"CHPROJ","DATE"     );
+      
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+
+   }
+
+   // --- Get Values ---
+
+   GetString_SYS("CHPROJ","NAME"     ,sName);     
+   GetString_SYS("CHPROJ","DESCR"    ,sDescr);     
+   GetString_SYS("CHPROJ","SCIENTIST",sGeo);    
+   GetString_SYS("CHPROJ","COMPANY"  ,sCompany);    
+   GetString_SYS("CHPROJ","DATE"     ,sDate);
+   
+   
+   Set_REG(hReg,"CHPROJ.NAME",sName);
+   Set_REG(hReg,"CHPROJ.DESCR",sDescr);
+   Set_REG(hReg,"CHPROJ.SCIENTIST",sGeo);  
+   Set_REG(hReg,"CHPROJ.COMPANY",sCompany);  
+   Set_REG(hReg,"CHPROJ.DATE",sDate);
+   
+   
+   // --- save project ---
+   
+   SetWorkspaceREG_SYS(hReg);
+   Destroy_REG(hReg);
+   
+}
+

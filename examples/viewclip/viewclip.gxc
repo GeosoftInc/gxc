@@ -1,0 +1,249 @@
+//===========================================================================
+
+NAME          = "Reset view clip region"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Map Views"
+
+DESCRIPTION   = "
+      VIEWCLIP.FILE  polygon file name
+              .VIEW  name of the view
+              .FORCE clip all groups
+"
+// Revision History:
+// v7.0.0: SJC Test polygons to see if they are valid before doing clipping.
+// v6.1.0: SJC One more fix for section views.
+// v6.0.0: SJC Added support for oriented and warped views.
+// v5.1.4: SJC Error for oriented views.
+//===========================================================================
+
+RESOURCE = "viewclip.gr"
+#include "viewclip.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;
+string(STR_VIEW) sView;
+int         i,iPoly,iForce,iOrient;
+int         bExclude,bIn;
+real        rMinX,rMaxX,rMinY,rMaxY;
+
+DGW         Diag;             // Dialogue handle
+PLY         Poly;		// polygon object
+VV          VVx,VVy;	// polyline VV's
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+LST         List;
+IPJ         hIPJ, hUserIPJ, hPolyIPJ;
+
+//===========================================================================
+
+{
+   bExclude = 0;
+
+	// --- get current map ---
+
+   EMap  = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+
+      // --- Create the 1st Dialogue ---
+
+      Diag = Create_DGW("VIEWCLIP");
+
+      List = GetList_DGW(Diag,_VIEWCLIP_1);
+      ViewList_MAP(Map,List);
+      Sort_LST(List,0,0);
+      
+      
+      // --- set default view to the current data view ---
+      
+      GetClassName_MAP(Map,"Data",sView);
+      SetInfo_DGW(Diag,_VIEWCLIP_1,DGW_TEXT,sView);
+      
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_VIEWCLIP_0,DGW_FILEPATH,"VIEWCLIP","FILE");
+      SetInfoSYS_DGW(Diag,_VIEWCLIP_2,DGW_LISTALIAS,"VIEWCLIP","FORCE");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) < 0) Cancel_SYS();
+
+    
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_VIEWCLIP_0,DGW_FILEPATH,"VIEWCLIP","FILE");     
+      GetInfoSYS_DGW(Diag,_VIEWCLIP_1,DGW_TEXT,"VIEWCLIP","VIEW");
+      GetInfoSYS_DGW(Diag,_VIEWCLIP_2,DGW_LISTALIAS,"VIEWCLIP","FORCE");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+	}
+
+            
+   // --- Get parameters ---
+
+   GetString_SYS("VIEWCLIP","FILE",sFile);
+   GetString_SYS("VIEWCLIP","VIEW",sView);
+   iForce = iGetInt_SYS("VIEWCLIP","FORCE");
+
+
+   // --- create VVs ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+
+
+   // --- if append, load current file ---
+
+   Poly = Create_PLY();
+   LoadTable_PLY(Poly,sFile);
+   
+   
+   // --- Check for valid polygon ---
+   
+   if(rArea_PLY(Poly)==0.0)
+       Abort_SYS(_("The polygon file does not contain a valid polygon."));
+       
+       
+   iPoly = iNumPoly_PLY(Poly);
+
+   hPolyIPJ = Create_IPJ();
+   GetIPJ_PLY(Poly, hPolyIPJ);
+   
+
+   // --- get view and clear ---
+
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+   ClipClear_MVIEW(View);
+
+
+   // --- Change the PLY Projection to that of the View ---
+
+   hIPJ = Create_IPJ();
+   GetIPJ_MVIEW(View,hIPJ);
+
+   hUserIPJ = Create_IPJ();
+   GetUserIPJ_MVIEW(View,hUserIPJ);
+
+
+   // --- Get orientation of the view, if any ---
+   
+   iOrient = iGetOrientation_IPJ(hIPJ);
+   
+
+   // --- If there is no projection in the polygon, or this is a section grid, assume it
+   //     is the same as the User Projection, otherwise
+   //     transform it to the User Projection ---
+   
+   if(iSourceType_IPJ(hPolyIPJ)==IPJ_TYPE_NONE ||
+      iOrient==IPJ_ORIENT_SECTION)
+   {
+      SetIPJ_PLY(Poly,hUserIPJ);
+   }
+   else
+      ChangeIPJ_PLY(Poly,hUserIPJ);
+
+
+   // --- If this is an oriented section, you must use the native view
+   //     projection, otherwise, one dimension ("Z") is lost because only the
+   //     true "X" and "Y" values are recovered from UserIPJ. This means the
+   //     PLY would collapse to a line.  In a section view, the native view
+   //     "X" coordinate corresponds to either Easting (for azimuth = 90), or
+   //     northing (for azimuth = 0), or begins at 0 on the left side. ---
+
+   iOrient = iGetOrientation_IPJ(hIPJ);
+   if(iOrient==IPJ_ORIENT_SECTION)
+      ClearOrientation_IPJ(hIPJ);
+   
+   
+   // --- Finally, the clip PLY is in the native view projection; convert
+   //     to that.
+
+   ChangeIPJ_PLY(Poly,hIPJ);
+   
+   Destroy_IPJ(hIPJ);
+   Destroy_IPJ(hPolyIPJ);
+   Destroy_IPJ(hUserIPJ);
+
+
+   // --- Work with polygons ---
+
+   bIn = FALSE;
+   for (i=0;i<iPoly;i++) {
+
+
+      // --- get polygon ---
+
+      GetPolygonEx_PLY(Poly,VVx,VVy,i,bExclude);
+      
+      if (!bExclude) bIn = TRUE;
+
+      ClipPolyEx_MVIEW(View,VVx,VVy,MVIEW_UNIT_VIEW,bExclude);
+
+   }
+   
+   
+   // --- if only exclusion polygons add an inclusion polygon based on map size ---
+   
+   if (bIn == FALSE) {
+   
+      // --- get map size and clip ---
+
+      rMinX=rMaxX=rMinY=rMaxY=0.0;      
+      GetMapSize_MAP(Map,rMinX,rMinY,rMaxX,rMaxY);
+      ClipRectEx_MVIEW(View,rMinX,rMinY,rMaxX,rMaxY,MVIEW_UNIT_MM,0);
+      
+   }
+   
+
+   Destroy_SYS(VVx);
+   Destroy_SYS(VVy);
+   Destroy_SYS(Poly);
+   
+   // --- Force Clipping ---
+   
+   if (iForce) {
+   
+      MarkAllGroups_MVIEW(View,1);
+      ClipMarkedGroups_MVIEW(View,CLIP_ON);
+      MarkAllGroups_MVIEW(View,0);
+   
+   
+      // --- unclip coordinates group ---
+      
+      if (iExistGroup_MVIEW(View,"Coordinates")) {
+         MarkGroup_MVIEW(View,"Coordinates",1);
+         ClipMarkedGroups_MVIEW(View,CLIP_OFF);
+         MarkGroup_MVIEW(View,"Coordinates",0);
+      }
+      
+   }
+      
+   
+   Destroy_MVIEW(View);
+   
+   // --- Release the Map ---
+
+   UnLock_EMAP(EMap);
+}

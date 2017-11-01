@@ -1,0 +1,274 @@
+//===========================================================================
+NAME          = "Import GPS file into a new database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav/Import"
+
+DESCRIPTION   = "
+
+   AGIMPGPS.FILE       Name of the data file to import
+           .DATE       GPS date
+         
+"
+// Revision History:
+// v6.3 New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "agimpgps.gr"
+#include "agimpgps.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+WA          hWA;              // Handle to QA log file
+EXP         Exp;              // Expression for creating "Date" channel
+DB_SYMB     Line,WeekCh,DateCh,SecCh,TimeCh;
+VV          hVVw,hVVs,hVVd;
+
+int         i,iLen;
+real        rDate,rDay0;
+real        rWeek,rSec;
+
+string(STR_FILE)     sFile,sDatabase;
+string(STR_DEFAULT)  sLine,sName,sGpsDay0,sDate;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGIMPGPS");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_AGIMPGPS_0,DGW_FILEPATH,"AGIMPGPS","FILE");
+      SetInfoSYS_DGW(Diag,_AGIMPGPS_1,DGW_TEXT,"AGIMPGPS","DATE");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_AGIMPGPS_0,DGW_FILEPATH,"AGIMPGPS","FILE");
+      GetInfoSYS_DGW(Diag,_AGIMPGPS_1,DGW_TEXT,"AGIMPGPS","DATE");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get parameter ---
+
+   GetString_SYS("AGIMPGPS","FILE",sFile);
+   
+   GetString_SYS("AGIMPGPS", "DATE", sDate);
+   rDate = rScanDate_STR(sDate, DATE_FORMAT_YYYYMMDD);
+   //if (rDate == rDUMMY)      
+   //   rDate = rScanDate_STR(sDate,DATE_FORMAT_MMDDYYYY);
+   //if (rDate == rDUMMY) 
+   //   rDate = rScanDate_STR(sDate,DATE_FORMAT_DDMMYYYY);
+   if (rDate == rDUMMY)
+      Abort_SYS(_("Invalid GPS date, please provide the date string in format YYYY/MM/DD"));
+
+   Strcpy_STR(sGpsDay0,"1999/08/22");       // GPS Week Number Rollover Day
+   rDay0 = rScanDate_STR(sGpsDay0,DATE_FORMAT_YYYYMMDD);
+      
+
+   // --- database name ---
+         
+   FileNamePart_STR(sFile,sName,STR_FILE_PART_NAME);
+   Strcpy_STR(sDatabase,sName);
+   Strcat_STR(sDatabase,".gdb");
+   if (iFileExist_SYS(sDatabase) && iInteractive_SYS())
+      if (!iDisplayQuestion_SYS(sDatabase,_("Database exists.  Overwrite?")))
+         Cancel_SYS();
+         
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing GPS data"),1);
+
+
+   // --- create/load the new database ---
+
+   if (iFileExist_SYS(sDatabase))  {
+      if (iLoaded_EDB(sDatabase)) UnLoad_EDB(sDatabase);
+      iDeleteFile_SYS(sDatabase);
+   }
+   Create_DB(sDatabase,10,50,10+50+20,10,100,"SUPER","");
+   EData = Load_EDB(sDatabase);
+   Data = Lock_EDB(EData);
+   
+   Strcpy_STR(sLine,_n("LGpsData"));
+
+   
+   // --- Import ---
+
+   hWA = Create_WA ("ImportGPS.log",WA_NEW);
+
+   ImportBIN2_DU(Data,sFile,"ag_impgps.i3",sLine,iDUMMY,rDUMMY,hWA);
+   if(hWA)  Destroy_WA(hWA);
+
+   UnLock_EDB(EData);
+
+
+   // --- Display/Edit Errors ---
+
+   if (iInteractive_SYS()) {
+      
+      if (iFileSize_SYS("import_error.log")>3) // 3 characters could be UTF-8 BOM only
+      {
+
+         SetString_SYS("EDIT","FILE","import_error.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }
+
+      if (iFileSize_SYS("ImportGPS.log") > 3) // 3 characters could be UTF-8 BOM only
+      {
+         
+         SetString_SYS("EDIT","FILE","ImportGPS.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }
+   } 
+
+
+   // --- delete line 0 and display channels (so math expression can be used) ---
+   
+   DelLine0_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+   
+   Data = Lock_EDB(EData);
+   Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);
+   LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Create "Date" channel and calculate geodate ---
+
+   WeekCh = FindChan_DB(Data,"Week");
+   SecCh = FindChan_DB(Data,"Sec");
+
+   if (WeekCh==NULLSYMB || SecCh==NULLSYMB)
+      Abort_SYS(_("Week/Sec channel not exist!"));
+      
+   LockSymb_DB(Data,WeekCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,SecCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   DateCh = DupSymb_DB(Data,WeekCh,"Date");        
+   
+   hVVw = Create_VV(REAL,0);
+   hVVs = Create_VV(REAL,0);
+   hVVd = Create_VV(REAL,0);
+   
+   GetChanVV_DB(Data,Line,WeekCh,hVVw);
+   GetChanVV_DB(Data,Line,SecCh,hVVs);
+
+   UnLockSymb_DB(Data,WeekCh);
+   UnLockSymb_DB(Data,SecCh);
+
+   iLen = iLength_VV(hVVw);
+   if(iLen<=0)  Abort_SYS(_("No data in Channel 'Week'."));
+   i = iFindDum_VV(hVVw,0,iLen-1,1,0);
+   if(i==-1)  Abort_SYS(_("No valid data in Channel 'Week'."));
+   rWeek = rGetReal_VV(hVVw,i);
+
+   iLen = iLength_VV(hVVs);
+   if(iLen<=0)  Abort_SYS(_("No data in Channel 'Sec'."));
+   i = iFindDum_VV(hVVw,0,iLen-1,1,0);
+   if(i==-1)  Abort_SYS(_("No valid data in Channel 'Sec'."));
+   rSec = rGetReal_VV(hVVs,i);
+
+   //rDate = rLongtoDate_SYS( iDatetoLong_SYS(rDay0) + (int)(rWeek*7.0 + rSec/86400.0) );
+
+   SetLen_VV(hVVd,iLen); 
+   FillReal_VV(hVVd,rDate);
+
+   PutChanVV_DB(Data,Line,DateCh,hVVd);
+
+   Destroy_VV( hVVw );
+   Destroy_VV( hVVs );
+   Destroy_VV( hVVd );
+
+
+   // --- Set "Date" channel format ---
+
+   SetChanFormat_DB(Data,DateCh,DB_CHAN_FORMAT_DATE);
+   SetChanWidth_DB(Data,DateCh,12);
+   SetLineDate_DB(Data,Line,rDate); 
+   UnLockSymb_DB(Data,DateCh);
+
+
+   // --- Create "Time" channel and calculate geotime ---
+
+   SecCh = FindChan_DB(Data,"Sec");
+   TimeCh = DupSymbNoLock_DB(Data,SecCh,"Time");        
+   
+
+   // --- Create the Expression ---
+
+   Exp = Create_EXP(Data,"@s=ROUND(SEC);@d=FLOOR(@s/86400);Time=(@s-@d*86400)/3600;",2048);
+   //Exp = Create_EXP(Data,"@d=FLOOR(SEC/86400);Time=(SEC-@d*86400)/3600;",2048);
+
+
+   // --- Apply the expression ---
+
+   Math_DU(Data,Line,Exp);
+
+   Destroy_EXP(Exp);
+
+
+   // --- Set "Time" channel format ---
+
+   LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   SetChanFormat_DB(Data,TimeCh,DB_CHAN_FORMAT_TIME);
+   SetChanWidth_DB(Data,TimeCh,12);
+   SetChanDecimal_DB(Data,TimeCh,0);
+   UnLockSymb_DB(Data,TimeCh);
+
+
+   // --- Release database to EDB ---
+   
+   UnLockSymb_DB(Data,Line);
+   UnLock_EDB(EData);   
+
+
+   // --- Display channels ---
+   
+   UnLoadAllChans_EDB(EData);
+   LoadChan_EDB(EData,"Date");
+   LoadChan_EDB(EData,"Time");
+   LoadChan_EDB(EData,"Latitude");
+   LoadChan_EDB(EData,"Longitude");
+   LoadChan_EDB(EData,"Height");
+   
+   Progress_SYS(0);
+}

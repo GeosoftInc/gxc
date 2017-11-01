@@ -1,0 +1,280 @@
+//===========================================================================
+NAME          = "Grid IP data by N value"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Subset a database by N value, then grid the subsetted database.
+
+    IPGRIDN.CHAN   : Channels to export
+    IPGRIDN.GRID   : Output grid file
+    IPGRIDN.N      : N Value to use.
+    IPGRIDN.MASK   : Mask channel
+    IPGRIDN.METHOD : Gridding method
+                     \"M\" : Minimum curvature
+                     \"B\" : Bi-directional line gridding
+                     \"T\" : TIN gridding
+    IPGRIDN.SAVEDB : 0: Delete subset database after running
+                     1: Save subset database
+"
+// Revision History:
+// v6.1.0: Create list of available N values from database. 
+//         Sort channel lists.
+// v6.0.0: Use new iRemoveDocument_PROJ function to unload GDB before deleting.
+//         Grids now automatically displayed, don't need to call NEWMAP.GX.
+// v5.1.5: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPGRIDN.gr"
+#include "IPGRIDN.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define GRID_NONE    0
+#define GRID_RANGRID 1
+#define GRID_BIGRID  2
+#define GRID_TINGRID 3
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+LST         ChLst, NLst;
+IP          Ip;
+
+int         i, iChan, iSaveDB, iN, iMethod, iInteractive;
+real        rN;
+
+string(STR_DB_SYMBOL) sMask, sChan, sXCh, sYCh;
+string(STR_DEFAULT) sMethod, sVal;
+string(STR_FILE) sDB, sSubsetDB, sGrid, sTin;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();   
+   GetName_EDB(EData, sDB);
+   Data = Lock_EDB(EData);
+
+   iSaveDB = 0;
+   
+   
+   // --- Make a list of available "N" values in the database ---
+      
+   Ip = Create_IP();
+   NLst = Create_LST(32);
+   GetNValueLST_IP(Ip, Data, NLst);
+   if(iSize_LST(NLst)==0)
+      Abort_SYS(_("The database does not contain any N value data in the selected lines."));
+   
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if(iInteractive)
+   {
+
+      // --- Get current X, Y channels ---
+
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+      // --- Get a list of the channels ---
+
+      ChLst = Create_LST(80);
+      SymbLST_DB(Data, ChLst, DB_SYMB_CHAN);
+      Sort_LST(ChLst, 0, 0);
+
+
+      // --- Remove X,Y from the list ---
+
+      iChan = iFindItem_LST(ChLst, 0, sXCh);
+      if(iChan!=-1) DelItem_LST(ChLst, iChan);
+
+      iChan = iFindItem_LST(ChLst, 0, sYCh);
+      if(iChan!=-1) DelItem_LST(ChLst, iChan);
+      
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPGRIDN");
+
+
+      // --- Copy in the channel and N lists ---
+
+      Copy_LST(GetList_DGW(Diag,_IPGRIDN_0),ChLst);
+      Copy_LST(GetList_DGW(Diag,_IPGRIDN_2),NLst);
+      Copy_LST(GetList_DGW(Diag,_IPGRIDN_3),ChLst);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPGRIDN_0,DGW_TEXT,"IPGRIDN","CHAN");
+      SetInfoSYS_DGW(Diag,_IPGRIDN_1,DGW_FILEPATH,"IPGRIDN","GRID");
+      SetInfoSYS_DGW(Diag,_IPGRIDN_2,DGW_TEXT,"IPGRIDN","N");
+      SetInfoSYS_DGW(Diag,_IPGRIDN_3,DGW_TEXT,"IPGRIDN","MASK");
+      SetInfoSYS_DGW(Diag,_IPGRIDN_4,DGW_LISTALIAS,"IPGRIDN","METHOD");
+      SetInfoSYS_DGW(Diag,_IPGRIDN_5,DGW_LISTALIAS,"IPGRIDN","SAVEDB");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPGRIDN_0,DGW_TEXT,"IPGRIDN","CHAN");
+      GetInfoSYS_DGW(Diag,_IPGRIDN_1,DGW_FILEPATH,"IPGRIDN","GRID");
+      GetInfoSYS_DGW(Diag,_IPGRIDN_2,DGW_TEXT,"IPGRIDN","N");
+      GetInfoSYS_DGW(Diag,_IPGRIDN_3,DGW_TEXT,"IPGRIDN","MASK");
+      GetInfoSYS_DGW(Diag,_IPGRIDN_4,DGW_LISTALIAS,"IPGRIDN","METHOD");
+      GetInfoSYS_DGW(Diag,_IPGRIDN_5,DGW_LISTALIAS,"IPGRIDN","SAVEDB");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);   
+      Destroy_LST(ChLst);
+   } 
+
+   UnLock_EDB(EData);
+
+
+   // --- Get the parameters ---
+
+   GetString_SYS("IPGRIDN","CHAN", sChan);
+   GetString_SYS("IPGRIDN","GRID", sGrid);
+   rN = rGetReal_SYS("IPGRIDN","N");
+   GetString_SYS("IPGRIDN","MASK", sMask);
+   GetString_SYS("IPGRIDN","METHOD", sMethod);
+
+   if(rN==rDUMMY || rN<=0.0)
+      Abort_SYS(_("Invalid N value"));
+   
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("Channel not defined."));
+
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("Output grid not defined."));
+
+   iMethod = GRID_NONE;
+   if(iCharComp_STR(sMethod, _n("M")) || iCharComp_STR(sMethod, _n("m"))) iMethod = GRID_RANGRID;
+   if(iCharComp_STR(sMethod, _n("B")) || iCharComp_STR(sMethod, _n("b"))) iMethod = GRID_BIGRID;
+   if(iCharComp_STR(sMethod, _n("T")) || iCharComp_STR(sMethod, _n("t"))) iMethod = GRID_TINGRID;
+   if(iMethod==GRID_NONE)
+      Abort_SYS(_("No gridding method selected."));
+
+   iSaveDB = iGetInt_SYS("IPGRIDN","SAVEDB");
+   if(iSaveDB != 1) iSaveDB = 0;    // delete by default
+
+
+   // --- Create subset DB name from the selected channel and the "N" value ---
+
+   Strcpy_STR(sSubsetDB, sChan);
+   Strcat_STR(sSubsetDB, "_");
+   iN = (int)rN;
+   FormatR_STR(rN,sVal,10,1);
+   ReplaceChar_STR(sVal, ".", "_"); // replace periods with underscores
+
+   Strcat_STR(sSubsetDB, sVal);
+   FileExt_STR(sSubsetDB, "gdb", sSubsetDB, FILE_EXT_FORCE);
+
+
+
+   // --- Set output parameters for IPXY GX ---
+   
+   SetString_SYS("IPXY","NEWDB", sSubsetDB);
+   SetString_SYS("IPXY","CHAN", "X");           // Single, externally defined channel
+   SetString_SYS("IPXY","ONECHAN", sChan);      // Single channel to export
+   SetReal_SYS("IPXY","N", rN);                  // N value to use
+   SetString_SYS("IPXY","MASK", sMask);         // Optional mask channel
+   SetInt_SYS("IPXY","NCHAN", 1);               // Single channel to export
+   SetString_SYS("IPXY","LINE", "S");           // Selected, because this is what gridding uses
+
+
+   // --- Call the IPXY GX ---
+
+   SetInteractive_SYS(0);
+   if (iRunGX_SYS("ipxy.gx"))  Cancel_SYS();
+   SetInteractive_SYS(iInteractive);
+
+   
+   // --- Call the gridding GX ---
+
+   if(iMethod == GRID_RANGRID) {
+      SetString_SYS("RANGRID","CHAN",sChan);
+      SetString_SYS("RANGRID","GRID",sGrid);
+      if (iRunGX_SYS("rangrid.gx"))  Cancel_SYS();
+      GetString_SYS("RANGRID","GRID",sGrid);       // get grid name actually used
+   }
+   else if(iMethod == GRID_BIGRID) {
+
+      SetString_SYS("BIGRID","CHAN",sChan);
+      SetString_SYS("BIGRID","GRID",sGrid);
+      if (iRunGX_SYS("bigrid.gx"))  Cancel_SYS();
+      GetString_SYS("BIGRID","GRID",sGrid);        // get grid name actually used
+   }
+   else if(iMethod == GRID_TINGRID) {
+
+      // --- Create a TIN file of the data ---
+
+      Strcpy_STR(sTin, sGrid);
+      FileExt_STR(sTin,"tin",sTin,FILE_EXT_FORCE);
+
+      SetString_SYS("TINDB","FILE",sTin);
+      SetString_SYS("TINDB","CHAN",sChan);
+      SetInt_SYS("TINDB","DUPLICATE",VV_XYDUP_AVERAGE);
+      SetInteractive_SYS(0);
+      if (iRunGX_SYS("tindb.gx"))  Cancel_SYS();
+      SetInteractive_SYS(iInteractive);
+
+      
+      // --- Grid the TIN ---
+
+      SetString_SYS("TINGRID","FILE",sTin);
+      SetString_SYS("TINGRID","GRID",sGrid);
+      SetString_SYS("TINGRID","METHOD","1");
+      SetString_SYS("TINGRID","CELL","");
+      if (iRunGX_SYS("tingrid.gx"))  Cancel_SYS();
+      GetString_SYS("TINGRID","GRID",sGrid);       // get grid name actually used
+   }
+
+
+   // --- Make the original database current ---
+
+   EData = Load_EDB(sSubsetDB);
+   MakeCurrent_EDB(EData);
+
+
+   // --- Unload and delete the subset database ---
+
+   if(!iSaveDB) {
+      if (iInteractive_SYS()) {
+         if(iRemoveDocument_PROJ(sSubsetDB)==0)
+            iDeleteFile_SYS(sSubsetDB);
+      }
+   }
+
+
+   // --- Make original database current again ---
+   
+   Load_EDB(sDB);
+}

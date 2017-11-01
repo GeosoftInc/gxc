@@ -1,0 +1,304 @@
+//===========================================================================
+
+NAME          = "Sample a TIN using the Natural Neighbour algorithm at database locations"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Tinning"
+
+DESCRIPTION   = "
+
+        TINSAMP.FILE            Input TIN file.
+        TINSAMP.CHAN            Output channel name
+        TINSAMP.METHOD          Interpolation method
+"
+// Revision History:
+// v6.3.0: Added interpolation options
+// v6.0.0: Added valid local datum transform check
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "TINSAMP.gr"
+#include "TINSAMP.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;            // Database handle
+DB         Data;             // Database handle
+DGW        Diag;
+VV         VVx, VVy, VVz, VVi;
+TIN        Tin;
+BF         Bf;
+IPJ        hIPJ, hIPJx;
+PJ         hPJ;
+DB_SYMB    Line, XCh, YCh, ZCh;
+
+int   i, iLines, iTotLines, iMethod;
+string(GS_MAX_PATH) sFile;
+string(STR_DB_SYMBOL) sChan, sLabel;
+string(STR_DEFAULT) sTemp;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+
+   // --- Are we running interactiveiY ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TINSAMP");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TINSAMP_0,DGW_FILEPATH,"TINSAMP","FILE");     
+      SetInfoSYS_DGW(Diag,_TINSAMP_1,DGW_TEXT,"TINSAMP","CHAN");     
+      SetInfoSYS_DGW(Diag,_TINSAMP_2,DGW_LISTALIAS,"TINSAMP","METHOD");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TINSAMP_0,DGW_FILEPATH,"TINSAMP","FILE");     
+      GetInfoSYS_DGW(Diag,_TINSAMP_1,DGW_TEXT,"TINSAMP","CHAN");     
+      GetInfoSYS_DGW(Diag,_TINSAMP_2,DGW_LISTALIAS,"TINSAMP","METHOD");     
+
+      Destroy_DGW(Diag);
+      
+   }      
+         
+   // --- get input file ---
+
+   GetString_SYS("TINSAMP","FILE",sFile);
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("Input TIN file name not specified"));
+
+   // --- get output channel ---
+
+   GetString_SYS("TINSAMP","CHAN",sChan);
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("Output channel name not specified"));
+
+   // --- get the method ---
+   
+   iMethod = iGetInt_SYS("TINSAMP", "METHOD");
+   if(iMethod==iDUMMY)
+      iMethod = 0;   // Natural neighbour default
+      
+   if(iMethod<0 || iMethod>2)
+      Abort_SYS(_("Interpolation method must be 0 (natural neighbour), 1 (linear) or 2 (nearest)"));
+      
+      
+   // --- Get the TIN file ---
+
+   Bf = Create_BF(sFile, BF_READ);
+   Tin = CreateS_TIN(Bf);
+
+
+   // --- Get the TIN projection ---
+
+   hIPJ = Create_IPJ();
+   GetIPJ_TIN(Tin,hIPJ);
+
+
+   // --- Is the TIN Z-valued? ---
+
+   if(!iIsZValued_TIN(Tin)) {
+      Abort_SYS(_("The TIN is not Z-Valued; cannot interpolate it."));
+   }
+
+
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+
+   // --- Does the Output Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sChan)) {
+      ZCh = DupSymb_DB(Data,XCh,sChan);       // Create it 
+      UnLockSymb_DB(Data,ZCh);
+   } else   
+      ZCh = FindChan_DB(Data,sChan);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ZCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Get the X, Y channel projection ---
+
+   hIPJx = Create_IPJ();
+   GetIPJ_DB(Data, XCh, hIPJx);
+
+
+   // --- check if local datum transform required/supported ---
+
+   if (iInteractive_SYS() && iSupportDatumTransform_IPJ(hIPJx,hIPJ) == 0) {
+      if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between tin and database coordinate systems may be inaccurate because the local datum transform for one or both systems is not defined.  Do want to continue?")) == 0)
+            Exit_SYS();
+   }
+   
+   
+   // --- Create transform: Channel to TIN ---
+
+   hPJ = CreateIPJ_PJ(hIPJx, hIPJ);
+
+
+   // --- Create VVs ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   VVz = Create_VV(REAL,0);
+   VVi = Create_VV(INT,0);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      Strcpy_STR(sLabel, _("Interpolate line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Read the X, Y locations ---
+   
+      GetChanVV_DB(Data, Line, XCh, VVx);
+      GetChanVV_DB(Data, Line, YCh, VVy);
+
+      ReFidVV_VV(VVy, VVx);
+
+
+      // --- Transform X, Y to Tin X, Y ---
+
+      ConvertVV_PJ(hPJ, VVx, VVy);
+      
+      
+      // --- Sort locations by increasing X for efficiency ---
+      
+      SortIndex2_VV(VVx, VVy, VVi, VV_SORT_ASCENDING, VV_SORT_ASCENDING);
+      IndexOrder_VV(VVi, VVx);
+      IndexOrder_VV(VVi, VVy);
+
+
+      // --- Interpolate the locations ---
+
+      SetLen_VV(VVz, iLength_VV(VVx));
+      if(iMethod==0)
+         InterpVV_TIN(Tin, VVx, VVy, VVz);
+      else if(iMethod==1)
+         LinearInterpVV_TIN(Tin, VVx, VVy, VVz);
+      else if(iMethod==2)
+         NearestVV_TIN(Tin, VVx, VVy, VVz);
+
+
+      // --- Restore the original order for the output Z data ---
+      
+      IndexInsert_VV(VVx, VVz, VVi);
+
+
+      // --- Output the results ---
+
+      PutChanVV_DB(Data, Line, ZCh, VVx);
+
+
+      // --- If this is a group line, add it to the association list ---
+
+      if(iLineCategory_DB(Data, Line)==DB_CATEGORY_LINE_GROUP)
+         Associate_DB(Data, Line, ZCh);
+
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,ZCh,_("Sampled TIN channel"),"TINSAMP;");
+
+   
+   // --- Unlock the Channel Symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,ZCh);
+
+
+   // --- Release the database ---
+
+   UnLock_EDB(EData);
+   
+      
+   // --- Display the new channel ---
+   
+   if (iInteractive_SYS())
+      LoadChan_EDB(EData, sChan);
+      
+   
+   // --- done ---
+
+   DestroyEx_BF(Bf);
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_VV(VVz);
+   Destroy_VV(VVi);
+   Destroy_TIN(Tin);
+   Destroy_IPJ(hIPJ);
+   Destroy_IPJ(hIPJx);
+   Destroy_PJ(hPJ);
+
+
+   Progress_SYS(0);
+
+}

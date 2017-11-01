@@ -1,0 +1,194 @@
+//===========================================================================
+NAME          = "Apply a high-pass filter"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "\
+\r\n\
+Apply a high-pass filter to a channel.\r\n\
+\r\n\
+Parameters: \r\n\
+\r\n\
+    HIGHPASS.IN      - Name of the Input Channel\r\n\
+            .OUT     - Name of the Ouput Channel\r\n\
+            .CUTOFF  - Long wavelength cutoff value\r\n\
+\r\n"
+
+//===========================================================================
+
+RESOURCE = "highpass.gr"
+#include "highpass.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;      // Channel Names
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh,OutCh;        // Channel handles
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+real       rLongW;            // Short Wavelength cutoff values
+int        i;                 // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("HIGHPASSForm");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_HIGHPASSFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_HIGHPASSFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_HIGHPASSFORM_0,DGW_TEXT,"HIGHPASS","IN");     
+      SetInfoSYS_DGW(Diag,_HIGHPASSFORM_1,DGW_TEXT,"HIGHPASS","OUT");     
+      SetInfoSYS_DGW(Diag,_HIGHPASSFORM_2,DGW_TEXT,"HIGHPASS","CUTOFF");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_HIGHPASSFORM_0,DGW_TEXT,"HIGHPASS","IN");     
+      GetInfoSYS_DGW(Diag,_HIGHPASSFORM_1,DGW_TEXT,"HIGHPASS","OUT");     
+      GetInfoSYS_DGW(Diag,_HIGHPASSFORM_2,DGW_TEXT,"HIGHPASS","CUTOFF"); 
+
+      // --- set the filter length to default 0 ---
+     
+      SetInt_SYS("HIGHPASS","FILTLEN",0);
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("HIGHPASS","IN",sInCh);
+   GetString_SYS("HIGHPASS","OUT",sOutCh);
+   rLongW = rGetReal_SYS("HIGHPASS","CUTOFF");
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data,InCh,sOutCh);       // Create it 
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) 
+      LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Filter line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+
+
+      // --- apply filter ---
+
+      BPFilt_DU(Data,Line,InCh,OutCh,0.0,rLongW,0);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Highpass filter"),"HIGHPASS;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) 
+      UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Unlock Data ---
+
+   UnLock_EDB(EData);
+
+	// --- display new channel ---
+
+	LoadChan_EDB( EData, sOutCh );
+
+}

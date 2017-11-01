@@ -1,0 +1,64 @@
+//===========================================================================
+NAME          = "Get saved selection"
+#include <version.gxh>
+DESCRIPTION   = "
+
+    SELGET.FILE  name of the selection file
+    
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Line/Selections"
+
+//===========================================================================
+
+RESOURCE = "selget.gr"
+#include "selget.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;            // Filter file name
+
+EDB        EData;
+DB         Data;
+DGW        Diag;              // Dialogue handle
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      Diag = Create_DGW("SELGET");
+      SetInfoSYS_DGW(Diag,_SELGET_0,DGW_FILEPATH,"SELGET","FILE");    
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+      GetInfoSYS_DGW(Diag,_SELGET_0,DGW_FILEPATH,"SELGET","FILE");    
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("SELGET","FILE",sFile);
+
+
+   // --- Get the Database and save selections ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   LoadSelect_DB(Data,sFile);
+   UnLock_EDB(EData);   
+   
+}

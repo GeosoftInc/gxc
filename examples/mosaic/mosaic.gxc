@@ -1,0 +1,92 @@
+//===========================================================================
+NAME          = "Create a grid mosaic from a set of input grids"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+
+   MOSAIC.INGRIDS   list of grids
+   MOSAIC.OUTGRID   output 
+
+"
+
+//===========================================================================
+// Revision history:
+//
+// v6.0.0   First release
+//
+//===========================================================================
+
+RESOURCE = "mosaic.gr"
+#include "mosaic.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_MULTI_FILE) sGrids;
+string(STR_FILE)       sGrid;
+DGW                    Diag;
+IMG                    hIMG;
+int                    iRun;
+
+
+//===========================================================================
+//                           MOSAIC CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      // --- first dialog ---
+
+      Diag = Create_DGW("MOSAIC");
+      
+      SetInfoSYS_DGW(Diag,_MOSAIC_0,DGW_FILEPATH, "MOSAIC","INGRIDS");     
+      SetInfoSYS_DGW(Diag,_MOSAIC_1,DGW_FILEPATH, "MOSAIC","OUTGRID");     
+                              
+      iRun = iRunDialogue_DGW(Diag);
+      if (iRun == -1)    Cancel_SYS();
+      SetInt_SYS("MOSAIC","NEW",iRun);
+
+      GetInfoSYS_DGW(Diag,_MOSAIC_0,DGW_FILEPATH, "MOSAIC","INGRIDS");     
+      GetInfoSYS_DGW(Diag,_MOSAIC_1,DGW_FILEPATH, "MOSAIC","OUTGRID");     
+      
+      Destroy_DGW(Diag);
+         
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("MOSAIC","INGRIDS",sGrids);
+   GetString_SYS("MOSAIC","OUTGRID",sGrid);
+
+
+   // --- create mosaic ---
+      
+   Progress_SYS(1);
+   ProgName_SYS(_("Mosaic grid..."),1); 
+   hIMG = Mosaic_IMU(sGrids,sGrid,(IPJ)0,rDUMMY);
+   Destroy_IMG(hIMG);
+   Progress_SYS(0);
+   
+   
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sGrid,"Grid",1);
+   
+   
+}

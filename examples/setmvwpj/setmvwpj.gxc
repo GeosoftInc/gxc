@@ -1,0 +1,169 @@
+//===========================================================================
+NAME          = "View projection"
+#include <version.gxh>
+DESCRIPTION   = "
+
+      SETMVWPJ.VIEW name of the view to modify.
+           IPJ.NAME        projection name
+           IPJ.DATUM       datum (name, major axis, ellipticity)
+           IPJ.METHOD      projection method (name,p1,p2,... see GXF)
+           IPJ.UNITS       distance units (name,m/unit)
+           IPJ.LOCALDATUM  local datum (name,dx,dy,dz,rx,ry,rz,scale)
+   
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Map Views"
+
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v5.1.8: User IPJ should have warp cleared.
+// v5.1.7: Retain User IPJ orienation info for section views.
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+IPJ         hIPJ, hIPJ2;
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+
+string(STR_VIEW) sView;
+string(STR_GXF) s1, s2, s3, s4, s5;
+real rX, rY, rZ, rRot, rUnused;
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- get current view projection ---
+   
+   if (iHaveCurrent_EMAP() == 0) {
+      Abort_SYS(_("No current map loaded"));
+   }
+   EMap = Current_EMAP();
+   
+   // --- get the view ---
+   
+   if (iInteractive_SYS()) {
+      GetCurrentView_EMAP(EMap,sView);
+      SetString_SYS("SETMVWPJ","VIEW",sView);
+   } else   
+      GetString_SYS("SETMVWPJ","VIEW",sView);
+      
+      
+   Map = Lock_EMAP(EMap);
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_MVIEW(View,hIPJ);
+
+
+   // --- Save the user IPJ as well. Sometimes the IPJ can have an orientation
+   //     (such as a section view) applied,  while the User IPJ has a plan
+   //     orientation, so that the "true" XYZ locations can be calculated and
+   //     displayed in the status bar. If the USER IPJ orientation is not saved,
+   //     then re-loading the IPJ after calling the projection wizard will destroy this
+   //     transformation. ---
+
+   hIPJ2 = Create_IPJ();
+   GetUserIPJ_MVIEW(View,hIPJ2);
+
+   rX = rDUMMY;
+   if(iGetOrientation_IPJ(hIPJ)==IPJ_ORIENT_SECTION &&
+      iGetOrientation_IPJ(hIPJ2)==IPJ_ORIENT_PLAN) {
+
+      GetOrientationInfo_IPJ(hIPJ2,  rX, rY, rZ, rRot, rUnused);
+   }
+
+
+
+   if(iInteractive_SYS())
+   {
+   
+      // --- Edit/modify the IPJ ---
+
+      if(iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Map View"), sView)!=0)
+         Cancel_SYS();
+         
+
+      // --- Export IPJ parameters as GXF strings for scripting. ---
+      
+      GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+      
+      SetString_SYS("IPJ", "NAME", s1);
+      SetString_SYS("IPJ", "DATUM", s2);
+      SetString_SYS("IPJ", "METHOD", s3);
+      SetString_SYS("IPJ", "UNITS", s4);
+      SetString_SYS("IPJ", "LOCALDATUM", s5);
+      
+      
+      // --- Read them back in - this will ensure they are used for lineage ---
+      
+      GetString_SYS("IPJ", "NAME", s1);
+      GetString_SYS("IPJ", "DATUM", s2);
+      GetString_SYS("IPJ", "METHOD", s3);
+      GetString_SYS("IPJ", "UNITS", s4);
+      GetString_SYS("IPJ", "LOCALDATUM", s5);
+   }
+   else
+   {
+      // --- Get and validate the IPJ parameters from the INI ---
+      
+      GetString_SYS("IPJ", "NAME", s1);
+      GetString_SYS("IPJ", "DATUM", s2);
+      GetString_SYS("IPJ", "METHOD", s3);
+      GetString_SYS("IPJ", "UNITS", s4);
+      GetString_SYS("IPJ", "LOCALDATUM", s5);
+      
+      if(!iStrlen_STR(s1) &&
+         !iStrlen_STR(s2) &&
+         !iStrlen_STR(s3) &&
+         !iStrlen_STR(s4) &&
+         !iStrlen_STR(s5))
+      {
+         Abort_SYS(_("GXF projection strings IPJ.NAME, IPJ.DATUM, IPJ.METHOD, IPJ.UNITS and IPJ.LOCALDATUM not set for non-interactive use of the SETMVWPJ.GX."));
+      }
+      
+      SetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+   }
+   
+   
+   // --- set the new IPJ  ---
+
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_YES);
+   SetIPJ_MVIEW(View,hIPJ);
+
+
+   // --- User projection cannot have a warp ---
+
+   ClearWarp_IPJ(hIPJ);
+   SetUserIPJ_MVIEW(View,hIPJ);
+
+
+   // --- set orientation for the User IPJ? ---
+
+   if(rX!=rDUMMY) {
+      SetPlanView_IPJ(hIPJ,  rX, rY, rZ, rRot);
+      SetUserIPJ_MVIEW(View,hIPJ);
+   }
+   
+   
+   // --- Done ---
+
+   Destroy_IPJ(hIPJ);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   
+}

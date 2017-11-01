@@ -1,0 +1,353 @@
+//===========================================================================
+
+NAME          = "WHOLEPLOT Preferences"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "
+
+    DHPREFERENCES.TEMPLATE        - Map template
+    DHPREFERENCES.ROCKCODES       - Rock Codes file
+    DHPREFERENCES.STRUCTURECODES  - Structure Codes file
+    DHPREFERENCES.RESURVEY        - Hole resurveying method
+    DHPREFERENCES.POLY_ORDER      - Order for polynomial resurveying
+    DHPREFERENCES.DISC_INTERVAL   - Hole resurveying disretization interval
+    DHPREFERENCES.DIP_SIGN        - Downward dip negative or positive.
+    DHPREFERENCES.LEFTRIGHT       - Right/left reference
+    DHPREFERENCES.EASTWEST        - N-S sections face east/west
+    DHPREFERENCES.CONVERT_NEGATIVES - Auto-convert negatives on import.
+    DHPREFERENCES.USEMASK         - Enable/disable use of mask channel.
+    DHPREFERENCES.MASK            - Mask channel to use.
+    DHPREFERENCES.AZIMUTHCOR      - Correction to apply to collar/survey azimuths
+    DHPREFERENCES.ANGLEDSECX0     - Location of horizontal origin on angled sections.
+"
+// Revision History:
+// v7.0.0: Mask channel setting should have used DGW_TEXT, not DGW_LISTALIAS
+// v6.3.0: Added angled section origin choice.
+// v6.1.1: Fixed Mask channel LST loading.
+// v6.1.0: Added structure codes preferences.
+// v5.1.8: Alternate version for ArcView.
+// v5.1.7: Added azimuth correction preference.
+// v5.1.3: Added mask channel preferences.
+//         Added N-S faces east/west preference.
+//===========================================================================
+
+RESOURCE = "DHPREFERENCES.gr"
+#include "DHPREFERENCES.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB EData;
+DB  Data;
+DGW Diag;
+LTB hTMP;
+LST List;
+
+string(256) sTemp;
+string(STR_FILE) sRockCode, sStructCode;
+int i, iCurrent, iIsESRI;
+
+//===========================================================================
+//                             MAP CODE
+//===========================================================================
+
+{
+
+   // --- Get the current database, if one exists. It doesn't really matter if
+   //     it is a Wholeplot database, as it is used only for compiling a list of
+   //     available mask channels ---
+
+   iCurrent = iHaveCurrent_EDB();
+   if(iCurrent) {
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+   }
+
+
+   // --- Running inside ArcView? ---
+
+   iIsESRI = iIsESRI_DH();
+
+
+   // --- get list of map templates ---
+
+   hTMP = CreateCSV_LTB("maptmpl");
+
+   // --- set current defaults ---
+
+   if(!iIsESRI) {
+      if (iGlobal_SYS("WHOLEPLOT.TEMPLATE",sTemp) == 0) {
+         SetString_SYS("DHPREFERENCES","TEMPLATE",sTemp);
+      }
+      else
+         SetString_SYS("DHPREFERENCES","TEMPLATE","landscape A4");
+   }
+
+   if (iGlobal_SYS("WHOLEPLOT.ROCK_CODES",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","ROCK_CODES",sTemp);
+   }  
+   else {
+      iFindPathNameEx_SYS(DH_DEFAULT_ROCKCODE_FILE, FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_USER_CSV, sTemp);
+      SetString_SYS("DHPREFERENCES","ROCK_CODES",sTemp);
+   }
+   Strcpy_STR(sRockCode, sTemp);
+
+   if (iGlobal_SYS("WHOLEPLOT.STRUCTURE_CODES",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","STRUCTURE_CODES",sTemp);
+   }  
+   else {
+      iFindPathNameEx_SYS(DH_DEFAULT_STRUCTURECODE_FILE, FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_USER_CSV, sTemp);
+      SetString_SYS("DHPREFERENCES","STRUCTURE_CODES",sTemp);
+   }
+   Strcpy_STR(sStructCode, sTemp);
+
+   if (iGlobal_SYS("WHOLEPLOT.RESURVEY",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","RESURVEY",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","RESURVEY","0");
+
+   if (iGlobal_SYS("WHOLEPLOT.POLY_ORDER",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","POLY_ORDER",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","POLY_ORDER","5");
+
+   if (iGlobal_SYS("WHOLEPLOT.DISC_INTERVAL",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","DISC_INTERVAL",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","DISC_INTERVAL","0.1");
+
+   if (iGlobal_SYS("WHOLEPLOT.DIP_SIGN",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","DIP_SIGN",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","DIP_SIGN","-1");
+
+   if (iGlobal_SYS("WHOLEPLOT.LEFTRIGHT",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","LEFTRIGHT",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","LEFTRIGHT","1");
+
+   if (iGlobal_SYS("WHOLEPLOT.EASTWEST",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","EASTWEST",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","EASTWEST","1");
+
+   if (iGlobal_SYS("WHOLEPLOT.CONVERT_NEGATIVES",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","CONVERT_NEGATIVES",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","CONVERT_NEGATIVES","1");
+
+   if (iGlobal_SYS("WHOLEPLOT.USEMASK",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","USEMASK",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","USEMASK","0");   // default is "no".
+
+   if (iGlobal_SYS("WHOLEPLOT.MASK",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","MASK",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","MASK","Mask");   // default is "Mask".
+
+   if (iGlobal_SYS("WHOLEPLOT.AZIMUTHCOR",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","AZIMUTHCOR",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","AZIMUTHCOR","0");   // default is "0".
+
+   if (iGlobal_SYS("WHOLEPLOT.ANGLEDSECX0",sTemp) == 0) {
+      SetString_SYS("DHPREFERENCES","ANGLEDSECX0",sTemp);
+   }
+   else
+      SetString_SYS("DHPREFERENCES","ANGLEDSECX0","0");   // default is "0".
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      if(iIsESRI) {
+
+         Diag = Create_DGW("DHPREFERENCES_ESRI");
+
+         // --- Set up mask channel list ---
+
+         List = GetList_DGW(Diag,_DHPREFERENCES_10);
+         if(iCurrent)
+            ClassChanLST_DB(Data,List,"MASK");
+         AddUniqueItem_LST(List, _n("Mask"), _n("Mask"));
+         Sort_LST(List,0,0);
+
+
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_0,DGW_FILEPATH,  "DHPREFERENCES","ROCK_CODES");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_1,DGW_FILEPATH,  "DHPREFERENCES","STRUCTURE_CODES");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_2,DGW_LISTALIAS, "DHPREFERENCES","RESURVEY");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_3,DGW_TEXT,      "DHPREFERENCES","POLY_ORDER");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_4,DGW_TEXT,      "DHPREFERENCES","DISC_INTERVAL");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_5,DGW_LISTALIAS, "DHPREFERENCES","DIP_SIGN");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_6,DGW_LISTALIAS, "DHPREFERENCES","LEFTRIGHT");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_7,DGW_LISTALIAS, "DHPREFERENCES","EASTWEST");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_8,DGW_LISTALIAS, "DHPREFERENCES","CONVERT_NEGATIVES");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_9,DGW_LISTALIAS, "DHPREFERENCES","USEMASK");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_10,DGW_TEXT, "DHPREFERENCES","MASK");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_11,DGW_TEXT,     "DHPREFERENCES","AZIMUTHCOR");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_12,DGW_LISTALIAS, "DHPREFERENCES","ANGLEDSECX0");
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_0,DGW_FILEPATH,  "DHPREFERENCES","ROCK_CODES");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_1,DGW_FILEPATH,  "DHPREFERENCES","STRUCTURE_CODES");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_2,DGW_LISTALIAS, "DHPREFERENCES","RESURVEY");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_3,DGW_TEXT,      "DHPREFERENCES","POLY_ORDER");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_4,DGW_TEXT,      "DHPREFERENCES","DISC_INTERVAL");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_5,DGW_LISTALIAS, "DHPREFERENCES","DIP_SIGN");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_6,DGW_LISTALIAS, "DHPREFERENCES","LEFTRIGHT");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_7,DGW_LISTALIAS, "DHPREFERENCES","EASTWEST");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_8,DGW_LISTALIAS, "DHPREFERENCES","CONVERT_NEGATIVES");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_9,DGW_LISTALIAS, "DHPREFERENCES","USEMASK");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_10,DGW_TEXT, "DHPREFERENCES","MASK");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_11,DGW_TEXT,     "DHPREFERENCES","AZIMUTHCOR");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_12,DGW_LISTALIAS, "DHPREFERENCES","ANGLEDSECX0");
+
+
+      }
+      else {
+
+         Diag = Create_DGW("DHPREFERENCES");
+
+         List = GetList_DGW(Diag,_DHPREFERENCES_0);
+         GetLST_LTB(hTMP,0,List);
+         Sort_LST(List,0,0);
+
+      
+         // --- Set up mask channel list ---
+
+         List = GetList_DGW(Diag,_DHPREFERENCES_11);
+         if(iCurrent)
+            ClassChanLST_DB(Data,List,"MASK");
+         AddUniqueItem_LST(List, _n("Mask"), _n("Mask"));
+         Sort_LST(List,0,0);
+
+
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_0,DGW_TEXT,      "DHPREFERENCES","TEMPLATE");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_1,DGW_FILEPATH,  "DHPREFERENCES","ROCK_CODES");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_2,DGW_FILEPATH,  "DHPREFERENCES","STRUCTURE_CODES");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_3,DGW_LISTALIAS, "DHPREFERENCES","RESURVEY");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_4,DGW_TEXT,      "DHPREFERENCES","POLY_ORDER");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_5,DGW_TEXT,      "DHPREFERENCES","DISC_INTERVAL");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_6,DGW_LISTALIAS, "DHPREFERENCES","DIP_SIGN");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_7,DGW_LISTALIAS, "DHPREFERENCES","LEFTRIGHT");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_8,DGW_LISTALIAS, "DHPREFERENCES","EASTWEST");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_9,DGW_LISTALIAS, "DHPREFERENCES","CONVERT_NEGATIVES");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_10,DGW_LISTALIAS, "DHPREFERENCES","USEMASK");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_11,DGW_TEXT,      "DHPREFERENCES","MASK");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_12,DGW_TEXT,      "DHPREFERENCES","AZIMUTHCOR");
+         SetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_13,DGW_LISTALIAS, "DHPREFERENCES","ANGLEDSECX0");
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_0,DGW_TEXT,      "DHPREFERENCES","TEMPLATE");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_1,DGW_FILEPATH,  "DHPREFERENCES","ROCK_CODES");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_2,DGW_FILEPATH,  "DHPREFERENCES","STRUCTURE_CODES");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_3,DGW_LISTALIAS, "DHPREFERENCES","RESURVEY");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_4,DGW_TEXT,      "DHPREFERENCES","POLY_ORDER");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_5,DGW_TEXT,      "DHPREFERENCES","DISC_INTERVAL");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_6,DGW_LISTALIAS, "DHPREFERENCES","DIP_SIGN");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_7,DGW_LISTALIAS, "DHPREFERENCES","LEFTRIGHT");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_8,DGW_LISTALIAS, "DHPREFERENCES","EASTWEST");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_9,DGW_LISTALIAS, "DHPREFERENCES","CONVERT_NEGATIVES");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_10,DGW_LISTALIAS, "DHPREFERENCES","USEMASK");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_11,DGW_TEXT,      "DHPREFERENCES","MASK");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_12,DGW_TEXT,      "DHPREFERENCES","AZIMUTHCOR");
+         GetInfoSYS_DGW(Diag,_DHPREFERENCES_ESRI_13,DGW_LISTALIAS, "DHPREFERENCES","ANGLEDSECX0");
+      }
+   }
+
+   // --- get/set parameters ---
+
+   if(!iIsESRI) {
+      GetString_SYS("DHPREFERENCES","TEMPLATE",sTemp);
+      GlobalSet_SYS("WHOLEPLOT.TEMPLATE",sTemp);
+   }
+   
+   
+   // --- Set the rock code file ---
+   
+   GetString_SYS("DHPREFERENCES","ROCK_CODES",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.ROCK_CODES",sTemp);
+   
+   
+   // --- If rock code file is altered, reset the DHEDRCD.FILE value ---
+   
+   if(iStrcmp_STR(sTemp, sRockCode, STR_CASE_TOLERANT)!=0)
+		SetString_SYS("DHEDRCD","FILE",sTemp);
+
+
+   // --- Set the structure code file ---
+   
+   GetString_SYS("DHPREFERENCES","STRUCTURE_CODES",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.STRUCTURE_CODES",sTemp);
+
+
+   // --- If the structure code file is altered, reset the DHSTRUCTCODES.FILE value ---
+   
+   if(iStrcmp_STR(sTemp, sStructCode, STR_CASE_TOLERANT)!=0)
+		SetString_SYS("DHSTRUCTCODES","FILE",sTemp);
+
+
+   GetString_SYS("DHPREFERENCES","RESURVEY",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.RESURVEY",sTemp);
+
+   GetString_SYS("DHPREFERENCES","POLY_ORDER",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.POLY_ORDER",sTemp);
+
+   GetString_SYS("DHPREFERENCES","DISC_INTERVAL",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.DISC_INTERVAL",sTemp);
+
+   GetString_SYS("DHPREFERENCES","DIP_SIGN",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.DIP_SIGN",sTemp);
+
+   GetString_SYS("DHPREFERENCES","LEFTRIGHT",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.LEFTRIGHT",sTemp);
+
+   GetString_SYS("DHPREFERENCES","EASTWEST",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.EASTWEST",sTemp);
+
+   GetString_SYS("DHPREFERENCES","CONVERT_NEGATIVES",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.CONVERT_NEGATIVES",sTemp);
+
+   GetString_SYS("DHPREFERENCES","USEMASK",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.USEMASK",sTemp);
+
+   GetString_SYS("DHPREFERENCES","MASK",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.MASK",sTemp);
+
+   GetString_SYS("DHPREFERENCES","AZIMUTHCOR",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.AZIMUTHCOR",sTemp);
+
+   GetString_SYS("DHPREFERENCES","ANGLEDSECX0",sTemp);
+   GlobalSet_SYS("WHOLEPLOT.ANGLEDSECX0",sTemp);
+
+   GlobalWrite_SYS("");            
+
+   if(iCurrent)
+      UnLock_EDB(EData);
+
+}

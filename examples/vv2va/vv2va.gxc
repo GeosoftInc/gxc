@@ -1,0 +1,205 @@
+//===========================================================================
+NAME          = "Copy a channel to an existing array cvhannel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools"
+
+DESCRIPTION   = "\
+
+   VV2VA.FROM     - Original channel
+        .TO       - Existing dimensioned array channel
+        
+"
+// Revision History:
+// v7.1.1  QA 16098 Replaced iExistSymb_DB with iExistChan_DB and FindSymb_DB with FindChan_DB.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "vv2va.gr"
+#include "vv2va.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;            // Channel Names
+string(STR_DB_SYMBOL) sOutCh;           // Channel Names
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     InCh;             // Channel Handle
+DB_SYMB     OutCh;            // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+VV          hVV;
+VA          hVA;
+
+int         i,iType;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("VV2VA");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_VV2VA_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_VV2VA_1);
+     ArrayLST_DB(Data,List);
+     Sort_LST(List,0,0);
+     
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_VV2VA_0,DGW_TEXT,"VV2VA","FROM");     
+     SetInfoSYS_DGW(Diag,_VV2VA_1,DGW_TEXT,"VV2VA","TO");     
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_VV2VA_0,DGW_TEXT,"VV2VA","FROM");    
+     GetInfoSYS_DGW(Diag,_VV2VA_1,DGW_TEXT,"VV2VA","TO");    
+     
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VV2VA","FROM",sInCh);
+   GetString_SYS("VV2VA","TO",sOutCh);
+   
+
+   // --- Do the Input Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sInCh))
+      Abort_SYS(_("input channel does not exist."));
+   InCh = FindChan_DB(Data,sInCh);
+   
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sOutCh))
+      Abort_SYS(_("output channel does not exist."));
+   OutCh = FindChan_DB(Data,sOutCh);
+      
+      
+   // --- create VV and VA ---
+   
+   iType = iGetChanType_DB(Data,OutCh);
+   GS_SIMPLE_TYPE(iType)
+   hVA = Create_VA(iType,0,iGetColVA_DB(Data,OutCh));      
+   hVV = GetFullVV_VA(hVA);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("VA->VV Copy line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- get VA/VV and write to new channel ---
+
+      GetChanVV_DB(Data,Line,InCh,hVV);
+      
+      
+      // --- transfer fid start/increment ---
+      
+      SetFidStart_VA(hVA,rGetFidStart_VV(hVV));
+      SetFidIncr_VA(hVA,rGetFidIncr_VV(hVV));
+
+
+      // --- write out the VA ---
+           
+      PutChanVA_DB(Data,Line,OutCh,hVA);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Copy channel"),"VV2VA;");
+   
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+   Destroy_VA(hVA);
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+}

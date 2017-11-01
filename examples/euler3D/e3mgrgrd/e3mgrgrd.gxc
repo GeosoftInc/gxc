@@ -1,0 +1,412 @@
+//===========================================================================
+NAME          = "Euler3D Rangrid Gridding Program"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "euler"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D"
+DESCRIPTION   = "
+
+Creates a grid file using minimum curvature gridding.  
+
+Parameters: 
+
+ E3MGRGRD.CHAN    -  Channel to grid                  (required)
+         .GRID    -  Name of output grid file         (required)
+         .CS      -  Grid cell size                   (required)
+         .XY      -  Xmin,Ymin,Xmax,Ymax              (optional)
+         .DSF     -  Low-pass desampling factor       (optional)
+         .BKD     -  Blanking distance                (optional)
+         .TOL     -  Tolerance                        (optional)
+         .PASTOL  -  % pass tolerance                 (optional)
+         .ITRMAX  -  Max. iterations                  (optional)
+         .ICGR    -  Starting coarse grid             (optional)
+         .SRD     -  Starting search radius           (optional)
+         .TENS    -  Internal tension (0-1)           (optional)
+         .EDGCLP  -  Cells to extend beyond data      (optional)
+
+ E3MGRGRD.NEW     -  Display grid in a new map (1) or current map (0)
+         .MAP     -  Map name if creating a new map
+"
+// Revision History:
+// v7.0.0: Removed reference to obsolete bclip parameter.
+// v5.1.6: Fixed double lock problem when calling NEWMAP.GX.
+// v5.1.5: New GX based on UXMGRGRD.GX and RANGRID.GX
+//===========================================================================
+
+//===========================================================================
+
+RESOURCE = "E3MGRGRD.gr"
+#include "E3MGRGRD.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define  E3MGRGRD_BACK  999
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DB          Data;         // Database handle
+EDB         EData;        // Database handle
+DGW         Diag;         // Dialogue handle
+LST         List;         // List handle
+WA          WA_con;       // Handle to write control file
+
+string(STR_FILE) sCtl;           // Name of control file
+string(STR_FILE) sGrid;          // Name of new grid file
+string(STR_DB_SYMBOL) sXCh, sYCh, sZCh;  // channels
+string(STR_DEFAULT) sCS;          // grid cell size       
+string(STR_DEFAULT_LONG) sXY;          //    . 
+string(STR_DEFAULT) sDSF;         //    . 
+string(STR_DEFAULT) sBKD;         //    .
+string(STR_DEFAULT) sTol;         //    .
+string(STR_DEFAULT) sPasTol;      //   optional parameters
+string(STR_DEFAULT) sItrMax;      //    .
+string(STR_DEFAULT) sTens;        //    .  
+string(STR_DEFAULT) sICGR;       //    . 
+string(STR_DEFAULT) sSRD;        //    .
+string(STR_DEFAULT) sEdgClp;     //    .
+
+string(STR_DEFAULT_LONG) sText;
+
+int         i, iDone;            // utility int
+int         iNew;
+
+int         iInteract;
+string(STR_DEFAULT_LONG) sMsg;
+
+//===========================================================================
+//                           E3MGRGRD CODE
+//===========================================================================
+
+{
+
+   iInteract = iInteractive_SYS();    
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   if(iInteractive_SYS())  {
+
+      iDone = 0;
+      i = 0;
+      while (iDone==0)
+      {
+         
+         if(i==0) {
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("E3MGRGRD");
+
+            // --- Set up lists ---
+  
+            List = GetList_DGW(Diag,_E3MGRGRD_0);
+            SymbLST_DB(Data,List,DB_SYMB_CHAN);
+            Sort_LST(List,0,0);
+         
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(Diag,_E3MGRGRD_0,DGW_TEXT,"E3MGRGRD","CHAN");     
+            SetInfoSYS_DGW(Diag,_E3MGRGRD_1,DGW_FILEPATH,"E3MGRGRD","GRID");
+            SetInfoSYS_DGW(Diag,_E3MGRGRD_2,DGW_TEXT,"E3MGRGRD","CS");     
+            SetInfoSYS_DGW(Diag,_E3MGRGRD_3,DGW_LISTALIAS,"E3MGRGRD","NEW");     
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1)
+               Cancel_SYS();    // Cancel
+
+         
+            // --- Put values back in INI ---
+
+            GetInfoSYS_DGW(Diag,_E3MGRGRD_0,DGW_TEXT,"E3MGRGRD","CHAN");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD_1,DGW_FILEPATH,"E3MGRGRD","GRID");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD_2,DGW_TEXT,"E3MGRGRD","CS");     
+            GetInfoSYS_DGW(Diag,_E3MGRGRD_3,DGW_LISTALIAS,"E3MGRGRD","NEW");     
+   
+
+            // ---  Do file verification here ---
+
+            if(i==0) {
+                  
+               GetString_SYS("E3MGRGRD","GRID",sGrid);
+               if(iFileExist_SYS(sGrid)) {
+
+                  Printf_STR(sMsg, sizeof(sMsg), _("Overwrite the \"%s\" file?"), sGrid);
+
+                  if(iDisplayQuestion_SYS(_("File Validation"), sMsg)==0) i = 1;
+               }
+            }
+
+            Destroy_DGW(Diag);
+
+            if(i==0) iDone = 1;
+
+         }
+         else if(i==1) {
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("E3MGRGRD1");
+
+            // --- Set any Defaults from INI ---
+
+            GetString_SYS("E3MGRGRD","CHAN",sZCh);
+            SetInfo_DGW(Diag,_E3MGRGRD1_0,DGW_TEXT,sZCh);
+
+            GetString_SYS("E3MGRGRD","GRID",sGrid);
+            if(!iStrlen_STR(sGrid))
+               Strcpy_STR(sGrid,_n("None Specified"));
+            SetInfo_DGW(Diag,_E3MGRGRD1_1,DGW_TEXT,sGrid);
+
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_2,DGW_TEXT,"E3MGRGRD","XY");
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_3,DGW_TEXT,"E3MGRGRD","DSF");     
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_4,DGW_TEXT,"E3MGRGRD","BKD");
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_5,DGW_TEXT,"E3MGRGRD","TOL");     
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_6,DGW_TEXT,"E3MGRGRD","PASTOL");
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_7,DGW_TEXT,"E3MGRGRD","ITRMAX");     
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_8,DGW_TEXT,"E3MGRGRD","ICGR");
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_9,DGW_TEXT,"E3MGRGRD","SRD");
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_10,DGW_TEXT,"E3MGRGRD","TENS");
+            SetInfoSYS_DGW(Diag,_E3MGRGRD1_11,DGW_TEXT,"E3MGRGRD","EDGCLP");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1)
+               Cancel_SYS();    // Cancel
+
+         
+            // --- Put values back in INI ---
+
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_2,DGW_TEXT,"E3MGRGRD","XY");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_3,DGW_TEXT,"E3MGRGRD","DSF");     
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_4,DGW_TEXT,"E3MGRGRD","BKD");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_5,DGW_TEXT,"E3MGRGRD","TOL");     
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_6,DGW_TEXT,"E3MGRGRD","PASTOL");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_7,DGW_TEXT,"E3MGRGRD","ITRMAX");     
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_8,DGW_TEXT,"E3MGRGRD","ICGR");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_9,DGW_TEXT,"E3MGRGRD","SRD");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_10,DGW_TEXT,"E3MGRGRD","TENS");
+            GetInfoSYS_DGW(Diag,_E3MGRGRD1_11,DGW_TEXT,"E3MGRGRD","EDGCLP");
+   
+            Destroy_DGW(Diag);
+         }
+      
+      } // end while(!iDone)
+
+
+      // --- Run 2nd dialog ---
+      
+      iNew = iGetInt_SYS("E3MGRGRD","NEW");
+
+      if (iNew==0 || iNew==1) {
+      
+         // --- Run NEWMAP wizard ---
+
+         UnLock_EDB(EData);         
+         if(iRunGX_SYS("newmap.gx")) Cancel_SYS();
+         Data = Lock_EDB(EData);
+      }        
+   } 
+
+
+   // --- Get Non-control file Parameters ---
+
+   GetString_SYS("E3MGRGRD","CHAN",sZCh); 
+   GetString_SYS("E3MGRGRD","GRID",sGrid);
+
+
+   // --- Validate parameters ---
+   
+   if (iStrMin_STR(sZCh) <=0)
+      Abort_SYS(_("Z channel name is invalid"));
+
+   if (iStrMin2_STR(sGrid) <=0)
+      Abort_SYS(_("New grid file name is invalid"));
+
+   
+   // --- Get current X, Y channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+   
+   // --- See if grid channels exist ---
+
+   if (!iExistSymb_DB(Data,sXCh,DB_SYMB_CHAN))
+      Abort_SYS(_("The current X channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,sYCh,DB_SYMB_CHAN))
+      Abort_SYS(_("The current Y channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,sZCh,DB_SYMB_CHAN))
+      Abort_SYS(_("The data channel does not exist in database"));
+
+   
+   // --- Get Control File Parameters ---
+
+   GetString_SYS("E3MGRGRD","CS",sCS);     
+   GetString_SYS("E3MGRGRD","XY",sXY);
+   GetString_SYS("E3MGRGRD","DSF",sDSF);     
+   GetString_SYS("E3MGRGRD","BKD",sBKD);
+   GetString_SYS("E3MGRGRD","TOL",sTol);     
+   GetString_SYS("E3MGRGRD","PASTOL",sPasTol);
+   GetString_SYS("E3MGRGRD","ITRMAX",sItrMax);     
+   GetString_SYS("E3MGRGRD","TENS",sTens);
+   GetString_SYS("E3MGRGRD","EDGCLP",sEdgClp);
+
+
+   // --- Coarse grid has required default (16) which may not be set if
+   //     user does not go to advanced options ---
+
+   GetString_SYS("E3MGRGRD","ICGR",sICGR);  
+   if(!iStrlen_STR(sICGR))
+      Strcpy_STR(sICGR,"16");
+         
+   GetString_SYS("E3MGRGRD","SRD",sSRD);
+
+   iNew = iGetInt_SYS("E3MGRGRD","NEW");
+
+
+   // --- write control file ---
+  
+   Strcpy_STR(sCtl, "_e3mgrgrd.con");
+   WA_con=Create_WA(sCtl,0);
+
+
+   // --- Line 1: cs ---
+
+   Puts_WA(WA_con,sCS);
+   NewLine_WA(WA_con);
+
+
+   // --- line 2: xmin,ymin,xmax,ymax ---
+
+   Puts_WA(WA_con,sXY);
+   NewLine_WA(WA_con);
+
+
+   // --- line 3: chan,zb,zm,logopt,logmin
+
+   Strcpy_STR(sText,",");
+   Strcat_STR(sText,"");   // Base to default
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,"");   // Multiplier to default
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,"0");  // Log Option
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,"");   // LogMin to default
+   Strcat_STR(sText,",");
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   // --- line 4: idsf,bkd,srd,iwt,edgclp
+
+   Strcpy_STR(sText,sDSF);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sBKD);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sSRD);
+   if(iStrlen_STR(sEdgClp)) {
+      Strcat_STR(sText,",,");       // skip the iwt parameter
+      Strcat_STR(sText,sEdgClp);
+   }
+   NewLine_WA(WA_con);
+   
+
+   // --- line 5: tol,pastol,itrmax,ti,icgr
+
+   Strcpy_STR(sText,sTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sPasTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sItrMax);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sTens);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sICGR);
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Destroy_WA(WA_con);
+
+
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- Execute Krigrid program ---
+
+   iRun2_RGRD(Data, sXCh, sYCh, sZCh, sCtl, sGrid);
+   
+
+   // --- Turn off progress ---
+
+   Progress_SYS(0);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("E3MGRGRD GX (Euler3D Rangrid)"), FALSE);
+   AddComment_DB(Data, "Channel", sZCh, TRUE);
+   AddComment_DB(Data, "Grid", sGrid, TRUE);
+   AddComment_DB(Data, "Grid cell size", sCS, TRUE);
+   AddComment_DB(Data, "Xmin,Ymin,Xmax,Ymax", sXY, TRUE);
+   AddComment_DB(Data, "Low-pass desampling factor", sDSF, TRUE);
+   AddComment_DB(Data, "Blanking distance", sBKD, TRUE);
+   AddComment_DB(Data, "Tolerance", sTol, TRUE);
+   AddComment_DB(Data, "% pass tolerance", sPasTol, TRUE);
+   AddComment_DB(Data, "Max. iterations", sItrMax, TRUE);
+   AddComment_DB(Data, "Starting coarse grid", sICGR, TRUE);
+   AddComment_DB(Data, "Starting search radius", sSRD, TRUE);
+   AddComment_DB(Data, "Internal tension (0-1)", sTens, TRUE);
+   AddComment_DB(Data, "EdgeClip", sEdgClp, TRUE);
+
+   
+   UnLock_EDB(EData);
+
+  
+   // --- Display mag grid ---
+   
+   if(iNew==0 || iNew==1) {
+   
+      if (iInteract)
+         SetInteractive_SYS(0);                    // Interactive off
+
+      // --- Grid ---
+   
+      SetInt_SYS("GRIDIMG1","NEW",0);           // Send it to the current map
+      SetString_SYS("GRIDIMG1","GRID",sGrid);
+      SetString_SYS("GRIDIMG1","COLOR","Colour.tbl");
+      SetInt_SYS("GRIDIMG1","ZONE",0);
+      SetString_SYS("GRIDIMG1","CONTOUR","");
+      SetInt_SYS("GRIDIMG1","REG",0);
+
+  
+      if (iRunGX_SYS("GRIDIMG1.GX") != 0) {
+         if (iInteract)
+            SetInteractive_SYS(1);                 // Interactive on
+         Abort_SYS(_("Failure to display the analytic signal grid."));
+      }
+      if (iInteract)
+         SetInteractive_SYS(1);                    // Interactive on
+   }
+   
+
+   // --- Set grid name to be input for E3PREP  ---
+
+   SetString_SYS("E3PREP","GRID",sGrid);
+
+}
+

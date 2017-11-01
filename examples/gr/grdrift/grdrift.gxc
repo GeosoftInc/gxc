@@ -1,0 +1,479 @@
+//===========================================================================
+NAME          = "Gravity tide correction"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+
+	Applies gravity drift correction to current survey database.
+
+"
+// Revision History
+// v7.3.0: Added tide correction using CG3/CG5 ETC.
+// v6.4.0: Modifications to allow operation in Script (OMS) mode.
+//         Don't need to associate channels.
+// v6.3.0: Don't delete existing output channels first.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grdrift.gr"
+#include "grdrift.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         eDB;                       // database handle
+DB          hDB;                      // database handle
+
+DB_SYMB     LatCh,LonCh,DateCh,TimeCh,TideCorrCh,BaseCh,CloseCh,HeightCh;
+DB_SYMB     Survey;                    // Survey Handle
+DB_SYMB     GCh;                       // _Gscale
+DB_SYMB     TypeCh;                    // type
+DGW         hDGW;                      // Dialogue handle
+REG         hDataREG;                  // gravity reg
+REG         hWorkREG;                  // gravity reg
+VV          hVV;
+EXP         Exp;
+
+real        r,rGMT;                    // GMT tide difference
+real        rHm;                       // factor to convert height to metres
+int         i,iLen;
+int         iInteractive;    
+int         iDateChType;
+int         iDateChFormat;
+
+string(STR_FILE) sFile,sSurvey, sLine;
+string(STR_DEFAULT_SHORT) sType;
+string(STR_DEFAULT_SHORT) sOperator;
+string(STR_DEFAULT_SHORT) sDate;
+string(STR_DEFAULT_SHORT) sInstrument;
+string(STR_FILE) sInstrument_scale;
+string(STR_FILE) sBase_gravity;
+string(STR_FILE) sLocation;
+string(STR_DEFAULT_SHORT) sGmt_diff;
+string(STR_DEFAULT_SHORT) sUnits;
+int                       iTideCorrOpt;    // 1 - Calculate, 0 - Use CG3/CG5 ETC
+string(STR_DEFAULT_LONG)  sTideCorrOpt;
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+	// --- Save database view ---
+
+	iInteractive = iInteractive_SYS();    
+	if (iInteractive) 
+	{
+		SetInteractive_SYS(0);   // 0 - interactive off
+		SetString_SYS("SAVEDBVU","FILE","Saved_grdrift.dbview");
+		if (iRunGX_SYS("savedbvu")) Cancel_SYS();
+		SetInteractive_SYS(iInteractive);  
+	}
+
+	// --- Get database ---
+
+	eDB  = Current_EDB();
+	GetName_EDB(eDB,sSurvey);
+	FileNamePart_STR(sSurvey,sSurvey,STR_FILE_PART_NAME_EXTENSION);
+
+
+	// --- Get survey line ---
+	
+	if(iScript_SYS())
+	{
+		GetString_SYS("GRDRIFT","SURVEY",sLine);
+		if(iStrlen_STR(sLine)==0)
+			Abort_SYS(_("The GRDRIFT.SURVEY parameter must be defined for the GRDRIFT.GX for script mode."));
+
+		hDB = Lock_EDB(eDB);
+		Survey = FindSymb_DB(hDB, sLine, DB_SYMB_LINE);
+	}
+	else
+	{
+		Survey = GetCurLineSymb_EDB(eDB);
+		GetCurLine_EDB(eDB, sLine);
+		hDB = Lock_EDB(eDB);
+	}      
+
+
+	// --- get REG's ---
+
+	hDataREG = Create_REG(256);
+	GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+	
+	Get_REG(hDataREG,"GRAVRED.TYPE",sType,sizeof(sType));
+	Get_REG(hDataREG,"GRAVRED.FILE",sFile,sizeof(sFile));
+	Get_REG(hDataREG,"GRAVRED.DATE",sDate,sizeof(sDate));
+	Get_REG(hDataREG,"GRAVRED.OPERATOR",sOperator,sizeof(sOperator));
+	Get_REG(hDataREG,"GRAVRED.INSTRUMENT",sInstrument,sizeof(sInstrument));
+	Get_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",sInstrument_scale,sizeof(sInstrument_scale));
+	Get_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",sGmt_diff,sizeof(sGmt_diff));
+	
+	Get_REG(hDataREG,"GRAVRED.TIDECORROPT",sTideCorrOpt,sizeof(sTideCorrOpt));
+	if(iStrcmp_STR(sTideCorrOpt,"1",STR_CASE_TOLERANT)==0) 	iTideCorrOpt = 1;
+	else                                                     iTideCorrOpt = 0;
+
+	if (!iCharComp_STR(sType,"S")) {
+		if (iInteractive_SYS())
+			if (iDisplayQuestion_SYS(_("Not a survey database!"), _("This is not a survey database - proceed anyway?")) == 0)
+				Cancel_SYS();
+		Set_REG(hDataREG,"GRAVRED.TYPE","Survey");
+		Set_REG(hDataREG,"GRAVRED.FILE","unknown");
+	}
+	
+
+	// --- get required work reg info ---
+	
+	hWorkREG = Create_REG(256);
+	GetWorkspaceREG_SYS(hWorkREG);
+	
+	Get_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sBase_gravity,sizeof(sBase_gravity));
+	Get_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sLocation,sizeof(sLocation));
+	
+
+	// --- Are we running interactively ? ---
+
+	if (iInteractive_SYS())
+	{
+
+		// --- Create the Dialogue ---
+
+		hDGW = Create_DGW("GRDRIFT");
+
+		SetInfo_DGW(hDGW,_GRDRIFT_0 ,DGW_TEXT,sSurvey);
+		SetInfo_DGW(hDGW,_GRDRIFT_1 ,DGW_TEXT,sFile);
+		SetInfo_DGW(hDGW,_GRDRIFT_2 ,DGW_TEXT,sDate);
+		SetInfo_DGW(hDGW,_GRDRIFT_3 ,DGW_TEXT,sOperator);
+		SetInfo_DGW(hDGW,_GRDRIFT_4 ,DGW_TEXT,sInstrument);
+		SetInfo_DGW(hDGW,_GRDRIFT_7 ,DGW_FILEPATH,sBase_gravity);
+		SetInfo_DGW(hDGW,_GRDRIFT_8 ,DGW_FILEPATH,sLocation);
+		SetInfo_DGW(hDGW,_GRDRIFT_9 ,DGW_TEXT,sGmt_diff);
+		
+		// --- is instrument scale a number? ---
+	
+		r = rScanR_STR(sInstrument_scale);
+		if (r == rDUMMY)
+			SetInfo_DGW(hDGW,_GRDRIFT_6,DGW_FILEPATH,sInstrument_scale);
+		else   
+			SetInfo_DGW(hDGW,_GRDRIFT_5,DGW_TEXT,sInstrument_scale);
+	
+		if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+
+
+		GetInfo_DGW(hDGW,_GRDRIFT_1 ,DGW_TEXT,sFile);
+		GetInfo_DGW(hDGW,_GRDRIFT_2 ,DGW_TEXT,sDate);
+		GetInfo_DGW(hDGW,_GRDRIFT_3 ,DGW_TEXT,sOperator);
+		GetInfo_DGW(hDGW,_GRDRIFT_4 ,DGW_TEXT,sInstrument);
+		GetInfo_DGW(hDGW,_GRDRIFT_7 ,DGW_FILEPATH,sBase_gravity);
+		GetInfo_DGW(hDGW,_GRDRIFT_8 ,DGW_FILEPATH,sLocation);
+		GetInfo_DGW(hDGW,_GRDRIFT_9 ,DGW_TEXT,sGmt_diff);
+		
+		GetInfo_DGW(hDGW,_GRDRIFT_5,DGW_TEXT,sInstrument_scale);
+		if (iStrMin_STR(sInstrument_scale) == 0)
+			GetInfo_DGW(hDGW,_GRDRIFT_6,DGW_FILEPATH,sInstrument_scale);
+		
+		Destroy_DGW(hDGW);
+		
+		
+		// --- update REG's ---
+		
+		Set_REG(hDataREG,"GRAVRED.OPERATOR",sOperator);
+		Set_REG(hDataREG,"GRAVRED.DATE",sDate);
+		Set_REG(hDataREG,"GRAVRED.INSTRUMENT",sInstrument);
+		Set_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",sInstrument_scale);
+		Set_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",sGmt_diff);
+		SetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+		
+	}
+	
+	Set_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sBase_gravity);
+	Set_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sLocation);
+	Set_REG(hWorkREG,"GRAVRED.SURVEY_DATABASE",sSurvey);
+	SetWorkspaceREG_SYS(hWorkREG);
+		
+
+	// --- create _Gscale channel to hold working reading ---
+
+	if (iExistSymb_DB(hDB,"_Gscale",DB_SYMB_CHAN)) {
+		GCh = FindSymb_DB(hDB,"_Gscale",DB_SYMB_CHAN);
+	}
+	else {
+		GCh = CreateSymb_DB(hDB,"_Gscale",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+		LOCK_RW(hDB,GCh);
+		SetChanDecimal_DB(hDB,GCh,3);
+		SetChanWidth_DB(hDB,GCh,12);
+		SetChanUnit_DB(hDB,GCh,_("mgal"));
+		UNLOCK(hDB,GCh);
+	}
+
+
+	// --- Turn On Progress ---
+
+	//Progress_SYS(1);
+
+
+	// --- scale factor, creates _Gscale channel ---
+
+	ProgName_SYS(_("Scale factor"),1);
+	UnLock_EDB(eDB);
+	
+	SetString_SYS("GRSCALE","LINE",sLine);
+	if (iRunGX_SYS("grscale")) Cancel_SYS();
+	
+
+	// --- load location station data ---
+
+	if (iStrlen_STR(sLocation) != 0) {
+		ProgName_SYS(_("Merge location data"),1);
+		SetString_SYS("GRMGXYE","CHILD","1");
+		if (iRunGX_SYS("grmgxye")) Cancel_SYS();
+	}
+	
+	
+	// --- load base station data ---
+
+	ProgName_SYS(_("Load base data"),1);
+	if (iRunGX_SYS("grbase")) Cancel_SYS();
+	
+
+	// --- tide correction ---
+
+	hDB = Lock_EDB(eDB);
+	ProgName_SYS(_("Tide correction"),1);
+
+
+	// --- get channels ---
+
+	if (!iExistSymb_DB(hDB,"Date",DB_SYMB_CHAN))  
+		Abort_SYS(_("Date channel does not exist."));
+	DateCh = FindSymb_DB(hDB,"Date",DB_SYMB_CHAN);
+	iDateChType = iGetChanType_DB(hDB, DateCh);
+	if (iDateChType != DB_CATEGORY_CHAN_DOUBLE && iDateChType != DB_CATEGORY_CHAN_FLOAT)
+		Abort_SYS(_("The DATE channel must have Float or Double data type."));
+
+	iDateChFormat = iGetChanFormat_DB(hDB, DateCh);
+	if (iDateChFormat != DB_CHAN_FORMAT_DATE)
+		Abort_SYS(_("The DATE channel must be have the format Date and be displayed as YYYY/MM/DD."));
+
+	if (!iExistSymb_DB(hDB,"Time",DB_SYMB_CHAN))  
+		Abort_SYS(_("Time channel does not exist."));
+	TimeCh = FindSymb_DB(hDB,"Time",DB_SYMB_CHAN);
+	
+
+	// --- create a TideCorr channel ---
+		
+	if (iExistSymb_DB(hDB,"TideCorr",DB_SYMB_CHAN))
+		TideCorrCh = FindSymb_DB(hDB,"TideCorr",DB_SYMB_CHAN);
+	else {
+		TideCorrCh = CreateSymb_DB(hDB,"TideCorr",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_FLOAT);
+		LOCK_RW(hDB,TideCorrCh);
+		SetChanDecimal_DB(hDB,TideCorrCh,4);
+		SetChanWidth_DB(hDB,TideCorrCh,8);
+		UNLOCK(hDB,TideCorrCh);
+	}
+
+
+	// --- Lock the Symbols ---
+
+	LOCK_R(hDB,DateCh);
+	LOCK_R(hDB,TimeCh);
+	LOCK_RW(hDB,TideCorrCh);
+	
+
+	// --- set TideCorr channel units ---
+	
+	SetChanUnit_DB(hDB,TideCorrCh,_("mgal"));
+	
+
+	// --- only do a tide correction if have a GMT time ---
+	
+	rGMT = rDUMMY;
+	GetReal_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",rGMT);
+	if (rGMT != rDUMMY && iTideCorrOpt==1)     // Geosoft tide correction
+	{
+
+		// --- Get Parameters ---
+
+		if (!iExistSymb_DB(hDB,"Latitude",DB_SYMB_CHAN))  
+			Abort_SYS(_("Latitude channel does not exist."));
+		LatCh = FindSymb_DB(hDB,"Latitude",DB_SYMB_CHAN);
+
+		if (!iExistSymb_DB(hDB,"Longitude",DB_SYMB_CHAN))  
+			Abort_SYS(_("Longitude channel does not exist."));
+		LonCh = FindSymb_DB(hDB,"Longitude",DB_SYMB_CHAN);
+
+		LOCK_RW(hDB,LatCh);
+		LOCK_RW(hDB,LonCh);
+
+
+		// --- interpolate lat and long ---
+
+		Interp_DU(hDB,Survey,LatCh,LatCh,DU_INTERP_LINEAR,DU_INTERP_EDGE_NONE);
+		Interp_DU(hDB,Survey,LatCh,LatCh,DU_INTERP_NEAREST,DU_INTERP_EDGE_SAME);
+		Interp_DU(hDB,Survey,LonCh,LonCh,DU_INTERP_LINEAR,DU_INTERP_EDGE_NONE);
+		Interp_DU(hDB,Survey,LonCh,LonCh,DU_INTERP_NEAREST,DU_INTERP_EDGE_SAME);
+
+
+		// --- tide correction ---
+
+		GravTide_DU(hDB,Survey,LatCh,LonCh,DateCh,TimeCh,rGMT,TideCorrCh);
+
+		UNLOCK(hDB,LatCh);
+		UNLOCK(hDB,LonCh);
+
+
+	} else {    // --- no tide correction ---
+
+		// --- get a working VV ---
+
+		hVV = Create_VV(REAL,0);
+		GetChanVV_DB(hDB,Survey,TimeCh,hVV);
+
+
+		// --- set TideCorr to 0.0 ---
+
+		SetRealN_VV(hVV,0,-1,0.0);
+		PutChanVV_DB(hDB,Survey,TideCorrCh,hVV);
+		Mask_DU(hDB,Survey,TideCorrCh,TimeCh);
+
+		Destroy_VV(hVV);
+
+	}
+
+
+	// --- Unlock the Symbols ---
+
+	UNLOCK(hDB,DateCh);
+	UNLOCK(hDB,TimeCh);
+	UNLOCK(hDB,TideCorrCh);
+
+
+	// --- apply tide correction ---
+
+	Exp = Create_EXP(hDB,"_Gscale=_Gscale+TideCorr;",60);
+	Math_DU(hDB,Survey,Exp);
+	Destroy_EXP(Exp);
+
+
+	// --- instrument height ---
+	
+	HeightCh = FindSymb_DB(hDB,"Height",DB_SYMB_CHAN);
+	if (HeightCh != NULLSYMB) {
+	
+		// --- get height units ---
+		
+		LOCK_R(hDB,HeightCh);
+		GetChanUnit_DB(hDB,HeightCh,sUnits);
+		UNLOCK(hDB,HeightCh);
+		rHm = rUnitScale_IPJ(sUnits,1.0);
+
+		Exp = Create_EXP(hDB,"Height=(Height==dummy)?0.0:Height;_Gscale=_Gscale+0.308596*$rHm*Height;",128);
+		Math_DU(hDB,Survey,Exp);
+		Destroy_EXP(Exp);
+		
+	}      
+
+
+	// --- create a closure channel ---
+
+	if (iExistSymb_DB(hDB,"Closure",DB_SYMB_CHAN)) {
+		CloseCh = FindSymb_DB(hDB,"Closure",DB_SYMB_CHAN);
+	}
+	else {
+		CloseCh = CreateSymb_DB(hDB,"Closure",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+		LOCK_RW(hDB,CloseCh);
+		SetChanDecimal_DB(hDB,CloseCh,3);
+		SetChanWidth_DB(hDB,CloseCh,8);
+		SetChanUnit_DB(hDB,CloseCh,_("mgal"));
+		UNLOCK(hDB,CloseCh);
+	}
+
+
+	// --- get base channel ---
+
+	BaseCh = FindSymb_DB(hDB,"Gravity",DB_SYMB_CHAN);
+
+
+	// --- drift correction ---
+
+	LOCK_R(hDB,DateCh);
+	LOCK_R(hDB,TimeCh);
+	LOCK_R(hDB,GCh);
+	LOCK_RW(hDB,BaseCh);
+	LOCK_RW(hDB,CloseCh);
+	GravDrift_DU(hDB,Survey,DateCh,TimeCh,GCh,BaseCh,CloseCh);
+	UNLOCK(hDB,DateCh);
+	UNLOCK(hDB,TimeCh);
+	UNLOCK(hDB,GCh);
+	UNLOCK(hDB,BaseCh);
+	UNLOCK(hDB,CloseCh);
+	
+
+	// --- create a type channel ---
+
+	if (iExistSymb_DB(hDB,"Type",DB_SYMB_CHAN)) {
+		TypeCh = FindSymb_DB(hDB,"Type",DB_SYMB_CHAN);
+	}
+	else {
+		TypeCh = CreateSymb_DB(hDB,"Type",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_SHORT);
+	}
+	
+	LOCK_RW(hDB,CloseCh);
+	LOCK_RW(hDB,TypeCh);
+	SetChanWidth_DB(hDB,TypeCh,6);
+	
+	hVV = Create_VV(INT,0);
+	GetChanVV_DB(hDB,Survey,CloseCh,hVV);
+	iLen = iLength_VV(hVV);
+	for (i=0;i<iLen;i++)
+		if (iGetInt_VV(hVV,i) == iDUMMY)
+			SetInt_VV(hVV,i,1);
+		else   
+			SetInt_VV(hVV,i,0);
+	PutChanVV_DB(hDB,Survey,TypeCh,hVV);
+	UNLOCK(hDB,TypeCh);
+	UNLOCK(hDB,CloseCh);
+	
+	
+	// --- Done ---
+
+	Destroy_SYS(hVV);
+	Destroy_SYS(hDataREG);
+	Destroy_SYS(hWorkREG);
+	Progress_SYS(0);
+	
+	
+	// --- display new channels ---
+	
+	UnLock_EDB(eDB);
+	UnLoadAllChans_EDB(eDB);
+	LoadChan_EDB(eDB,"Station");
+	LoadChan_EDB(eDB,"Type");
+	LoadChan_EDB(eDB,"Gravity");
+	LoadChan_EDB(eDB,"Closure");
+	LoadChan_EDB(eDB,"TideCorr");
+	LoadAllChans_EDB(eDB);
+	UnLoadChan_EDB(eDB,"_GScale");
+
+	// --- Load database view ---
+
+	SetInteractive_SYS(0);   // 0 - interactive off
+	if (iInteractive) {
+		SetString_SYS("LOADDBVU","FILE","Saved_grdrift.dbview");
+		if (iRunGX_SYS("loaddbvu")) Cancel_SYS();
+	}
+	SetInteractive_SYS(iInteractive);
+
+}

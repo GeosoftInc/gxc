@@ -1,0 +1,695 @@
+//===========================================================================
+NAME          = "Bi-directional line gridding"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Gridding"
+
+DESCRIPTION   = "
+
+      BIGRID.parameter  - parameters from BIGRID.CON file.
+      
+"
+// Revision History:
+// v7.0.1: Unload/delete existing grid to ensure proper refresh of grid window.
+// v6.3    Set correct SMX and GAPLIM into con file for iTRA==1 bigrid run.
+//         Save the correct con file in both cases of iTRA==0 or 1.
+// v6.0.0  Set default units if units not set in DB.
+// v5.1.3  Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+// v5.1.5  Added gradient-assisted gridding
+//
+//===========================================================================
+
+RESOURCE = "bigrid.gr"
+#include "bigrid.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrid;          // Name of output grid
+string(STR_DEFAULT_LONG) sText;  // Line of text to write to control file
+string(STR_DEFAULT_LONG) sTitle; //
+string(STR_DB_SYMBOL) sChan;     // Channel to grid 
+string(STR_DB_SYMBOL) sGrad;     // Gradient channel
+string(STR_DEFAULT_LONG) sCS;
+string(STR_DEFAULT_LONG) sSMX;
+string(STR_DEFAULT_LONG) sGAPLIM;
+string(STR_DEFAULT_LONG) sISP1;
+string(STR_DEFAULT_LONG) sISP2;
+string(STR_DEFAULT_LONG) sWS;
+string(STR_DEFAULT_LONG) sWL;
+string(STR_DEFAULT_LONG) sTOLN;
+string(STR_DEFAULT_LONG) sFDX;
+   
+string(STR_DEFAULT_LONG) sNEX;
+string(STR_DEFAULT_LONG) sXYRANGE;
+string(STR_DEFAULT_LONG) sPRESORT;
+string(STR_DEFAULT_LONG) sLOGOPT;
+string(STR_DEFAULT_LONG) sLOGMIN;
+string(STR_DEFAULT_LONG) sTRA;
+string(STR_DEFAULT_LONG) sKX;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+                                         
+BIGRID      Bigrid;     // Handle to BIGRIDd object
+DAT         InDat;      // Handle to Input DAT 
+DAT         OutDat;     // Handle to Output DAT
+
+WA          ConFile;    // Control File
+DGW         Diag;       // Dialogue handle
+LST         List;       // Channel list
+EDB         EData;
+DB          Data;       // Database
+            
+DB_SYMB     XCh;
+IPJ         hIPJ;
+
+int         i,iTRA;
+real        rTRA;
+real        rTOLN, rWS, rF;
+string(STR_DEFAULT_LONG) sMsg, sUnits, sAliasFlag;
+
+int         iRunMode;
+#define MODE_NORMAL 0
+#define MODE_OPTIONS 1
+#define MODE_CONTROL_FILE 2
+//===========================================================================
+//                           BIGRID CODE
+//===========================================================================
+
+{
+
+   // --- get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   iRunMode = iGetInt_SYS("BIGRID", "RUNMODE");
+   SetInt_SYS("BIGRID", "RUNMODE", 0);      // must set every time, default to normal behaviour
+   if(iRunMode!=MODE_OPTIONS && 
+      iRunMode!=MODE_CONTROL_FILE) iRunMode = MODE_NORMAL;
+
+   // --- Are we running interactively ? ---
+   if(iRunMode==MODE_NORMAL)
+   {  
+       if (iInteractive_SYS()) 
+       {
+
+          i = 1;
+          while (i != 0) {
+          
+             switch (i) {
+             
+                case 1:
+                         
+                   // --- Create the Dialogue ---
+
+                   Diag = Create_DGW("BIGRID0");
+
+                   
+                   // --- Set up lists ---
+
+                   List = GetList_DGW(Diag,_BIGRID0_0);
+                   SymbLST_DB(Data,List,DB_SYMB_CHAN);
+                   Sort_LST(List,0,0);
+
+
+                   // --- Set any Defaults from INI ---
+
+                   SetInfoSYS_DGW(Diag,_BIGRID0_0,DGW_TEXT     ,"BIGRID","CHAN");     
+                   SetInfoSYS_DGW(Diag,_BIGRID0_1,DGW_FILEPATH ,"BIGRID","GRID");
+                   SetInfoSYS_DGW(Diag,_BIGRID0_2,DGW_TEXT     ,"BIGRID","CS");     
+
+
+                   // --- Run the Dialogue ---
+
+                   i = iRunDialogue_DGW(Diag);
+                   if (i == -1) Cancel_SYS();
+
+
+                   // --- Put values back in INI ---
+
+                   GetInfoSYS_DGW(Diag,_BIGRID0_0,DGW_TEXT     ,"BIGRID","CHAN");     
+                   GetInfoSYS_DGW(Diag,_BIGRID0_1,DGW_FILEPATH ,"BIGRID","GRID");
+                   GetInfoSYS_DGW(Diag,_BIGRID0_2,DGW_TEXT     ,"BIGRID","CS");     
+
+                   
+                   // ---  Do file verification here ---
+
+                   if(i==0) {
+                      
+                      GetString_SYS("BIGRID","GRID",sGrid);
+                      if(iFileExist_SYS(sGrid)) {
+                         Printf_STR(sMsg, sizeof(sMsg), _("Overwrite the \"%s\" file?"), sGrid);
+                         if(iDisplayQuestion_SYS(_("File Validation"), sMsg)==0) i = 1;
+                      }
+                   }
+
+                   Destroy_DGW(Diag);
+                   
+                   break;
+                   
+                   
+                case 2:
+                
+                         
+                   // --- Create the Dialogue ---
+
+                   Diag = Create_DGW("BIGRID1");
+
+                   
+                   // --- Set any Defaults from INI ---
+
+                   SetInfoSYS_DGW(Diag,_BIGRID1_0,DGW_TEXT      ,"BIGRID","XYRANGE");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_1,DGW_TEXT      ,"BIGRID","SMX");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_2,DGW_TEXT      ,"BIGRID","GAPLIM");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_3,DGW_TEXT      ,"BIGRID","NEX");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_4,DGW_LISTALIAS ,"BIGRID","ISP1");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_5,DGW_LISTALIAS ,"BIGRID","ISP2");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_6,DGW_TEXT      ,"BIGRID","WS");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_7,DGW_TEXT      ,"BIGRID","WL");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_8,DGW_TEXT      ,"BIGRID","TOLN");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_9,DGW_TEXT      ,"BIGRID","FDX");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_10,DGW_LISTALIAS,"BIGRID","PRESORT");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_11,DGW_LISTALIAS,"BIGRID","LOGOPT");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_12,DGW_TEXT     ,"BIGRID","LOGMIN");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_13,DGW_TEXT     ,"BIGRID","TRA");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_14,DGW_LISTALIAS,"BIGRID","KX");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_15,DGW_TEXT     ,"BIGRID","GYN");
+
+
+                   // --- Run the Dialogue ---
+
+                   i = iRunDialogue_DGW(Diag);
+                   if (i == -1) Cancel_SYS();
+
+
+                   // --- Put values back in INI ---
+
+                   GetInfoSYS_DGW(Diag,_BIGRID1_0,DGW_TEXT      ,"BIGRID","XYRANGE");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_1,DGW_TEXT      ,"BIGRID","SMX");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_2,DGW_TEXT      ,"BIGRID","GAPLIM");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_3,DGW_TEXT      ,"BIGRID","NEX");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_4,DGW_LISTALIAS ,"BIGRID","ISP1");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_5,DGW_LISTALIAS ,"BIGRID","ISP2");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_6,DGW_TEXT      ,"BIGRID","WS");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_7,DGW_TEXT      ,"BIGRID","WL");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_8,DGW_TEXT      ,"BIGRID","TOLN");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_9,DGW_TEXT      ,"BIGRID","FDX");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_10,DGW_LISTALIAS,"BIGRID","PRESORT");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_11,DGW_LISTALIAS,"BIGRID","LOGOPT");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_12,DGW_TEXT     ,"BIGRID","LOGMIN");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_13,DGW_TEXT     ,"BIGRID","TRA");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_14,DGW_LISTALIAS,"BIGRID","KX");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_15,DGW_TEXT     ,"BIGRID","GYN");
+
+                   GetInfo_DGW(Diag,_BIGRID1_15,DGW_LISTALIAS   ,sAliasFlag);
+
+                   Destroy_DGW(Diag);
+
+                   // ---  Do file verification here ---
+
+                   if(i==0) {
+                      
+                      GetString_SYS("BIGRID","GRID",sGrid);
+                      if(iFileExist_SYS(sGrid)) {
+                         Printf_STR(sMsg, sizeof(sMsg), _("Overwrite the \"%s\" file?"), sGrid);
+                         if(iDisplayQuestion_SYS(_("File Validation"), sMsg)==0) i = 1;
+                      }
+                   }
+                   
+                   rTOLN = rGetReal_SYS("BIGRID","TOLN");
+                   rWS = rGetReal_SYS("BIGRID","WS");
+                   if(rTOLN!=rDUMMY && rTOLN>0.0) {
+                      if(rWS==rDUMMY) {
+                         DisplayMessage_SYS(_("Non-linear filtering"),_("You must specify the Low-pass filter wavelength when using non-linear filtering."));
+                         i = 2;
+                      }
+                   }
+                   
+                   if (i != 1 && (iGetYesNo_SYS("BIGRID","GYN") || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))) {
+                      i = 3;
+                   }                  
+
+                   break;
+                   
+                   
+                case 3:
+                
+                         
+                   // --- Create the Dialogue ---
+
+                   Diag = Create_DGW("BIGRID2");
+
+                   
+                   // --- Set up lists ---
+
+                   List = GetList_DGW(Diag,_BIGRID2_0);
+                   SymbLST_DB(Data,List,DB_SYMB_CHAN);
+                   Sort_LST(List,0,0);
+
+
+                   // --- Set any Defaults from INI ---
+
+                   SetInfoSYS_DGW(Diag,_BIGRID1_0,DGW_TEXT      ,"BIGRID","GRAD");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_1,DGW_TEXT      ,"BIGRID","GSEP");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_2,DGW_LISTALIAS ,"BIGRID","GCOR");     
+                   SetInfoSYS_DGW(Diag,_BIGRID1_3,DGW_LISTALIAS ,"BIGRID","GLEV");
+                   SetInfoSYS_DGW(Diag,_BIGRID1_4,DGW_TEXT      ,"BIGRID","GNOISE");
+
+
+                   // --- Run the Dialogue ---
+
+                   i = iRunDialogue_DGW(Diag);
+                   if (i == -1) Cancel_SYS();
+
+
+                   // --- Put values back in INI ---
+
+                   GetInfoSYS_DGW(Diag,_BIGRID1_0,DGW_TEXT      ,"BIGRID","GRAD");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_1,DGW_TEXT      ,"BIGRID","GSEP");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_2,DGW_LISTALIAS ,"BIGRID","GCOR");     
+                   GetInfoSYS_DGW(Diag,_BIGRID1_3,DGW_LISTALIAS ,"BIGRID","GLEV");
+                   GetInfoSYS_DGW(Diag,_BIGRID1_4,DGW_TEXT      ,"BIGRID","GNOISE");
+
+                   Destroy_DGW(Diag);
+               
+                   // --- back? ---
+                       
+                   if (i==1) i = 2; 
+
+                   break;
+                   
+                default:
+                   DisplayMessage_SYS(_("Lost"),_("I'm lost"));
+                   i = 0;
+                   break;    
+                   
+             }                                          
+          }
+       } 
+   }
+   if(iRunMode == MODE_OPTIONS)
+   {
+    if(!iInteractive_SYS())
+         Abort_SYS(_("Bigrid OPTIONS mode must be run interactively"));
+        // --- Create the Dialogue ---
+
+       Diag = Create_DGW("BIGRID_ADV");
+
+       
+       // --- Set any Defaults from INI ---
+
+       SetInfoSYS_DGW(Diag,_BIGRID1_0,DGW_TEXT      ,"BIGRID","XYRANGE");
+       SetInfoSYS_DGW(Diag,_BIGRID1_1,DGW_TEXT      ,"BIGRID","SMX");     
+       SetInfoSYS_DGW(Diag,_BIGRID1_2,DGW_TEXT      ,"BIGRID","GAPLIM");
+       SetInfoSYS_DGW(Diag,_BIGRID1_3,DGW_TEXT      ,"BIGRID","NEX");
+       SetInfoSYS_DGW(Diag,_BIGRID1_4,DGW_LISTALIAS ,"BIGRID","ISP1");     
+       SetInfoSYS_DGW(Diag,_BIGRID1_5,DGW_LISTALIAS ,"BIGRID","ISP2");     
+       SetInfoSYS_DGW(Diag,_BIGRID1_6,DGW_TEXT      ,"BIGRID","WS");     
+       SetInfoSYS_DGW(Diag,_BIGRID1_7,DGW_TEXT      ,"BIGRID","WL");
+       SetInfoSYS_DGW(Diag,_BIGRID1_8,DGW_TEXT      ,"BIGRID","TOLN");     
+       SetInfoSYS_DGW(Diag,_BIGRID1_9,DGW_TEXT      ,"BIGRID","FDX");
+       SetInfoSYS_DGW(Diag,_BIGRID1_10,DGW_LISTALIAS,"BIGRID","PRESORT");     
+       SetInfoSYS_DGW(Diag,_BIGRID1_11,DGW_LISTALIAS,"BIGRID","LOGOPT");
+       SetInfoSYS_DGW(Diag,_BIGRID1_12,DGW_TEXT     ,"BIGRID","LOGMIN");
+       SetInfoSYS_DGW(Diag,_BIGRID1_13,DGW_TEXT     ,"BIGRID","TRA");
+       SetInfoSYS_DGW(Diag,_BIGRID1_14,DGW_LISTALIAS,"BIGRID","KX");
+       SetInfoSYS_DGW(Diag,_BIGRID1_15,DGW_TEXT     ,"BIGRID","GYN");
+
+
+       // --- Run the Dialogue ---
+
+       i = iRunDialogue_DGW(Diag);
+       if (i == -1) Cancel_SYS();
+
+
+       // --- Put values back in INI ---
+
+       GetInfoSYS_DGW(Diag,_BIGRID1_0,DGW_TEXT      ,"BIGRID","XYRANGE");
+       GetInfoSYS_DGW(Diag,_BIGRID1_1,DGW_TEXT      ,"BIGRID","SMX");     
+       GetInfoSYS_DGW(Diag,_BIGRID1_2,DGW_TEXT      ,"BIGRID","GAPLIM");
+       GetInfoSYS_DGW(Diag,_BIGRID1_3,DGW_TEXT      ,"BIGRID","NEX");
+       GetInfoSYS_DGW(Diag,_BIGRID1_4,DGW_LISTALIAS ,"BIGRID","ISP1");     
+       GetInfoSYS_DGW(Diag,_BIGRID1_5,DGW_LISTALIAS ,"BIGRID","ISP2");     
+       GetInfoSYS_DGW(Diag,_BIGRID1_6,DGW_TEXT      ,"BIGRID","WS");     
+       GetInfoSYS_DGW(Diag,_BIGRID1_7,DGW_TEXT      ,"BIGRID","WL");
+       GetInfoSYS_DGW(Diag,_BIGRID1_8,DGW_TEXT      ,"BIGRID","TOLN");     
+       GetInfoSYS_DGW(Diag,_BIGRID1_9,DGW_TEXT      ,"BIGRID","FDX");
+       GetInfoSYS_DGW(Diag,_BIGRID1_10,DGW_LISTALIAS,"BIGRID","PRESORT");     
+       GetInfoSYS_DGW(Diag,_BIGRID1_11,DGW_LISTALIAS,"BIGRID","LOGOPT");
+       GetInfoSYS_DGW(Diag,_BIGRID1_12,DGW_TEXT     ,"BIGRID","LOGMIN");
+       GetInfoSYS_DGW(Diag,_BIGRID1_13,DGW_TEXT     ,"BIGRID","TRA");
+       GetInfoSYS_DGW(Diag,_BIGRID1_14,DGW_LISTALIAS,"BIGRID","KX");
+       GetInfoSYS_DGW(Diag,_BIGRID1_15,DGW_TEXT     ,"BIGRID","GYN");
+
+       GetInfo_DGW(Diag,_BIGRID1_15,DGW_LISTALIAS   ,sAliasFlag);
+
+       Destroy_DGW(Diag);
+       Exit_SYS();
+   }
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("BIGRID","CHAN",sChan);
+   GetString_SYS("BIGRID","GRAD",sGrad); 
+   GetString_SYS("BIGRID","GRID",sGrid); 
+   GetString_SYS("BIGRID","CS",sCS);     
+   GetString_SYS("BIGRID","SMX",sSMX);     
+   GetString_SYS("BIGRID","GAPLIM",sGAPLIM);
+   GetString_SYS("BIGRID","ISP1",sISP1);     
+   GetString_SYS("BIGRID","ISP2",sISP2);     
+   GetString_SYS("BIGRID","WS",sWS);     
+   GetString_SYS("BIGRID","WL",sWL);
+   GetString_SYS("BIGRID","TOLN",sTOLN);     
+   GetString_SYS("BIGRID","FDX",sFDX);
+   
+   GetString_SYS("BIGRID","NEX",sNEX);
+   GetString_SYS("BIGRID","XYRANGE",sXYRANGE);
+   GetString_SYS("BIGRID","PRESORT",sPRESORT);
+   GetString_SYS("BIGRID","LOGOPT",sLOGOPT);
+   GetString_SYS("BIGRID","LOGMIN",sLOGMIN);
+   GetString_SYS("BIGRID","TRA",sTRA);
+   GetString_SYS("BIGRID","KX",sKX);
+     
+   
+   // --- Validate all required parameters ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   if (!iExistChan_DB(Data,sXCh))
+      Abort_SYS(_("The current X channel does not exist."));
+
+   if (!iExistChan_DB(Data,sYCh))
+      Abort_SYS(_("The current Y channel does not exist."));
+
+   if (!iExistChan_DB(Data,sChan))
+      Abort_SYS(_("Z Channel is not specified or does not exist"));
+
+
+   // --- Set default parameters to be the same as in the GRC ---
+
+   if(!iStrlen_STR(sNEX))     // Extend 1 cell
+      Strcpy_STR(sNEX, "1");
+
+   if(!iStrlen_STR(sISP1))    // Akima spline down-line
+      Strcpy_STR(sISP1, "2");
+
+   if(!iStrlen_STR(sISP2))    // Akima spline down-line
+      Strcpy_STR(sISP2, "2");
+
+   if(!iStrlen_STR(sPRESORT))    // Presort: "None"
+      Strcpy_STR(sPRESORT, "0");
+
+   if(!iStrlen_STR(sLOGOPT))    // Log option: "Linear"
+      Strcpy_STR(sLOGOPT, "0");
+
+
+
+   // --- If non-linear filtering is used, must specify WS parameter ---
+
+   rTOLN = rGetReal_SYS("BIGRID","TOLN");
+   rWS = rGetReal_SYS("BIGRID","WS");
+   if(rTOLN!=rDUMMY && rTOLN>0.0) {
+      if(rWS==rDUMMY) {
+         Abort_SYS(_("You must specify the low-pass filter wavelength parameter WS when using non-linear filtering."));
+      }
+   }
+
+      
+   // --- trend gridding? ---
+   
+   if (iStrMin_STR(sTRA)) {
+      rTRA = rGetReal_SYS("BIGRID","TRA");
+      if (rTRA != 0.0 && rTRA != rDUMMY) {
+         iTRA = TRUE;
+      } else {
+         Strcpy_STR(sTRA,"");
+         iTRA = FALSE;
+      }
+   } else
+      iTRA = FALSE;
+
+   
+   // --- Create control file ---
+   
+   ConFile = Create_WA("_bigrid.con",0);
+
+   Strcpy_STR(sTitle,_n("Channel "));
+   Strcat_STR(sTitle,sChan);
+   Strcat_STR(sTitle,_n(" from "));
+   GetName_DB(Data,DB_NAME_FILE,sText);
+   Strcat_STR(sTitle,sText);
+   Puts_WA(ConFile,sTitle);                        NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sCS);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sNEX);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sPRESORT);
+   Strcat_STR(sText," /CS");
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+   
+   Strcpy_STR(sText,sXYRANGE);
+   Strcat_STR(sText,_n(" /XMIN,YMIN,XMAX,YMAX"));
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sTRA);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sKX);
+   Strcat_STR(sText," /TRA,KX");
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+   
+   Strcpy_STR(sText,",");
+   Strcat_STR(sText,sSMX);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sGAPLIM);
+   Strcat_STR(sText,",,"); 
+   Strcat_STR(sText,_n(",, /SLM,SMX,GAPLIM,LSEL"));
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Puts_WA(ConFile,_n("/SCL,SX,SY,ANGS"));             NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,",");
+   Strcat_STR(sText,sLOGOPT);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLOGMIN);
+   Strcat_STR(sText," /IZ,LOGZ,ZMIN"); 
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Puts_WA(ConFile,"/BL,XX,CLIP");                 NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sWS);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sWL);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sFDX);
+   Strcat_STR(sText,_n(",,, /WS,WL,FDX,FT,NC"));
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,"");
+   if (iStrcmp_STR(sTOLN,"",0)) 
+   {
+      Strcat_STR(sText,"1,");
+      Strcat_STR(sText,sTOLN);
+   }  
+   Strcat_STR(sText," /NFLT,TOLN"); 
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sISP1);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sISP2);
+   Strcat_STR(sText," /ISP1,ISP2"); 
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+   
+   if (iGetYesNo_SYS("BIGRID","GYN") || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT)) {
+      Puts_WA(ConFile," /AFACT,AZB");              NewLine_WA(ConFile);
+      Puts_WA(ConFile," /PRJIN,PRJOUT");           NewLine_WA(ConFile);
+      Puts_WA(ConFile,"1,");
+      GetString_SYS("BIGRID","GSEP",sText);
+      Puts_WA(ConFile,sText); Puts_WA(ConFile,",");
+      GetString_SYS("BIGRID","GCOR",sText);
+      Puts_WA(ConFile,sText); Puts_WA(ConFile,",");
+      GetString_SYS("BIGRID","GLEV",sText);
+      Puts_WA(ConFile,sText); Puts_WA(ConFile,",");
+      GetString_SYS("BIGRID","GNOISE",sText);
+      Puts_WA(ConFile,sText); Puts_WA(ConFile,"/GRAD,GSEP,GCOR,GLEV,GNOISE");
+      NewLine_WA(ConFile);
+   }   
+
+   Destroy_WA(ConFile);
+
+
+	// --- Delete existing file ---
+	
+	if(iFileExist_SYS(sGrid))
+	{
+		if (iInteractive_SYS())
+			iRemoveDocument_PROJ(sGrid);
+		iDeleteGridFile_SYS(sGrid);
+	}
+
+   
+   // --- get the DAT's ---
+
+   if ((iGetYesNo_SYS("BIGRID","GYN") || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT)) && iStrMin_STR(sGrad) > 0) {
+      Strcat_STR(sChan,",");
+      Strcat_STR(sChan,sGrad);
+   }   
+   InDat = CreateDB_DAT(Data,sXCh,sYCh,sChan);
+   if (iTRA)
+      OutDat = CreateXGD_DAT("_bigrid.grd(GRD)",DAT_XGD_NEW);
+   else   
+      OutDat = CreateXGD_DAT(sGrid,DAT_XGD_NEW);
+
+
+
+   
+   // --- put IPJ into image ---
+   
+   XCh = FindChan_DB(Data,sXCh);
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,hIPJ);
+   
+   
+   // --- If the IPJ has no units, the following will set them from the
+   //     defaults; if they are already set, it will make no difference. ---
+   
+   GetUnits_IPJ(hIPJ, rF, sUnits);
+   SetUnits_IPJ(hIPJ, rF, sUnits);
+   
+   
+   // --- Release Symbol Lock ---
+   
+   UnLockSymb_DB(Data,XCh);
+   
+
+   // --- Make a BIGRID object ---
+
+   Bigrid = Create_BIGRID();
+
+
+   // --- Load up the BIGRID control parameters ---
+
+   if (iLoadParms_BIGRID(Bigrid,"_bigrid.con"))
+      Abort_SYS(_("Bad control file"));
+
+
+   // --- BIGRID ---
+
+   Progress_SYS(1);
+   Run2_BIGRID(Bigrid,"1",InDat,OutDat,hIPJ);
+   Progress_SYS(0);
+   
+   
+   // --- Destroy the DATs and BIGRID object ---
+   
+   Destroy_BIGRID(Bigrid);
+   Destroy_DAT(InDat);
+   Destroy_DAT(OutDat);
+      
+
+   // --- if trending, re-grid ---
+   
+   if (iTRA) {
+   
+
+      // --- create control file for squaring the grid ---
+
+      ConFile = Create_WA("_bigrid1.con",0);
+
+      Puts_WA(ConFile,sTitle);                        NewLine_WA(ConFile);
+   
+      Strcpy_STR(sText,sCS);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sNEX);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sPRESORT);
+      Strcat_STR(sText," /CS");
+      Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+   
+      Puts_WA(ConFile,"/XMIN,YMIN,XMAX,YMAX");        NewLine_WA(ConFile);
+      Puts_WA(ConFile,"0.0,");
+      Puts_WA(ConFile,sKX);
+      Puts_WA(ConFile,"/TRA,KX");                    NewLine_WA(ConFile);
+      
+      //Puts_WA(ConFile,"/SLM,SMX,GAPLIM,LSEL,BCLIP");  NewLine_WA(ConFile);
+      Strcpy_STR(sText,",");
+      Strcat_STR(sText,sSMX);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sGAPLIM);
+      Strcat_STR(sText,",,"); 
+      Strcat_STR(sText,_n(",, /SLM,SMX,GAPLIM,LSEL"));
+      Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+      
+      Puts_WA(ConFile,"/SCL,SX,SY,ANGS");             NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/IZ,LOGZ,ZMIN");               NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/BL,XX,CLIP");                 NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/WS,WL,FDX,FT,NC");            NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/NFLT,TOLN");                  NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/ISP1,ISP2");                  NewLine_WA(ConFile);
+
+      Destroy_WA(ConFile);
+
+
+      // --- get the DAT's ---
+
+      InDat = CreateXGD_DAT("_bigrid.grd(GRD)",DAT_XGD_READ);
+      OutDat = CreateXGD_DAT(sGrid,DAT_XGD_NEW);
+
+
+      // --- Make a BIGRID object ---
+
+      Bigrid = Create_BIGRID();
+
+
+      // --- Load up the BIGRID control parameters ---
+
+      if (iLoadParms_BIGRID(Bigrid,"_bigrid1.con"))
+         Abort_SYS(_("Bad control file"));
+
+
+      // --- Execute BIGRID ---
+
+      Progress_SYS(1);
+      Run2_BIGRID(Bigrid,"",InDat,OutDat,hIPJ);
+      Progress_SYS(0);
+      
+
+      // --- Destroy the DATs and BIGRID object ---
+      
+      Destroy_BIGRID(Bigrid);
+      Destroy_DAT(InDat);
+      Destroy_DAT(OutDat);   
+
+
+      // --- delete temporary file ---
+
+      iDeleteFile_SYS("_bigrid.grd");
+      iDeleteFile_SYS("_bigrid1.con");
+      
+   }
+   
+
+   
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sGrid,"Grid",1);
+   
+   
+   // --- Release the Database ---
+
+   Destroy_IPJ(hIPJ);
+   UnLock_EDB(EData);
+   
+   
+}

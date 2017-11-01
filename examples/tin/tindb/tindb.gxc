@@ -1,0 +1,257 @@
+//===========================================================================
+NAME          = "Calculate TIN for a database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+
+        TINDB.CHAN                 Optional Z channel to include with TIN
+        TINDB.FILE                 Name of TIN file.
+        TINDB.DUPLICATE            Duplicate location handling
+"
+// Revision History:
+// v5.1.6: Added progress for output of TIN to disk.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "tindb.gr"
+#include "tindb.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,ZCh; // Channel handles
+DB_SYMB    Line;        // Line handle
+DGW        Diag;
+VV         VVx, VVy, VVxt, VVyt, VVz, VVzt;
+BF         Bf;
+TIN        Tin;
+LST        List;
+IPJ        hIPJ;
+
+int   i,iZ,iCur,iNew,iLines,iTotLines,iDup;
+string(GS_MAX_PATH) sFile;
+string(GS_MAX_PATH) sBuff;
+string(STR_DB_SYMBOL) sChan;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TINDB");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_TINDB_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TINDB_0,DGW_FILEPATH,"TINDB","FILE");     
+      SetInfoSYS_DGW(Diag,_TINDB_1,DGW_TEXT,"TINDB","CHAN");     
+      SetInfoSYS_DGW(Diag,_TINDB_2,DGW_LISTALIAS,"TINDB","DUPLICATE");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TINDB_0,DGW_FILEPATH,"TINDB","FILE");     
+      GetInfoSYS_DGW(Diag,_TINDB_1,DGW_TEXT,"TINDB","CHAN");     
+      GetInfoSYS_DGW(Diag,_TINDB_2,DGW_LISTALIAS,"TINDB","DUPLICATE");     
+
+      Destroy_DGW(Diag);
+      
+   }      
+         
+   // --- get output file ---
+
+   GetString_SYS("TINDB","FILE",sFile);
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("Output TIN file name not specified"));
+
+   // --- get optional Z channel ---
+   
+   GetString_SYS("TINDB","CHAN",sChan);
+
+   // --- Get the duplicate handling ---
+
+   iDup = iGetInt_SYS("TINDB","DUPLICATE");
+   if(iDup!=VV_XYDUP_AVERAGE &&
+      iDup!=VV_XYDUP_SUM)
+      Abort_SYS(_("Invalid or undefined duplicate sample handling control value."));
+
+
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+
+   iZ = 0;
+   if(iStrlen_STR(sChan)) iZ = 1;
+   if(iZ) {
+      if (!iExistChan_DB(Data,sChan)) {
+         Printf_STR(sBuff, sizeof(sBuff), _("%s channel does not exist."), sChan);
+         Abort_SYS(sBuff);
+      }
+      ZCh = FindChan_DB(Data,sChan);
+   }
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   if(iZ) LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   VVz = Create_VV(REAL,0);
+   VVxt = Create_VV(REAL,0);
+   VVyt = Create_VV(REAL,0);
+   VVzt = Create_VV(REAL,0);   
+
+   // --- Get the X,Y positions, Z values ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   ProgName_SYS(_("Loading positions"),0);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+      // --- Get X and Y ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+      ReFidVV_VV(VVy,VVx);
+
+      if(iZ) {
+         GetChanVV_DB(Data,Line,ZCh,VVz);
+         ReFidVV_VV(VVx,VVz);
+         ReFidVV_VV(VVy,VVz);
+
+         // --- Remove dummies ---
+
+
+      }
+
+      iNew = iLength_VV(VVx);
+
+      // --- Add the positions to the X and Y VVs ---
+
+      iNew = iLength_VV(VVx);
+      iCur = iLength_VV(VVxt);
+
+      SetLen_VV(VVxt, iNew+iCur);
+      SetLen_VV(VVyt, iNew+iCur);
+      Copy2_VV(VVxt, iCur, VVx, 0, iNew);
+      Copy2_VV(VVyt, iCur, VVy, 0, iNew);
+
+      if(iZ) {
+         SetLen_VV(VVzt, iNew+iCur);
+         Copy2_VV(VVzt, iCur, VVz, 0, iNew);
+      }
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   if(iZ) UnLockSymb_DB(Data,ZCh);
+
+   // --- Handle duplicate samples ---
+
+   ProgName_SYS(_("Handling Duplicate Samples"),0);
+
+   if(iZ)
+      RemoveXYDup_VVU(VVxt, VVyt, VVzt, iDup);
+   else
+      RemoveXYDup_VVU(VVxt, VVyt, (VV)0, iDup);
+   
+
+   // --- Do the TIN ---
+
+
+   ProgName_SYS(_("Creating the TIN"),0);
+
+   Tin = Create_TIN(VVxt, VVyt, VVzt);
+   
+
+   // --- put IPJ into TIN ---
+   
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,hIPJ);
+   UnLockSymb_DB(Data,XCh);
+   SetIPJ_TIN(Tin,hIPJ);
+   Destroy_IPJ(hIPJ);
+   
+   
+   // --- Serialize TIN ---
+
+   ProgName_SYS(_("Writing TIN to file"), 2);
+   Bf = Create_BF(sFile, BF_READWRITE_NEW);
+   Serial_TIN(Tin, Bf);
+
+   Progress_SYS(0);
+
+   // --- done ---
+
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_VV(VVz);
+   Destroy_VV(VVxt);
+   Destroy_VV(VVyt);
+   Destroy_VV(VVzt);
+   DestroyEx_BF(Bf);
+   Destroy_TIN(Tin);
+   UnLock_EDB(EData);
+   
+}

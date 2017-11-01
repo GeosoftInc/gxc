@@ -1,0 +1,95 @@
+//===========================================================================
+NAME          = "Sort all channels on a reference channel"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   SORTALL.CHANNEL    channel name
+          .ORDER      \"ASCENDING\" or \"DESCENDING\"
+          .READONLY   sort read-only channels \"Yes\" or \"No\"
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "sortall.gr"
+#include "sortall.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DB          Data;         // Database handle
+EDB         EData;        // Database handle
+DGW         Diag;
+LST         List;               // list handle
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("SORTALL");
+
+
+     // --- Set up input and output lists ---
+
+     EData = Current_EDB();
+     Data = Lock_EDB(EData);
+     List = GetList_DGW(Diag,_SORTALL_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     UnLock_EDB(EData);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_SORTALL_0,DGW_TEXT,"SORTALL","CHANNEL");
+     SetInfoSYS_DGW(Diag,_SORTALL_1,DGW_TEXT,"SORTALL","ORDER");
+     SetInfoSYS_DGW(Diag,_SORTALL_2,DGW_TEXT,"SORTALL","READONLY");
+
+
+     // --- Run the Dialogue ---
+
+     if (iRunDialogue_DGW(Diag)) Cancel_SYS();    
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_SORTALL_0,DGW_TEXT,"SORTALL","CHANNEL");
+     GetInfoSYS_DGW(Diag,_SORTALL_1,DGW_TEXT,"SORTALL","ORDER");
+     GetInfoSYS_DGW(Diag,_SORTALL_2,DGW_TEXT,"SORTALL","READONLY");
+
+     GetInfoSYS_DGW(Diag,_SORTALL_2,DGW_LISTALIAS,"SORTALL","READONLY_ALIAS");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+
+   // --- sort ---
+
+   iRunGX_SYS("sortal");
+
+
+}

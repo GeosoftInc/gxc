@@ -1,0 +1,157 @@
+//===========================================================================
+NAME          = "Import drill-hole plot data parameters"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Import"
+
+DESCRIPTION   = "
+   
+   Import plot data parameters into a drill-hole project.
+
+   Script Parameters:
+
+   DHIMPDATAPARAM.DIR   The top directory for the INI files.
+"
+// Revision History:
+// v6.3.0: Removed check for obsolete single Wholeplot databases.
+// v6.1.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhimpdataparam.gr"
+#include "dhimpdataparam.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DGW         Diag;             // Dialogue handle
+DB          hDB;
+DH          hDH;
+
+int i;  
+
+string(STR_FILE) sDB, sCurrentDB, sDirINI;
+string(STR_FILE) sVol, sDir, sName;
+string(STR_FILE) sLocalPath, sLocalDir, sLocalVol;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get Current Database and DH project name ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sCurrentDB);
+   hDH = Create_DH(sCurrentDB);
+   
+   
+   // --- Get information on the location of the collar database. If the
+   //     volume and directory are the same as the workspace volume and 
+   //     directory, then reset the volume and directory to empty strings. ---
+         
+   FileNamePart_STR(sCurrentDB, sVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sCurrentDB, sDir, STR_FILE_PART_DIRECTORY);
+
+   GetDirectory_SYS(SYS_DIR_LOCAL,sLocalPath);
+   FileNamePart_STR(sLocalPath, sLocalVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sLocalPath, sLocalDir, STR_FILE_PART_DIRECTORY);
+   
+   if(iStrcmp_STR(sVol, sLocalVol, STR_CASE_TOLERANT) == 0 && iStrcmp_STR(sDir, sLocalDir, STR_CASE_TOLERANT) == 0)
+   {
+      Strcpy_STR(sVol, "");
+      Strcpy_STR(sDir, "");
+   }
+
+   // --- By default, use "INI" directory under the current working directory ---
+
+   GetString_SYS("DHIMPDATAPARAM","DIR",sDirINI);
+   if(!iStrlen_STR(sDirINI))
+   {         
+      Strcpy_STR(sDirINI, "");                  
+      if(iStrlen_STR(sVol)) {                  
+         Strcat_STR(sDirINI, sVol);
+         Strcat_STR(sDirINI, ":");
+      }
+      if(iStrlen_STR(sDir)) {
+         Strcat_STR(sDirINI, sDir);
+         Strcat_STR(sDirINI, "\\");                  
+      }
+      Strcat_STR(sDirINI, "INI");
+
+      if(iDirExist_SYS(sDirINI)) {
+         SetString_SYS("DHIMPDATAPARAM","DIR",sDirINI);
+      }
+   }
+      
+
+
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS()) {
+   
+      Diag = Create_DGW("DHIMPDATAPARAM");
+      SetInfoSYS_DGW(Diag,_DHIMPDATAPARAM_0,DGW_FILEPATH, "DHIMPDATAPARAM", "DIR");
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_DHIMPDATAPARAM_0,DGW_FILEPATH, "DHIMPDATAPARAM", "DIR");
+      Destroy_DGW(Diag);                                    
+   }
+
+
+
+   // --- Get and validate parameters ---
+
+   GetString_SYS("DHIMPDATAPARAM","DIR",sDir);
+   if(!iStrlen_STR(sDir)) {
+      Abort_SYS(_("No directory was specified for the location of the plot data parameter INI files."));
+   }   
+
+
+   // --- Load assay database channel data parameters stored in the channel REGs ---
+   
+   for(i=0;i<iNumAssays_DH(hDH);i++) {
+
+
+      //--- Get the database name ---
+      
+      hDB = hAssayDB_DH(hDH, i);
+      GetName_DB(hDB,DB_NAME_FILE,sDB);
+      FileNamePart_STR(sDB,sName,STR_FILE_PART_NAME);
+      
+      
+      // --- First, look in the named directory. As of v6.0, data is
+      //     written to subdirectories under this directory ---
+      
+      // --- Load the data parameters ---
+      
+      LoadDataParametersINI_DH(hDH, hDB, sDir);
+      
+      
+      //--- Look for the sub-directory directory for this database.  ---
+               
+      Strcpy_STR(sDirINI, sDir);
+      Strcat_STR(sDirINI, "\\");
+      Strcat_STR(sDirINI, sName);
+      if(!iDirExist_SYS(sDirINI)) continue;
+
+      
+      // --- Load the data parameters ---
+      
+      LoadDataParametersINI_DH(hDH, hDB, sDirINI);
+   }     
+   
+   Destroy_DH(hDH);             
+}

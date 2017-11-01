@@ -1,0 +1,292 @@
+//===========================================================================
+NAME          = "Free-Air anomaly"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Free Air, Bouguer Step by Step"
+
+DESCRIPTION   = "
+
+"
+
+// Revision History
+// v6.3.0: Don't delete existing output channels first.
+// v6.2.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grfreeair.gr"
+#include "grfreeair.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         eDB;                       // database handle
+DB          hDB;                       // database handle
+
+DB_SYMB     Ch;
+DB_SYMB     Survey;                    // Survey Handle
+DGW         hDGW;                      // Dialogue handle
+REG         hWorkREG;                  // gravity reg
+EXP         Exp;
+LST         hLST;                      // list
+LST         hFormulaLST;               // formula list
+LST         hFaLST;                    // free air list
+
+real rEm;                      // scale factor elevation->metres
+int  iRtn;
+int  i,i1,i2;
+
+string(STR_FILE)          sDB;
+string(STR_DEFAULT_LONG)  sFormula;
+string(STR_DEFAULT_LONG)  sFa;
+string(STR_DB_SYMBOL)     sGravity,sFreeAir;
+string(STR_DEFAULT_SHORT) sDistance_units;
+string(STR_DEFAULT_SHORT) sUnits;
+string(STR_DEFAULT_LONG)  s,s1,s2;
+
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   if (!iInteractive_SYS()) {
+   
+      // --- load database ---
+      
+      GetString_SYS("GRFREEAIR","DATABASE",sDB);
+      if (iStrMin2_STR(sDB))
+         Load_EDB(sDB);
+         
+   }
+   
+   eDB  = Current_EDB();
+   GetName_EDB(eDB,sDB);
+   FileNamePart_STR(sDB,sDB,STR_FILE_PART_NAME_EXTENSION);
+   hDB   = Lock_EDB(eDB);
+
+
+   // --- get gravity REG ---
+
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+   
+   
+   // --- if a script, set registry settings from system settings ---
+   
+   if (!iInteractive_SYS()) {
+   
+      if (iExistString_SYS("GRAVRED","GRAVITY")) {
+         GetString_SYS("GRAVRED","GRAVITY",sGravity);
+         Set_REG(hWorkREG,"GRAVRED.GRAVITY",sGravity);
+      }   
+      if (iExistString_SYS("GRAVRED","FREEAIR")) {
+         GetString_SYS("GRAVRED","FREEAIR",sFreeAir);
+         Set_REG(hWorkREG,"GRAVRED.FREEAIR",sFreeAir);
+      }   
+      if (iExistString_SYS("GRAVRED","FORMULA")) {
+         GetString_SYS("GRAVRED","FORMULA",sFormula);
+         Set_REG(hWorkREG,"GRAVRED.FORMULA",sFormula);
+      }   
+      if (iExistString_SYS("GRAVRED","FREE_AIR")) {
+         GetString_SYS("GRAVRED","FREE_AIR",sFa);
+         Set_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa);
+      }   
+   }
+   
+   Get_REG(hWorkREG,"GRAVRED.GRAVITY",sGravity,sizeof(sGravity));
+   Get_REG(hWorkREG,"GRAVRED.FREEAIR",sFreeAir,sizeof(sFreeAir));
+   Get_REG(hWorkREG,"GRAVRED.FORMULA",sFormula,sizeof(sFormula));
+   Get_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa,sizeof(sFa));
+   Get_REG(hWorkREG,"GRAVRED.DISTANCE_UNITS",sDistance_units,sizeof(sDistance_units));
+   
+   
+   // --- get/create formula lists ---
+   
+   hFormulaLST = Create_LST(256);
+   LoadFile_LST(hFormulaLST,"Gravity_Formulas");
+   if (iSize_LST(hFormulaLST) == 0) {
+   
+   
+      // --- the grparm gx contains the default formulas ---
+   
+#include "../gravity_formulas.gxh"
+   
+      SaveFile_LST(hFormulaLST,"Gravity_Formulas");
+      
+   }
+   
+   
+   // --- default formula ---
+   
+   if (iStrlen_STR(sFormula) == 0)
+      GetItem_LST(hFormulaLST,0,1,sFormula);
+      
+      
+   // --- free-air list ---      
+   
+   hFaLST = Create_LST(256);
+   LoadFile_LST(hFaLST,"Gravity_Free_Air");
+   if (iSize_LST(hFaLST) == 0) {
+   
+   
+      // --- the grparm gx contains the default formulas ---
+   
+#include "../gravity_free_air.gxh"
+   
+      SaveFile_LST(hFaLST,"Gravity_Free_Air");
+      
+   }
+   
+   // --- default free-air correction ---
+   
+   if (iStrlen_STR(sFa) == 0)
+      GetItem_LST(hFaLST,0,0,sFa);
+      
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      hDGW = Create_DGW("grfreeair");
+      
+
+      // --- Set up lists ---
+
+      hLST = GetList_DGW(hDGW,_GRFREEAIR_1);
+      SymbLST_DB(hDB,hLST,DB_SYMB_CHAN);
+      Sort_LST(hLST,0,0);
+      Copy_LST(GetList_DGW(hDGW,_GRFREEAIR_2),hLST);
+
+      Copy_LST(GetList_DGW(hDGW,_GRFREEAIR_3),hFormulaLST);
+      Copy_LST(GetList_DGW(hDGW,_GRFREEAIR_4),hFaLST);
+      
+      SetInfo_DGW(hDGW,_GRFREEAIR_0,DGW_TEXT,sDB);
+      SetInfo_DGW(hDGW,_GRFREEAIR_1,DGW_TEXT,sGravity);
+      SetInfo_DGW(hDGW,_GRFREEAIR_2,DGW_TEXT,sFreeAir);
+      SetInfo_DGW(hDGW,_GRFREEAIR_3,DGW_TEXT,sFormula);
+      SetInfo_DGW(hDGW,_GRFREEAIR_4,DGW_TEXT,sFa);
+
+      iRtn = iRunDialogue_DGW(hDGW);
+      if (iRtn==-1) Cancel_SYS();
+
+      GetInfo_DGW(hDGW,_GRFREEAIR_0,DGW_TEXT,sDB);
+      GetInfo_DGW(hDGW,_GRFREEAIR_1,DGW_TEXT,sGravity);
+      GetInfo_DGW(hDGW,_GRFREEAIR_2,DGW_TEXT,sFreeAir);
+      GetInfo_DGW(hDGW,_GRFREEAIR_3,DGW_TEXT,sFormula);
+      GetInfo_DGW(hDGW,_GRFREEAIR_4,DGW_TEXT,sFa);
+
+      Destroy_DGW(hDGW);
+      
+
+      // --- put reg back ---
+
+      Set_REG(hWorkREG,"GRAVRED.GRAVITY",sGravity);
+      Set_REG(hWorkREG,"GRAVRED.FREEAIR",sFreeAir);
+      Set_REG(hWorkREG,"GRAVRED.FORMULA",sFormula);
+      Set_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa);
+      SetWorkspaceREG_SYS(hWorkREG);
+   }
+
+
+   // --- create new channels ---
+
+   if (iExistSymb_DB(hDB,sFreeAir,DB_SYMB_CHAN)) {
+      Ch = FindSymb_DB(hDB,sFreeAir,DB_SYMB_CHAN);
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   }
+   else {
+      CreateSymb_DB(hDB,sFreeAir,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      Ch = FindSymb_DB(hDB,sFreeAir,DB_SYMB_CHAN);
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanWidth_DB(hDB,Ch,10);
+      SetChanDecimal_DB(hDB,Ch,3);
+      SetChanUnit_DB(hDB,Ch,_("mgal"));
+   }
+   
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(hDB,Ch,_("Free-air anomaly"),"GRFREEAIR;");
+
+   UnLockSymb_DB(hDB,Ch);
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+
+
+   // --- get units ---
+      
+   Ch = FindSymb_DB(hDB,"Elevation",DB_SYMB_CHAN);
+   if (Ch == NULLSYMB) Abort_SYS(_("No Elevation channel."));
+   LOCK_R(hDB,Ch);
+   GetChanUnit_DB(hDB,Ch,sUnits);
+   UNLOCK(hDB,Ch);
+   rEm = rUnitScale_IPJ(sUnits,1.0);
+   
+
+   // --- latitude correction ---
+
+   if (iStrlen_STR(sFormula) == 0) 
+      Abort_SYS(_("Gravity formula is not defined."));
+   GetItem_LST(hFormulaLST,1,iFindItem_LST(hFormulaLST,0,sFormula),sFormula);
+   
+   
+   // --- free air correction ---
+   
+   if (iStrlen_STR(sFa) == 0) 
+      Abort_SYS(_("Free Air formula is not defined."));
+   GetItem_LST(hFaLST,1,iFindItem_LST(hFaLST,0,sFa),sFa);
+   Strcat_STR(sFormula,sFa);
+   
+   // --- Replace "FreeAir" by sFreeAir ---
+
+   Strcpy_STR(s,sFormula);
+   i = iStrlen_STR(s);
+   i1 = iStrStr_STR(s,_n("FreeAir"),STR_CASE_TOLERANT);
+   i2 = i-i1;
+   Substr_STR (s1,s,0,i1);
+   Substr_STR (s2,s,i1+7,i2-7);
+   Strcpy_STR(sFormula,s1);
+   Strcat_STR(sFormula,sFreeAir);
+   Strcat_STR(sFormula,s2);
+   
+
+   // --- Apply the expression ---
+
+   Exp = Create_EXP(hDB,sFormula,512);
+   Survey = FirstSelLine_DB(hDB);
+   while (iIsLineValid_DB(hDB,Survey)) {
+      Math_DU(hDB,Survey,Exp);
+      Survey = NextSelLine_DB(hDB, Survey);
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Done ---
+
+   Destroy_REG(hWorkREG);
+   Progress_SYS(0);
+   
+   UnLock_EDB(eDB);
+   LoadChan_EDB(eDB,sGravity);
+   LoadChan_EDB(eDB,sFreeAir);
+
+}

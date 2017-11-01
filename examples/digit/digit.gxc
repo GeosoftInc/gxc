@@ -1,0 +1,126 @@
+//===========================================================================
+NAME          = "Digitize"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+
+      DIGIT.OUT      - output file name
+           .APPEND   - overwrite file = 0; append to output = 1
+           .GRID     - grid name
+           .DIGITS   - significant digits in output data
+           .PREFIX   - data prefix
+           .DELIM    - delimiter character (default is a space)
+"
+
+//===========================================================================
+
+RESOURCE = "digit.gr"
+#include "digit.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sOut,sGrid,sPrefix;
+string(5)   sDelim;
+
+
+DGW         Diag;
+int         i,iDigits,iAppend;
+
+IMG         IMG1;             // Image tied to the input grid
+
+WA          hWA;              // Output file handle
+EMAP        EMap;             // EMap object
+MAP         hMAP;             // Map object
+
+//===========================================================================
+//                           DIGITS CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if(!iInteractive_SYS())
+      Abort_SYS(_("This GX must run interactively"));
+
+
+   // --- Create the Dialogue ---
+
+   Diag = Create_DGW("DIGIT");
+
+   
+   // --- Set any Defaults from INI ---
+
+   SetInfoSYS_DGW(Diag,_DIGIT_0,DGW_FILEPATH,"DIGIT","OUT");
+   SetInfoSYS_DGW(Diag,_DIGIT_1,DGW_LISTALIAS,"DIGIT","APPEND");      
+   SetInfoSYS_DGW(Diag,_DIGIT_2,DGW_FILEPATH, "DIGIT","GRID");     
+   SetInfoSYS_DGW(Diag,_DIGIT_3,DGW_TEXT,"DIGIT","DIGITS");     
+   SetInfoSYS_DGW(Diag,_DIGIT_4,DGW_TEXT,"DIGIT","PREFIX");     
+   SetInfoSYS_DGW(Diag,_DIGIT_5,DGW_TEXT,"DIGIT","DELIM");     
+
+
+   // --- Run the Dialogue ---
+
+   i = iRunDialogue_DGW(Diag);
+   if (i == 1)
+      Cancel_SYS();    // He hit cancel
+
+   
+   // --- Put values back in INI ---
+
+   GetInfoSYS_DGW(Diag,_DIGIT_0,DGW_FILEPATH,"DIGIT","OUT");
+   GetInfoSYS_DGW(Diag,_DIGIT_1,DGW_LISTALIAS,"DIGIT","APPEND");      
+   GetInfoSYS_DGW(Diag,_DIGIT_2,DGW_FILEPATH, "DIGIT","GRID");     
+   GetInfoSYS_DGW(Diag,_DIGIT_3,DGW_TEXT,"DIGIT","DIGITS");     
+   GetInfoSYS_DGW(Diag,_DIGIT_4,DGW_TEXT,"DIGIT","PREFIX");     
+   GetInfoSYS_DGW(Diag,_DIGIT_5,DGW_TEXT,"DIGIT","DELIM");     
+
+
+   EMap = Current_EMAP();
+   iSetCurrentView_EMAP(EMap,"*Data");
+
+   hMAP = Lock_EMAP(EMap);
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DIGIT","OUT",sOut);
+   iAppend = iGetInt_SYS("DIGIT","APPEND");
+   GetString_SYS("DIGIT","GRID",sGrid);
+   iDigits = iGetInt_SYS("DIGIT","DIGITS");
+   GetString_SYS("DIGIT","PREFIX",sPrefix);
+   GetString_SYS("DIGIT","DELIM",sDelim);
+
+   // --- Create Image tied to the grid ---  
+   
+   if (iStrlen_STR(sGrid))
+      IMG1 = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
+   else
+      IMG1 = IMG_NULL;
+
+   // --- Create output file ---
+
+   hWA = Create_WA (sOut,iAppend);
+
+   UnLock_EMAP(EMap);      
+    
+   iDigitize_EMAP(EMap,hWA,IMG1,iDigits,_("Digitize..."),sPrefix,sDelim,0);
+           
+   Destroy_WA(hWA);
+
+   if (IMG1 != IMG_NULL)
+      Destroy_IMG(IMG1);
+
+   // --- done ---
+   
+}

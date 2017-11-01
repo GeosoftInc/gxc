@@ -1,0 +1,177 @@
+//===========================================================================
+
+NAME          = "Plot a TIN Mesh"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Tinning"
+
+DESCRIPTION   = "
+
+        TINMESH.MAXLENGTH            Maximum length for joins in meters.
+        TINMESH.FILE                 Name of TIN file.
+"
+
+//===========================================================================
+
+RESOURCE = "tinmesh.gr"
+#include "tinmesh.grh"
+
+//===========================================================================
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sLineColor;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+VV    MeshVV;
+TIN   Tin;
+BF    Bf;
+IPJ   hIPJ;
+
+int   i;
+real  rScale;
+real  rThickness;
+string(GS_MAX_PATH) sFile;
+string(GS_MAX_PATH) sGroup;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TINMESH");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TINMESH_0,DGW_FILEPATH,"TINDB","FILE");     
+      SetInfoSYS_DGW(Diag,_TINMESH_1,DGW_TEXT,"TINMESH","COLOR");
+      SetInfoSYS_DGW(Diag,_TINMESH_2,DGW_TEXT,"TINMESH","THICKNESS");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TINMESH_0,DGW_FILEPATH,"TINDB","FILE");     
+      GetInfoSYS_DGW(Diag,_TINMESH_1,DGW_TEXT,"TINMESH","COLOR");
+      GetInfoSYS_DGW(Diag,_TINMESH_2,DGW_TEXT,"TINMESH","THICKNESS");
+
+      Destroy_DGW(Diag);
+      
+   }
+   
+      
+   // --- get database and map ---
+   
+   EMap   = Current_EMAP();
+   Map    = Lock_EMAP(EMap);   
+
+   GetString_SYS("TINDB","FILE",sFile); 
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("No TIN file specified"));   
+
+   rThickness = rGetReal_SYS("TINMESH","THICKNESS");
+   if(rThickness==rDUMMY) rThickness = 0.1;
+
+   GetString_SYS("TINMESH","COLOR",sLineColor); 
+   if(!iStrlen_STR(sLineColor))
+      Abort_SYS(_("No line color specified"));
+      
+
+   // --- Get TIN ---
+
+   Bf = Create_BF(sFile, BF_READ);
+   Tin = CreateS_TIN(Bf);
+   
+
+   // --- Create VV for mesh lines ---
+
+   MeshVV = Create_VV(-32,0);    // sizeof(GS_D2LINE)
+   
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+   
+   // --- set the working IPJ ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_TIN(Tin,hIPJ);
+   SetWorkingIPJ_MVIEW(View,hIPJ);
+   Destroy_IPJ(hIPJ);
+
+   
+
+   // --- create path group ---
+
+   Strcpy_STR(sGroup,"TIN_");
+   FileNamePart_STR(sFile,sFile,STR_FILE_PART_NAME);
+   Strcat_STR(sGroup,sFile);
+   Strcat_STR(sGroup,"_Mesh");
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   
+
+   // --- set plotting parameters ---
+
+   SetThinRes_MVIEW(View,0.02);
+   rScale = rScaleMM_MVIEW(View);
+   
+
+   // --- set line characteristics ---
+
+   LineColor_MVIEW(View,iColor_MVIEW(sLineColor));
+   LineThick_MVIEW(View,rThickness*rScale);
+   LineStyle_MVIEW(View,0,0.0);
+   
+   Progress_SYS(1);
+   
+   // --- Get the Mesh ---
+
+   GetMesh_TIN(Tin,MeshVV);
+   
+
+   // --- Draw the Mesh
+
+   LineVV_MVIEW(View, MeshVV);
+   
+
+   // --- Add maker object ---
+
+   EasyMaker_MVIEW(View,_("TIN Mesh Plot"),"TINMESH;TINDB");
+
+
+   // --- done ---
+
+   DestroyEx_BF(Bf);
+   Destroy_TIN(Tin);
+   Destroy_VV(MeshVV);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+}

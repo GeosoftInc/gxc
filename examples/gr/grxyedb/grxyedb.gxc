@@ -1,0 +1,152 @@
+//===========================================================================
+NAME          = "Open/load location data."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Locations"
+
+DESCRIPTION   = "
+
+    GRXYEDB.FILE         location file in CSV format
+           .DATABASE     database name
+
+"
+// Revision History:
+// v6.0.1: Now tests if location GDB was deleted by GRTESTLOC.GX
+// v6.0.0: Validates location database before doing anything.
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "grxyedb.gr"
+#include "grxyedb.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         eDB;                  // Database
+DB          hDB;                  // Database
+DGW         hDGW;                 // Dialogue handle
+REG         hWorkREG;
+REG         hDataREG;
+
+string(STR_FILE) sDB;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+int i,iNew;
+
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- get workspace REG and parameters ---
+   
+   hWorkREG = Create_REG(156);
+   GetWorkspaceREG_SYS(hWorkREG);
+   GetString_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sDB);
+   
+
+   // --- Are we running interactively ? ---
+
+   iNew = FALSE;
+   if (iInteractive_SYS()) {
+   
+      hDGW = Create_DGW("GRXYEDB");
+      SetInfo_DGW(hDGW,_GRXYEDB_0,DGW_FILEPATH,sDB);
+      
+      i = 0;
+      while(i==0) {
+      
+         if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+         GetInfo_DGW(hDGW,_GRXYEDB_0,DGW_FILEPATH,sDB);
+         
+   
+         // --- check database exists ---
+   
+         if (!iFileExist_SYS(sDB)) {
+            i = iDisplayQuestion_SYS(sDB,_("Database does not exist.  Create new?"));
+            if (i) iNew = TRUE;
+         } else
+            i = 1;   
+      }
+      Destroy_DGW(hDGW);
+      
+   }
+   
+   
+   // --- Is the location database actually set up correctly? ---
+
+   if(iRunGX_SYS("grtestloc.gx"))
+      Cancel_SYS();
+   
+   
+   // --- The above grtestloc.gx may have deleted the database, if so, then must re-create it ---
+   
+   if(!iFileExist_SYS(sDB)) iNew = 1;
+      
+
+   // --- set base parameter ---
+
+   Set_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sDB);
+   SetWorkspaceREG_SYS(hWorkREG);
+   Destroy_SYS(hWorkREG);
+   
+
+   if (iNew) {
+   
+      // --- create new database ---
+      
+      if (iRunGX_SYS("grxyenew") != 0) 
+         Abort_SYS(_("Unable to create a new location database."));
+      
+      if (  iInteractive_SYS() &&
+            iDisplayQuestion_SYS(_("Load data?"), _("Load location from a file or database now?"))) {
+      
+         if (iRunGX_SYS("grldxye")) 
+            Abort_SYS(_("Unable to create a new location database."));
+            
+      }
+
+   }
+   
+   // --- load the database ---
+      
+   eDB = Load_EDB(sDB);
+   
+   
+   // --- set the database type to base ---
+      
+   hDB = Lock_EDB(eDB);      
+   hDataREG = Create_REG(256);
+   GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+   Set_REG(hDataREG,"GRAVRED.TYPE","Location");
+   SetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+   
+   GetXYZChan_DB(hDB, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(hDB, DB_CHAN_Y, sYCh);
+   
+   Destroy_SYS(hDataREG);
+   UnLock_EDB(eDB);
+       
+   UnLoadAllChans_EDB(eDB);
+   LoadChan_EDB(eDB,"Line");
+   LoadChan_EDB(eDB,"Station");
+   LoadChan_EDB(eDB,"Longitude");
+   LoadChan_EDB(eDB,"Latitude");
+   LoadChan_EDB(eDB,sXCh);
+   LoadChan_EDB(eDB,sYCh);
+   LoadChan_EDB(eDB,"Elevation");
+   LoadAllChans_EDB(eDB);
+   
+}

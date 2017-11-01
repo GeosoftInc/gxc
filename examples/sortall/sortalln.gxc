@@ -1,0 +1,122 @@
+//===========================================================================
+NAME = "Sort all channels on up to 4 reference channels"
+#include <version.gxh>
+DESCRIPTION = "
+
+SORTALLN.CHANNEL1   primary channel
+.CHANNEL2   secondary channel(blank if none)
+.CHANNEL3   ternary channel(blank if none)
+.CHANNEL4   quaternary channel(blank if none)
+.ORDER1     \"ASCENDING\" or \"DESCENDING\"
+.ORDER2     \"ASCENDING\" or \"DESCENDING\"
+.ORDER3     \"ASCENDING\" or \"DESCENDING\"
+.ORDER4     \"ASCENDING\" or \"DESCENDING\"
+.READONLY   sort read - only channels \"Yes\" or \"No\"
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "sortalln.gr"
+#include "sortalln.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DB          Data;         // Database handle
+EDB         EData;        // Database handle
+DGW         Diag;
+LST         List;               // list handle
+
+int iInt;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+	// --- Are we running interactively ? ---
+
+	iInt = iInteractive_SYS();
+	
+	if (iInt && iScript_SYS() != 1)
+	{
+
+		// --- Create the Dialogue ---
+
+		Diag = Create_DGW("SORTALLN");
+
+
+		// --- Set up input and output lists ---
+
+		EData = Current_EDB();
+		Data = Lock_EDB(EData);
+		List = GetList_DGW(Diag, _SORTALLN_0);
+		SymbLST_DB(Data, List, DB_SYMB_CHAN);
+		Sort_LST(List, 0, 0);
+		Copy_LST(GetList_DGW(Diag, _SORTALLN_2), List);
+		Copy_LST(GetList_DGW(Diag, _SORTALLN_4), List);
+		Copy_LST(GetList_DGW(Diag, _SORTALLN_6), List);
+		UnLock_EDB(EData);
+
+
+		// --- Set any Defaults ---
+
+		SetInfoSYS_DGW(Diag, _SORTALLN_0, DGW_TEXT, "SORTALLN", "CHANNEL1");
+		SetInfoSYS_DGW(Diag, _SORTALLN_1, DGW_TEXT, "SORTALLN", "ORDER1");
+		SetInfoSYS_DGW(Diag, _SORTALLN_2, DGW_TEXT, "SORTALLN", "CHANNEL2");
+		SetInfoSYS_DGW(Diag, _SORTALLN_3, DGW_TEXT, "SORTALLN", "ORDER2");
+		SetInfoSYS_DGW(Diag, _SORTALLN_4, DGW_TEXT, "SORTALLN", "CHANNEL3");
+		SetInfoSYS_DGW(Diag, _SORTALLN_5, DGW_TEXT, "SORTALLN", "ORDER3");
+		SetInfoSYS_DGW(Diag, _SORTALLN_6, DGW_TEXT, "SORTALLN", "CHANNEL4");
+		SetInfoSYS_DGW(Diag, _SORTALLN_7, DGW_TEXT, "SORTALLN", "ORDER4");
+		SetInfoSYS_DGW(Diag, _SORTALLN_8, DGW_TEXT, "SORTALLN", "READONLY");
+
+
+		// --- Run the Dialogue ---
+
+		if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+
+		// --- Get the Strings ---
+
+		GetInfoSYS_DGW(Diag, _SORTALLN_0, DGW_TEXT, "SORTALLN", "CHANNEL1");
+		GetInfoSYS_DGW(Diag, _SORTALLN_1, DGW_TEXT, "SORTALLN", "ORDER1");
+		GetInfoSYS_DGW(Diag, _SORTALLN_2, DGW_TEXT, "SORTALLN", "CHANNEL2");
+		GetInfoSYS_DGW(Diag, _SORTALLN_3, DGW_TEXT, "SORTALLN", "ORDER2");
+		GetInfoSYS_DGW(Diag, _SORTALLN_4, DGW_TEXT, "SORTALLN", "CHANNEL3");
+		GetInfoSYS_DGW(Diag, _SORTALLN_5, DGW_TEXT, "SORTALLN", "ORDER3");
+		GetInfoSYS_DGW(Diag, _SORTALLN_6, DGW_TEXT, "SORTALLN", "CHANNEL4");
+		GetInfoSYS_DGW(Diag, _SORTALLN_7, DGW_TEXT, "SORTALLN", "ORDER4");
+		GetInfoSYS_DGW(Diag, _SORTALLN_8, DGW_TEXT, "SORTALLN", "READONLY");
+
+		GetInfoSYS_DGW(Diag, _SORTALLN_8, DGW_LISTALIAS, "SORTALLN", "READONLY_ALIAS");
+
+		// --- Destroy the Dialogue ---
+
+		Destroy_DGW(Diag);
+
+
+		SetInteractive_SYS(0);
+	}
+
+	// --- sort ---
+	iRunGX_SYS("sortaln");
+	
+	if (iInt && iScriptRecord_SYS() == 0 && iScript_SYS() != 1)
+		SetInteractive_SYS(1);
+
+}

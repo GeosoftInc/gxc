@@ -1,0 +1,187 @@
+//===========================================================================
+NAME          = "Open an GBN data file into a new database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+DESCRIPTION   = "
+   Open an GBN data file into a new database
+
+    OpenGBN.FILE     : Input data file name
+    OpenGBN.LINES    : Number of Lines
+    OpenGBN.CHANNELS : Number of Channels
+    
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "OpenGBN.gr"
+#include "OpenGBN.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         eDB;              // Database handle
+DB          hDB;              // Database handle
+DGW         hDGW;             // Dialogue handle
+
+int         i;                // Utility 
+int         iLines;           
+int         iChannels;        
+int         iBlobs;           
+int         iErase;           
+
+
+string(STR_FILE) sGBN,sDB;
+string(STR_DEFAULT_LONG) sPr;
+string(STR_DEFAULT_SHORT) sExt;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      // --- Create the Dialogue ---
+
+      hDGW = Create_DGW("OPENGBN");
+      SetInfoSYS_DGW(hDGW,_OPENGBN_0,DGW_FILEPATH,"OPENGBN","FILE");
+      i = iRunDialogue_DGW(hDGW);
+      if (i == -1) Cancel_SYS();
+      GetInfoSYS_DGW(hDGW,_OPENGBN_0,DGW_FILEPATH,"OPENGBN","FILE");
+      Destroy_DGW(hDGW);
+
+   } 
+      
+
+   // --- check file name ---
+   
+   GetString_SYS("OPENGBN","FILE",sGBN);
+   FileNamePart_STR(sGBN,sExt,STR_FILE_PART_EXTENSION);
+   
+   
+   // --- GBN of GDB? ---
+   
+   if (iStrcmp_STR(sExt,"GBN",STR_CASE_TOLERANT)==0) {
+   
+   
+      // --- create database ---
+   
+      FileExt_STR(sGBN,"gdb",sDB,FILE_EXT_FORCE);
+      
+      
+      // --- check overwrite ---
+      
+      if (iFileExist_SYS(sDB)) {
+      
+         Printf_STR(sPr, sizeof(sPr), _("The GBN file will be opened in a new GDB file named <%s>. This file already exists. Overwrite?"), sDB);
+         
+         if (!iDisplayQuestion_SYS(_("GDB file exists"),sPr))
+            Cancel_SYS();
+            
+         UnLoad_EDB(sDB);            
+      }
+
+      // --- Ask for Database Size ---
+
+      if (iInteractive_SYS()) 
+      {
+          // --- Create the Dialogue ---
+
+          hDGW = Create_DGW("CreateDB");
+
+
+          // --- Set any Defaults ---
+                            
+          SetInfoSYS_DGW(hDGW,_CREATEDB_0,DGW_TEXT,"OPENGBN","LINES");
+          SetInfoSYS_DGW(hDGW,_CREATEDB_1,DGW_TEXT,"OPENGBN","CHANNELS");
+
+
+          // --- Run the Dialogue ---
+
+          i = iRunDialogue_DGW(hDGW);
+          if (i==-1) Cancel_SYS();
+
+
+          // --- Get the Strings ---
+
+          GetInfoSYS_DGW(hDGW,_CREATEDB_0,DGW_TEXT,"OPENGBN","LINES");
+          GetInfoSYS_DGW(hDGW,_CREATEDB_1,DGW_TEXT,"OPENGBN","CHANNELS");
+
+          Destroy_DGW(hDGW);
+      }
+      
+      
+      // --- Get Lines and Channels ---
+      
+      iLines    = iGetInt_SYS("OPENGBN","LINES");
+      iChannels = iGetInt_SYS("OPENGBN","CHANNELS");
+      
+      if ( (iLines <= 0) || (iLines == iDUMMY) )
+         iLines = 500;
+        
+      if ( (iChannels <= 0) || (iChannels == iDUMMY) )
+         iChannels = 128;
+      
+      iBlobs = iLines+iChannels+100;
+      iErase = (int)(  ((real)(iLines*iChannels)) *0.05 );
+      if (iErase < 100)   iErase = 100;
+      if (iErase > 10000) iErase = 10000;
+
+
+      // --- Create Database ---
+      
+      CreateComp_DB(sDB,
+                    iLines,
+                    iChannels,
+                    iBlobs,
+                    10,
+                    iErase,
+                    "SUPER",
+                    "",
+                    1024,
+                    DB_COMP_SIZE);
+
+
+      // --- Load Database ---
+                    
+      eDB = Load_EDB(sDB);
+      hDB = Lock_EDB(eDB);
+      
+
+      // --- load data ---             
+     
+      Progress_SYS(1);
+      ProgName_SYS(_("Loading GBN"),1);
+      ImportGBN_DU(hDB,sGBN);
+      Progress_SYS(0);
+      
+      UnLock_EDB(eDB);
+      DelLine0_EDB(eDB);
+      LoadAllChans_EDB(eDB);
+      iRunGX_SYS("chanpoff.gx");
+      
+   } else if (iStrcmp_STR(sExt,"GDB",STR_CASE_TOLERANT)==0) {
+   
+      // --- its a GDB, just open the database ---
+      
+      Load_EDB(sGBN);
+   
+   } else
+      Abort_SYS(_("Must be an GBN or GDB file."));
+      
+}

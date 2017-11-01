@@ -1,0 +1,253 @@
+//===========================================================================
+
+NAME          = "Create a smooth (B-splined) level correction channel."
+#include <version.gxh>
+
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/LevTieLine/Careful Levelling"
+
+DESCRIPTION   = "
+
+   LVTSPLN.ERROR     - Leveling error (difference) channel
+          .OUT       - Ouput correction channel
+          .MAX       - maximum error to consider.
+          .SMOOTH    - smoothness between 0 and 1.0.
+          .TENSION   - tension between 0 and 1.0.
+          .TYPE      - process \"LINE\", \"TIE\" or \"SELECTED\" lines.
+"
+
+//===========================================================================
+
+RESOURCE = "lvtspln.gr"
+#include "lvtspln.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;             
+string(STR_DB_SYMBOL) sOutCh;            
+string(STR_DEFAULT) sType;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh;              // Channel handle
+DB_SYMB    OutCh;             // Channel handle
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        iLines;            // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+real       rMax;              // Maximum
+real       rRou;              // Roughness (Rou > 0.0)
+real       rTau;              // Tension (0.<= Tau <=1.)
+
+DB_SELECT  Select;
+EXP        Exp;
+
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("LVTSPLN");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_LVTSPLN_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_LVTSPLN_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_LVTSPLN_0,DGW_TEXT,"LVTSPLN","ERROR");     
+      SetInfoSYS_DGW(Diag,_LVTSPLN_1,DGW_TEXT,"LVTSPLN","OUT");     
+      SetInfoSYS_DGW(Diag,_LVTSPLN_2,DGW_TEXT,"LVTSPLN","MAX");     
+      SetInfoSYS_DGW(Diag,_LVTSPLN_3,DGW_TEXT,"LVTSPLN","SMOOTH");     
+      SetInfoSYS_DGW(Diag,_LVTSPLN_4,DGW_TEXT,"LVTSPLN","TENSION");     
+      SetInfoSYS_DGW(Diag,_LVTSPLN_5,DGW_TEXT,"LVTSPLN","TYPE");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();  
+
+
+      // --- Get the Strings ---
+
+
+      GetInfoSYS_DGW(Diag,_LVTSPLN_0,DGW_TEXT,"LVTSPLN","ERROR");     
+      GetInfoSYS_DGW(Diag,_LVTSPLN_1,DGW_TEXT,"LVTSPLN","OUT");     
+      GetInfoSYS_DGW(Diag,_LVTSPLN_2,DGW_TEXT,"LVTSPLN","MAX");     
+      GetInfoSYS_DGW(Diag,_LVTSPLN_3,DGW_TEXT,"LVTSPLN","SMOOTH");     
+      GetInfoSYS_DGW(Diag,_LVTSPLN_4,DGW_TEXT,"LVTSPLN","TENSION");     
+      GetInfoSYS_DGW(Diag,_LVTSPLN_5,DGW_TEXT,"LVTSPLN","TYPE");
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("LVTSPLN","ERROR",sInCh);
+   GetString_SYS("LVTSPLN","OUT",sOutCh);
+   SetString_SYS("LVCORR","CORR",sOutCh);
+
+   if (iExistReal_SYS("LVTSPLN","MAX"))
+      rMax = rGetReal_SYS("LVSPLN","MAX");
+   else
+      rMax = rDUMMY;
+
+   rRou = rGetReal_SYS("LVTSPLN","SMOOTH");
+   rTau = rGetReal_SYS("LVTSPLN","TENSION");
+
+   if (iStrcmp_STR(sOutCh,sInCh,0) == 0)
+      Abort_SYS(_("All channels must be different."));
+
+
+   // --- calculate roughness from smoothness ---
+
+   if (rRou < 0.0001)
+      rRou = 1.0;
+   else
+      rRou = rPow_MATH(10.0,-(rRou*10.0));
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))  
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+
+
+   // --- Does the Output Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))  
+      DupSymbNoLock_DB(Data,InCh,sOutCh);
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+   
+      
+   // --- set up clipping expression ---
+
+   if (rMax != rDUMMY)
+      Exp = Create_EXP(Data,_n("$sOutCh = CLIP($sOutCh,-$rMax,$rMax);"),128);
+
+
+   // --- work out the selection ---
+
+   GetString_SYS("LVTSPLN","TYPE",sType);
+   SetString_SYS("LVCORR","TYPE",sType);
+
+   ToUpper_STR(sType);
+   if (iCharComp_STR(sType,"S")==0) {
+
+      Select = GetSelect_DB(Data);
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+
+      if (iCharComp_STR(sType,"L")) 
+         Select_DB(Data,"L",DB_LINE_SELECT_INCLUDE);
+      else if (iCharComp_STR(sType,"T"))
+         Select_DB(Data,"T",DB_LINE_SELECT_INCLUDE);
+      else
+         Abort_SYS(_("TYPE must be \"Line\", \"Tie\" or \"Selected\""));
+   }
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line)) {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sTemp,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Copy differences ---
+
+      Decimate_DU(Data,Line,InCh,OutCh,1);
+
+
+      // --- clip to maximum ---
+
+      if (rMax != rDUMMY)
+         Math_DU(Data,Line,Exp);
+
+
+      // --- Calculate the error trend ---
+
+      BSpline_DU(Data,Line,OutCh,OutCh,1.0,rRou,rTau);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("B-splined level correction"),"LVTSPLN;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

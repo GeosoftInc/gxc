@@ -1,0 +1,125 @@
+//===========================================================================
+NAME          = "Duplicate copy of current map"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   DUPMAP.MAP       New map name
+         .CONTENTS  0 - Blank 
+                    1 - Copy current contents
+                    2 - Duplicate for versions prior to montaj 6.2
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+// Revision History
+// 6.2.0: Added ability to send for versions prior to 6.2. to solve some Unicode compatibility issues
+// 7.0.0: Remove option in GUI to save as pre 6.2 version
+
+//===========================================================================
+
+RESOURCE = "dupmap.gr"
+#include "dupmap.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+string(STR_FILE)  sMap,sNewMap;
+string(STR_DEFAULT_LONG) sContents;
+
+EMAP  EMap;
+MAP   Map,NewMap;
+DGW   Diag;
+LST   List;
+
+int   i,iContents;
+
+
+//===========================================================================
+
+{
+   // --- gotta have a map ---
+   
+   if (!iHaveCurrent_EMAP()) Cancel_SYS();
+   
+   // --- get the current map ---
+
+   EMap = Current_EMAP();
+   GetName_EMAP(EMap,sMap);
+
+   // --- Are we running interactively ?
+
+   if (iInteractive_SYS()) {
+
+		// --- We grandfathered this in the GUI but still support it in scripting mode ---
+
+	   GetString_SYS("DUPMAP","CONTENTS",sContents);
+   	if(iStrcmp_STR(sContents,_n("Duplicate for versions prior to montaj 6.2"),0) == 0) 
+			SetString_SYS("DUPMAP","CONTENTS",_n("Copy current contents"));
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DUPMAP");
+      
+      List = GetList_DGW(Diag,_DUPMAP_1);
+      Sort_LST(List,0,0);
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_DUPMAP_0,DGW_FILEPATH,"DUPMAP","MAP");     
+      SetInfoSYS_DGW(Diag,_DUPMAP_1,DGW_LISTALIAS,"DUPMAP","CONTENTS");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_DUPMAP_0,DGW_FILEPATH,"DUPMAP","MAP");     
+      GetInfoSYS_DGW(Diag,_DUPMAP_1,DGW_LISTALIAS,"DUPMAP","CONTENTS");     
+   }
+
+   // --- get the current map ---
+
+   Map = Lock_EMAP(EMap);
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   GetFileName_MAP(Map,sMap);
+
+
+   iContents = 0;
+   GetString_SYS("DUPMAP","MAP",sNewMap);
+   GetString_SYS("DUPMAP","CONTENTS",sContents);
+   if(iStrcmp_STR(sContents,_n("Copy current contents"),0) == 0 || iStrcmp_STR(sContents,_n("1"),0) == 0) 
+      iContents = 1;
+   else if(iStrcmp_STR(sContents,_n("Duplicate for versions prior to montaj 6.2"),0) == 0 || iStrcmp_STR(sContents,_n("2"),0) == 0) 
+      iContents = 2;
+
+   if(iStrcmp_STR(sMap,sNewMap,0) == 0) 
+      Abort_SYS(_("The source and destination maps' name must not be the same."));
+
+
+   // --- open the map ---
+
+   NewMap = Create_MAP(sNewMap,MAP_WRITENEW);
+   
+
+   // --- dup the map ---
+   
+   DupMap_MAP(Map,NewMap,iContents);
+   
+   
+   // --- done ---
+
+   UnLock_EMAP(EMap);
+   Destroy_MAP(NewMap);
+
+   if (iInteractive_SYS())
+      Load_EMAP(sNewMap);
+   
+}

@@ -1,0 +1,425 @@
+//===========================================================================
+NAME          = "Find edge points of a grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+
+    Scan a grid file for edge points and save the X, Y coordinates
+    in a *.ply file.
+
+    GRID2PLY.GRID       Grid file
+            .ACTION     \"Draw\" to draw to current map
+                        \"Save\" to save to a file
+            .EDGERES    Thinning edge resolution (cells) - output to file
+            .EDGERESMAP Thinning edge resolution (mm) - output to map
+                        
+            .PLY        Output .ply file name
+            .MODE       Save results in a new file or append to an existing file
+            
+            .STYLE      line style
+            .PITCH      line style
+            .THICK      line thickness
+            .LCOLOR     line colour
+            .FCOLOR     fill colour
+            
+"
+
+//===========================================================================
+// Revision History
+//
+// 7.1.0    SJC   Give info message if grid edge does not fall within the bounds of the current map.
+//          SJC   Split edge resolution to two screen and file dialogs.
+// 6.3.0    SJC   Clear PLY before calling GridPLY_IMU because PLY was being set twice (QA 8160).
+// 6.2.0    SJC   Fixed grid access when updating grid boundary.
+// 6.1.0    INM   Added back the updating of the grid boundary
+// 5.1.7    SJC   Using new GridEdgePLY_IMU function - old GridPLY_IMU altered the grids META.
+// 5.1.5    SJC   Append mode was not implemented.
+// 5.1.3    TFD   Changed thinning res. from 0.5*rEdgeRes*rDX to rEdgeRes*rDX when thin edge.
+//                Changed thinning res. from 0.5*rScale to 0.2*rScale when draw on current map.
+// 5.1.3    INM   Added polygon clipping when drawing the outline.
+//                Added grid metadata to the polygon on the map.
+//
+//===========================================================================
+
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "GRID2PLY.gr"
+#include "GRID2PLY.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         hDGW;          
+LPT         hLPT;
+LST         hLST;
+EMAP        eMAP;
+MAP         hMAP;
+MVIEW       View;
+PLY         hPLY, hPLY2;
+IMG         hIMG;
+IPJ         hIPJ;
+IPJ         hUserIPJ;
+META        hMETA;
+VV          VVx,VVy;
+
+string(STR_FILE)    sGrid,sGridName; 
+string(STR_FILE)    sPLY;
+string(STR_FILE)    sTemp;
+string(STR_DEFAULT) sGrpName,sLineColor,sFillColor,sAction;
+
+real  rThick,rPitch,rScale;
+real  rDX,rDY,rX0,rY0,rRot,rEdgeRes;
+real  rMinX,rMinY,rMaxX,rMaxY;
+
+int   i,iN,iExc;
+int   iMode,iStyle;
+int   iMinPoints;
+int   iOrient;
+
+//===========================================================================
+//                                  CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      i = 0;
+      while (i != 3) switch (i) {
+         
+         case 0:
+            
+            hDGW = Create_DGW("GRID2PLY0");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY0_0,DGW_FILEPATH,"GRID2PLY","GRID");    
+            SetInfoSYS_DGW(hDGW,_GRID2PLY0_1,DGW_LISTALIAS,"GRID2PLY","ACTION");    
+            SetInfoSYS_DGW(hDGW,_GRID2PLY0_2,DGW_TEXT,"GRID2PLY","MINPOINTS");    
+            
+            i = iRunDialogue_DGW(hDGW);
+            if (i == -1) Cancel_SYS();  
+            
+            GetInfoSYS_DGW(hDGW,_GRID2PLY0_0,DGW_FILEPATH,"GRID2PLY","GRID");    
+            GetInfoSYS_DGW(hDGW,_GRID2PLY0_1,DGW_LISTALIAS,"GRID2PLY","ACTION");    
+            GetInfoSYS_DGW(hDGW,_GRID2PLY0_2,DGW_TEXT,"GRID2PLY","MINPOINTS");    
+            Destroy_DGW(hDGW);
+            
+            GetString_SYS("GRID2PLY","ACTION",sTemp);
+            if (iCharComp_STR(sTemp,"D"))
+               i = 2;
+            else
+               i = 1;
+            
+            break;
+            
+         case 1:
+
+            hDGW = Create_DGW("GRID2PLY1");
+            
+            SetInfoSYS_DGW(hDGW,_GRID2PLY1_0,DGW_FILEPATH,"GRID2PLY","PLY");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY1_1,DGW_LISTALIAS,"GRID2PLY","MODE");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY1_2,DGW_TEXT,"GRID2PLY","EDGERES");    
+            
+            i = iRunDialogue_DGW(hDGW);
+            if (i ==-1) Cancel_SYS();
+
+            GetInfoSYS_DGW(hDGW,_GRID2PLY1_0,DGW_FILEPATH,"GRID2PLY","PLY");
+            GetInfoSYS_DGW(hDGW,_GRID2PLY1_1,DGW_LISTALIAS,"GRID2PLY","MODE");
+            GetInfoSYS_DGW(hDGW,_GRID2PLY1_2,DGW_TEXT,"GRID2PLY","EDGERES");    
+            
+            Destroy_DGW(hDGW);
+            
+            break;
+            
+         case 2:
+
+            hDGW = Create_DGW("GRID2PLY2");
+            
+            
+            // --- get line pattern list ---
+            
+            eMAP = Current_EMAP();
+            hMAP = Lock_EMAP(eMAP);
+            hLPT = GetLPT_MAP(hMAP);
+            hLST = GetList_DGW(hDGW,_GRID2PLY2_3);
+            GetLST_LPT(hLPT,hLST);
+            UnLock_EMAP(eMAP);
+
+            SetInfoSYS_DGW(hDGW,_GRID2PLY2_0,DGW_TEXT,"GRID2PLY","LCOLOR");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY2_1,DGW_TEXT,"GRID2PLY","FCOLOR");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY2_2,DGW_TEXT,"GRID2PLY","THICK");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY2_3,DGW_LISTALIAS,"GRID2PLY","STYLE");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY2_4,DGW_TEXT,"GRID2PLY","PITCH");
+            SetInfoSYS_DGW(hDGW,_GRID2PLY2_5,DGW_TEXT,"GRID2PLY","EDGERESMAP");    
+            
+            i = iRunDialogue_DGW(hDGW);
+            if (i ==-1) Cancel_SYS();
+
+            GetInfoSYS_DGW(hDGW,_GRID2PLY2_0,DGW_TEXT,"GRID2PLY","LCOLOR");
+            GetInfoSYS_DGW(hDGW,_GRID2PLY2_1,DGW_TEXT,"GRID2PLY","FCOLOR");
+            GetInfoSYS_DGW(hDGW,_GRID2PLY2_2,DGW_TEXT,"GRID2PLY","THICK");
+            GetInfoSYS_DGW(hDGW,_GRID2PLY2_3,DGW_LISTALIAS,"GRID2PLY","STYLE");
+            GetInfoSYS_DGW(hDGW,_GRID2PLY2_4,DGW_TEXT,"GRID2PLY","PITCH");
+            GetInfoSYS_DGW(hDGW,_GRID2PLY2_5,DGW_TEXT,"GRID2PLY","EDGERESMAP");    
+            
+            Destroy_DGW(hDGW);
+            
+            break;
+            
+         default:
+         
+            DisplayMessage_SYS(_("Lost"),_("I'm lost..."));
+            i = 0;
+            
+      }
+      
+   }
+   
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("GRID2PLY","GRID",sGrid);
+   if (iFileExist_SYS(sGrid) == 0)   
+      Abort_SYS(_("The specified grid file does not exist."));
+        
+
+   // --- Min Points ---        
+       
+   if (iExistInt_SYS("GRID2PLY","MINPOINTS")) 
+      iMinPoints = iGetInt_SYS("GRID2PLY","MINPOINTS");  
+   else
+      iMinPoints = 0;
+
+   // --- get the action ---
+         
+   GetString_SYS("GRID2PLY","ACTION",sAction);
+
+   // --- get edge ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Get grid edge points"),1);
+
+   hIMG = CreateFile_IMG(GS_TYPE_DEFAULT,sGrid,IMG_FILE_READORWRITE);
+   SetGridUnchanged_IMG(hIMG);
+
+   hPLY = Create_PLY();   
+   GridEdgePLY_IMU(hIMG,hPLY,iMinPoints);
+   
+	// --- Get grid cell size for thinning ---
+	
+   GetInfo_IMG(hIMG,rDX,rDY,rX0,rY0,rRot);
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_IMG(hIMG,hIPJ);
+   if (!iHasProjection_IPJ(hIPJ) || iCharComp_STR(sAction,"S") )
+   {
+      // --- Rotate polygon ---
+      Rotate_PLY(hPLY, rX0, rY0, rRot);
+   }
+   Destroy_SYS(hIPJ);
+
+   // --- put the polygon in the grid header ---
+   
+   UpdatePLY_IMU(hIMG,hPLY);
+   
+   Clear_PLY(hPLY);
+   GridPLY_IMU(hIMG,hPLY,0);
+   Destroy_IMG(hIMG);
+   
+
+   ProgUpdate_SYS(100);
+   Progress_SYS(0);
+   
+
+   // --- get the action ---
+         
+   GetString_SYS("GRID2PLY","ACTION",sAction);
+   if (iCharComp_STR(sAction,"D")) 
+   {
+   
+      // --- draw on current map ---
+
+      GetString_SYS("GRID2PLY","LCOLOR",sLineColor);
+      GetString_SYS("GRID2PLY","FCOLOR",sFillColor);
+      rThick = rGetReal_SYS("GRID2PLY","THICK");
+      iStyle = iGetInt_SYS("GRID2PLY","STYLE");
+      rPitch = rGetReal_SYS("GRID2PLY","PITCH");
+      rEdgeRes = rGetReal_SYS("GRID2PLY","EDGERESMAP");
+      if(rEdgeRes == rDUMMY)
+			rEdgeRes = 0.2;
+      
+
+       // --- get map and view ---
+
+      eMAP = Current_EMAP();
+      hMAP = Lock_EMAP(eMAP);
+      View = Create_MVIEW(hMAP,"*Data",MVIEW_WRITEOLD);
+      rScale = rScaleMM_MVIEW(View);
+      
+
+      // --- get the view extent, thin and clip the PLY ---
+      
+      Extent_MVIEW(View,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_VIEW,rMinX,rMinY,rMaxX,rMaxY);
+      
+      Progress_SYS(1);
+      ProgName_SYS(_("Thinning polygon"),0);
+      
+      hIPJ = Create_IPJ();
+      GetIPJ_MVIEW(View,hIPJ);
+
+      hUserIPJ = Create_IPJ();
+      GetUserIPJ_MVIEW(View,hUserIPJ);
+   
+
+      // --- If this is an oriented section, you must use the native view
+      //     projection, otherwise, one dimension ("Z") is lost because only the
+      //     true "X" and "Y" values are recovered from UserIPJ. This means the
+      //     PLY would collapse to a line.  In a section view, the native view
+      //     "X" coordinate corresponds to either Easting (for azimuth = 90), or
+      //     northing (for azimuth = 0), or begins at 0 on the left side. ---
+
+      iOrient = iGetOrientation_IPJ(hIPJ);
+      if(iOrient == IPJ_ORIENT_SECTION) 
+      {
+          ClearOrientation_IPJ(hIPJ);
+          Copy_IPJ(hIPJ, hUserIPJ);
+      }
+
+   
+      // --- If there is no projection in the polygon, assume it
+      //     is the same as the User Projection, otherwise
+      //     transform it to the User Projection ---
+   
+      if(iSourceType_IPJ(hIPJ)==IPJ_TYPE_NONE)
+          SetIPJ_PLY(hPLY,hUserIPJ);
+      else
+          ChangeIPJ_PLY(hPLY,hUserIPJ);
+   
+      // --- set the working projection ---
+   
+      SetWorkingIPJ_MVIEW(View,hUserIPJ);
+   
+
+      Thin_PLY(hPLY,rScaleMM_MVIEW(View)*rEdgeRes);
+      
+      ProgUpdate_SYS(100);
+      
+      ProgName_SYS(_("Clipping polygon"),0);
+      if (iClipArea_PLY(hPLY,rMinX,rMinY,rMaxX,rMaxY)) {
+         
+
+          // --- create a group ---
+
+         FileNamePart_STR(sGrid,sGridName,STR_FILE_PART_NAME);
+         GenGroupName_STR("EDGE",sGridName,"",sGrpName);
+         StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+      
+
+         // --- put the grid meta in the group ---
+
+         hIMG = CreateFile_IMG(GS_TYPE_DEFAULT,sGrid,IMG_FILE_READORWRITE);
+         hMETA = Create_META();
+         GetMETA_IMG(hIMG,hMETA);
+         Meta_MVIEW(View,hMETA,"Grid Properties");
+         Destroy_META(hMETA);
+         Destroy_IMG(hIMG);
+         
+         
+         
+          // --- set drawing attributes ---
+
+         LineStyle_MVIEW(View,iStyle,rPitch*rScale);
+         LineThick_MVIEW(View,rThick*rScale);
+         LineColor_MVIEW(View,iColor_MVIEW(sLineColor));
+         FillColor_MVIEW(View,iColor_MVIEW(sFillColor));
+      
+      
+           // --- draw polygon ---
+
+         PolygonPLY_MVIEW(View,hPLY);
+      
+
+         // --- Add maker object ---
+
+         EasyMaker_MVIEW(View,_("Grid edge..."),"GRID2PLY;");
+         
+      }
+      else
+      {
+			DisplayMessage_SYS(_("Draw grid edge on the map"), _("The grid edge does not fall within the bounds of the current map."));
+		}
+      
+
+      ProgUpdate_SYS(100);
+      Progress_SYS(0);
+      
+      Destroy_SYS(View);
+      UnLock_EMAP(eMAP);
+      Destroy_SYS(hIPJ);
+      Destroy_SYS(hUserIPJ);
+      Destroy_SYS(hPLY);
+      
+   
+   } else {
+
+
+		// --- Get edge resolution for thinning ---
+		
+      rEdgeRes = rGetReal_SYS("GRID2PLY","EDGERES");  
+      if(rEdgeRes == rDUMMY)
+			rEdgeRes = 1.0;
+
+   
+      // --- save to a polygon file ---
+
+      GetString_SYS("GRID2PLY","PLY",sPLY);
+
+
+      // --- Append to existing file ---
+
+      iMode = iGetInt_SYS("GRID2PLY","MODE");
+      if(iMode==1 && iFileExist_SYS(sPLY)) {
+
+         hPLY2 = Create_PLY();
+         VVx = Create_VV(REAL, 0);
+         VVy = Create_VV(REAL, 0);
+
+         LoadTable_PLY(hPLY2, sPLY);
+
+         // --- Add the new polygons to the existing polygon ---
+         
+         iN = iNumPoly_PLY(hPLY);
+         for(i=0;i<iN;i++) {
+
+            GetPolygonEx_PLY(hPLY, VVx, VVy, i, iExc);
+            AddPolygonEx_PLY(hPLY2, VVx, VVy, iExc);
+         }
+   
+	      if (rEdgeRes > 1.0)
+		      Thin_PLY(hPLY2, rEdgeRes*rDX);
+   
+         SaveTable_PLY(hPLY2,sPLY);
+         
+      }
+      else
+      {
+	      if (rEdgeRes > 1.0)
+		      Thin_PLY(hPLY, rEdgeRes*rDX);
+
+         SaveTable_PLY(hPLY,sPLY);
+      }
+   }
+         
+}

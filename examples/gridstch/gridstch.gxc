@@ -1,0 +1,429 @@
+//===========================================================================
+NAME          = "Grid Stitching"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+      GRIDSTCH.IFILE1       Input grid #1
+      GRIDSTCH.IFILE2       Input grid #2
+      GRIDSTCH.IFILEX       Input grid ... etc to 10.
+      GRIDSTCH.OFILE        Output grid
+      GRIDSTCH.METHOD       Stitching Method
+      GRIDSTCH.TRMETHOD     Detrending Method
+      GRIDSTCH.CELLSIZE     Output grid cell size
+      GRIDSTCH.TRORDER1     Grid #1 Trend Removal: Order
+      GRIDSTCH.TRORDER2     Grid #2 Trend Removal: Order
+      GRIDSTCH.TRCALC       Trend Removal: Points to Use
+      GRIDSTCH.MASK_OUTPUT  Output grid size: 0: combined, 1: grid 1, 2: grid 2
+
+      GRIDSTCH.REGIONAL     Regional grid to remove trend against
+      GRIDSTCH.REGTREND     Maximum trend for regional detrending
+      GRIDSTCH.REGERROR     Error tolerance for regional detrending        
+      GRIDSTCH.REGTRCALC    Trend Removal: Points to Use
+      GRIDSTCH.REGREMOVE    Remove regional from finished grid?
+
+      GRIDSTCH.GAP          Maximum gap to interpolate across
+      GRIDSTCH.SPLINE       Interpolation method to use
+      GRIDSTCH.PATH         Suture Path Selection
+      GRIDSTCH.WEIGHTING    Correction weighting
+      GRIDSTCH.WIDTH        Maximum width for corrections
+
+      GRIDSTCH.PATHPLY      Name of interactive path PLY file.
+"
+//===========================================================================
+// Revision History
+// v6.3.0 Added output masking option.
+// v6.2.0 Added new suture option.
+// v6.0.0 Added output grid to project explorer.
+// v5.1.4 Option for output cell size added.
+//        Next 3 trend orders added.
+//        Remove trend against regional grid.
+//        Trend using "Overlapping edges"
+//        Using control file
+//===========================================================================
+
+RESOURCE = "gridstch.gr"
+#include "gridstch.grh"
+#include <all.gxh>
+
+//===========================================================================
+// dialogs
+//===========================================================================
+
+#define GS_START     0
+#define GS_TREND     1
+#define GS_TRENDREG  2
+#define GS_INTERP    3
+#define GS_SUTURE    4
+#define GS_MAIN      5
+#define GS_MAIN2     6
+
+#define GS_FINISH    99
+#define GS_DONE      999
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+PLY			Poly;					// polygon object
+VV          VVx, VVy;         // Polygon positions
+EMAP        EMap;
+
+string(STR_FILE) sCtl, sPath; 
+string(STR_DEFAULT_LONG) sMsg;
+
+int i, iD, iLen, iMethod, iPLY;
+int iPath, iTrMethod, iMulti, iGS_MAIN;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+
+   // --- Use multiple grids? ---
+
+   iMulti = iGetInt_SYS("GRIDSTCH", "MULTI");
+   if(iMulti!=1) iMulti = 0;
+   SetInt_SYS("GRIDSTCH", "MULTI", 0);    // reset every time.
+
+   iGS_MAIN = GS_MAIN;
+   if(iMulti)
+      iGS_MAIN = GS_MAIN2;
+   
+
+   if (iInteractive_SYS()) {
+
+      i  = iGS_MAIN;
+      while (i != GS_DONE) {
+      
+         switch (i) {
+         
+            case GS_MAIN:
+            
+            
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("GSMAIN");
+               SetInfoSYS_DGW(Diag,_GSMAIN_0,DGW_FILEPATH,"GRIDSTCH","IFILE1");     
+               SetInfoSYS_DGW(Diag,_GSMAIN_1,DGW_FILEPATH,"GRIDSTCH","IFILE2");     
+               SetInfoSYS_DGW(Diag,_GSMAIN_2,DGW_FILEPATH,"GRIDSTCH","OFILE");     
+               SetInfoSYS_DGW(Diag,_GSMAIN_3,DGW_LISTALIAS,"GRIDSTCH","METHOD");
+               SetInfoSYS_DGW(Diag,_GSMAIN_4,DGW_LISTALIAS,"GRIDSTCH","TRMETHOD");
+               SetInfoSYS_DGW(Diag,_GSMAIN_5,DGW_TEXT,"GRIDSTCH","CELLSIZE");
+               SetInfoSYS_DGW(Diag,_GSMAIN_6,DGW_LISTALIAS,"GRIDSTCH","MASK_OUTPUT");
+               
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+               
+               GetInfoSYS_DGW(Diag,_GSMAIN_0,DGW_FILEPATH,"GRIDSTCH","IFILE1");     
+               GetInfoSYS_DGW(Diag,_GSMAIN_1,DGW_FILEPATH,"GRIDSTCH","IFILE2");     
+               GetInfoSYS_DGW(Diag,_GSMAIN_2,DGW_FILEPATH,"GRIDSTCH","OFILE");     
+               GetInfoSYS_DGW(Diag,_GSMAIN_3,DGW_LISTALIAS,"GRIDSTCH","METHOD");
+               GetInfoSYS_DGW(Diag,_GSMAIN_4,DGW_LISTALIAS,"GRIDSTCH","TRMETHOD");
+               GetInfoSYS_DGW(Diag,_GSMAIN_5,DGW_TEXT,"GRIDSTCH","CELLSIZE");
+               GetInfoSYS_DGW(Diag,_GSMAIN_6,DGW_LISTALIAS,"GRIDSTCH","MASK_OUTPUT");
+    
+               Destroy_DGW(Diag);
+
+               iMethod = iGetInt_SYS("GRIDSTCH","METHOD");
+               iTrMethod = iGetInt_SYS("GRIDSTCH","TRMETHOD");
+               
+               // --- what to do next ---
+               
+               if (iD == 0) {i = GS_DONE; break;}
+               
+               if(iTrMethod == 0)
+                  i = GS_INTERP;
+               else if(iTrMethod == 2)
+                  i = GS_TRENDREG;
+               else
+                  i = GS_TREND;
+               
+               break;
+               
+            case GS_MAIN2:
+            
+            
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("GSMAIN2");
+               SetInfoSYS_DGW(Diag,_GSMAIN2_0,DGW_FILEPATH,"GRIDSTCH","IFILE1");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_1,DGW_FILEPATH,"GRIDSTCH","IFILE2");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_2,DGW_FILEPATH,"GRIDSTCH","IFILE3");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_3,DGW_FILEPATH,"GRIDSTCH","IFILE4");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_4,DGW_FILEPATH,"GRIDSTCH","IFILE5");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_5,DGW_FILEPATH,"GRIDSTCH","IFILE6");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_6,DGW_FILEPATH,"GRIDSTCH","IFILE7");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_7,DGW_FILEPATH,"GRIDSTCH","IFILE8");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_8,DGW_FILEPATH,"GRIDSTCH","IFILE9");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_9,DGW_FILEPATH,"GRIDSTCH","IFILE10");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_10,DGW_FILEPATH,"GRIDSTCH","OFILE");     
+               SetInfoSYS_DGW(Diag,_GSMAIN2_11,DGW_LISTALIAS,"GRIDSTCH","METHOD");
+               SetInfoSYS_DGW(Diag,_GSMAIN2_12,DGW_LISTALIAS,"GRIDSTCH","TRMETHOD");
+               SetInfoSYS_DGW(Diag,_GSMAIN2_13,DGW_TEXT,"GRIDSTCH","CELLSIZE");
+               
+               iD = iRunDialogue_DGW(Diag);
+               if (iD == -1) Cancel_SYS();
+               
+               GetInfoSYS_DGW(Diag,_GSMAIN2_0,DGW_FILEPATH,"GRIDSTCH","IFILE1");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_1,DGW_FILEPATH,"GRIDSTCH","IFILE2");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_2,DGW_FILEPATH,"GRIDSTCH","IFILE3");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_3,DGW_FILEPATH,"GRIDSTCH","IFILE4");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_4,DGW_FILEPATH,"GRIDSTCH","IFILE5");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_5,DGW_FILEPATH,"GRIDSTCH","IFILE6");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_6,DGW_FILEPATH,"GRIDSTCH","IFILE7");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_7,DGW_FILEPATH,"GRIDSTCH","IFILE8");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_8,DGW_FILEPATH,"GRIDSTCH","IFILE9");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_9,DGW_FILEPATH,"GRIDSTCH","IFILE10");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_10,DGW_FILEPATH,"GRIDSTCH","OFILE");     
+               GetInfoSYS_DGW(Diag,_GSMAIN2_11,DGW_LISTALIAS,"GRIDSTCH","METHOD");
+               GetInfoSYS_DGW(Diag,_GSMAIN2_12,DGW_LISTALIAS,"GRIDSTCH","TRMETHOD");
+               GetInfoSYS_DGW(Diag,_GSMAIN2_13,DGW_TEXT,"GRIDSTCH","CELLSIZE");
+    
+               Destroy_DGW(Diag);
+
+               iMethod = iGetInt_SYS("GRIDSTCH","METHOD");
+               iTrMethod = iGetInt_SYS("GRIDSTCH","TRMETHOD");
+               
+               // --- what to do next ---
+               
+               if (iD == 0) {i = GS_DONE; break;}
+               
+               if(iTrMethod == 0)
+                  i = GS_INTERP;
+               else if(iTrMethod == 2)
+                  i = GS_TRENDREG;
+               else
+                  i = GS_TREND;
+               
+               break;
+               
+
+            case GS_TREND:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("GSTREND");
+               SetInfoSYS_DGW(Diag,_GSTREND_0,DGW_LISTALIAS,"GRIDSTCH","TRORDER1");
+               SetInfoSYS_DGW(Diag,_GSTREND_1,DGW_LISTALIAS,"GRIDSTCH","TRORDER2");
+               SetInfoSYS_DGW(Diag,_GSTREND_2,DGW_LISTALIAS,"GRIDSTCH","TRCALC");
+               iD = iRunDialogue_DGW(Diag);
+               if(iD!=-1) {
+                  GetInfoSYS_DGW(Diag,_GSTREND_0,DGW_LISTALIAS,"GRIDSTCH","TRORDER1");
+                  GetInfoSYS_DGW(Diag,_GSTREND_1,DGW_LISTALIAS,"GRIDSTCH","TRORDER2");
+                  GetInfoSYS_DGW(Diag,_GSTREND_2,DGW_LISTALIAS,"GRIDSTCH","TRCALC");
+               }
+
+               Destroy_DGW(Diag);
+
+               if (iD == -1) i = iGS_MAIN;
+               if (iD == 0) i = iGS_MAIN;
+               if (iD == 1) i = GS_INTERP;
+               if (iD == GS_FINISH) i = iGS_MAIN;
+               break;
+
+            case GS_TRENDREG:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("GSTRENDR");
+               SetInfoSYS_DGW(Diag,_GSTRENDR_0,DGW_FILEPATH, "GRIDSTCH","REGIONAL");
+               SetInfoSYS_DGW(Diag,_GSTRENDR_1,DGW_LISTALIAS,"GRIDSTCH","REGTRCALC");
+               SetInfoSYS_DGW(Diag,_GSTRENDR_2,DGW_LISTALIAS,"GRIDSTCH","REGTREND");
+               SetInfoSYS_DGW(Diag,_GSTRENDR_3,DGW_TEXT,     "GRIDSTCH","REGERROR");
+               SetInfoSYS_DGW(Diag,_GSTRENDR_4,DGW_LISTALIAS,"GRIDSTCH","REGREMOVE");
+               iD = iRunDialogue_DGW(Diag);
+               if(iD!=-1) {
+                  GetInfoSYS_DGW(Diag,_GSTRENDR_0,DGW_FILEPATH, "GRIDSTCH","REGIONAL");
+                  GetInfoSYS_DGW(Diag,_GSTRENDR_1,DGW_LISTALIAS,"GRIDSTCH","REGTRCALC");
+                  GetInfoSYS_DGW(Diag,_GSTRENDR_2,DGW_LISTALIAS,"GRIDSTCH","REGTREND");
+                  GetInfoSYS_DGW(Diag,_GSTRENDR_3,DGW_TEXT,     "GRIDSTCH","REGERROR");
+                  GetInfoSYS_DGW(Diag,_GSTRENDR_4,DGW_LISTALIAS,"GRIDSTCH","REGREMOVE");
+               }
+
+               Destroy_DGW(Diag);
+
+               if (iD == -1) i = iGS_MAIN;
+               if (iD == 0) i = iGS_MAIN;
+               if (iD == 1) i = GS_INTERP;
+               if (iD == GS_FINISH) i = iGS_MAIN;
+               break;
+
+            case GS_INTERP:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("GSINTERP");
+               SetInfoSYS_DGW(Diag,_GSINTERP_0,DGW_LISTALIAS,"GRIDSTCH","SPLINE");
+               SetInfoSYS_DGW(Diag,_GSINTERP_1,DGW_TEXT,"GRIDSTCH","GAP");     
+               iD = iRunDialogue_DGW(Diag);
+               if(iD!=-1) {
+                  GetInfoSYS_DGW(Diag,_GSINTERP_0,DGW_LISTALIAS,"GRIDSTCH","SPLINE");
+                  GetInfoSYS_DGW(Diag,_GSINTERP_1,DGW_TEXT,"GRIDSTCH","GAP");     
+               }
+
+               Destroy_DGW(Diag);
+
+               if (iD == -1) i = iGS_MAIN;
+               if (iD == 0) {               
+                  if(iTrMethod == 0)
+                     i = iGS_MAIN;
+                  else if(iTrMethod == 2)
+                     i = GS_TRENDREG;
+                  else
+                     i = GS_TREND;
+               }
+               if (iD == 1) i = GS_SUTURE;
+               if (iD == GS_FINISH) i = iGS_MAIN;
+               break;
+
+            case GS_SUTURE:
+
+               if(iMethod==0) {
+                  i = GS_MAIN;
+                  break;
+               }
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("GSSUTURE");
+               SetInfoSYS_DGW(Diag,_GSSUTURE_0,DGW_LISTALIAS,"GRIDSTCH","PATH");
+               SetInfoSYS_DGW(Diag,_GSSUTURE_1,DGW_TEXT,"GRIDSTCH","WEIGHTING");     
+               SetInfoSYS_DGW(Diag,_GSSUTURE_2,DGW_TEXT,"GRIDSTCH","WIDTH");
+               iD = iRunDialogue_DGW(Diag);
+               if(iD!=-1) {
+                  GetInfoSYS_DGW(Diag,_GSSUTURE_0,DGW_LISTALIAS,"GRIDSTCH","PATH");
+                  GetInfoSYS_DGW(Diag,_GSSUTURE_1,DGW_TEXT,"GRIDSTCH","WEIGHTING");     
+                  GetInfoSYS_DGW(Diag,_GSSUTURE_2,DGW_TEXT,"GRIDSTCH","WIDTH");
+               }
+
+               Destroy_DGW(Diag);
+
+               iPath = iGetInt_SYS("GRIDSTCH","PATH");
+               if(iMulti==1 && iPath==1) {
+                  Strcpy_STR(sMsg, _("The interactive suture path cannot be\r\nspecified when stitching multiple grids."));
+                  DisplayMessage_SYS(_("Interactive Suture Path"),  sMsg);
+                  SetInt_SYS("GRIDSTCH","PATH", 0);     // Reset to auto.
+                  break;
+               }
+
+               if (iD == -1) i = iGS_MAIN;
+               if (iD == 0) i = GS_INTERP;
+               if (iD == GS_FINISH) i = iGS_MAIN;
+               break;
+
+
+            default:
+
+               DisplayInt_SYS(_("I'm lost"),i);            
+   
+         }
+      }
+
+   }  // end if(iInteractive_SYS)
+
+
+   // --- Get the interactive path for the Suture method ---
+
+   iMethod = iGetInt_SYS("GRIDSTCH","METHOD");
+   if(iMethod>=1) {  // Suture Method
+
+      iPath = iGetInt_SYS("GRIDSTCH","PATH");
+
+
+      // --- Load the PLY object for user-specified paths ---
+
+      if(iPath==1) {
+
+         i = 0;
+
+         while(i != GS_DONE) {
+		   
+
+            i = GS_DONE;
+                     
+            // --- create polygon ---
+
+     	      Poly = Create_PLY();
+
+            if (!iInteractive_SYS()) {
+               Abort_SYS(_("Cannot do interactive path selection in batch mode."));             
+            }
+
+            // --- create VV's ---
+
+            VVx = Create_VV(REAL,0);
+            VVy = Create_VV(REAL,0);
+
+            // --- get profile points ---
+
+            do {
+               DisplayMessage_SYS(_("Define path"), _("Enter 3 or more points on path, Right button when done, Esc to cancel."));
+
+               EMap = Current_EMAP();
+               iSetCurrentView_EMAP(EMap,"data");
+               iPLY = iGetPolyLine_EMAP(EMap,_("Click on polygon corners, Right button when done..."),VVx,VVy);
+               if(iPLY != 0) Exit_SYS();
+      
+               // --- if not cancelled, and there are 3 or more points, process ---
+
+               iLen = iLength_VV(VVx);
+               if(iLen <3) {
+                  DisplayMessage_SYS(_("Path Definition Error"), _("Interactive path must have at least 3 points"));
+               }
+
+            }  while(iLen < 3);
+            
+            AddPolygonEx_PLY(Poly,VVx,VVy,0);
+
+
+            // --- Serialize the Polygon to a file ---
+
+            Strcpy_STR(sPath, "_gridknitpath.ply");
+            SaveTable_PLY(Poly, sPath);
+            SetString_SYS("GRIDSTCH", "PATHPLY", sPath);
+
+            Destroy_SYS(VVx);
+            Destroy_SYS(VVy);
+            Destroy_SYS(Poly);
+
+         }
+		}
+   }		
+
+   // --- Set up for multiple grid stitching ---
+
+   SetInt_SYS("GRIDSTCH","MULTIPLE", iMulti);
+
+
+   // --- Output the parameters to an INI file ---
+
+   Strcpy_STR(sCtl, "_gridknit.ini"); 
+   SaveParm_SYS(sCtl, 0, "GRIDSTCH");
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Stitching Grids..."),1); 
+
+   GridStitchCtl_IMU(sCtl);
+
+
+   // --- done ---
+   
+   Progress_SYS(0);   
+   
+
+   // --- Add output to the current project ---
+
+   if (iInteractive_SYS()) {
+      GetString_SYS("GRIDSTCH","OFILE",sCtl);
+      iAddDocument_PROJ(sCtl,"Grid",1);
+   }
+   
+}

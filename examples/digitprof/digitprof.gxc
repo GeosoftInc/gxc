@@ -1,0 +1,492 @@
+//===========================================================================
+NAME          = "DIGITPROF GX"
+#include <version.gxh>
+DESCRIPTION   = "
+
+    Use of this GX to digitize targets from a database profile
+    and save results in the current database.
+
+    Use the DIGITPROFOPT GX to set the plotting options for this GX.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Profile"
+
+// Revision History:
+// v7.0.0: Symbol font weight fix-up.
+//         QA 12071: Now takes projects from channel IPJ to view IPJ.
+// v6.4.0: FR QA 977 - Added line channel output.
+// v6.3.1: Fixed QA 9345 - Reverted behaviour back to 6.2 style, with
+//         re-fidding to the currently selected channel.
+// v6.3.0: Fixed QA 6712 - Selected channel data was output instead of 
+//                         channel #1 from the options dialog.
+//         Fixed QA 7071 - Allow string channels as inputs.
+// v6.2.0: Fixed QA 6072 - if current channel has no data give an error message.
+// v5.1.7: Added 3 optional data channels to select values for.
+// v5.1.4: New GX based on UXDIGITPROF
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define GET_CHAN(A,B,C)                                           \
+   if (!iExistSymb_DB(Data,A,DB_SYMB_CHAN))                       \
+      B = CreateSymb_DB(Data,A,DB_SYMB_CHAN, DB_OWN_SHARED, C);   \
+   else                                                           \
+      B = FindSymb_DB(Data,A,DB_SYMB_CHAN);                       \
+   LockSymb_DB(Data,B,DB_LOCK_READWRITE,DB_WAIT_INFINITY);        \
+   AddAssociatedLoad_DB(Data,Targets,B);                          \
+   if (iGetChanProtect_DB(Data,B) == DB_CHAN_PROTECTED)            \
+      SetChanProtect_DB(Data,B,DB_CHAN_UNPROTECTED);              
+
+
+#define EXTRA_CHAN(A)                                                \
+   if(iStrlen_STR(A)) {                                              \
+                                                                     \
+      DCh = FindChan_DB(Data, A);                                   \
+      if(DCh != NULLSYMB) {                                         \
+                                                                     \
+         LockSymb_DB(Data,DCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);  \
+                                                                     \
+         if (iGetChanProtect_DB(Data,DCh) == DB_CHAN_PROTECTED)     \
+            SetChanProtect_DB(Data,DCh,DB_CHAN_UNPROTECTED);        \
+                                                                     \
+         iChType = iGetChanType_DB(Data, DCh);                      \
+         Destroy_VV(DVV);                                            \
+         Destroy_VV(DCVV);                                           \
+         DVV = CreateExt_VV(iChType, 0);                                \
+         DCVV = CreateExt_VV(iChType, 0);                               \
+                                                                     \
+         GetChanVV_DB(Data,CurLine,DCh,DCVV);                       \
+         ReFidVV_VV(ZCVV, XCVV);                                     \
+                                                                     \
+         GetChanVV_DB(Data,Targets,DCh,DVV);                        \
+         ReFidVV_VV(DVV, XVV);                                       \
+                                                                     \
+         if(iChType>=0)                                              \
+            rD = rGetReal_VV(DCVV, iVal);                            \
+         else                                                        \
+            GetString_VV(DCVV, iVal, sVal);                          \
+                                                                     \
+         SetLen_VV(DVV,iLen + 1);                                    \
+                                                                     \
+         if(iChType>=0)                                              \
+            SetReal_VV(DVV, iLen, rD);                               \
+         else                                                        \
+            SetString_VV(DVV, iLen, sVal);                           \
+         PutChanVV_DB(Data,Targets,DCh,DVV);                        \
+                                                                     \
+         UnLockSymb_DB(Data,DCh);                                   \
+      }                                                              \
+   }
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EMAP        EMap;             // Map object
+MAP         Map;              // Map object
+MVIEW       View;
+EDB         EData;
+DB          Data;
+DB_SYMB     XCh,YCh,ZCh,DCh,LCh;
+DB_SYMB     Targets, CurLine;
+VV          XVV,YVV,DVV,LVV;
+VV          XCVV,YCVV,ZCVV,DCVV;
+IPJ         ChanIPJ, ViewIPJ;
+PJ          Proj;
+
+string(STR_DB_SYMBOL) sTargets,sGrpName,sCurChan,sChan,sCurLine;
+string(STR_DB_SYMBOL) sChan2,sChan3,sChan4;
+string(STR_GROUP)      sFont,sGroup;
+string(STR_DEFAULT_LONG) sColourLine,sColourFill,sMsg,sVal;
+
+real        rFidStart,rFidEnd,rFidIncr,rZFidStart,rZFidIncr;
+real        rX, rY, rD;
+int         iLen, iVal, iValid, iExist, iPlotSymb;
+int         iSymb,iWeight,iChType, iLineChType;
+
+real        rSize,rScale;
+
+
+//===========================================================================
+//                           DIGITS CODE
+//===========================================================================
+
+{
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("This GX must be run interactively"));
+
+
+   // --- Get database and current line ---
+
+   EData = Current_EDB();
+
+   ZCh = GetCurChanSymb_EDB(EData);
+   if(ZCh==NULLSYMB)
+      Abort_SYS(_("No channel is currently selected"));
+   GetCurChan_EDB(EData,sCurChan);
+
+   GetCurLine_EDB(EData, sCurLine);
+   CurLine = GetCurLineSymb_EDB(EData);
+
+
+   // --- Get the current mark ---
+
+   if(iGetCurMark_EDB(EData, rFidStart, rFidEnd, rFidIncr))
+      Abort_SYS(_("No data is selected."));
+      
+   if(rFidStart != rFidEnd)
+      Abort_SYS(_("A single value must be selected."));
+
+
+   // --- Verify parameters, and if not valid, run the dialog ---
+
+   iValid = 1;
+   GetString_SYS("DIGITPROF","TARGETS",sTargets);
+   GetString_SYS("DIGITPROF","CHAN",sChan);
+
+   if(!iStrlen_STR(sTargets)) iValid = 0;
+
+   Data = Lock_EDB(EData);
+   if(!iStrlen_STR(sChan) || !iExistChan_DB(Data, sChan)) iValid = 0;
+   UnLock_EDB(EData);
+
+
+   // --- If parameters remain undefined, call the DPROFOPT GX ---
+
+   if (!iValid) {
+
+      if(iRunGX_SYS("digitprofopt.gx") != 0)
+         Cancel_SYS();
+
+   }
+    
+   // --- Get Parameters ---
+
+   GetString_SYS("DIGITPROF","TARGETS",sTargets);
+   GetString_SYS("DIGITPROF","CHAN",sChan);
+   GetString_SYS("DIGITPROF","CHAN2",sChan2);
+   GetString_SYS("DIGITPROF","CHAN3",sChan3);
+   GetString_SYS("DIGITPROF","CHAN4",sChan4);
+
+
+   // --- Get Targets handle ---
+
+   Data = Lock_EDB(EData);
+
+   if (!iExistSymb_DB(Data, sTargets, DB_SYMB_LINE)) {
+
+      Targets = CreateSymb_DB(Data, sTargets, DB_SYMB_LINE, DB_OWN_SHARED, DB_CATEGORY_LINE_GROUP);
+      LockSymb_DB(Data,Targets,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      SetGroupClass_DB(Data,Targets,"TARGETS");
+      UnLockSymb_DB(Data,Targets);
+   }
+   else
+      Targets = FindSymb_DB(Data, sTargets, DB_SYMB_LINE);
+
+
+
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+   LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+	// --- Get the channel projection ---
+	
+	ChanIPJ = Create_IPJ();
+	GetIPJ_DB(Data, XCh, ChanIPJ);
+	
+
+   // --- Get output channel ---
+
+   GET_CHAN(sChan,DCh,DB_CATEGORY_CHAN_DOUBLE)
+   iChType = iGetChanType_DB(Data, DCh);
+
+     
+   // --- Get the line channel ---
+   
+   iLineChType = -20;
+   GET_CHAN(_n("Line"),LCh,iLineChType)
+   
+   
+   // --- Lock the selected channel ---
+
+   LockSymb_DB(Data,ZCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+      
+   // --- Unprotect the X, Y channels, if protected ---
+
+   if (iGetChanProtect_DB(Data,XCh) == DB_CHAN_PROTECTED)
+      SetChanProtect_DB(Data,XCh,DB_CHAN_UNPROTECTED);
+   if (iGetChanProtect_DB(Data,YCh) == DB_CHAN_PROTECTED)
+      SetChanProtect_DB(Data,YCh,DB_CHAN_UNPROTECTED);
+
+      
+   // --- Get the index of the selected channel value ---
+
+   rZFidStart = rGetFidStart_DB(Data, CurLine, ZCh);
+   rZFidIncr = rGetFidIncr_DB(Data, CurLine, ZCh);
+   
+   
+   // --- The index requires the FID start and increment of the Z channel ---
+   
+   if(rZFidStart==rDUMMY) rZFidStart = 0.0;
+   if(rZFidIncr==rDUMMY) rZFidIncr = 1.0;
+   
+   iVal = (int)((rFidStart - rZFidStart) / rZFidIncr);
+      
+
+   // --- Create VVs ---
+   // --- Current line ---
+   LVV = CreateExt_VV(iLineChType,0);
+      
+   XCVV = Create_VV(REAL,0);     // current line data
+   YCVV = Create_VV(REAL,0);
+   ZCVV = Create_VV(REAL,0);     // current channel for selecting purposes
+   DCVV = CreateExt_VV(iChType,0);
+
+   
+   // --- Target line ---
+   
+   XVV = Create_VV(REAL,0);     // already selected anomalies
+   YVV = Create_VV(REAL,0);
+   DVV = CreateExt_VV(iChType,0);
+      
+      
+   // --- The current channel must have data in it for this all to work...---
+   
+   GetChanVV_DB(Data,CurLine,ZCh,ZCVV);
+   if(iLength_VV(ZCVV)==0) {
+      Printf_STR(sMsg, sizeof(sMsg), _("The currently selected channel %s has no data. Select a channel with data before selecting a profile location."), sCurChan);
+      Abort_SYS(sMsg);
+   }
+   UnLockSymb_DB(Data,ZCh);
+   
+   
+   // --- Get current line data ---
+
+   GetChanVV_DB(Data,CurLine,XCh,XCVV);
+   GetChanVV_DB(Data,CurLine,YCh,YCVV);
+   GetChanVV_DB(Data,CurLine,DCh,DCVV);
+   
+   
+   // --- Refid to current channel fid ---
+
+   ReFidVV_VV(XCVV, ZCVV);
+   ReFidVV_VV(YCVV, ZCVV);
+   ReFidVV_VV(DCVV, ZCVV);
+
+   
+   // --- Get current targets data ---
+
+   GetChanVV_DB(Data,Targets,XCh,XVV);
+   GetChanVV_DB(Data,Targets,YCh,YVV);
+   GetChanVV_DB(Data,Targets,DCh,DVV);
+   GetChanVV_DB(Data,Targets,LCh,LVV);
+
+
+	// --- Ensure XVV fid info is set up ---
+	
+	rFidStart = rGetFidStart_VV(XVV);
+	rFidIncr =  rGetFidIncr_VV(XVV);
+	
+   if(rFidStart == rDUMMY)
+   {
+      rFidStart = 0.0;
+      SetFidStart_VV(XVV, rFidStart);
+   }
+      
+   if(rFidIncr == rDUMMY)
+	{
+		rFidIncr = 1.0;
+		SetFidIncr_VV(XVV, rFidIncr);
+	}
+
+	
+   // --- Refid to the "X" channel in the Targets ---
+     
+   ReFidVV_VV(YVV, XVV);
+   ReFidVV_VV(DVV, XVV);
+   ReFidVV_VV(LVV, XVV);
+
+      
+   // --- Get the current location and value ---
+
+   rX = rGetReal_VV(XCVV, iVal);
+   rY = rGetReal_VV(YCVV, iVal);
+   if(iChType>0)
+      rD = rGetReal_VV(DCVV, iVal);
+   else 
+      GetString_VV(DCVV, iVal, sVal);
+
+   if(rX==rDUMMY || rY==rDUMMY) {
+      Printf_STR(sMsg, sizeof(sMsg), _("X and/or Y are undefined at the selected position for channel %s."), sCurChan);
+      Abort_SYS(sMsg);
+   }
+      
+
+   // --- VV length ---
+      
+   iLen = iLength_VV(XVV);
+
+
+   // --- Append digitzed targets to the existing list ---
+      
+   SetLen_VV(XVV,iLen + 1);
+   SetLen_VV(YVV,iLen + 1);
+   SetLen_VV(DVV,iLen + 1);
+   SetLen_VV(LVV,iLen + 1);
+
+   SetReal_VV(XVV, iLen, rX);
+   SetReal_VV(YVV, iLen, rY);
+   if(iChType>=0)
+      SetReal_VV(DVV, iLen, rD);
+   else
+      SetString_VV(DVV, iLen, sVal);
+   SetString_VV(LVV, iLen, sCurLine);
+
+
+
+   // --- Put data ---
+
+   PutChanVV_DB(Data,Targets,XCh,XVV);
+   PutChanVV_DB(Data,Targets,YCh,YVV);
+   PutChanVV_DB(Data,Targets,DCh,DVV);
+   PutChanVV_DB(Data,Targets,LCh,LVV);
+      
+      
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,DCh);
+   UnLockSymb_DB(Data,LCh);
+
+
+   // --- Do the extra channels ---
+
+   EXTRA_CHAN(sChan2)
+   EXTRA_CHAN(sChan3)
+   EXTRA_CHAN(sChan4)
+
+   Destroy_VV(LVV);
+   Destroy_VV(XCVV);
+   Destroy_VV(YCVV);
+   Destroy_VV(ZCVV);
+   Destroy_VV(DCVV);
+   Destroy_VV(XVV);
+   Destroy_VV(YVV);
+   Destroy_VV(DVV);
+
+
+   //------------------------
+   // --- Plot the new symbol? ---
+
+
+   iPlotSymb = iGetInt_SYS("DIGITPROF","PLOTSYMB");
+   if(iPlotSymb!=1) iPlotSymb = 0;
+
+
+   if(!iPlotSymb || !iHaveCurrent_EMAP()) 
+      Cancel_SYS();
+
+   EMap = Current_EMAP();
+
+
+   // --- Get symbol marker parameters ---
+
+   GetString_SYS("DIGITPROF","MARKER_LINE_COLOUR",sColourLine);
+   GetString_SYS("DIGITPROF","MARKER_FILL_COLOUR",sColourFill);
+
+   iSymb = iGetInt_SYS("DIGITPROF","MARKER_SYMBOL");       
+   iWeight = iGetInt_SYS("DIGITPROF","MARKER_WEIGHT");    
+   rSize = rGetReal_SYS("DIGITPROF","MARKER_SIZE");
+  
+  
+   // --- Verify parameters ---
+
+   if (rSize <= 0.0)       rSize = 2.0;
+   if (iSymb == iDUMMY)    iSymb = 2;
+   if (iWeight == iDUMMY)  iWeight = MVIEW_FONT_WEIGHT_MEDIUM;
+   if (iStrMin_STR(sColourLine) == 0) Strcpy_STR(sColourLine,"R0");
+   if (iStrMin_STR(sColourFill) == 0) Strcpy_STR(sColourFill,"N");
+
+
+   // --- Current map ---
+
+   Map = Lock_EMAP(EMap);
+
+
+   // --- Open data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   rScale = rScaleMM_MVIEW(View);
+
+	
+	// --- Get the view projection ---
+	
+	ViewIPJ = Create_IPJ();
+	GetIPJ_MVIEW(View, ViewIPJ);
+
+
+   // --- Start a new group for the symbols? ---
+
+   GetName_DB(Data,DB_NAME_FILE,sGroup);
+   FileNamePart_STR(sGroup,sGroup,STR_FILE_PART_NAME);
+   GenGroupName_STR("SYMBOLS",sGroup,sTargets,sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+  
+   iExist = iExistGroup_MVIEW (View, sGroup);
+   if(!iExist)   
+      StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   else
+      StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_APPEND);
+
+
+   // --- Set symbol parameters ---
+
+   iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont);
+   SymbFont_MVIEW(View,sFont,TRUE,iWeight,FALSE);
+   SymbColor_MVIEW(View,iColor_MVIEW(sColourLine));
+   SymbFillColor_MVIEW(View,iColor_MVIEW(sColourFill));
+   SymbNumber_MVIEW(View,iSymb);
+   SymbSize_MVIEW(View,rSize*rScale);
+   SymbAngle_MVIEW(View,0.0);
+
+
+	// --- Transform from channel IPJ to the view IPJ ---
+	
+	Proj = CreateIPJ_PJ(ChanIPJ, ViewIPJ);
+	ConvertXY_PJ(Proj, rX, rY);
+	
+
+   // --- Draw ---
+
+   Symbol_MVIEW(View,rX,rY);
+
+
+   // --- Clean up ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+
+
+
+}
+
+
+
+
+
+   

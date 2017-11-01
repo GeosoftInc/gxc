@@ -1,0 +1,70 @@
+//===========================================================================
+NAME          = "Plot zone-classified symbols"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Plotting"
+
+DESCRIPTION   = "
+
+Plot classified symbols.
+
+   This GX calls the COLSYMB GX, but uses the default
+   CHIMERA mask channel.
+
+"
+
+// Revision History:
+// v5.1.5 : New GX calling the COLSYMB GX from CHIMERA.
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+
+string(STR_DB_SYMBOL) sMask;
+string(STR_DEFAULT_SHORT) sTemp;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Get Default Mask Channel if required, and if it exists or is "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+
+
+         EData = Current_EDB();
+         Data = Lock_EDB(EData);
+
+         if(iScanI_STR(sTemp)==1 &&
+            (iExistChan_DB(Data,sMask) || 
+             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+            SetString_SYS("COLSYMB","MASK",sMask);
+         }
+
+         UnLock_EDB(EData);
+      }
+   }
+   
+
+   // --- Use CHIMERA mask channel list in COLSYMB GX. ---
+
+   SetInt_SYS("COLSYMB","CHIMERA",1);  // Must set every time.
+
+
+   // --- Call the CLASYMB GX to do classified symbols ---
+
+   iRunGX_SYS("colsymb.gx");
+
+
+}

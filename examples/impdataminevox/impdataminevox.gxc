@@ -1,0 +1,311 @@
+//===========================================================================
+NAME          = "Imports a Datamine block model file into a Geosoft VOXEL"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Imports a Datamine block model file into a Geosoft VOXEL.
+
+   IMPDATAMINEVOX.DATAMINE:     Datamine block model file.
+   IMPDATAMINEVOX.VOX:          Output Geosoft voxel file name.
+   IMPDATAMINEVOX.FIELDS        Selected fields for export.
+"
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v6.3.0   Enabled ArcGIS specific functionality
+// v6.3.0   First version
+//===========================================================================
+
+RESOURCE = "impdataminevox.gr"
+#include "impdataminevox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW  hDGW;   
+LST  FieldLST, SelFieldLST;
+IPJ  hIPJ;
+META hMETA;
+
+string(STR_FILE) sExt,sFile,sDir,sName,sName2,sOutput,sVol;
+string(STR_DEFAULT) sField;
+string(STR_DEFAULT_LONG) s1,s2,s3,s4,s5,sMsg,sTemp;
+string(65536) sFields;
+int i, iNFields, iType;
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Create IPJ and META ---
+
+   hIPJ = Create_IPJ();
+   hMETA = Create_META();
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+   
+     // --- Read Previous Projection ---
+    
+     GetString_SYS("IMPDATAMINEVOX","IPJ_NAME",s1);
+     if (iStrlen_STR(s1)) {
+        GetString_SYS("IMPDATAMINEVOX","IPJ_DATUM",s2);
+        GetString_SYS("IMPDATAMINEVOX","IPJ_METHOD",s3);
+        GetString_SYS("IMPDATAMINEVOX","IPJ_UNITS",s4);
+        GetString_SYS("IMPDATAMINEVOX","IPJ_LOCALDATUM",s5);
+        SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+     }
+     
+   
+     // --- Start Loop ---
+   
+     i = 0;
+     do {
+     
+        switch(i)
+        {
+           case 0 :
+           
+           
+               // --- Create the Dialogue ---
+
+               hDGW = Create_DGW("IMPDATAMINEVOX");
+
+
+               // --- Set any Defaults ---
+
+               SetInfoSYS_DGW(hDGW,_IMPDATAMINEVOX_0,DGW_FILEPATH,"IMPDATAMINEVOX","DATAMINE");
+
+               
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(hDGW);
+               if (i == -1) Cancel_SYS();    // The user hit cancel
+
+
+               // --- Get the Strings ---
+
+               GetInfoSYS_DGW(hDGW,_IMPDATAMINEVOX_0,DGW_FILEPATH,"IMPDATAMINEVOX","DATAMINE");    
+
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(hDGW);
+               
+           case 1 :
+           
+              // --- Create the Dialogue ---
+
+              hDGW = Create_DGW("IMPDATAMINEPROP");
+        
+        
+              // --- Set any Defaults ---
+
+              SetInfoSYS_DGW(hDGW,_IMPDATAMINEPROP_0,DGW_FILEPATH,"IMPDATAMINEVOX","VOX");     
+     
+              GetName_IPJ(hIPJ,IPJ_NAME_PCS,sTemp);         
+              SetInfo_DGW(hDGW,_IMPDATAMINEPROP_1,DGW_TEXT,sTemp);
+              GetName_IPJ(hIPJ,IPJ_NAME_UNIT_FULL,sTemp);         
+              SetInfo_DGW(hDGW,_IMPDATAMINEPROP_2,DGW_TEXT,sTemp);
+     
+              // --- Run the Dialogue ---
+
+              i = iRunDialogue_DGW(hDGW);
+              if (i == -1) Cancel_SYS();    // The user hit cancel
+
+     
+              // --- Get the Strings ---
+
+              GetInfoSYS_DGW(hDGW,_IMPDATAMINEPROP_0,DGW_FILEPATH,"IMPDATAMINEVOX","VOX");     
+     
+     
+              // --- Destroy the Dialogue ---
+
+              Destroy_DGW(hDGW);
+              break;
+              
+           
+           case 2 : 
+       
+               // --- Edit/modify the IPJ ---
+               
+              GetString_SYS("IMPDATAMINEVOX","DATAMINE",sFile);
+              iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Datamine file"), sFile);
+              
+              i = 1;
+              break;
+         }
+         
+     } while (i != 3);
+      
+     // --- Save Projection ---
+     
+     GetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+     GetString_SYS("IMPDATAMINEVOX","IPJ_NAME",s1);
+     GetString_SYS("IMPDATAMINEVOX","IPJ_DATUM",s2);
+     GetString_SYS("IMPDATAMINEVOX","IPJ_METHOD",s3);
+     GetString_SYS("IMPDATAMINEVOX","IPJ_UNITS",s4);
+     GetString_SYS("IMPDATAMINEVOX","IPJ_LOCALDATUM",s5);
+   }
+            
+   
+   // --- Read Projection ---
+
+   GetString_SYS("IMPDATAMINEVOX","IPJ_NAME",s1);
+   if (iStrlen_STR(s1)) {
+      GetString_SYS("IMPDATAMINEVOX","IPJ_DATUM",s2);
+      GetString_SYS("IMPDATAMINEVOX","IPJ_METHOD",s3);
+      GetString_SYS("IMPDATAMINEVOX","IPJ_UNITS",s4);
+      GetString_SYS("IMPDATAMINEVOX","IPJ_LOCALDATUM",s5);
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   }
+   
+   
+   // --- Get the available fields for import ---
+   
+   GetString_SYS("IMPDATAMINEVOX","DATAMINE",sFile);
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("The datamine file name is not specified."));
+      
+      
+   // --- Get the basic output file name and break it into parts ---      
+      
+   GetString_SYS("IMPDATAMINEVOX","VOX",sOutput);
+   FileNamePart_STR(sOutput, sVol, STR_FILE_PART_VOLUME); 
+   FileNamePart_STR(sOutput, sDir, STR_FILE_PART_DIRECTORY); 
+   FileNamePart_STR(sOutput, sName, STR_FILE_PART_NAME); 
+   FileNamePart_STR(sOutput, sExt, STR_FILE_PART_EXTENSION); 
+   
+      
+   // --- Get the file type to ensure it is a block model file ---
+   
+   iType = iDatamineType_GIS(sFile); 
+   if(iAnd_MATH(iType, GIS_DMTYPE_BLOCKMODEL)==0)
+      Abort_SYS(_("The input datamine file is not a block model."));
+      
+      
+   // --- Get a LST of the available fields ---
+   
+   FieldLST = Create_LST(128);
+   NumericFieldLST_DATAMINE(sFile, FieldLST);
+   
+   iNFields = iSize_LST(FieldLST);
+   if(iNFields==0)
+      Abort_SYS(_("No valid numeric fields were found in the block model file."));
+      
+
+   // --- If there is more than one field available, let the user select 
+   //     from a list of all the available numeric fields ---
+   
+   SelFieldLST = Create_LST(64);      
+   if(iNFields>1)
+   {
+      if(iInteractive_SYS())
+      {            
+         
+         // --- Set starting selection for GUI ---
+
+         GetString_SYS("IMPDATAMINEVOX", "FIELDS", sFields);
+         ConvertFromCSVString_LST(SelFieldLST, sFields);
+
+         i = iTwoPanelSelection_GUI(FieldLST, SelFieldLST, _("Select fields for voxel files"));
+         if(i!=0) Cancel_SYS();
+                  
+         
+         // --- Save selection ---
+         
+         ConvertToCSVString_LST(SelFieldLST, sFields);
+         SetString_SYS("IMPDATAMINEVOX", "FIELDS", sFields);     
+      }          
+   
+      // --- Get the fields and create the voxel files ---
+      
+      GetString_SYS("IMPDATAMINEVOX", "FIELDS", sFields);
+      ConvertFromCSVString_LST(SelFieldLST, sFields);
+      
+      
+      // --- Remove fields not found in the file ---
+      
+      iNFields = iSize_LST(SelFieldLST);
+      for(i=iNFields-1;i>=0;i--)
+      {
+         GetItem_LST(SelFieldLST, 0, i, sField);    
+          
+         if(iFindItem_LST(FieldLST, 0, sField)==-1)
+            DelItem_LST(SelFieldLST, i);
+      }      
+   }
+   else
+      Copy_LST(SelFieldLST, FieldLST);
+      
+
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing Datamine block model"),1);
+   
+   iNFields = iSize_LST(SelFieldLST);
+   for(i=0;i<iNFields;i++)
+   {
+      GetItem_LST(SelFieldLST, 0, i, sField);
+    
+          
+      // --- If there is more than one field, create the output name from the input name 
+      //     with the field appended. ---
+      
+      if(iNFields>1)
+      {
+         Strcpy_STR(sName2, sName);
+         Strcat_STR(sName2, "_");
+         Strcat_STR(sName2, sField);
+         FileCombineParts_STR(sVol, sDir, sName2, sExt, "", sOutput);
+      }
+    
+
+      // --- Delete the file if it exists ---
+      
+      if(iFileExist_SYS(sOutput))
+      {
+         if(iDeleteFile_SYS(sOutput)) 
+         {
+            Printf_STR(sMsg, sizeof(sMsg), _("The file %s already exists but cannot be overwritten. If it is currently displayed in a map, close the map."), sOutput);
+            Abort_SYS(sMsg);
+         }
+      }
+      
+
+      // --- Progress ---
+          
+      Strcpy_STR(sMsg, _("Importing Datamine field: "));
+      Strcat_STR(sMsg, sField);
+      ProgName_SYS(sMsg, 0);
+      ProgUpdateL_SYS(i, iNFields);
+      if(iCheckStop_SYS()) Cancel_SYS();
+      
+      
+      // --- Create the file ---
+      
+      CreateVoxel_DATAMINE(sFile, sField, hIPJ, hMETA, sOutput);      
+   }
+   
+      
+   Progress_SYS(0);
+   
+   
+   // --- Display the Voxel ? ---
+   if ((!iScript_SYS()) && iNFields==1) 
+	{
+		SetString_SYS("VOXEL_UTILS","DISPLAY_VOXEL",sOutput);
+		iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.VoxelGxUtils;DisplayNewVoxel)");
+	}	
+}

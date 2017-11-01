@@ -1,0 +1,318 @@
+//===========================================================================
+NAME          = "Bi-directional line gridding"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid"
+
+DESCRIPTION   = "
+
+      BIGRID.parameter  - parameters from BIGRID.CON file.
+      
+"
+// Revision History:
+// v6.0:   No grc needed for this GX.
+// v5.1.8: New GX.
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(GS_MAX_PATH) sGrid,sGDB;
+string(255) sText;      // Line of text to write to control file
+string(255) sTitle;     //
+string(100) sChan;      // Channel to grid 
+string(100) sCS;
+string(100) sSMX;
+string(100) sGAPLIM;
+string(100) sISP1;
+string(100) sISP2;
+string(100) sWS;
+string(100) sWL;
+string(100) sTOLN;
+string(100) sFDX;
+   
+string(100) sNEX;
+string(100) sXYRANGE;
+string(100) sPRESORT;
+string(100) sLOGOPT;
+string(100) sLOGMIN;
+string(100) sTRA;
+string(100) sKX;
+
+                                         
+BIGRID      Bigrid;     // Handle to BIGRIDd object
+DAT         InDat;      // Handle to Input DAT 
+DAT         OutDat;     // Handle to Output DAT
+
+WA          ConFile;    // Control File
+DB          Data;       // Database
+            
+DB_SYMB     XCh;
+IPJ         hIPJ;
+
+int         iTRA;
+real        rTRA;
+
+
+//===========================================================================
+//                           BIGRID CODE
+//===========================================================================
+
+{
+   // --- Get Parameters ---
+
+   GetString_SYS("BIGRID","CHAN",sChan); 
+   GetString_SYS("BIGRID","GRID",sGrid); 
+   GetString_SYS("BIGRID","CS",sCS);     
+   GetString_SYS("BIGRID","SMX",sSMX);     
+   GetString_SYS("BIGRID","GAPLIM",sGAPLIM);
+   GetString_SYS("BIGRID","ISP1",sISP1);     
+   GetString_SYS("BIGRID","ISP2",sISP2);     
+   GetString_SYS("BIGRID","WS",sWS);     
+   GetString_SYS("BIGRID","WL",sWL);
+   GetString_SYS("BIGRID","TOLN",sTOLN);     
+   GetString_SYS("BIGRID","FDX",sFDX);
+   
+   GetString_SYS("BIGRID","NEX",sNEX);
+   GetString_SYS("BIGRID","XYRANGE",sXYRANGE);
+   GetString_SYS("BIGRID","PRESORT",sPRESORT);
+   GetString_SYS("BIGRID","LOGOPT",sLOGOPT);
+   GetString_SYS("BIGRID","LOGMIN",sLOGMIN);
+   GetString_SYS("BIGRID","TRA",sTRA);
+   GetString_SYS("BIGRID","KX",sKX);
+     
+   GetString_SYS("BIGRID","GDB",sGDB);
+   
+   
+   // --- Get the Database ---
+
+   if (iStrlen_STR(sGDB) <=0)
+      Abort_SYS(_("Geosoft database file name is invalid"));
+   Data = Open_DB(sGDB,"SUPER","");
+   
+   
+   // --- Validate all required parameters ---
+   
+   if (!iExistSymb_DB(Data,"X",DB_SYMB_CHAN))
+      Abort_SYS(_("X Channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,"Y",DB_SYMB_CHAN))
+      Abort_SYS(_("Y Channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,sChan,DB_SYMB_CHAN))
+      Abort_SYS(_("Z Channel is not specified or does not exist"));
+
+   
+   // --- trend gridding? ---
+   
+   if (iStrMin_STR(sTRA)) {
+      rTRA = rGetReal_SYS("BIGRID","TRA");
+      if (rTRA != 0.0 && rTRA != rDUMMY) {
+         Strcpy_STR(sKX,"");
+         iTRA = TRUE;
+      } else {
+         Strcpy_STR(sTRA,"");
+         Strcpy_STR(sKX,"1");
+         iTRA = FALSE;
+      }
+   } else
+      iTRA = FALSE;
+
+   
+   // --- Create control file ---
+   
+   ConFile = Create_WA("_bigrid.con",0);
+
+   Strcpy_STR(sTitle,_n("Channel "));
+   Strcat_STR(sTitle,sChan);
+   Strcat_STR(sTitle,_n(" from "));
+   GetName_DB(Data,DB_NAME_FILE,sText);
+   Strcat_STR(sTitle,sText);
+   Puts_WA(ConFile,sTitle);                        NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sCS);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sNEX);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sPRESORT);
+   Strcat_STR(sText," /CS");
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+   
+   Strcpy_STR(sText,sXYRANGE);
+   Strcat_STR(sText," /XMIN,YMIN,XMAX,YMAX");
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sTRA);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sKX);
+   Strcat_STR(sText," /TRA,KX");
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+   
+   Strcpy_STR(sText,",");
+   Strcat_STR(sText,sSMX);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sGAPLIM);
+   Strcat_STR(sText,",,"); 
+   Strcat_STR(sText,_n(",, /SLM,SMX,GAPLIM,LSEL"));
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Puts_WA(ConFile,"/SCL,SX,SY,ANGS");             NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,",");
+   Strcat_STR(sText,sLOGOPT);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLOGMIN);
+   Strcat_STR(sText," /IZ,LOGZ,ZMIN"); 
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Puts_WA(ConFile,"/BL,XX,CLIP");                 NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sWS);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sWL);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sFDX);
+   Strcat_STR(sText,_n(",,, /WS,WL,FDX,FT,NC"));
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,"");
+   if (iStrcmp_STR(sTOLN,"",0)) 
+   {
+      Strcat_STR(sText,"1,");
+      Strcat_STR(sText,sTOLN);
+   }  
+   Strcat_STR(sText," /NFLT,TOLN"); 
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Strcpy_STR(sText,sISP1);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sISP2);
+   Strcat_STR(sText," /ISP1,ISP2"); 
+   Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+
+   Destroy_WA(ConFile);
+
+
+   // --- Get the Projection ---
+   
+   XCh = FindSymb_DB(Data,"X",DB_SYMB_CHAN);
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,hIPJ);
+   UnLockSymb_DB(Data,XCh);
+
+   
+   // --- get the DAT's ---
+
+   InDat = CreateDB_DAT(Data,"X","Y",sChan);
+   if (iTRA)
+      OutDat = CreateXGD_DAT("_bigrid.grd(GRD)",DAT_XGD_NEW);
+   else   
+      OutDat = CreateXGD_DAT(sGrid,DAT_XGD_NEW);
+
+
+   // --- Make a BIGRID object ---
+
+   Bigrid = Create_BIGRID();
+
+
+   // --- Load up the BIGRID control parameters ---
+
+   if (iLoadParms_BIGRID(Bigrid,"_bigrid.con"))
+      Abort_SYS(_("Bad control file"));
+
+
+   // --- BIGRID ---
+
+   Progress_SYS(1);
+   Run2_BIGRID(Bigrid,"1",InDat,OutDat,hIPJ);
+   Progress_SYS(0);
+   
+   
+   // --- Destroy the DATs and BIGRID object ---
+   
+   Destroy_BIGRID(Bigrid);
+   Destroy_DAT(InDat);
+   Destroy_DAT(OutDat);
+      
+
+   // --- if trending, re-grid ---
+   
+   if (iTRA) {
+
+      // --- create control file for squaring the grid ---
+
+      ConFile = Create_WA("_bigrid.con",0);
+
+      Puts_WA(ConFile,sTitle);                        NewLine_WA(ConFile);
+   
+      Strcpy_STR(sText,sCS);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sNEX);
+      Strcat_STR(sText,",");
+      Strcat_STR(sText,sPRESORT);
+      Strcat_STR(sText," /CS");
+      Puts_WA(ConFile,sText);                         NewLine_WA(ConFile);
+   
+      Puts_WA(ConFile,"/XMIN,YMIN,XMAX,YMAX");        NewLine_WA(ConFile);
+      Puts_WA(ConFile,"0.0,1/TRA,KX");                NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/SLM,SMX,GAPLIM,LSEL,BCLIP");  NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/SCL,SX,SY,ANGS");             NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/IZ,LOGZ,ZMIN");               NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/BL,XX,CLIP");                 NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/WS,WL,FDX,FT,NC");            NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/NFLT,TOLN");                  NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/ISP1,ISP2");                  NewLine_WA(ConFile);
+
+      Destroy_WA(ConFile);
+
+
+      // --- get the DAT's ---
+
+      InDat = CreateXGD_DAT("_bigrid.grd(GRD)",DAT_XGD_READ);
+      OutDat = CreateXGD_DAT(sGrid,DAT_XGD_NEW);
+
+
+      // --- Make a BIGRID object ---
+
+      Bigrid = Create_BIGRID();
+
+
+      // --- Load up the BIGRID control parameters ---
+
+      if (iLoadParms_BIGRID(Bigrid,"_bigrid.con"))
+         Abort_SYS(_("Bad control file"));
+
+
+      // --- Execute BIGRID ---
+
+      Progress_SYS(1);
+      Run2_BIGRID(Bigrid,"",InDat,OutDat,hIPJ);
+      Progress_SYS(0);
+      
+
+      // --- Destroy the DATs and BIGRID object ---
+      
+      Destroy_BIGRID(Bigrid);
+      Destroy_DAT(InDat);
+      Destroy_DAT(OutDat);   
+
+
+      // --- delete temporary file ---
+
+      iDeleteFile_SYS("_bigrid.grd");
+      
+   }
+   
+   
+   Destroy_IPJ(hIPJ);
+   //iDeleteFile_SYS("_bigrid.con");
+   
+}

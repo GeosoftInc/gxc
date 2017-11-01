@@ -1,0 +1,94 @@
+//===========================================================================
+NAME          = "Set the map snap resolution"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Set the resolution of the snap feature in mm for the map.
+
+Parameters: 
+
+    MAPSNAP.RES   - Resolution in MM
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Map Settings"
+
+// Revision History
+// 6.0.0: Don't blow away undo/redo stack by using new EMAP wrapper to do this
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "mapsnap.gr"
+#include "mapsnap.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        EMap;
+DGW         Diag;             // Dialogue handle
+
+real        rRes;             // New fid increment
+string(STR_DEFAULT_SHORT) sRes;
+
+int         i;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get map ---
+   
+   EMap = Current_EMAP();
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("MAPSNAPForm");
+
+     // --- Set any Defaults ---
+
+     GetMapSnap_EMAP(EMap, rRes);
+     FormatReal_STR(rRes,sRes,FORMAT_SIG_DIG,20,10);
+     SetInfo_DGW(Diag,_MAPSNAPFORM_0,DGW_TEXT,sRes);    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_MAPSNAPFORM_0,DGW_TEXT,"MAPSNAP","RES");    
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("MAPSNAP","RES",sRes);
+   rRes = rScanR_STR(sRes);
+   if (rRes <= 0.0)
+      Abort_SYS(_("Resolution must be >= 0.0."));
+
+
+   // --- Save Settings ---
+   
+   SetMapSnap_EMAP(EMap, rRes);
+}

@@ -1,0 +1,237 @@
+//===========================================================================
+NAME          = "Create a 3d view of an IP Stacked Section map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Takes the individual section views in an IP stacked section map
+   and plots them to a 3d view window.
+
+    IP3DVIEW.VIEW          view name
+"
+// Revision History:
+// v6.4.0: Added "IP3D" default to the view LST
+// v6.3.0: Removed 3D controls.
+// v6.2.0: Better error message if trying to run on a map-based section.
+// v6.1.0: Progress bar was not initialized properly. 
+// v5.1.4: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE="ip3dview.gr"
+#include "ip3dview.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+#include <obsolete.gxh>
+
+//===========================================================================
+// dialogs
+//===========================================================================
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW      Diag;
+EMAP     EMap;
+MAP      Map;
+IPJ      Ipj, Ipj2;
+LST      Lst, Lst3d;
+MVIEW    View;
+
+int i, iN, iS, iSkip, iInteractive;
+string(STR_GROUP) sView, sView3d;
+string(STR_DEFAULT_LONG) sMsg;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- get current map ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   
+
+   // --- Get lists of the views ---
+
+   Lst = Create_LST(MVIEW_NAME_LENGTH);
+   ViewListEx_MAP(Map, Lst, MAP_LIST_MODE_NOT3D); 
+
+   Lst3d = Create_LST(MVIEW_NAME_LENGTH);
+   ViewListEx_MAP(Map, Lst3d, MAP_LIST_MODE_3D); 
+   
+   
+   // --- Add the default to the 3D View LST ---
+   
+   AddUniqueItem_LST(Lst3d, "IP3D", "IP3D");
+
+
+   // --- Create IPJs ---
+
+   Ipj = Create_IPJ();
+   Ipj2 = Create_IPJ();
+
+
+   // --- See if there are any section views to plot ---
+
+   iN = iSize_LST(Lst);
+   iS = 0;
+   for(i=0;i<iN;i++) {
+
+      // --- Get the view and its projection ---
+
+      GetItem_LST(Lst, 0, i, sView);
+      View = Create_MVIEW(Map, sView, MVIEW_READ);
+      GetIPJ_MVIEW(View, Ipj);
+      Destroy_MVIEW(View);
+
+
+      // --- Check that it's a section view ---
+
+      if(iGetOrientation_IPJ(Ipj) != IPJ_ORIENT_SECTION) continue;
+      iS++;
+   }
+
+   if(iS==0) {
+      Strcpy_STR(sMsg, _("No section views were found in the current map.\r\n"));
+      Strcat_STR(sMsg, _("3-D sections can be produced from \"Equal-spaced\"\r\nstacked sections but not from \"Map-based\" stacked\r\nsections."));
+      Abort_SYS(sMsg);
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if (iInteractive) {
+
+      Diag = Create_DGW("IP3DVIEW");
+      Copy_LST(GetList_DGW(Diag,_IP3DVIEW_0),Lst3d);
+
+      SetInfoSYS_DGW(Diag,_IP3DVIEW_0,DGW_TEXT,"IP3DVIEW","VIEW");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==-1) Cancel_SYS(); 
+
+      GetInfoSYS_DGW(Diag,_IP3DVIEW_0,DGW_TEXT,"IP3DVIEW","VIEW");
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   GetString_SYS("IP3DVIEW","VIEW", sView3d);
+   if(!iStrlen_STR(sView3d))
+      Strcpy_STR(sView3d, "IP3D");    // Set default view
+
+
+   // Turn on progress 
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating 3D view of sections"), 1);
+   
+   iN = iSize_LST(Lst);
+   iS = 0;
+   iSkip = 0;
+   for(i=0;i<iN;i++) {
+
+      
+      if(iCheckStop_SYS()) Cancel_SYS();
+      ProgUpdateL_SYS(i, iN);
+
+      
+      // --- Get the view and its projection ---
+
+      GetItem_LST(Lst, 0, i, sView);
+
+      View = Create_MVIEW(Map, sView, MVIEW_READ);
+      GetIPJ_MVIEW(View, Ipj);
+      Destroy_MVIEW(View);
+
+
+      // --- Check that it's a section view ---
+
+      if(iGetOrientation_IPJ(Ipj) != IPJ_ORIENT_SECTION) continue;
+
+      SetString_SYS("V3DMAP","VIEW",sView3d);
+      SetString_SYS("V3DMAP","VIEWGROUP",sView);
+      SetString_SYS("V3DMAP","PLANE",sView);
+      SetInt_SYS("V3DMAP","ORIENT", 0);      // "RAW" Orientation
+      SetString_SYS("V3DMAP","GRID","");     // No relief
+
+      if(iS==0) {
+
+         SetString_SYS("V3DMAP","NEWVIEW","YES");
+
+      }
+      else {
+
+         // --- See if the IPJ has changed... don't plot
+         //     overlapping sections ---
+         
+         if (iOrientationsAreTheSame_IPJ(Ipj, Ipj2))
+	{
+            iSkip++;
+            continue;
+         }
+
+         SetString_SYS("V3DMAP","NEWVIEW","NO");
+      }
+
+      if(iInteractive) SetInteractive_SYS(0);
+      UnLock_EMAP(EMap);
+      
+      
+      // --- If not creating a new view, then the 3D view is set
+      //     to be the current view ---
+      
+      if(!iScript_SYS() && iS>0)
+         iChangeCurrentView_EMAP(EMap,sView3d);
+         
+      if(iRunGX_SYS("v3dmap.gx")) Cancel_SYS();
+      
+      Map = Lock_EMAP(EMap);
+      if(iInteractive) SetInteractive_SYS(1);
+
+      // --- Save projection for comparison ---
+
+      Copy_IPJ(Ipj, Ipj2);
+      iS++;
+      
+   }
+
+   ProgUpdate_SYS(100);
+   Progress_SYS(0);
+
+   if(iSkip && iInteractive) {
+      Strcpy_STR(sMsg, _("One or more sections was skipped because\r\nit shared the same plane as one already plotted.\r\n"));
+      Strcat_STR(sMsg, _("This will happen with multiple pseudo-section plots of single lines."));
+      DisplayMessage_SYS(_("Create a 3D View"), sMsg);
+   }
+
+   
+   // -- Clean up ---
+
+   UnLock_EMAP(EMap);
+   if (iInteractive_SYS()) 
+		ActivateView_EMAP(EMap, sView3d);
+
+   Destroy_IPJ(Ipj);
+   Destroy_IPJ(Ipj2);
+   Destroy_LST(Lst);
+   Destroy_LST(Lst3d);
+
+}
+

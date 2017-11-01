@@ -1,0 +1,435 @@
+//===========================================================================
+NAME          = "Create a line intersection table"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/LevTieLine"
+
+DESCRIPTION   = "
+   Find the intersections between lines.  The interection points will be 
+   tabulated in a Geosoft ASCII table file, which can in turn be used by 
+   the XLEVEL GX to extract leveling parameters.
+
+   INTERSCT.InX       -  Input x channel
+           .InY       -  Input y channel
+           .InZ       -  Input z channel
+           .Tol       -  Intersection tolerance (0.0 for line crossings)
+           .Lines     -  \"Tie\" to find tie intersections only.
+                         \"All\" to find all line intersections.
+           .OldTable  -  Existing intersection table/database
+           .Table     -  Ouput intersection table/database
+"
+// Revision History
+// v7.1.0: Add support for intersection databases.
+// v7.0.0: Refid locations to Z channel if Z fid increment is smaller.
+// v5.1.4: Can now use existing intersection table for intersections.
+//         Use current X,Y channels if not already set.
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "intersct.gr"
+#include "intersct.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInX, sInY, sInZ, sTmpX, sTmpY, sLine;
+string(STR_FILE) sInput, sOutput;        // File Names
+string(STR_FILE) sInputDB, sOutputDB, sCurDB, sExt, sDB;
+string(STR_DEFAULT) sProg;
+
+string(4)   sOpt;              // Intersection option
+
+EDB         EData, EIntData;
+DB          Data, IntData;
+DB_SYMB     InX, InY, InZ, TmpX, TmpY, Line;  // Temp channels and line
+DGW         Diag;
+LST         List;              // List
+LST         LineLST; 
+real        rTol, rFidIncrX, rFidIncrZ;
+int         i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
+
+//===========================================================================
+//                             INTERSECTION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sCurDB);
+   Data = Lock_EDB(EData);
+
+
+	// --- See if this is an intersection database and make the original database current. ---
+
+	GetRegSymbSetting_DB(Data, NULLSYMB, "Levelling.Database", sDB, sizeof(sDB)); 
+	if(iStrlen_STR(sDB) > 0)
+	{
+		UnLock_EDB(EData);
+		EData = Load_EDB(sDB);
+		
+		GetName_EDB(EData, sCurDB);
+		Data = Lock_EDB(EData);
+	}		
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("InterSctForm");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_INTERSCTFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_INTERSCTFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_INTERSCTFORM_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      GetString_SYS("Intersct","InX",sInX);
+      if(!iStrlen_STR(sInX)) {
+         GetXYZChan_DB(Data, DB_CHAN_X, sInX);
+         SetString_SYS("Intersct","InX",sInX);
+      }
+      GetString_SYS("Intersct","InY",sInY);
+      if(!iStrlen_STR(sInY)) {
+         GetXYZChan_DB(Data, DB_CHAN_Y, sInY);
+         SetString_SYS("Intersct","InY",sInY);
+      }
+
+      SetInfoSYS_DGW(Diag,_INTERSCTFORM_0,DGW_TEXT,"InterSct","InX");
+      SetInfoSYS_DGW(Diag,_INTERSCTFORM_1,DGW_TEXT,"InterSct","InY"); 
+      SetInfoSYS_DGW(Diag,_INTERSCTFORM_2,DGW_TEXT,"InterSct","InZ"); 
+      SetInfoSYS_DGW(Diag,_INTERSCTFORM_3,DGW_TEXT,"InterSct","Tol"); 
+      SetInfoSYS_DGW(Diag,_INTERSCTFORM_4,DGW_LISTALIAS,"InterSct","Lines"); 
+      SetInfoSYS_DGW(Diag,_INTERSCTFORM_5,DGW_FILEPATH,"InterSct","OldTable");
+      SetInfoSYS_DGW(Diag,_INTERSCTFORM_6,DGW_FILEPATH,"InterSct","Table");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_INTERSCTFORM_0,DGW_TEXT,"InterSct","InX");     
+      GetInfoSYS_DGW(Diag,_INTERSCTFORM_1,DGW_TEXT,"InterSct","InY"); 
+      GetInfoSYS_DGW(Diag,_INTERSCTFORM_2,DGW_TEXT,"InterSct","InZ"); 
+      GetInfoSYS_DGW(Diag,_INTERSCTFORM_3,DGW_TEXT,"InterSct","Tol"); 
+      GetInfoSYS_DGW(Diag,_INTERSCTFORM_4,DGW_LISTALIAS,"InterSct","Lines"); 
+      GetInfoSYS_DGW(Diag,_INTERSCTFORM_5,DGW_FILEPATH,"InterSct","OldTable");
+      GetInfoSYS_DGW(Diag,_INTERSCTFORM_6,DGW_FILEPATH,"InterSct","Table");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("Intersct","InX",sInX);
+   GetString_SYS("Intersct","InY",sInY);
+   GetString_SYS("Intersct","InZ",sInZ);
+
+
+   if (iExistReal_SYS("Intersct","Tol")) {
+      rTol = rGetReal_SYS("Intersct","Tol");
+      if (rTol < 0.0) rTol = 0.0;
+   } else
+      rTol = 0.0;
+   GetString_SYS("Intersct","Lines",sOpt);
+   GetString_SYS("Intersct","OldTable",sInput);
+   GetString_SYS("Intersct","Table",sOutput);
+
+
+	// --- Get the absolute file names so the names can be compared. ---
+	
+	AbsoluteFileName_SYS(sInput, sInput);
+	AbsoluteFileName_SYS(sOutput, sOutput);
+	AbsoluteFileName_SYS(sCurDB, sCurDB);
+	
+   if(iStrlen_STR(sInput)) {
+      if(0==iStrcmp_STR(sInput, sOutput, STR_CASE_TOLERANT)) 
+         Abort_SYS(_("Input and output table files cannot be the same."));
+      if(0==iStrcmp_STR(sInput, sCurDB, STR_CASE_TOLERANT)) 
+         Abort_SYS(_("The current database cannot be the input intersection database."));
+      if(0==iStrcmp_STR(sOutput, sCurDB, STR_CASE_TOLERANT)) 
+         Abort_SYS(_("The current database cannot be the output intersection database."));
+   }
+   
+   
+   // --- Are the input or ouput tables databases? ---
+   
+   FileNamePart_STR(sInput, sExt, STR_FILE_PART_EXTENSION);
+   iInGDB = 0;
+   if(iStrlen_STR(sInput) != 0 &&
+      iStrcmp_STR(sExt, "GDB", STR_CASE_TOLERANT)==0)
+      iInGDB = 1;
+
+   FileNamePart_STR(sOutput, sExt, STR_FILE_PART_EXTENSION);
+   iOutGDB = 0;
+   if(iStrlen_STR(sOutput) != 0 &&
+      iStrcmp_STR(sExt, "GDB", STR_CASE_TOLERANT)==0)
+      iOutGDB = 1;
+      
+      
+	// --- If the input is a database, create a temporary input table ---
+	
+	if(iInGDB)
+	{
+		// --- Must unload intersection database to convert it ---
+		
+		Strcpy_STR(sInputDB, sInput);
+		iReloadInputDB = 0;
+		if(iLoaded_EDB(sInputDB))
+		{
+			UnLoad_EDB(sInputDB);
+			iReloadInputDB = 1;
+		}
+		Strcpy_STR(sInput, "_TempInputIntersection.tbl");
+	   Progress_SYS(1);
+		IntersectGDBtoTBL_DU(sInputDB, sInput);
+	   Progress_SYS(0);
+	}
+	
+	
+	// --- If the output is a database, create a temporary output table ---
+
+	if(iOutGDB)
+	{
+		// --- Must unload intersection database to delete/overwrite it ---
+		
+		Strcpy_STR(sOutputDB, sOutput);
+		iReloadOutputDB = 0;
+		if(iLoaded_EDB(sOutputDB))
+		{
+			UnLoad_EDB(sOutputDB);
+			iReloadOutputDB = 1;
+		}
+		Strcpy_STR(sOutput, "_TempOutputIntersection.tbl");
+	}
+
+
+   // --- Do the Input Channels Exist ? ---
+
+   InX = FindChan_DB(Data,sInX);
+   if(InX==NULLSYMB)
+      Abort_SYS(_("Input X channel does not exist."));
+   InY = FindChan_DB(Data,sInY);
+   if(InY==NULLSYMB)
+      Abort_SYS(_("Input Y channel does not exist."));
+   InZ = FindChan_DB(Data,sInZ);
+   if(InZ==NULLSYMB)
+      Abort_SYS(_("Input Z channel does not exist."));
+
+
+   // --- Prepare to do the work ---
+
+   Progress_SYS(1);
+
+
+   // --- Lock the Symbols ---
+
+   LockSymb_DB(Data,InX,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,InY,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,InZ,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+
+   //     The Intersect routines re-fid data to the X channels rate, so if
+   //     if the Z channel is at a higher sampling rate than the X channel,
+   //     then information can be lost. To get around this,
+   //     then create temporary X and Y channels at the higher sampling rate.
+   
+   // --- Get a LST of all the currently selected lines ---
+   
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, LineLST);
+
+   
+	// --- Go through all the lines to see if we need to re-fid.
+	//     This method assumes that there are not multiple fid increments
+	//     for the same channel in different lines. 
+	//     This process is not necessary when calculating from an existing table. ---
+   
+   iTmp = GS_FALSE;
+   if(iStrlen_STR(sInput)==0)
+   {	      
+		iN = iSize_LST(LineLST);
+		for(i=0;i<iN;i++)
+		{
+			GetSymbItem_LST(LineLST, i, sLine, Line);
+	      
+			rFidIncrX = rGetFidIncr_DB(Data, Line, InX);
+			rFidIncrZ = rGetFidIncr_DB(Data, Line, InZ);
+			if(rFidIncrX==rDUMMY) rFidIncrX = 1.0;
+			if(rFidIncrZ==rDUMMY) rFidIncrZ = 1.0;
+
+			if(rFidIncrZ < rFidIncrX)
+			{
+				iTmp = GS_TRUE;
+				break;
+			}
+		}
+	}
+
+
+   // --- Do the re-fidding? ---
+   
+   if(iTmp)
+   {
+      // --- Temp channel names ---
+      
+      Strcpy_STR(sTmpX, "_IntTmpX");
+      Strcpy_STR(sTmpY, "_IntTmpY");
+   
+   
+      // --- Delete the temp channels if they already exist ---
+      
+      TmpX = FindChan_DB(Data, sTmpX);
+      if(TmpX!=NULLSYMB)
+      {
+         LockSymb_DB(Data, TmpX, DB_LOCK_READWRITE, DB_WAIT_NONE); 
+         DeleteSymb_DB(Data, TmpX);
+      }
+      TmpY = FindChan_DB(Data, sTmpY);
+      if(TmpY!=NULLSYMB)
+      {
+         LockSymb_DB(Data, TmpY, DB_LOCK_READWRITE, DB_WAIT_NONE); 
+         DeleteSymb_DB(Data, TmpY);
+      }
+      
+      
+      // --- Create copies of current X and Y ---
+         
+      TmpX = DupSymb_DB(Data, InX, sTmpX);
+      TmpY = DupSymb_DB(Data, InY, sTmpY);
+      
+      
+      // --- Refid ---
+      
+      Progress_SYS(1);
+      Strcpy_STR(sProg, _("Re-sampling locations to the data fid increment."));
+      ProgName_SYS(sProg, 1);
+      
+      iN = iSize_LST(LineLST);
+      for(i=0;i<iN;i++)
+      {
+         ProgUpdateL_SYS(i, iN);
+         GetSymbItem_LST(LineLST, i, sLine, Line);
+         
+			CopyData_DB(Data, Line, InX, TmpX);
+			CopyData_DB(Data, Line, InY, TmpY);
+			ReFidCh_DU(Data, Line, InZ, TmpX);
+			ReFidCh_DU(Data, Line, InZ, TmpY);
+      }
+      ProgUpdate_SYS(100);
+      
+      UnLockSymb_DB(Data,InX);
+      UnLockSymb_DB(Data,InY);
+      InX = TmpX;
+      InY = TmpY;
+   }
+   
+   
+   // --- Do the Intersection ---
+
+   if(iStrlen_STR(sInput)) 
+      IntersectOld_DU(Data, InX, InY, InZ, sInput, sOutput);
+   else {
+   
+      ToUpper_STR(sOpt);
+      if (iCharComp_STR(sOpt,"A")) 
+         IntersectAll_DU(Data,InX,InY,InZ,rTol,sOutput);
+      else
+         Intersect_DU(Data,InX,InY,InZ,rTol,sOutput);
+   }
+
+
+   // --- UnLock Symbols / Delete temp X,Y ---
+
+   if(iTmp)
+   {
+      DeleteSymb_DB(Data,InX);
+      DeleteSymb_DB(Data,InY);
+   }
+   else
+   {
+      UnLockSymb_DB(Data,InX);
+      UnLockSymb_DB(Data,InY);
+   }
+   UnLockSymb_DB(Data,InZ);
+   
+   
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+
+	// --- If the input is a database, reload it? ---
+	
+	if(iInGDB)
+	{
+		if(iReloadInputDB)
+			Load_EDB(sInputDB);
+		iDeleteFile_SYS(sInput);	// delete the temp table
+	}
+	
+	
+	// --- If the output is a database, create it from the
+	//     temp table, and load it. ---
+
+	if(iOutGDB)
+	{
+		IntersectTBLtoGDB_DU(sOutput, sOutputDB);
+		Strcpy_STR(sOutput, sOutputDB);
+
+		EIntData = Load_EDB(sOutputDB);
+		
+		
+		// --- Mark the intersection database with the flight database name ---
+		
+		IntData = Lock_EDB(EIntData);
+		SetRegSymbSetting_DB(IntData, NULLSYMB, "Levelling.Database", sCurDB);
+		Commit_DB(IntData);
+		UnLock_EDB(EIntData);
+		
+		
+		// --- delete the temp table ---
+		
+		iDeleteFile_SYS(sOutput);	
+	}
+	 
+
+   // --- pass on input channel ---
+
+   SetString_SYS("LVCORR","IN",sInZ);
+   SetString_SYS("STATLEV","IN",sInZ);
+   SetString_SYS("FULLLEV","IN",sInZ);
+   SetString_SYS("XLEVEL","REF",sInZ);
+   SetString_SYS("XLEVEL","INTERSECT",sOutput);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+}

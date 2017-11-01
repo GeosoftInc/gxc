@@ -1,0 +1,211 @@
+//===========================================================================
+NAME          = "GRIDMASK"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+Create a Mask Grid file using polygon coordiates
+defined in a separate file.  The polygon coorindates
+reference the input grid file. There may be more than
+one polygon defined in the polygon file.
+The region of the input grid file inside (or outside)
+the polygon(s) is masked out - i.e. replaced by dummies.
+
+Parameters: 
+
+   GRIDMASK.GRDIN      File Name of the Input Grid.
+           .GRDOUT     File Name of the Output Masked Grid.
+           .POLY       Name of the File containing the 
+                         Polygon(s) Mask Coordinates.
+           .MASKOPT    'OUTSIDE' - Mask (dummy) the grid area 
+                                   outside the polygon.
+                                   This is the DEFAULT value.
+                       'INSIDE'  - Mask (dummy) the grid area
+                                   inside the polygon.
+           .RESIZE     'NO'  - Do not minimise the size of output grid                         
+                               This is the DEFAULT value.
+                       'YES' - Minimise the size of output grid                         
+"
+
+//===========================================================================
+// Revision history
+//
+// 8.3      Improve progress.
+// 7.3      Output warning if the output grid has no valid items.
+// 6.0.1    Create geosoft temporary grid to prevent problems with XGD's
+//          that have special naming requirements, such an an ERS file.
+//
+//===========================================================================
+
+RESOURCE = "gridmask.gr"
+#include "gridmask.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+int        iMopt;             // Masking option
+int        iNValid, iNDummies, iProgState;
+real       rMin, rMax, rMean, rStdDev;
+
+string(STR_FILE)  sGrd;            // Name of input grid
+string(STR_FILE)  sMfile;          // Name of output mask grid
+string(STR_FILE)  sTfile;          // Name of temp mask grid
+string(STR_FILE)  sPoly;           // Name of polygon file
+
+string(STR_DEFAULT) sMopt;             // Mask option ("OUT" or "IN")
+string(STR_DEFAULT) sResize, sAliasFlag;           // Resize option ("YES" or "NO")
+
+PLY        Ply;               // Polygons created from file
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDMASKForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDMASKFORM_0,DGW_FILEPATH,"GRIDMASK","GRDIN");     
+      SetInfoSYS_DGW(Diag,_GRIDMASKFORM_1,DGW_FILEPATH,"GRIDMASK","GRDOUT");
+      SetInfoSYS_DGW(Diag,_GRIDMASKFORM_2,DGW_FILEPATH,"GRIDMASK","POLY");       
+      SetInfoSYS_DGW(Diag,_GRIDMASKFORM_3,DGW_TEXT,"GRIDMASK","MASKOPT");    
+      SetInfoSYS_DGW(Diag,_GRIDMASKFORM_4,DGW_TEXT,"GRIDMASK","RESIZE");    
+       
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDMASKFORM_0,DGW_FILEPATH,"GRIDMASK","GRDIN");     
+      GetInfoSYS_DGW(Diag,_GRIDMASKFORM_1,DGW_FILEPATH,"GRIDMASK","GRDOUT");
+      GetInfoSYS_DGW(Diag,_GRIDMASKFORM_2,DGW_FILEPATH,"GRIDMASK","POLY");       
+      GetInfoSYS_DGW(Diag,_GRIDMASKFORM_3,DGW_TEXT,"GRIDMASK","MASKOPT");    
+      GetInfoSYS_DGW(Diag,_GRIDMASKFORM_4,DGW_TEXT,"GRIDMASK","RESIZE");    
+ 
+      GetInfo_DGW(Diag,_GRIDMASKFORM_4,DGW_LISTALIAS,sAliasFlag);
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDMASK","GRDIN",sGrd);
+   GetString_SYS("GRIDMASK","GRDOUT",sMfile);
+   GetString_SYS("GRIDMASK","POLY",sPoly);
+
+   
+   // --- Check for null mask option string and set to 
+   //     default value if blank ---
+
+   GetString_SYS("GRIDMASK","MASKOPT",sMopt);
+   GetString_SYS("GRIDMASK","RESIZE",sResize);
+
+   if (!iStrcmp_STR("OUTSIDE",sMopt,STR_CASE_TOLERANT))
+      iMopt = IMU_MASK_OUTSIDE;
+   else if (!iStrcmp_STR("INSIDE",sMopt,STR_CASE_TOLERANT))
+      iMopt = IMU_MASK_INSIDE;
+   else 
+      Abort_SYS(_("Invalid Mask Option selected! Must be 'INSIDE' or 'OUTSIDE'."));
+
+   
+   // --- Check for null input, output and polygon file name strings ---
+
+   if (!iStrlen_STR(sGrd))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   if (!iStrlen_STR(sMfile))
+      Abort_SYS(_("Output Mask File Not Specified!"));
+      
+   if (!iStrlen_STR(sPoly))
+      Abort_SYS(_("Polygon File Not Specified!"));   
+
+   iProgState = iProgState_SYS();
+	if(iProgState != 1)
+		Progress_SYS(1);
+
+   ProgName_SYS(_("Loading Polygons..."),1); 
+
+   // --- Create and Load Polygons from file ---  
+
+   Ply = Create_PLY();
+   LoadTable_PLY(Ply,sPoly);  
+
+   ProgName_SYS(_("Masking Grid..."),1);
+
+
+   if (!iStrcmp_STR("YES",sResize,STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))  {
+   
+      Strcpy_STR(sTfile,"__gmasktmp.grd(GRD;Comp=size)");
+
+      // --- Mask the Grid ---
+
+      GridMask_IMU(sGrd,sTfile,Ply,iMopt);
+   
+      // --- Resizing the Grid ---
+
+      GridResize_IMU(sTfile,sMfile);
+         
+
+      // --- Remove Temp Files ---
+
+      iDeleteFile_SYS(sTfile);
+      iDeleteFile_SYS("__gmasktmp.grd.gi");
+         
+   } else {  
+   
+      // --- Mask the Grid ---
+      GridMask_IMU(sGrd,sMfile,Ply,iMopt);
+   }
+   
+   // --- Destroy the Polygons ---
+   
+   Destroy_PLY(Ply);
+  
+
+	// --- If the grid is empty, warn the user ---
+
+	if(iInteractive_SYS()==1 || iScript_SYS()==1)
+	{
+		GridStatExt_IMU(sMfile, IMU_STAT_FORCED_YES, iNValid, iNDummies, rMin, rMax, rMean, rStdDev);   // Also writes metadata for the grid header.
+		if(iNValid == 0 && iInteractive_SYS()==1)
+			Abort_SYS(_("The polygon(s) did not intersect any valid data. The output grid is empty."));
+	}
+  
+  
+   // --- done ---
+
+	if(iProgState != iProgState_SYS())
+		Progress_SYS(iProgState);
+		   
+   
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sMfile,"Grid",1);
+   
+}

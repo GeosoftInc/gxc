@@ -1,0 +1,640 @@
+//===========================================================================
+NAME          = "Quality control on flight/tie line intersection data values"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/QC Utility"
+
+DESCRIPTION   = "
+
+Use this GX to carry out quality control on values measured at the intersection of flight and tie lines.
+
+Parameters: 
+
+  QCINTERSECT.CHAN   -  Data channel - e.g. altitude or any measured value
+             .ALLDEV -  Allowed difference in data values at the crossing
+             .MAP    -  New map (1) or current map (0)
+  
+"
+// Revision History
+// v8.5:   Enabled for batch operation.
+// v6.3.0: New GX.
+//===========================================================================
+
+RESOURCE = "qcintersect.gr"
+#include "qcintersect.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+int         i;
+
+EMAP        EMap;
+MAP         Map;
+EDB         EData;
+DB          Data;
+DB_SYMB     XCh,YCh,ZCh,DCh,ChFlag;       // Channel Handles
+DB_SYMB     Line, Tie;
+DGW         Diag;
+LST         List, LineLST;               // List
+RA          Ra;
+MVIEW       View;
+DB_SELECT   Select;
+real        rTol;
+
+VV  VVd, VVdt, VVx, VVxt;
+
+
+int iInd, iNew, iToks;
+int iLine, iN, iNLines, iNTies, iType, k;
+real rLFid, rLFidStart, rLFidIncr, rLZ, rTFid, rTFidStart, rTFidIncr, rTZ;
+real rMinX, rMaxX, rMinY, rMaxY, rScaleMM, rTxtSize, rXo, rYo;
+real        rXLegend, rYLegend;
+
+string(STR_FILE) sTable, sMap;
+string(STR_DB_SYMBOL) sChan, sCh, sChFlag, sLine,sLastLine,sTie,sLastTie;    // Channel Name
+string(STR_GROUP) sExp, sBuff, sFont, sGrpName, sName, sGroup;
+string(STR_DEFAULT_SHORT) sLFid, sLZ, sTFid, sTZ, sVal, sColor;
+
+int         iInteract, iShowDialog, iPlotToMap, iPlotPath;
+
+//===========================================================================
+//                             INTERSECTION CODE
+//===========================================================================
+
+{
+	Strcpy_STR(sColor, "r128b128");		// purple
+
+
+	// ---- Batch control ---
+	
+	iShowDialog = 1;
+	if (iExistInt_SYS("QC", "SHOW_DIALOG"))
+	{
+		iShowDialog = iGetInt_SYS("QC", "SHOW_DIALOG");
+		if(iShowDialog != iDUMMY)
+			SetString_SYS("QC", "SHOW_DIALOG", "");		// force reset each time
+		if(iShowDialog != 0) iShowDialog = 1;				// show by default in interactive mode
+	}
+
+	iPlotToMap = 1;
+	if (iExistInt_SYS("QC", "OUTPUT_MAP"))
+	{
+		iPlotToMap = iGetInt_SYS("QC", "OUTPUT_MAP");
+		if(iPlotToMap != iDUMMY)
+			SetString_SYS("QC", "OUTPUT_MAP", "");			// force reset each time
+		if(iPlotToMap != 0) iPlotToMap = 1;					// plot by default
+	}
+
+	iPlotPath = 1;
+	if (iExistInt_SYS("QC", "PLOT_PATH"))
+	{
+		iPlotPath = iGetInt_SYS("QC", "PLOT_PATH");
+		if(iPlotPath != iDUMMY)
+			SetString_SYS("QC", "PLOT_PATH", "");			// force reset each time
+		if(iPlotPath != 0) iPlotPath = 1;					// plot by default
+	}
+
+	if (iPlotToMap == 0)
+		iPlotPath = 0;			                        // override
+
+
+   iInteract = iInteractive_SYS();    
+
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   
+   
+   // --- See if there are any lines/tie lines selected. ---
+   
+   Data = Lock_EDB(EData);
+	GetName_DB(Data,DB_NAME_FILE,sName);
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   SelectedLineLST_DB(Data, LineLST);
+     
+   iNTies = 0;
+   iNLines = 0;
+   iN = iSize_LST(LineLST);
+   for(i=0;i<iN;i++)
+   {
+      GetSymbItem_LST(LineLST, i, sLine, Line);
+      LOCK_R(Data, Line);
+      iType = iLineType_DB(Data, Line);
+      UNLOCK(Data, Line);
+      if(iType==DB_LINE_TYPE_NORMAL)
+         iNLines++;
+      else if(iType==DB_LINE_TYPE_TIE)
+         iNTies++;
+   }
+      
+   if(iNLines==0)
+      Abort_SYS(_("No normal flight lines are selected."));
+   if(iNTies==0)
+      Abort_SYS(_("No tie lines are selected."));
+
+	UnLock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   iInteract = iInteractive_SYS();
+   i = 2;
+   while (iInteract && (i == 2) && iShowDialog)
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("QCINTERSECT");
+
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_QCINTERSECT_0);
+
+		Data = Lock_EDB(EData);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+		UnLock_EDB(EData);
+
+      Sort_LST(List,0,0);
+
+
+      SetInfoSYS_DGW(Diag,_QCINTERSECT_0,DGW_TEXT,"QCINTERSECT","CHAN");
+      SetInfoSYS_DGW(Diag,_QCINTERSECT_1,DGW_TEXT,"QCINTERSECT","ALLDEV"); 
+      SetInfoSYS_DGW(Diag,_QCINTERSECT_2,DGW_LISTALIAS,"QCINTERSECT","MAP");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      GetInfoSYS_DGW(Diag,_QCINTERSECT_0,DGW_TEXT,"QCINTERSECT","CHAN");
+      GetInfoSYS_DGW(Diag,_QCINTERSECT_1,DGW_TEXT,"QCINTERSECT","ALLDEV"); 
+      GetInfoSYS_DGW(Diag,_QCINTERSECT_2,DGW_LISTALIAS,"QCINTERSECT","MAP");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   
+   
+      // --- New map? ---
+
+      iNew = iGetInt_SYS("QCINTERSECT","MAP");      
+      if (iNew && iPlotToMap) {
+         
+         // --- Run NEWMAP wizard ---
+   
+         iNew = iRunGX_SYS("newmap.gx");
+              
+         if (iNew == -1)        i = 2;
+         else if (iNew == 1)    Cancel_SYS();
+      }        
+   }
+
+   if (iPlotToMap) 
+	{
+		if (!iInteractive_SYS() || iShowDialog == 0) 
+		{
+			iNew    = iGetInt_SYS("QCINTERSECT","MAP");
+      
+			if (iNew) 
+			{         
+				// --- Run NEWMAP wizard ---
+		
+				iRunGX_SYS("newmap.gx");
+				GetString_SYS("NEWMAP","MAP",sMap);
+				Load_EMAP(sMap);
+			}
+		}
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("QCINTERSECT","CHAN",sChan);
+   if(iStrlen_STR(sChan)==0) 
+      Abort_SYS(_("Intersection data channel not defined."));
+
+
+   rTol = rGetReal_SYS("QCINTERSECT","ALLDEV");
+   if (rTol < 0.0) rTol = 10.0;
+
+
+   // --- Do the reference channels exist ? ---
+
+   Data = Lock_EDB(EData);
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+   ZCh = FindChan_DB(Data,sChan);
+   if(ZCh==NULLSYMB)
+      Abort_SYS(_("The intersection data channel does not exist."));
+
+
+   // --- Prepare to do the work ---
+
+   Progress_SYS(1);
+
+
+   // --- Intersection table name ---
+   
+   Strcpy_STR(sTable, "QC_Int.tbl");
+   
+
+   // --- Lock the Symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+
+   // --- Do the Intersection ---
+
+   Intersect_DU(Data,XCh,YCh,ZCh,rTol,sTable);
+
+
+   // --- Create an intersection difference channel ---
+   
+   Strcpy_STR(sCh,_n("IntDiff"));
+   if (iExistSymb_DB(Data,sCh,DB_SYMB_CHAN)) {
+      DCh = FindSymb_DB(Data,sCh,DB_SYMB_CHAN);
+      LOCK_RW(Data,DCh);
+      DeleteSymb_DB(Data, DCh);
+   }
+   DCh = CreateSymb_DB(Data,sCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   LOCK_RW(Data,DCh);
+   
+   
+   VVd = Create_VV(REAL, 0);
+   VVx = Create_VV(REAL, 0);
+   VVdt = Create_VV(REAL, 0);
+   VVxt = Create_VV(REAL, 0);
+   
+   
+   // --- Scan through the intersection table and get the intersections ---
+   
+   ProgName_SYS(_("Checking intersections"), 1);
+   Strcpy_STR(sLastLine, "");
+   Strcpy_STR(sLastTie, "");
+
+   Line = NULLSYMB;
+   Tie = NULLSYMB;
+   Ra = Create_RA(sTable);
+   iNLines = iLen_RA(Ra);
+   iLine = 0;
+   while(iGets_RA(Ra, sBuff)!=1)
+   {
+   
+      ProgUpdateL_SYS(iLine, iNLines);
+      iLine++;
+      if(iCheckStop_SYS()) Cancel_SYS();
+
+      
+      // --- Skip comments ---
+      
+      if(iCharComp_STR(sBuff, "\\")) continue;
+
+      TrimSpace_STR(sBuff, STR_TRIMBOTH);    
+      iToks = iTokenize_STR(sBuff, " ", "", "", "");
+      if(iToks!=10) continue;
+      
+      
+      // --- Get the required values ---
+      
+      GetToken_STR(sTie, sBuff, 2);
+      GetToken_STR(sTFid, sBuff, 3);
+      GetToken_STR(sTZ, sBuff, 4);
+      
+      GetToken_STR(sLine, sBuff, 6);
+      GetToken_STR(sLFid, sBuff, 7);
+      GetToken_STR(sLZ, sBuff, 8);
+      
+      rLFid = rScanR_STR(sLFid);
+      if(rLFid==rDUMMY) continue;
+      
+      rLZ = rScanR_STR(sLZ);
+      rTZ = rScanR_STR(sTZ);
+      if(rLZ==rDUMMY || rTZ==rDUMMY) continue;
+      
+      rTFid = rScanR_STR(sTFid);
+      if(rTFid==rDUMMY) continue;
+      
+      
+      // --- Regular lines ---
+      
+      if(iStrcmp_STR(sLine, sLastLine, STR_CASE_TOLERANT)!=0)
+      {
+         
+         // --- Output existing line? ---
+         
+         if(iStrlen_STR(sLastLine))
+            PutChanVV_DB(Data, Line, DCh, VVd);
+
+         
+         // --- Input new line ---
+         
+         Line = FindSymb_DB(Data, sLine, DB_SYMB_LINE);
+         GetChanVV_DB(Data, Line, XCh, VVx);
+         GetChanVV_DB(Data, Line, DCh, VVd);
+         ReFidVV_VV(VVd,VVx);
+
+         
+         rLFidStart = rGetFidStart_VV(VVx);
+         rLFidIncr = rGetFidIncr_VV(VVx);
+      }
+      
+               
+      // --- Locate the closest location in the line to the 
+      //     intersection point ---
+         
+      iInd = (int)((rLFid-rLFidStart)/rLFidIncr + 0.5);
+      SetReal_VV(VVd, iInd, rTZ - rLZ);
+      Strcpy_STR(sLastLine, sLine);        
+      
+   
+      // --- Tie lines ---
+      
+      if(iStrcmp_STR(sTie, sLastTie, STR_CASE_TOLERANT)!=0)
+      {
+         
+         // --- Output existing Tie? ---
+         
+         if(iStrlen_STR(sLastTie))
+            PutChanVV_DB(Data, Tie, DCh, VVdt);
+
+         
+         // --- Input new Tie ---
+         
+         Tie = FindSymb_DB(Data, sTie, DB_SYMB_LINE);
+         GetChanVV_DB(Data, Tie, XCh, VVxt);
+         GetChanVV_DB(Data, Tie, DCh, VVdt);
+         ReFidVV_VV(VVdt,VVxt);
+
+         rTFidStart = rGetFidStart_VV(VVxt);
+         rTFidIncr = rGetFidIncr_VV(VVxt);
+      }         
+       
+
+      // --- Locate the closest location in the Tie to the 
+      //     intersection point ---
+         
+      iInd = (int)((rTFid-rTFidStart)/rTFidIncr + 0.5);
+      SetReal_VV(VVdt, iInd, rTZ - rLZ);
+      Strcpy_STR(sLastTie, sTie);        
+   
+   }
+   
+
+   // --- Output remaining lines? ---
+   
+   if(iStrlen_STR(sLastLine))
+       PutChanVV_DB(Data, Line, DCh, VVd);
+   
+   if(iStrlen_STR(sLastTie))
+       PutChanVV_DB(Data, Tie, DCh, VVdt);
+   
+   Destroy_RA(Ra);
+
+
+   // --- Does the Flag channel exist ? ---
+
+   Strcpy_STR(sChFlag,"Flag_Int");
+   if (iExistSymb_DB(Data,sChFlag,DB_SYMB_CHAN)) {
+      ChFlag = FindSymb_DB(Data,sChFlag,DB_SYMB_CHAN);
+      LOCK_RW(Data,ChFlag);
+      DeleteSymb_DB(Data,ChFlag);
+   }   
+   ChFlag = CreateSymb_DB(Data,sChFlag,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_BYTE);
+
+	UnLockAllSymb_DB(Data);
+   UnLock_EDB(EData);
+   
+   Progress_SYS(0);
+
+
+	// --- Set the flag channel to 1 in locations where the height difference
+	//     is larger than the input tolerance, and 0 elsewhere where the height is defined. ---
+   
+	Strcpy_STR(sExp, sChFlag);
+	Strcat_STR(sExp, "=(abs(");
+	Strcat_STR(sExp, sCh);
+	Strcat_STR(sExp, ")>");
+	FormatR_STR(rTol, sVal, 10, 10);
+	Strcat_STR(sExp, sVal);
+	Strcat_STR(sExp, _n(") && abs("));
+	Strcat_STR(sExp, sCh);
+	Strcat_STR(sExp, _n(") != DUMMY ? 1 : 0"));
+   
+	SetString_SYS("MATH", "EXP", sExp);
+
+	iInteract = iInteractive_SYS();
+	SetInteractive_SYS(0);   
+	iRunGX_SYS("math.gx");
+	SetInteractive_SYS(iInteract);   
+
+	
+	// --- Load the new channels ---
+   
+	LoadChan_EDB(EData, sCh);
+	LoadChan_EDB(EData, sChFlag);
+
+
+	if (iPlotToMap)
+	{
+		// --- Plot line path and flag ---
+
+		if (iInteract)
+			SetInteractive_SYS(0);
+
+		SetString_SYS("QCDEVMAP","MAP","0");
+		SetString_SYS("QCDEVMAP","RESULT",sChFlag);
+		SetString_SYS("QCDEVMAP","THICK","1.0");
+		SetString_SYS("QCDEVMAP","COLOR",sColor);
+		SetString_SYS("QCDEVMAP","OFFSET","0.0");
+
+
+		// --- For the QC map, mark locations ONLY for the tie lines ---
+
+		Data = Lock_EDB(EData);   
+		Select = GetSelect_DB(Data);
+		Select_DB(Data, "T", DB_LINE_SELECT_EXCLUDE);
+		UnLock_EDB(EData);
+   
+		if (iRunGX_SYS("qcdevmap.gx")) Cancel_SYS(); 
+      
+		Data = Lock_EDB(EData);   
+		SetSelect_DB(Data, Select);
+		UnLock_EDB(EData);
+
+		if (iPlotPath)
+		{
+			SetString_SYS("PATH","LINE_THICKNESS","0.15");
+			SetString_SYS("PATH","LINE_COLOR","k");
+			SetString_SYS("PATH","TICKFLAG","0");
+			SetString_SYS("PATH","LABEL_FORMAT","TL");
+			SetString_SYS("PATH","LABEL_LOCATION","1");
+			SetString_SYS("PATH","LABEL_SIZE","2.5");
+			SetString_SYS("PATH","LABEL_COLOR","k");
+			SetString_SYS("PATH","LABEL_WEIGHT","0");
+			SetString_SYS("PATH","H_OFFSET","2.0");
+			SetString_SYS("PATH","V_OFFSET","0");
+			SetString_SYS("PATH","GAP","0");
+			SetString_SYS("PATH","LABEL_COMPASS","-1");
+
+			if (iRunGX_SYS("path.gx"))     
+				Cancel_SYS(); 
+		}
+
+		SetInteractive_SYS(iInteract);   
+
+
+		// ---------------------------------------
+		// --- Plot legend ---
+   
+		// --- check for base view ---
+
+		EMap = Current_EMAP();
+		Map = Lock_EMAP(EMap);
+		if (!iExistView_MAP(Map,"*Base"))
+			Abort_SYS(_("Legend cannot be drawn because a base view does not exist in this map."));
+		UnLock_EMAP(EMap);   
+
+		if (iInteractive_SYS())
+			iSetCurrentView_EMAP(EMap,"*Base");
+
+		Map = Lock_EMAP(EMap);
+		View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+ 
+ 
+		// --- Where to plot ---
+ 
+		rXLegend = rGetReal_SYS("QC", "LEGEND_X_IN");
+		rYLegend = rGetReal_SYS("QC", "LEGEND_Y_IN");
+		if(rXLegend != rDUMMY && rYLegend != rDUMMY)
+		{
+			rXo = rXLegend;
+			rYo = rYLegend;
+			SetString_SYS("QC", "LEGEND_X_IN", "");	// force reset each call
+			SetString_SYS("QC", "LEGEND_Y_IN", "");
+		}
+		else if (iInteractive_SYS()) 
+		{
+			// --- Get the coordinates of a user selected box ---
+
+			DisplayMessage_SYS(_("Locate legend"),_("Locate the lower left corner of the legend..."));
+
+			UnLock_EMAP(EMap);   
+			EMap = Current_EMAP();
+			iSetCurrentView_EMAP(EMap,"*Base");
+      
+			if (iGetPoint_EMAP(EMap,_("Locate legend..."),rXo,rYo)) Cancel_SYS(); 
+      
+			Map = Lock_EMAP(EMap);
+			View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+		} else {
+
+			// --- Get box area ---
+
+			Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
+			rXo = 0.2*rMinX + 0.8*rMaxX;
+			rYo = 0.2*rMinY + 0.8*rMaxY;
+		}
+
+		rXLegend = rXo;
+		rYLegend = rYo;
+
+
+		// --- Scale parameters ---
+
+		rScaleMM = rScaleMM_MVIEW(View);
+		rTxtSize = rScaleMM*2.5;
+		rXo *= rScaleMM;
+		rYo *= rScaleMM;
+
+
+		// --- Start a group ---
+
+		FileNamePart_STR(sName,sName,STR_FILE_PART_NAME);
+		GenGroupName_STR(_n("LEGEND_QC"),sName,_n("Int"),sGrpName);
+		Strcpy_STR(sGroup,sGrpName);
+		StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+		if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+			Strcpy_STR(sFont,_n("default"));
+		TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+		TextSize_MVIEW(View,rTxtSize);
+		TextAngle_MVIEW(View,0.0);
+		TextColor_MVIEW(View,iColor_MVIEW("k"));
+   
+		LineThick_MVIEW(View,0.15*rScaleMM);
+		LineStyle_MVIEW(View,0,0.0);
+		LineColor_MVIEW(View,iColor_MVIEW("k"));
+   
+		if (iPlotPath)
+		{
+			Text_MVIEW(View,_("Line path"),rXo+15.0*rScaleMM,rYo);
+			Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
+			rYo+=5.0*rScaleMM;
+		}
+
+ 
+		// --- QC results ---
+   
+		TextColor_MVIEW(View,iColor_MVIEW(sColor));
+		Text_MVIEW(View,sChFlag,rXo+15.0*rScaleMM,rYo);
+
+		if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+			Strcpy_STR(sFont,_n("symbols"));
+		SymbFont_MVIEW(View,sFont,TRUE,MVIEW_FONT_WEIGHT_MEDIUM,FALSE);
+		SymbColor_MVIEW(View,iColor_MVIEW(sColor));
+		SymbFillColor_MVIEW(View,iColor_MVIEW(sColor));
+		SymbNumber_MVIEW(View,20);  // solid circle
+		SymbSize_MVIEW(View, rScaleMM);
+		SymbAngle_MVIEW(View,0.0);
+
+
+		// --- Just draw one symbol here ---
+   
+		k = (int)(30.0/0.2) + 1;
+		i = k/2;
+		Symbol_MVIEW(View, rXo + 0.33*(real)i*0.2*rScaleMM, rYo + 1.25*rScaleMM);
+
+ 
+ 		// --- Save group location and extents ---
+
+		SetReal_SYS("QC", "LEGEND_X_OUT", rXLegend);
+		SetReal_SYS("QC", "LEGEND_Y_OUT", rYLegend);
+
+		GetGroupExtent_MVIEW (View, sGroup, rMinX, rMinY, rMaxX, rMaxY, MVIEW_UNIT_MM);
+		SetReal_SYS("QC", "LEGEND_WIDTH", rMaxX - rMinX);
+		SetReal_SYS("QC", "LEGEND_HEIGHT", rMaxY - rMinY);
+
+
+		// --- Done with legend ---
+
+		Destroy_MVIEW(View);
+		UnLock_EMAP(EMap);
+
+
+		// --- Set default plotting channel ---
+
+		SetString_SYS("QCDEVMAP","RESULT",sChFlag);     
+	}
+}

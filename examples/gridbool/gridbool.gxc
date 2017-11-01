@@ -1,0 +1,189 @@
+//===========================================================================
+NAME          = "GRIDBOOL"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GMSYS-3D Tools/Manual FFT Preparation"
+
+DESCRIPTION   = "\
+\r\n\
+Mask one grid against another to produce
+a new output grid\r\n\
+\r\n\
+Parameters: \r\n\
+      GRIDBOOL.GRD1  File Name of the First Grid.                       
+              .GRD2  File Name of the Second Grid.                      
+              .OUT   File Name of Output Grid.
+              .BOOL  Boolean logic option for masking.
+                       (0,1,or 2.   Default = 0)
+              .SIZ   Option controlling size of output
+                       grid area.
+                       (0,1,2,or 3. Default = 0)
+              .OLAP  Option controlling values to use
+                       in overlapping areas.
+                       (0,1,or 2    Default = 1)\r\n"
+
+//===========================================================================
+
+RESOURCE = "gridbool.gr"
+#include "gridbool.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;             // Dialogue handle
+
+int        i;                // utility int
+int        iBool;            // Boolean logic option
+int        iSizing;          // Sizing option
+int        iOlap;            // Overlap option
+int        iType1,iType2;
+int        t1,t2,t3;
+real       d1,d2,d3,d4,d5,d6,d7;
+
+string(STR_FILE) sGrd1;           // Name of input grid 1
+string(STR_FILE) sGrd2;           // Name of input grid 2
+string(STR_FILE) sNew;            // Name of new resultant grid
+string(STR_DEFAULT_SHORT) sTemp;           // Temporary string 
+
+IMG        IMG1,IMG2;        // Images tied to the input grids
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDBOOLForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDBOOLFORM_0,DGW_FILEPATH,"GRIDBOOL","GRD1");     
+      SetInfoSYS_DGW(Diag,_GRIDBOOLFORM_1,DGW_FILEPATH,"GRIDBOOL","GRD2");   
+      SetInfoSYS_DGW(Diag,_GRIDBOOLFORM_2,DGW_FILEPATH,"GRIDBOOL","OUT");    
+      SetInfoSYS_DGW(Diag,_GRIDBOOLFORM_3,DGW_LISTALIAS,"GRIDBOOL","BOOL");
+      SetInfoSYS_DGW(Diag,_GRIDBOOLFORM_4,DGW_LISTALIAS,"GRIDBOOL","SIZ");
+      SetInfoSYS_DGW(Diag,_GRIDBOOLFORM_5,DGW_LISTALIAS,"GRIDBOOL","OLAP");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDBOOLFORM_0,DGW_FILEPATH,"GRIDBOOL","GRD1");     
+      GetInfoSYS_DGW(Diag,_GRIDBOOLFORM_1,DGW_FILEPATH,"GRIDBOOL","GRD2");   
+      GetInfoSYS_DGW(Diag,_GRIDBOOLFORM_2,DGW_FILEPATH,"GRIDBOOL","OUT");    
+      GetInfoSYS_DGW(Diag,_GRIDBOOLFORM_3,DGW_LISTALIAS,"GRIDBOOL","BOOL");
+      GetInfoSYS_DGW(Diag,_GRIDBOOLFORM_4,DGW_LISTALIAS,"GRIDBOOL","SIZ");
+      GetInfoSYS_DGW(Diag,_GRIDBOOLFORM_5,DGW_LISTALIAS,"GRIDBOOL","OLAP");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDBOOL","GRD1",sGrd1);
+   GetString_SYS("GRIDBOOL","GRD2",sGrd2);
+   GetString_SYS("GRIDBOOL","OUT",sNew);  
+  
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrd1))
+      Abort_SYS(_("Input Grid #1 Not Specified!"));
+
+   if (!iStrlen_STR(sGrd2))
+      Abort_SYS(_("Input Grid #2 Not Specified!"));
+      
+   if (!iStrlen_STR(sNew))
+      Abort_SYS(_("Output Grid Not Specified!"));   
+
+   // --- Check for null parameter strings and set to 
+   //     default values if blank ---
+
+   GetString_SYS("GRIDBOOL","BOOL",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iBool = IMU_BOOL_OPT_AND;
+   else
+      iBool = iGetInt_SYS("GRIDBOOL","BOOL");
+
+   GetString_SYS("GRIDBOOL","SIZ",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iSizing = IMU_BOOL_SIZING_MIN;
+   else
+      iSizing = iGetInt_SYS("GRIDBOOL","SIZ");
+
+   GetString_SYS("GRIDBOOL","OLAP",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iOlap = IMU_BOOL_OLAP_1;
+   else
+      iOlap = iGetInt_SYS("GRIDBOOL","OLAP");
+
+
+   // --- Check parameter validity ---
+
+   if ((iBool < IMU_BOOL_OPT_AND) || (iBool > IMU_BOOL_OPT_XOR))
+      Abort_SYS(_("Boolean logic option is Invalid! Must be 0,1 or 2."));
+
+   if ((iSizing < IMU_BOOL_SIZING_MIN) || (iSizing > IMU_BOOL_SIZING_MAX))
+      Abort_SYS(_("Sizing option is Invalid! Must be 0,1,2 or 3."));
+
+   if ((iOlap < IMU_BOOL_OLAP_AVE) || (iOlap > IMU_BOOL_OLAP_2))
+      Abort_SYS(_("Overlap area option is Invalid! Must be 0,1 or 2."));
+  
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+
+   GridStat_IMU(sGrd1,iType1,t1,t2,d1,d2,t3,d3,d4,d5,d6,d7);
+   GridStat_IMU(sGrd2,iType2,t1,t2,d1,d2,t3,d3,d4,d5,d6,d7);
+
+
+   IMG1 = CreateFile_IMG(iType1,sGrd1,IMG_FILE_READONLY);
+   IMG2 = CreateFile_IMG(iType2,sGrd2,IMG_FILE_READONLY);
+
+   ProgName_SYS(_("Masking Grids..."),1);
+
+   // --- Mask the grids ---
+
+   GridBool_IMU(IMG1,IMG2,sNew,iBool,iSizing,iOlap);
+   
+   // --- Destroy the Images ---
+   
+   Destroy_IMG(IMG1);
+   Destroy_IMG(IMG2);
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sNew,"Grid",1);
+   
+}

@@ -1,0 +1,105 @@
+//===========================================================================
+NAME          = "WholePlot - Sort holes in collar table"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Sorts the rows in the collar table by the DH_HOLE values. 
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DH          Drill;
+DB_SELECT   Select;           // current selection mode
+
+string(STR_FILE) sDB;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+
+   // --- Get DB/DH ---
+   
+   EData = Current_EDB();
+
+
+   // --- Get the current database name. ---
+
+   GetName_EDB(EData, sDB);
+
+
+   // --- Create the DH object ---
+
+   Drill  = Create_DH(sDB);
+
+
+   // --- Get the name of the collar table database ---
+
+   GetCollarTableDB_DH(Drill, sDB);
+
+
+   // --- Release the Drill Hole project ---
+
+   Destroy_DH(Drill);
+
+
+   // --- Make the collar table the current database ---
+
+   EData = Load_EDB(sDB);                  
+   MakeCurrent_EDB(EData);
+
+
+   // --- Go to the collar table ---
+
+   SetCurLine_EDB(EData, "DH_Collar");
+
+
+   // --- Get the current selection, and reset to just the collar table ---
+
+   Data = Lock_EDB(EData);
+   Select = GetSelect_DB(Data);
+   Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+   Select_DB(Data,"DH_Collar",DB_LINE_SELECT_INCLUDE);
+   UnLock_EDB(EData);
+
+
+   // --- Run the Sortall GX non-interactively---
+
+   SetString_SYS("SORTALL","CHANNEL", "DH_HOLE");
+   SetString_SYS("SORTALL","ORDER",   "ascending");
+   SetString_SYS("SORTALL","READONLY","Yes");
+
+   SetInteractive_SYS(0);
+   iRunGX_SYS("sortall");
+   SetInteractive_SYS(1);
+
+
+   // --- Reset the selection ---
+
+   Data = Lock_EDB(EData);
+   SetSelect_DB(Data,Select);
+   UnLock_EDB(EData);
+
+}
+   

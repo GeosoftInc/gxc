@@ -1,0 +1,143 @@
+//===========================================================================
+NAME          = "Select all Data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+      Reset the mask channel values to 1, with mineral options.
+   
+"
+// Revision History
+// v6.3.0: Allow selection of mineral channel.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.7: New GX for Semplot upgrade..
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semselectall.gr"
+#include "semselectall.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+LST         List;
+DGW         Diag;
+DB_SYMB     MaskCh;
+
+int iRet, iAutoRedraw,iLines,iInteractive;
+string(STR_DB_SYMBOL) sMaskCh, sMineralCh;
+string(STR_DEFAULT_SHORT) sMineral, sVal;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   iInteractive = iInteractive_SYS();
+   if(iInteractive) {
+
+
+      Diag = Create_DGW("SEMSELECTALL");
+
+
+      // --- Create Lists ---
+
+      List = GetList_DGW(Diag,_SEMSELECTALL_0);
+      ClassChanLST_DB(Data,List,"MASK");
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_SEMSELECTALL_1);
+      ClassChanLST_DB(Data,List,"MINERAL");
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_SEMSELECTALL_2);
+      GetFullMineralLST_SEMPLOT(List);
+
+      SetInfoSYS_DGW(Diag,_SEMSELECTALL_0,DGW_TEXT,"SEMPLOT","MASK");
+      SetInfoSYS_DGW(Diag,_SEMSELECTALL_1,DGW_TEXT,"SEMPLOT","MINERAL_CHANNEL");
+      SetInfoSYS_DGW(Diag,_SEMSELECTALL_2,DGW_LISTALIAS,"SEMSELECTALL","MINERAL");
+      SetInfoSYS_DGW(Diag,_SEMSELECTALL_3,DGW_LISTALIAS,"SEMSELECTALL","LINES");
+                  
+
+      iRet = iRunDialogue_DGW(Diag);
+      if (iRet == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_SEMSELECTALL_0,DGW_TEXT,"SEMPLOT","MASK");
+      GetInfoSYS_DGW(Diag,_SEMSELECTALL_1,DGW_TEXT,"SEMPLOT","MINERAL_CHANNEL");
+      GetInfoSYS_DGW(Diag,_SEMSELECTALL_2,DGW_LISTALIAS,"SEMSELECTALL","MINERAL");
+      GetInfoSYS_DGW(Diag,_SEMSELECTALL_3,DGW_LISTALIAS,"SEMSELECTALL","LINES");
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+   GetString_SYS("SEMPLOT", "MINERAL_CHANNEL", sMineralCh);
+   GetString_SYS("SEMSELECTALL", "MINERAL", sMineral);
+   iLines = iGetInt_SYS("SEMSELECTALL", "LINES");
+   if(iLines!=1) iLines = 0;
+
+
+   // --- Create mask channel if it does not exist ---
+
+   MaskCh = FindChan_DB(Data, sMaskCh);
+   if(MaskCh==NULLSYMB) {
+
+
+      // --- Create a new mask channel ---
+
+      SetInteractive_SYS(0);
+      UnLock_EDB(EData);
+
+      iRunGX_SYS("semmask.gx");
+
+      SetInteractive_SYS(iInteractive);
+
+   }
+   else {
+
+
+      // --- Reset the mask channel ---
+
+      Progress_SYS(1);
+      ProgName_SYS(_("Setting Mask Channel"), 1);
+      SetMask_SEMPLOT(Data, sMaskCh, sMineralCh, sMineral, iLines, 1);
+      Progress_SYS(0);
+
+
+      // --- Release the database --
+
+      UnLock_EDB(EData);
+
+   }
+
+
+
+   // --- Auto replot of data? ---
+
+   iGlobal_SYS("SEMPLOT.AUTOREDRAW",sVal);
+   iAutoRedraw = iScanI_STR(sVal);
+
+   if(iAutoRedraw==1)
+      iRunGX_SYS("semreplotmaps");
+
+}

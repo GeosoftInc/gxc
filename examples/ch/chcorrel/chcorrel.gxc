@@ -1,0 +1,1121 @@
+
+//===========================================================================
+NAME          = "CHIMERA correlation plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+   Plot assay correlations.
+   
+   CHCORREL.DATA     \"ASSAY\"
+                     \"DISPLAYED_ASSAY\"
+                     \"LIST\"
+                     \"ALL\"
+                     \"DISPLAYED\"
+           .LOG      \"DEFAULT\" to use LOG attribute
+                     \"LOG\"     to use log of all data
+                     \"LINEAR\"  to use original data
+           .TITLE    title to be plotted below table
+           .COLOUR	 \"YES\" to colour-code results
+           .SIGLEV   Significance level: 0.90, 0.95, 0.975, 0.99, default is 0.95
+           .SCAT      \"YES\" to plot scatter plots in the upper diagonal
+"           
+// Revision History:
+// v6.3.0: Fixed to work better with scatter tool.
+// v6.0.0: Save min, max and transform for each channel in CHCORPICK variables.
+// v5.1.8: Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+// v5.1.3: Fixed bug in setting LogVV value for "j" channels.
+//===========================================================================
+
+RESOURCE = "chcorrel.gr"
+#include "chcorrel.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+DGW        Diag;
+EDB        EData;
+DB         Data;
+EMAP       EMap;
+MAP        Map;
+MVIEW      View;
+DB_SYMB    Line; 
+DB_SYMB    Chan,Ch1,Ch2;
+VV         VV1,VV2,VV1t,VV2t,LogVV;
+WA         WAtbl;
+TB         TableCorr;
+ST2        St2;
+REG        Reg;
+LST        ChLST;
+
+string(4000) sLongTemp;
+string(STR_FILE) sTblFile,sMap,sDB,sDB2, sMapDir, sMapName;
+string(STR_DB_SYMBOL) sCh;
+string(STR_DEFAULT_LONG) sTemp,sFont;
+string(STR_DEFAULT_LONG) sData,sLog,sTitle;
+string(STR_DEFAULT_LONG) sPrompt,sParm,sNum;
+real       rCorr,rVal;
+real       rMinX,rMaxX,rMinY,rMaxY;
+real       rCellSz,rTextSz,rTemp;
+real       rLMargin,rRMargin,rBMargin,rTMargin,rStep,rStepj,rBit;
+
+string(STR_DEFAULT_LONG) sCompany,sName,sDescr,sGeo,sDate,sAliasFlagColour,sAliasFlagScat;
+real       rX,rY;
+
+int        i,j,iBold,iVal;
+int        iTotLines;
+int        iCh;
+int        iOK, iScat, iCol;
+
+TB         TableItems;
+VM         VMf;
+string(STR_FILE) sTblItemsFile;
+string(STR_DEFAULT_SHORT) sSigLev;
+string(32768) sChannels;
+VV         VVmin, VVmax;
+
+int        iItems,iDegFree,iMaxItem;
+int        iColour,iVStr,iStr,iMod,iWeak,iVWeak,iNull,iK,iLog;
+real       rF,rR,rI,rACorr;
+real       rBoxH,rBoxW,rMin,rMax,rScale;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      Diag = Create_DGW("CHCORREL");
+   
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_CHCORREL_0,DGW_LISTALIAS,"CHCORREL","DATA");
+      SetInfoSYS_DGW(Diag,_CHCORREL_1,DGW_LISTALIAS,"CHCORREL","LOG");
+      SetInfoSYS_DGW(Diag,_CHCORREL_2,DGW_TEXT,"CHCORREL","TITLE");
+      SetInfoSYS_DGW(Diag,_CHCORREL_3,DGW_TEXT,"CHCORREL","COLOUR");
+      SetInfoSYS_DGW(Diag,_CHCORREL_4,DGW_TEXT,"CHCORREL","SIGLEV");
+      SetInfoSYS_DGW(Diag,_CHCORREL_5,DGW_TEXT,"CHCORREL","SCAT");
+   
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    
+
+      GetInfoSYS_DGW(Diag,_CHCORREL_0,DGW_LISTALIAS,"CHCORREL","DATA");
+      GetInfoSYS_DGW(Diag,_CHCORREL_1,DGW_LISTALIAS,"CHCORREL","LOG");
+      GetInfoSYS_DGW(Diag,_CHCORREL_2,DGW_TEXT,"CHCORREL","TITLE");
+      GetInfoSYS_DGW(Diag,_CHCORREL_3,DGW_TEXT,"CHCORREL","COLOUR");
+      GetInfoSYS_DGW(Diag,_CHCORREL_4,DGW_TEXT,"CHCORREL","SIGLEV");
+      GetInfoSYS_DGW(Diag,_CHCORREL_5,DGW_TEXT,"CHCORREL","SCAT");
+
+      GetInfo_DGW(Diag,_CHCORREL_3,DGW_LISTALIAS,sAliasFlagColour);
+      GetInfo_DGW(Diag,_CHCORREL_5,DGW_LISTALIAS,sAliasFlagScat);
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get parameters ---
+  
+   GetString_SYS("CHCORREL","DATA",sData);
+   GetString_SYS("CHCORREL","LOG",sLog);
+   GetString_SYS("CHCORREL","TITLE",sTitle);
+   GetString_SYS("CHCORREL","SIGLEV",sSigLev);
+   GetString_SYS("CHCORREL","MAP_DIR",sMapDir);
+   
+   iColour= iGetYesNo_SYS("CHCORREL","COLOUR");
+   if (iColour == 0)
+      iColour = !iStrcmp_STR(sAliasFlagColour,"1",STR_CASE_TOLERANT);
+   iScat= iGetYesNo_SYS("CHCORREL","SCAT");
+   if (iScat == 0)
+      iScat = !iStrcmp_STR(sAliasFlagScat,"1",STR_CASE_TOLERANT);
+   
+   if(iStrMin2_STR(sTitle)==0)  
+      Strcpy_STR(sTitle,_("Assay Correlations"));
+
+
+   Reg = Create_REG(128);
+   
+
+   EData = Current_EDB();
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sData);
+   SetString_SYS("CHCHANLST","GX","CHCORREL");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- create LSTs to hold channel lists, and select the items ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+   
+   // --- nothing to do ---
+   
+   iCh = iSize_LST(ChLST);   
+   if (iCh < 2) Abort_SYS(_("Nothing to plot.  At least two channels are required for correlation plot."));
+   
+   
+   // --- Create VVs to hold min, max for each channel ---
+   
+   VVmin = Create_VV(REAL, iCh);
+   VVmax = Create_VV(REAL, iCh);
+
+	FillReal_VV(VVmin, rDUMMY);
+	FillReal_VV(VVmax, rDUMMY);
+   
+   
+   GetName_DB(Data,DB_NAME_FILE,sDB);
+   FileNamePart_STR(sDB,sDB2,STR_FILE_PART_NAME);
+
+   Progress_SYS(1);
+
+
+   // --- set colours ---
+   
+   iVStr  = iColor_MVIEW("RB");
+   iStr   = iColor_MVIEW("R196");
+   iMod   = iColor_MVIEW("R255G128");
+   iWeak  = iColor_MVIEW("G196");
+   iVWeak = iColor_MVIEW("G196B196");
+   iNull  = iColor_MVIEW("K96");
+   iK     = iColor_MVIEW("K");
+   
+   
+   // --- set F values in VM ---
+   
+   VMf = Create_VM(REAL,35);
+   if (iStrcmp_STR(sSigLev,"0.90",STR_CASE_TOLERANT) == 0) {
+      SetReal_VM(VMf, 0, 39.86);	 // Dgrees of freedom  1
+      SetReal_VM(VMf, 1,  8.53);	 //  				   2
+      SetReal_VM(VMf, 2,  5.54);	 //  				   3
+      SetReal_VM(VMf, 3,  4.54);	 //  				   4
+      SetReal_VM(VMf, 4,  4.06);	 //  				   5
+      SetReal_VM(VMf, 5,  3.78);	 //  				   6
+      SetReal_VM(VMf, 6,  3.59);	 //  				   7
+      SetReal_VM(VMf, 7,  3.46);	 //  				   8
+      SetReal_VM(VMf, 8,  3.36);	 //  				   9
+      SetReal_VM(VMf, 9,  3.29);	 //  				  10
+      SetReal_VM(VMf,10,  3.23);	 //  				  11
+      SetReal_VM(VMf,11,  3.18);	 //  				  12
+      SetReal_VM(VMf,12,  3.14);	 //  				  13
+      SetReal_VM(VMf,13,  3.10);	 //  				  14
+      SetReal_VM(VMf,14,  3.07);	 //  				  15
+      SetReal_VM(VMf,15,  3.05);	 //  				  16
+      SetReal_VM(VMf,16,  3.03);	 //  				  17
+      SetReal_VM(VMf,17,  3.01);	 //  				  18
+      SetReal_VM(VMf,18,  2.99);	 //  				  19
+      SetReal_VM(VMf,19,  2.97);	 //  				  20
+      SetReal_VM(VMf,20,  2.96);	 //  				  21
+      SetReal_VM(VMf,21,  2.95);	 //  				  22
+      SetReal_VM(VMf,22,  2.94);	 //  				  23
+      SetReal_VM(VMf,23,  2.93);	 //  				  24
+      SetReal_VM(VMf,24,  2.92);	 //  				  25
+      SetReal_VM(VMf,25,  2.91);	 //  				  26
+      SetReal_VM(VMf,26,  2.90);	 //  				  27
+      SetReal_VM(VMf,27,  2.89);	 //  				  28
+      SetReal_VM(VMf,28,  2.89);	 //  				  29
+      SetReal_VM(VMf,29,  2.88);	 //  				  30
+      SetReal_VM(VMf,30,  2.84);	 //  				  40
+      SetReal_VM(VMf,31,  2.79);	 //  				  60
+      SetReal_VM(VMf,32,  2.75);	 //  				 120
+      SetReal_VM(VMf,33,  2.71);	 //  				 infinite
+   } else if (iStrcmp_STR(sSigLev,"0.95",STR_CASE_TOLERANT) == 0) {
+      SetReal_VM(VMf, 0,161.40);
+      SetReal_VM(VMf, 1, 18.51);
+      SetReal_VM(VMf, 2, 10.13);
+      SetReal_VM(VMf, 3,  7.71);
+      SetReal_VM(VMf, 4,  6.61);
+      SetReal_VM(VMf, 5,  5.99);
+      SetReal_VM(VMf, 6,  5.59);
+      SetReal_VM(VMf, 7,  5.32);
+      SetReal_VM(VMf, 8,  5.12);
+      SetReal_VM(VMf, 9,  4.96);
+      SetReal_VM(VMf,10,  4.84);
+      SetReal_VM(VMf,11,  4.75);
+      SetReal_VM(VMf,12,  4.67);
+      SetReal_VM(VMf,13,  4.60);
+      SetReal_VM(VMf,14,  4.54);
+      SetReal_VM(VMf,15,  4.49);
+      SetReal_VM(VMf,16,  4.45);
+      SetReal_VM(VMf,17,  4.41);
+      SetReal_VM(VMf,18,  4.38);
+      SetReal_VM(VMf,19,  4.35);
+      SetReal_VM(VMf,20,  4.32);
+      SetReal_VM(VMf,21,  4.30);
+      SetReal_VM(VMf,22,  4.28);
+      SetReal_VM(VMf,23,  4.26);
+      SetReal_VM(VMf,24,  4.24);
+      SetReal_VM(VMf,25,  4.23);
+      SetReal_VM(VMf,26,  4.21);
+      SetReal_VM(VMf,27,  4.20);
+      SetReal_VM(VMf,28,  4.18);
+      SetReal_VM(VMf,29,  4.17);
+      SetReal_VM(VMf,30,  4.08);
+      SetReal_VM(VMf,31,  4.00);
+      SetReal_VM(VMf,32,  3.92);
+      SetReal_VM(VMf,33,  3.84);
+   } else if (iStrcmp_STR(sSigLev,"0.975",STR_CASE_TOLERANT) == 0) {
+      SetReal_VM(VMf, 0,647.80);
+      SetReal_VM(VMf, 1, 38.51);
+      SetReal_VM(VMf, 2, 17.44);
+      SetReal_VM(VMf, 3, 12.22);
+      SetReal_VM(VMf, 4, 10.01);
+      SetReal_VM(VMf, 5,  8.81);
+      SetReal_VM(VMf, 6,  8.07);
+      SetReal_VM(VMf, 7,  7.57);
+      SetReal_VM(VMf, 8,  7.21);
+      SetReal_VM(VMf, 9,  6.94);
+      SetReal_VM(VMf,10,  6.72);
+      SetReal_VM(VMf,11,  6.55);
+      SetReal_VM(VMf,12,  6.41);
+      SetReal_VM(VMf,13,  6.30);
+      SetReal_VM(VMf,14,  6.20);
+      SetReal_VM(VMf,15,  6.12);
+      SetReal_VM(VMf,16,  6.04);
+      SetReal_VM(VMf,17,  5.98);
+      SetReal_VM(VMf,18,  5.92);
+      SetReal_VM(VMf,19,  5.87);
+      SetReal_VM(VMf,20,  5.83);
+      SetReal_VM(VMf,21,  5.79);
+      SetReal_VM(VMf,22,  5.75);
+      SetReal_VM(VMf,23,  5.72);
+      SetReal_VM(VMf,24,  5.69);
+      SetReal_VM(VMf,25,  5.66);
+      SetReal_VM(VMf,26,  5.63);
+      SetReal_VM(VMf,27,  5.61);
+      SetReal_VM(VMf,28,  5.59);
+      SetReal_VM(VMf,29,  5.57);
+      SetReal_VM(VMf,30,  5.42);
+      SetReal_VM(VMf,31,  5.29);
+      SetReal_VM(VMf,32,  5.15);
+      SetReal_VM(VMf,33,  5.02);
+   } else if (iStrcmp_STR(sSigLev,"0.99",STR_CASE_TOLERANT) == 0) {
+      SetReal_VM(VMf, 0,4052.0);
+      SetReal_VM(VMf, 1, 98.50);
+      SetReal_VM(VMf, 2, 34.12);
+      SetReal_VM(VMf, 3, 21.20);
+      SetReal_VM(VMf, 4, 16.26);
+      SetReal_VM(VMf, 5, 13.75);
+      SetReal_VM(VMf, 6, 12.25);
+      SetReal_VM(VMf, 7, 11.26);
+      SetReal_VM(VMf, 8, 10.56);
+      SetReal_VM(VMf, 9, 10.04);
+      SetReal_VM(VMf,10,  9.65);
+      SetReal_VM(VMf,11,  9.33);
+      SetReal_VM(VMf,12,  9.07);
+      SetReal_VM(VMf,13,  8.86);
+      SetReal_VM(VMf,14,  8.68);
+      SetReal_VM(VMf,15,  8.53);
+      SetReal_VM(VMf,16,  8.40);
+      SetReal_VM(VMf,17,  8.29);
+      SetReal_VM(VMf,18,  8.18);
+      SetReal_VM(VMf,19,  8.10);
+      SetReal_VM(VMf,20,  8.02);
+      SetReal_VM(VMf,21,  7.95);
+      SetReal_VM(VMf,22,  7.88);
+      SetReal_VM(VMf,23,  7.82);
+      SetReal_VM(VMf,24,  7.77);
+      SetReal_VM(VMf,25,  7.72);
+      SetReal_VM(VMf,26,  7.68);
+      SetReal_VM(VMf,27,  7.64);
+      SetReal_VM(VMf,28,  7.60);
+      SetReal_VM(VMf,29,  7.56);
+      SetReal_VM(VMf,30,  7.31);
+      SetReal_VM(VMf,31,  7.08);
+      SetReal_VM(VMf,32,  6.85);
+      SetReal_VM(VMf,33,  6.63);
+   }
+   
+
+   // --- Create correlation table ---
+
+   ProgName_SYS(_("Calculating correlation coeff..."),1);
+   
+	FileCombineParts_STR("", sMapDir, "_Correl_", "tbl", "", sTblFile);
+   
+   WAtbl = Create_WA(sTblFile,0);
+
+   Strcpy_STR(sTemp,_n("/ Correlation Table"));
+   Puts_WA(WAtbl,sTemp);
+   NewLine_WA(WAtbl);
+   Puts_WA(WAtbl,"/");
+   NewLine_WA(WAtbl);
+   Strcpy_STR(sTemp,"/= ");
+   Strcat_STR(sTemp,_n("Chan"));
+   Strcat_STR(sTemp,":string16:I");
+   Puts_WA(WAtbl,sTemp);
+   NewLine_WA(WAtbl);
+
+   Strcpy_STR(sLongTemp,_n("/   Chan  "));
+   for(i=0; i<iCh; i++) {
+      Chan = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetChanName_DB(Data,Chan,sCh);
+      Strcat_STR(sLongTemp,sCh);
+      Strcat_STR(sLongTemp,"  ");
+      Strcpy_STR(sTemp,"/= ");
+      Strcat_STR(sTemp,sCh);
+      Strcat_STR(sTemp,_n(":real"));
+      Puts_WA(WAtbl,sTemp);
+      NewLine_WA(WAtbl);
+   }   
+
+   Puts_WA(WAtbl,"/");
+   NewLine_WA(WAtbl);
+   Puts_WA(WAtbl,sLongTemp);
+   NewLine_WA(WAtbl);
+   
+   for(i=0; i<iCh; i++) {
+      GetItem_LST(ChLST, 0, i, sCh);
+      Strcpy_STR(sLongTemp,sCh);
+      for(j=0; j<iCh; j++) {
+         Strcat_STR(sLongTemp,"    *");
+      }   
+      Puts_WA(WAtbl,sLongTemp);
+      NewLine_WA(WAtbl);
+   }   
+   Destroy_WA(WAtbl);
+
+   TableCorr = Create_TB(sTblFile);
+        
+        
+   // --- Create correlation Items table ---
+
+	FileCombineParts_STR("", sMapDir, "_Correl_items_", "tbl", "", sTblItemsFile);
+   
+   WAtbl = Create_WA(sTblItemsFile,0);
+
+   Strcpy_STR(sTemp,_n("/ Correlation Items Table"));
+   Puts_WA(WAtbl,sTemp);
+   NewLine_WA(WAtbl);
+   Puts_WA(WAtbl,"/");
+   NewLine_WA(WAtbl);
+   Strcpy_STR(sTemp,"/= ");
+   Strcat_STR(sTemp,_n("Chan"));
+   Strcat_STR(sTemp,":string16:I");
+   Puts_WA(WAtbl,sTemp);
+   NewLine_WA(WAtbl);
+
+   Strcpy_STR(sLongTemp,_n("/   Chan  "));
+   for(i=0; i<iCh; i++) {
+      Chan = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetChanName_DB(Data,Chan,sCh);
+      Strcat_STR(sLongTemp,sCh);
+      Strcat_STR(sLongTemp,"  ");
+      Strcpy_STR(sTemp,"/= ");
+      Strcat_STR(sTemp,sCh);
+      Strcat_STR(sTemp,_n(":int"));
+      Puts_WA(WAtbl,sTemp);
+      NewLine_WA(WAtbl);
+   }   
+
+   Puts_WA(WAtbl,"/");
+   NewLine_WA(WAtbl);
+   Puts_WA(WAtbl,sLongTemp);
+   NewLine_WA(WAtbl);
+   
+   for(i=0; i<iCh; i++) {
+      GetItem_LST(ChLST, 0, i, sCh);
+      Strcpy_STR(sLongTemp,sCh);
+      for(j=0; j<iCh; j++) {
+         Strcat_STR(sLongTemp,"    *");
+      }   
+      Puts_WA(WAtbl,sLongTemp);
+      NewLine_WA(WAtbl);
+   }   
+   Destroy_WA(WAtbl);
+
+   TableItems = Create_TB(sTblItemsFile);
+
+   // --- Determine choices for scaling ---
+           
+   iLog = 0;  // By default use linear scaling
+   if (iStrcmp_STR(sLog,"LOG",0) == 0)  iLog = 1;  // force log scaling
+   if (iStrcmp_STR(sLog,"DEFAULT",0) == 0)  iLog = -1;   // use channel attribute
+
+        
+   // --- Fill the tables ---     
+        
+   St2 = Create_ST2();    
+   VV1 = Create_VV(REAL,0);
+   VV2 = Create_VV(REAL,0);
+
+   LogVV = Create_VV(INT,0);
+
+   SetIntN_VV(LogVV, 0, iCh, 0);   // default to linear scaling
+
+   iMaxItem = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   for(i=0; i<iCh; i++) {
+      Ch1 = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      LockSymb_DB(Data,Ch1,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   }   
+   for(i=0; i<iCh; i++) {
+
+      ProgUpdateL_SYS(i,iCh);
+      iCheckStop_SYS();
+
+      for(j=0; j<iCh; j++) {
+
+         if(j==i)  {
+            rCorr=1.0;
+            iItems = iDUMMY;
+         } else if(j<i) {
+            rCorr = rGetReal_TB(TableCorr,j,i+1);
+            iItems = iGetInt_TB(TableItems,j,i+1);
+         } else {
+            Reset_ST2(St2);
+            Line = FirstSelLine_DB(Data);
+            while (iIsLineValid_DB(Data,Line))
+            {
+               Ch1 = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+               GetChanVV_DB(Data,Line,Ch1,VV1);
+               Ch2 = (DB_SYMB)iGetInt_LST(ChLST,1,j);
+               GetChanVV_DB(Data,Line,Ch2,VV2);
+               
+               // --- refid to first channel length ---
+               
+               ReFidVV_VV(VV2,VV1);
+               
+               if (iLog==1)  {
+                  Log_VV(VV1,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,0.000000001);
+                  Log_VV(VV2,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,0.000000001);
+                  SetInt_VV(LogVV, i, 1);
+               }
+               else if (iLog==-1)  {
+                  GetRegSymb_DB(Data,Ch1,Reg);
+                  Get_REG(Reg,"LOG",sTemp,sizeof(sTemp));
+                  if (iStrcmp_STR(sTemp,"YES",0) == 0) {
+                     Log_VV(VV1,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,0.000000001);
+                     SetInt_VV(LogVV, i, 1);
+                  }
+                  GetRegSymb_DB(Data,Ch2,Reg);
+                  Get_REG(Reg,"LOG",sTemp,sizeof(sTemp));
+                  if (iStrcmp_STR(sTemp,"YES",0) == 0) {
+                     Log_VV(VV2,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,0.000000001);
+                     SetInt_VV(LogVV, j, 1);
+                  }
+               }
+               DataVV_ST2(St2,VV1,VV2);
+               Line = NextSelLine_DB(Data, Line );
+            }
+            rCorr = rGet_ST2(St2,1);
+            iItems = iItems_ST2(St2);
+         }
+         SetReal_TB(TableCorr,i,j+1,rCorr);
+         SetInt_TB(TableItems,i,j+1,iItems);
+         if(iItems > iMaxItem)  iMaxItem = iItems;
+      }
+   }
+   ProgUpdate_SYS(100);
+   iCheckStop_SYS();
+   
+   
+   SaveToAscii_TB(TableCorr,sTblFile);
+   SaveToAscii_TB(TableItems,sTblItemsFile);
+   Destroy_ST2(St2);
+
+
+   // --- Display correlation coeff on map ---
+
+   ProgName_SYS(_("Displaying correlation coeff..."),1);
+
+   // --- Create a new map ---
+
+   rCellSz = 10.0;   
+   
+   Strcpy_STR(sMapName,"Correlation_");
+   Strcat_STR(sMapName, sDB2);
+
+   iOK = FALSE;
+   while (iOK == FALSE) 
+	{
+      iOK = TRUE;   
+	   FileExt_STR(sMapName,"map",sMapName,FILE_EXT_FORCE);   
+		FileCombineParts_STR("", sMapDir, sMapName, "", "", sMap);
+      if (iInteractive_SYS() && iFileExist_SYS(sMap)) {
+         Printf_STR(sPrompt, sizeof(sPrompt), _("\"%s\" exists. Overwrite?"), sMapName);
+         if (iDisplayQuestion_SYS(_("Map exists"),sPrompt) == 0) {
+            if (Prompt_SYS(_("New map name"),sMapName)) Cancel_SYS();
+            iOK = FALSE;
+         }
+      }
+   }
+   
+   
+   ProgUpdateL_SYS(1,3);
+   
+   // --- Create a view ---
+   
+   if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+
+   rMinX = 0.0;
+   rMinY = 0.0;
+   rMaxX = rMinX + (real)(iCh+2)*rCellSz;
+   rMaxY = rMinY + (real)(iCh+2)*rCellSz + 28.0;
+   if (iColour) 
+      rMaxX += 22.0;
+   
+   View = Create_MVIEW(Map,"Base",MVIEW_WRITENEW);
+   FitWindow_MVIEW (View,rMinX,rMinY,rMaxX,rMaxY,rMinX,rMinY,rMaxX,rMaxY);
+   
+   Destroy_MVIEW(View);
+   Destroy_MAP(Map);
+   Load_EMAP(sMap);
+
+
+   // --- Draw on the map ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"Base",MVIEW_WRITEOLD);
+   Extent_MVIEW(View,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_MM,rMinX,rMinY,rMaxX,rMaxY);
+  
+   i = 0;
+   StartGroup_MVIEW(View,"Correlation",MVIEW_GROUP_APPEND);
+
+   rTextSz = rCellSz/4.0;
+   
+   rLMargin = rMinX + rCellSz;
+   rRMargin = rLMargin + rCellSz*(real)iCh;
+   rBMargin = rMinY + rCellSz;
+   rTMargin = rBMargin + rCellSz*(real)iCh;
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   TextAngle_MVIEW(View,0.0);
+
+   LineColor_MVIEW(View,iColor_MVIEW("K"));
+   LineStyle_MVIEW(View,1,0.0);
+   LineThick_MVIEW(View,0.1);
+   
+   ProgUpdateL_SYS(2,3);
+
+   // --- draw grid ---
+
+   for(i=0; i<=iCh; i++) {
+   
+      rStep = rCellSz*(real)i;
+      Line_MVIEW(View,rLMargin,      rBMargin+rStep,rRMargin,       rBMargin+rStep);
+      Line_MVIEW(View,rLMargin+rStep,rBMargin,      rLMargin+rStep, rTMargin);
+   }
+      
+   // --- draw headings ---
+   
+   for(i=0; i<iCh; i++) {
+   
+      rStep = rCellSz*((real)i+0.5);
+      TextSize_MVIEW(View,rTextSz);
+      TextAngle_MVIEW(View,0.0);
+      
+      GetChanLabel_DB(Data,(DB_SYMB)iGetInt_LST(ChLST,1,i),sCh);
+    
+      if (iStrlen_STR(sCh) > 4)  {
+         rTemp = rTextSz;
+         while((real)iStrlen_STR(sCh)*rTemp > rCellSz)   rTemp /= 1.1;
+         TextSize_MVIEW(View,rTemp);
+      }
+      TextRef_MVIEW(View,TEXT_REF_MIDDLE_CENTER);
+      Text_MVIEW(View,sCh,rLMargin+rStep,      rTMargin+rCellSz*0.4);
+
+      if (iStrlen_STR(sCh) > 4)  {
+         TextAngle_MVIEW(View,-90.0);
+         TextRef_MVIEW(View,TEXT_REF_MIDDLE_CENTER);
+         Text_MVIEW(View,sCh,rLMargin-rCellSz*0.4,rTMargin-rStep);
+    
+      } else {
+
+         TextRef_MVIEW(View,TEXT_REF_MIDDLE_RIGHT);
+         Text_MVIEW(View,sCh,rLMargin-rCellSz*0.1,rTMargin-rStep);
+      }
+   }
+
+   VV1t = Create_VV(REAL,0);
+   VV2t = Create_VV(REAL,0);
+      
+   // --- draw correlation coeff ---
+   
+   TextSize_MVIEW(View,rTextSz);
+   TextRef_MVIEW(View,TEXT_REF_MIDDLE_RIGHT);
+   TextAngle_MVIEW(View,0.0);
+
+   ProgName_SYS(_("Plotting correlation coeff..."),1);
+
+   for(i=0; i<iCh; i++) {
+
+      ProgUpdateL_SYS(i,iCh);
+      iCheckStop_SYS();
+
+      rStep = rCellSz*((real)i+0.95);
+
+      for(j=0; j<iCh; j++) {
+      
+         if (i == j) continue;   // don't plot diagonal
+
+         iItems = iGetInt_TB(TableItems,j,i+1);
+         
+         rStepj = rCellSz*((real)j+0.5);
+
+         iCol = iNull;
+
+         iBold = 0;
+         
+         rCorr = rGetReal_TB(TableCorr,j,i+1);
+         
+         iDegFree = iItems-2;
+         if(iDegFree<=1)
+            rF = rGetReal_VM(VMf,0);
+         else if(iDegFree<=30) 
+            rF = rGetReal_VM(VMf,iDegFree-1);
+         else if(iDegFree<=40)
+            rF = rGetReal_VM(VMf,29)-(rGetReal_VM(VMf,29)-rGetReal_VM(VMf,30))*(real)(iDegFree-30)/10.0;
+         else if(iDegFree<=60)
+            rF = rGetReal_VM(VMf,30)-(rGetReal_VM(VMf,30)-rGetReal_VM(VMf,31))*(real)(iDegFree-40)/20.0;
+         else if(iDegFree<=120)
+            rF = rGetReal_VM(VMf,31)-(rGetReal_VM(VMf,31)-rGetReal_VM(VMf,32))*(real)(iDegFree-60)/60.0;
+         else if(iDegFree<=500)
+            rF = rGetReal_VM(VMf,32)-(rGetReal_VM(VMf,32)-rGetReal_VM(VMf,33))*(real)(iDegFree-120)/380.0;
+         else
+            rF = rGetReal_VM(VMf,33);
+
+         rR = rSqrt_MATH(rF/((real)iDegFree+rF));
+         rI = (1.0-rR)/5.0;
+         rACorr = rAbs_MATH(rCorr);
+         if(rACorr >= (rR+(4.0*rI))) {
+               
+            TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_XBOLD,FALSE);
+            iBold = 1;
+            iCol = iVStr;
+         }
+         else if(rACorr >= (rR+(3.0*rI))) 
+            iCol = iStr;
+         else if(rACorr >= (rR+(2.0*rI))) 
+            iCol = iMod;
+         else if(rACorr >= (rR+(1.0*rI))) 
+            iCol = iWeak;
+         else if(rACorr >= rR) 
+            iCol = iVWeak;
+         else 
+            iCol = iNull;
+
+         if(iItems<2) iCol = iNull;
+
+         if (!iColour) {
+            if(iCol != iVStr)
+               iCol = iNull;
+         }         
+            
+         if(iScat && i > j) {
+
+            Ch1 = (DB_SYMB)iGetInt_LST(ChLST,1,i);                        
+            Ch2 = (DB_SYMB)iGetInt_LST(ChLST,1,j);
+
+            // --- Get the data ---
+
+            SetLen_VV(VV1, 0);
+            SetLen_VV(VV2, 0);
+
+            Line = FirstSelLine_DB(Data);
+            while (iIsLineValid_DB(Data,Line))
+            {
+               GetChanVV_DB(Data,Line,Ch1,VV1t);
+               GetChanVV_DB(Data,Line,Ch2,VV2t);
+               
+               // --- refid to first channel length ---
+               
+               ReFidVV_VV(VV2t,VV1t);
+
+
+               // --- add to the full VV ---
+
+               Append_VV(VV1, VV1t);
+               Append_VV(VV2, VV2t);
+
+               Line = NextSelLine_DB(Data, Line );
+            }
+            
+            
+            // --- Save raw min and max values for X ---
+            
+            if(j==0) {
+               RangeDouble_VV(VV1, rMin, rMax);
+               SetReal_VV(VVmin, i, rMin);
+               SetReal_VV(VVmax, i, rMax);
+
+               if(i==iCh-1) {
+                  RangeDouble_VV(VV2, rMin, rMax);
+                  SetReal_VV(VVmin, j, rMin);
+                  SetReal_VV(VVmax, j, rMax);
+               }
+            }
+                        
+
+            // --- Take logs as necessary ---
+
+            iLog = iGetInt_VV(LogVV, i);
+            if(iLog)
+               Log_VV(VV1,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,0.000000001);
+            iLog = iGetInt_VV(LogVV, j);
+            if(iLog)
+               Log_VV(VV2,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,0.000000001);
+
+            
+            // --- Scale X Axis ---
+
+            RangeDouble_VV(VV1, rMin, rMax);
+            
+            
+            if(rMin == rMAX) {
+
+               TextColor_MVIEW(View,iCol);
+               Text_MVIEW(View,_("None"),rLMargin+rStep,rTMargin-rStepj);
+               if(iBold)
+                  TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+               
+               continue;
+            }
+            rBit = 0.075;     // To leave space around the edges
+            if(rMin==rMax)
+               rScale = 1.0;
+            else
+               rScale = (1.0-2.0*rBit)*rCellSz / (rMax - rMin);
+            Trans_VV(VV1, -rMin, rScale);
+            Trans_VV(VV1, rLMargin + (real)i*rCellSz + rBit*rCellSz, 1.0);
+
+            // --- Scale Y Axis ---
+
+            RangeDouble_VV(VV2, rMin, rMax);
+            if(rMin == rMAX) {
+
+               TextColor_MVIEW(View,iCol);
+               Text_MVIEW(View,_("None"),rLMargin+rStep,rTMargin-rStepj);
+               if(iBold)
+                  TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+               
+               continue;
+            }
+            if(rMin==rMax)
+               rScale = 1.0;
+            else
+               rScale = (1.0-2.0*rBit)*rCellSz / (rMax - rMin);
+            Trans_VV(VV2, -rMin, rScale);
+            Trans_VV(VV2, rTMargin - (real)(j+1)*rCellSz + rBit*rCellSz, 1.0);
+
+            // --- Scale symbol size - for fewer symbols make them bigger ---
+
+            rScale = 2.0*rSqrt_MATH((real)iLength_VV(VV1));
+            if(rScale > 100.0) rScale = 100.0;
+            if(rScale < 15.0) rScale = 15.0;
+            SymbSize_MVIEW(View, rCellSz/rScale);
+            SymbNumber_MVIEW(View, 4);
+   
+            SymbColor_MVIEW(View, iCol);
+            SymbFillColor_MVIEW(View, iCol);
+            Symbols_MVIEW(View, VV1, VV2);
+
+         }
+         else {
+
+            FormatR2_STR(rCorr,sTemp,5,2);
+            TextColor_MVIEW(View,iCol);
+            if(iItems<2)
+               Text_MVIEW(View,"(N<2)",rLMargin+rStep,rTMargin-rStepj);
+            else
+               Text_MVIEW(View,sTemp,rLMargin+rStep,rTMargin-rStepj);
+            if(iBold)
+               TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+
+         }
+         
+         
+         if(iCol==iVStr) {
+            FillColor_MVIEW(View,C_TRANSPARENT);
+            LineColor_MVIEW(View,iVStr);
+            LineThick_MVIEW(View,0.4);
+            LineStyle_MVIEW(View,0,0.0);
+            Rectangle_MVIEW(View,rLMargin + (real)i*rCellSz + 0.2, rTMargin - (real)(j+1)*rCellSz + 0.2,
+                                 rLMargin + (real)(i+1)*rCellSz - 0.2, rTMargin - (real)j*rCellSz - 0.2);
+         }        
+      }
+   }
+
+   ProgUpdate_SYS(100);
+
+   for(i=0; i<iCh; i++) {
+      Ch1 = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      UnLockSymb_DB(Data,Ch1);
+   }   
+      
+   // --- add sample size ---
+
+   TextColor_MVIEW(View,C_BLACK);
+   TextAngle_MVIEW(View,0.0);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextSize_MVIEW(View,2.0);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   
+   FormatI_STR(iMaxItem,sNum,16); iStrMin_STR(sNum);
+   Printf_STR(sPrompt, sizeof(sPrompt), _("Sample Size  %s"), sNum);
+   Text_MVIEW(View,sPrompt,rLMargin,rBMargin-5.0);
+   
+   // --- get the workspace REG ---
+      
+   GetWorkspaceREG_SYS(Reg);
+   Get_REG(Reg,"CHPROJ.COMPANY",sCompany,sizeof(sCompany));  
+   Get_REG(Reg,"CHPROJ.NAME",sName,sizeof(sName));
+   Get_REG(Reg,"CHPROJ.DESCR",sDescr,sizeof(sDescr));
+   Get_REG(Reg,"CHPROJ.SCIENTIST",sGeo,sizeof(sGeo));  
+   Get_REG(Reg,"CHPROJ.DATE",sDate,sizeof(sDate));
+   
+   
+   // --- add title block ---                             
+   
+   rX = 20.0;
+   rY = rMaxY-28.0;
+   FillColor_MVIEW(View,C_TRANSPARENT);
+   LineColor_MVIEW(View,C_BLACK);
+   LineThick_MVIEW(View,0.35);
+   LineStyle_MVIEW(View,0,0.0);
+   Rectangle_MVIEW(View,rMinX,rMinY,rMaxX,rMaxY);
+   Line_MVIEW(View,rMinX,rY,rMaxX,rY);
+   
+   rY += 21.0;
+   TextColor_MVIEW(View,C_BLACK);
+   TextAngle_MVIEW(View,0.0);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextSize_MVIEW(View,4.0);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,sTitle,1.5,rY);
+   
+   TextSize_MVIEW(View,3.0);
+   rY -= 5.0;
+   Text_MVIEW(View,sCompany,1.5,rY);
+         
+   TextSize_MVIEW(View,2.0);
+   rY -= 5.0;
+   
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Project:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sName,rX+1.0,rY);
+      
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Scientist:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sGeo,rX+1.0,rY);
+   
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Project date:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sDate,rX+1.0,rY);
+   
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Report date:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   FormatDate_STR(rDate_SYS(),sDate,10,DATE_FORMAT_YYYYMMDD);
+   Text_MVIEW(View,sDate,rX+1.0,rY);
+
+
+   // --- Add Colour coding ---
+   
+   if (iColour) {
+
+	  rX = rRMargin + 5.0;
+      rY = rBMargin + 1.0;
+
+      rBoxH = 2.5;
+      rBoxW = 4.0;
+      if(iCh<4) {
+         rBoxH /= 2.0;
+         rBoxW /= 2.0;
+      }  
+
+      LineColor_MVIEW(View,iK);
+      FillColor_MVIEW(View,iNull);
+      Rectangle_MVIEW(View,rX,rY,rX+rBoxW,rY+rBoxH);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,_("null"),rX+rBoxW+2.0,rY);
+
+      rY += 2.0*rBoxH;
+      LineColor_MVIEW(View,iK);
+      FillColor_MVIEW(View,iVWeak);
+      Rectangle_MVIEW(View,rX,rY,rX+rBoxW,rY+rBoxH);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,_("very weak"),rX+rBoxW+2.0,rY);
+
+      rY += 2.0*rBoxH;
+      LineColor_MVIEW(View,iK);
+      FillColor_MVIEW(View,iWeak);
+      Rectangle_MVIEW(View,rX,rY,rX+rBoxW,rY+rBoxH);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,_("weak"),rX+rBoxW+2.0,rY);
+
+      rY += 2.0*rBoxH;
+      LineColor_MVIEW(View,iK);
+      FillColor_MVIEW(View,iMod);
+      Rectangle_MVIEW(View,rX,rY,rX+rBoxW,rY+rBoxH);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,_("moderate"),rX+rBoxW+2.0,rY);
+      
+      rY += 2.0*rBoxH;
+      LineColor_MVIEW(View,iK);
+      FillColor_MVIEW(View,iStr);
+      Rectangle_MVIEW(View,rX,rY,rX+rBoxW,rY+rBoxH);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,_("strong"),rX+rBoxW+2.0,rY);
+      
+      rY += 2.0*rBoxH;
+      LineColor_MVIEW(View,iK);
+      FillColor_MVIEW(View,iVStr);
+      Rectangle_MVIEW(View,rX,rY,rX+rBoxW,rY+rBoxH);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_XBOLD,FALSE);
+      Text_MVIEW(View,_("very strong"),rX+rBoxW+2.0,rY);
+      
+      rY += 2.0*rBoxH+1.0;
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+      Strcpy_STR(sPrompt,"(significance ");
+      Strcat_STR(sPrompt,sSigLev);
+      Strcat_STR(sPrompt,")");
+      Text_MVIEW(View,sPrompt,rX-2.0,rY);
+
+      rY += 3.0;
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+      Text_MVIEW(View,_("Colour Coding"),rX,rY);
+   }
+   
+
+   // --- Add maker ---
+   
+   SetReal_SYS("CHCORPICK","X",rLMargin);
+   SetReal_SYS("CHCORPICK","Y",rBMargin);
+   SetReal_SYS("CHCORPICK","DX",rCellSz);
+   SetReal_SYS("CHCORPICK","DY",rCellSz);
+   SetInt_SYS("CHCORPICK","NC",iCh);
+   SetString_SYS("CHCORPICK","DATABASE",sDB);
+   
+   
+   // --- channel names ---
+   
+   TextColor_MVIEW(View,C_BLACK);
+   for(i=0; i<iCh; i++) {
+   
+      // --- parameter name ---
+      
+      Strcpy_STR(sParm,"C");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);
+      
+      GetItem_LST(ChLST, 0, i, sCh);
+      SetString_SYS("CHCORPICK",sParm,sCh);
+      
+   }
+   
+
+   // --- Save min, max and transform for each channel ---
+   
+   for(i=0; i<iCh; i++) {
+   
+      // --- Min ---
+      
+      Strcpy_STR(sParm,"MIN");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);
+      
+      rVal = rGetReal_VV(VVmin, i);
+      SetReal_SYS("CHCORPICK",sParm,rVal);
+      
+      
+      // --- Max ---
+      
+      Strcpy_STR(sParm,"MAX");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);
+      
+      rVal = rGetReal_VV(VVmax, i);
+      SetReal_SYS("CHCORPICK",sParm,rVal);
+
+
+      // --- Transform ---
+      
+      Strcpy_STR(sParm,"TRANS");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);
+      
+      iVal = iGetInt_VV(LogVV, i);
+      SetInt_SYS("CHCORPICK",sParm,iVal);
+   }
+   
+
+   Maker_MVIEW(View,0,1,"CHCORPICK",MAKER_GX,_("Scatter tool..."),"CHCORPICK;");
+   
+
+   // --- Close ---
+
+   Destroy_LST(ChLST);
+   Destroy_VM(VMf);
+   Destroy_TB(TableCorr);
+   Destroy_TB(TableItems);
+   Destroy_MVIEW(View);
+   Destroy_SYS(Reg);
+   
+   Destroy_VV(VV1);
+   Destroy_VV(VV2);
+   Destroy_VV(VV1t);
+   Destroy_VV(VV2t);
+   Destroy_VV(LogVV);
+   
+   // --- select the group ---
+   
+   UnLock_EMAP(EMap);
+   if (iInteractive_SYS())
+      SelectGroup_EMAP(EMap,_n("Base/Correlation"));
+
+   Progress_SYS(0);
+
+   // --- release the database ---
+
+   UnLock_EDB(EData);
+   
+}

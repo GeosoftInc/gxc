@@ -1,0 +1,433 @@
+//===========================================================================
+NAME          = "Display a set of histograms"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+
+   CHMHIST.CHANNELS  \"ASSAY\"
+                     \"DISPLAYED_ASSAY\"
+                     \"LIST\"
+                     \"ALL\"
+                     \"DISPLAYED\"
+          .SIZE      Single Graph Size in mm.
+          .MASK 		Optional mask channel - default is \"ChemMask\"
+          .TITLE     title to be plotted, default is \"Multi-Scatter Plot\"
+
+"
+// Revision History:
+// v6.4.1: Fix map group name creation.
+// v5.1.8: Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "chmhist.gr"
+#include "chmhist.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define X1 20.0
+#define X2 (rX0+(real)(iNx-1)*rDx+rBox+rX0)
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_FILE) sDB;
+string(STR_FILE) sMap, sMapDir, sMapName;
+string(STR_DEFAULT_SHORT) sChOpt;
+string(STR_DEFAULT_LONG) sLabel;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_GROUP) sGroup;
+string(STR_DB_SYMBOL) sMask, sChan;
+
+EDB      EData;
+DB       Data;
+LST      List, ChLST;
+DGW      Diag;
+DB_SYMB  Ln,Ch;
+MAP      hMAP;
+MVIEW    View;
+REG      hReg;
+
+real     rX,rY,rDx,rDy,rSizeX,rSizeY,rX0,rY0,rBox;
+real     rCellSz;
+
+int      iOK;
+int      i,iNx,iNy,iX,iY,iGX,iPCh;
+int      iCh;
+
+string(STR_DEFAULT_LONG) sName,sDescr,sGeo,sCompany, sCurline;
+string(STR_DEFAULT_LONG) sPrompt,sTitle;
+string(STR_DEFAULT_SHORT) sParm,sNum,sDate;
+string(STR_DB_SYMBOL) sCh;
+string(32768) sChannels;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   if (!iHaveCurrent_EDB())
+      Abort_SYS(_("No database loaded."));
+      
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   
+   if (iInteractive_SYS())
+      Ln = GetCurLineSymb_EDB(EData);
+   Data = Lock_EDB(EData);
+   
+   if (!iInteractive_SYS()) {
+      GetString_SYS("CHMHIST", "CURLINE", sCurline);   
+      Ln = FindSymb_DB(Data, sCurline, DB_SYMB_LINE);
+      
+   }   
+      
+         
+   // --- Get Default Mask Channel if required, and if it exists or is "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 &&
+            (iExistChan_DB(Data,sMask) || 
+             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+            SetString_SYS("CHMHIST","MASK",sMask);
+         }
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHMHIST");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_CHMHIST_2);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+
+      SetInfoSYS_DGW(Diag,_CHMHIST_0,DGW_LISTALIAS,"CHMHIST","CHANNELS");     
+      SetInfoSYS_DGW(Diag,_CHMHIST_1,DGW_TEXT,     "CHMHIST","SIZE");
+      SetInfoSYS_DGW(Diag,_CHMHIST_2,DGW_TEXT,     "CHMHIST","MASK");
+      SetInfoSYS_DGW(Diag,_CHMHIST_3,DGW_TEXT,     "CHMHIST","TITLE");
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+      
+      GetInfoSYS_DGW(Diag,_CHMHIST_0,DGW_LISTALIAS,"CHMHIST","CHANNELS");     
+      GetInfoSYS_DGW(Diag,_CHMHIST_1,DGW_TEXT,     "CHMHIST","SIZE");
+      GetInfoSYS_DGW(Diag,_CHMHIST_2,DGW_TEXT,     "CHMHIST","MASK");
+      GetInfoSYS_DGW(Diag,_CHMHIST_3,DGW_TEXT,     "CHMHIST","TITLE");
+   }
+   UnLock_EDB(EData);
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHMHIST","CHANNELS",sChOpt);
+   rCellSz = rGetReal_SYS("CHMHIST","SIZE");     
+   GetString_SYS("CHMHIST","MASK",sMask);
+   GetString_SYS("CHMHIST","TITLE",sTitle);
+   GetString_SYS("CHMHIST","MAP_DIR",sMapDir);
+   
+   if(iStrMin2_STR(sTitle)==0)  
+      Strcpy_STR(sTitle,_("Assay Histograms"));
+
+   
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChOpt);
+   SetString_SYS("CHCHANLST","GX","CHMHIST");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+   
+     
+   
+   // --- nothing to do ---
+   
+   iCh = iSize_LST(ChLST);   
+   if (iCh <= 0) Abort_SYS(_("No channels to plot."));
+   
+   
+   // --- work out optimal layout for landscape ---
+   
+   iNx = (int)rSqrt_MATH((real)iCh/0.5);
+   if (iNx==0) iNx = 1;
+   iNy = (iCh+iNx-1)/iNx;
+   
+   rDx = rCellSz;   
+   rDy = rDx;
+   rBox = rDx*0.68;
+   rX0 = rDx/3.0;
+   rY0 = rDx/4.0;
+   
+   // --- area ---
+   
+   rSizeX = rDx * (real)iNx;      
+   rSizeY = rDy * (real)iNy;      
+   
+   
+   // --- Build map name ---
+   
+   FileNamePart_STR(sDB,sLabel,STR_FILE_PART_NAME);
+
+   Strcpy_STR(sMapName,"Histograms_");
+   Strcat_STR(sMapName,sLabel);
+   
+   iOK = FALSE;
+   while (iOK == FALSE) 
+	{
+      iOK = TRUE;   
+	   FileExt_STR(sMapName,"map",sMapName,FILE_EXT_FORCE);   
+		FileCombineParts_STR("", sMapDir, sMapName, "", "", sMap);
+      if (iInteractive_SYS() && iFileExist_SYS(sMap)) {
+         Printf_STR(sPrompt, sizeof(sPrompt), _("\"%s\" exists. Overwrite?"), sMapName);
+         if (iDisplayQuestion_SYS(_("Map exists"),sPrompt) == 0) {
+            if (Prompt_SYS(_("New map name"),sMapName)) Cancel_SYS();
+            iOK = FALSE;
+         }
+      }
+   }
+   
+   
+   // --- Build group name ---
+   
+   GenGroupName_STR("HIST",sLabel,"",sGroup);
+
+   
+   // --- create a new map and view ---
+   
+   if (iLoaded_EMAP(sMap)) 
+      UnLoad_EMAP(sMap);
+   hMAP = Create_MAP(sMap,MAP_WRITENEW);
+   View = Create_MVIEW(hMAP,"*base",MVIEW_WRITENEW);
+   Destroy_MAP(hMAP);
+   
+                        
+   // --- set histogram constants ---
+   
+   SetReal_SYS("CHPRHIST","WIDTH",rBox);
+   SetString_SYS("CHPRHIST","SUMM","0");                        
+   SetString_SYS("CHPRHIST","DB",sDB);                        
+   SetString_SYS("CHPRHIST","DIV","50");                        
+   SetString_SYS("CHPRHIST","BOXWHISKER","1");                        
+   SetString_SYS("CHPRHIST","MAP",sMap);                        
+   SetString_SYS("CHPRHIST","PROBABILITY","1");                        
+   SetString_SYS("CHPRHIST","LOG","-1");                        
+   SetString_SYS("CHPRHIST","MASK","");
+   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))  {
+      if(iExistChan_DB(Data,sMask))
+         SetString_SYS("CHPRHIST","MASK",sMask);
+   }
+      
+   
+   // --- plot histograms ---
+      
+   UnLock_EDB(EData);      
+   Progress_SYS(1);
+   ProgName_SYS(_("Plotting"),1);
+   iPCh = 0;
+   i = 0;
+   for (iY = 0; iY < iNy; iY++) {
+   
+      rY = rSizeY - (real)(iY+1) * rDy + rY0;
+      
+      for (iX = 0; iX < iNx; iX++) {
+      
+         rX = rDx * (real)iX + rX0;
+         
+         // --- get the next channel data ---
+
+         Ch = NULLSYMB;
+         while ((Ch == NULLSYMB) && (i < iCh))
+            Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i++);
+
+         if (Ch != NULLSYMB) {
+
+            iPCh++;
+            
+            // --- get the data label and unit ---
+            
+            Data = Lock_EDB(EData);
+            GetChanName_DB(Data,Ch,sChan);
+            UnLock_EDB(EData);
+            SetString_SYS("CHPRHIST","DIALOG","No");                        
+            SetString_SYS("CHPRHIST","TITLE",sChan);
+            SetString_SYS("CHPRHIST","CHAN",sChan);                        
+            SetReal_SYS("CHPRHIST","X",rX);                        
+            SetReal_SYS("CHPRHIST","Y",rY);                        
+            SetString_SYS("CHPRHIST","VIEW","*base");                        
+            SetString_SYS("CHPRHIST","GROUP",sGroup);                        
+            SetString_SYS("CHPRHIST","MIN","");                        
+            SetString_SYS("CHPRHIST","MAX","");                        
+
+            
+            // --- progress ---
+                           
+            Strcpy_STR(sLabel,_("Plotting "));               
+            Strcat_STR(sLabel,sChan);               
+            ProgName_SYS(sLabel,1);
+            ProgUpdateL_SYS(i,iCh);
+            
+            
+            // --- plot ---
+            
+            iGX = iRunGX_SYS("chprhist");
+            if (iGX == -1) 
+               Cancel_SYS();
+            else if (iGX != 0) 
+               Abort_SYS(_("CHPRHIST GX failed"));
+         }
+      }
+   }
+   
+   
+   // --- get the workspace REG ---
+      
+   hReg = Create_REG(128);
+   GetWorkspaceREG_SYS(hReg);
+   Get_REG(hReg,"CHPROJ.COMPANY",sCompany,sizeof(sCompany));  
+   Get_REG(hReg,"CHPROJ.NAME",sName,sizeof(sName));
+   Get_REG(hReg,"CHPROJ.DESCR",sDescr,sizeof(sDescr));
+   Get_REG(hReg,"CHPROJ.SCIENTIST",sGeo,sizeof(sGeo));  
+   Get_REG(hReg,"CHPROJ.DATE",sDate,sizeof(sDate));
+   
+   
+   // --- add title block ---                             
+   
+   hMAP = Create_MAP(sMap,MAP_WRITEOLD);
+   View = Create_MVIEW(hMAP,"*base",MVIEW_WRITEOLD);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_APPEND);
+   FillColor_MVIEW(View,C_TRANSPARENT);
+   LineColor_MVIEW(View,C_BLACK);
+   LineThick_MVIEW(View,0.35);
+   LineStyle_MVIEW(View,0,0.0);
+   
+   rY = ((real)iNy)*rDy + rY0;
+   Line_MVIEW(View,0.0,rY,X2,rY);
+   Rectangle_MVIEW(View,0.0,0.0,X2,rY+28.0);
+   SetWindow_MVIEW(View,0.0,0.0,X2,rY+28.0,MVIEW_UNIT_MM);
+   
+   rX = 2.0;
+   rY += 21.0;
+   TextColor_MVIEW(View,C_BLACK);
+   TextAngle_MVIEW(View,0.0);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextSize_MVIEW(View,4.0);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,sTitle,rX,rY);
+   
+   TextSize_MVIEW(View,3.0);
+   rY -= 5.0;
+   Text_MVIEW(View,sCompany,rX,rY);
+         
+   TextSize_MVIEW(View,2.0);
+   rY -= 5.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Project:"),X1,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sName,X1+1.0,rY);
+   
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Scientist:"),X1,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sGeo,X1+1.0,rY);
+   
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Project date:"),X1,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sDate,X1+1.0,rY);
+   
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Report date:"),X1,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   FormatDate_STR(rDate_SYS(),sDate,10,DATE_FORMAT_YYYYMMDD);
+   Text_MVIEW(View,sDate,X1+1.0,rY);
+   
+      
+   // --- Add maker ---
+   
+   SetReal_SYS("CHHISPICK","X",rX0);
+   SetReal_SYS("CHHISPICK","Y",rY0);
+   SetReal_SYS("CHHISPICK","DX",rDx);
+   SetReal_SYS("CHHISPICK","DY",rDy);
+   SetInt_SYS("CHHISPICK","NX",iNx);
+   SetInt_SYS("CHHISPICK","NY",iNy);
+   SetInt_SYS("CHHISPICK","NC",iPCh);
+   SetString_SYS("CHHISPICK","DATABASE",sDB);
+   
+   
+   // --- channel names ---
+   
+   i = 0;
+   Data = Lock_EDB(EData);
+   for(iX=0; iX<iPCh; iX++) {
+   
+      // --- parameter name ---
+      
+      Strcpy_STR(sParm,"C");
+      FormatI_STR(iX,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);
+      
+      Ch = NULLSYMB;
+      while ((Ch == NULLSYMB) && (i < iCh))
+         Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i++);
+
+      if (Ch != NULLSYMB) {
+         GetChanName_DB(Data,Ch,sCh);
+         SetString_SYS("CHHISPICK",sParm,sCh);
+      }   
+   }
+   UnLock_EDB(EData);
+
+   Maker_MVIEW(View,0,1,"CHHISPICK",MAKER_GX,_("Histogram tool..."),"CHHISPICK;");
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+   Destroy_MVIEW(View);
+   Destroy_REG(hReg);
+   Destroy_MAP(hMAP);   
+   Destroy_LST(ChLST);
+   Load_EMAP(sMap);
+   
+}

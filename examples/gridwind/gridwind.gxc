@@ -1,0 +1,383 @@
+//===========================================================================
+NAME          = "GRIDWIND"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "Create a Grid from a Window in a Larger Grid
+
+Parameters:
+
+ GRIDWIND.GRD    File Name of the Input Grid
+                   (.grd file)
+         .NEW    File Name of the Output Grid
+                   created from a window in the input grid
+                   (.grd file)
+         .COORD  Use 'GRID' indicies or 'GROUND' units.
+         .XMIN   Window Limits - minimum in X direction
+         .XMAX                 - maximum in X direction
+         .YMIN                 - minimum in X direction
+         .YMAX                 - maximum in X direction
+         .ZMIN   Z Data Limits - minimum 
+         .ZMAX                 - maximum 
+         .CLIP   Z Data out-of-range is 'CLIPPED' or 'DUMMIED'
+         .CSIZE  New grid cell size
+         .DEC    Decimation factor
+         .ADDTOPROJECT - If 0, no files will be added to the project. Default is 1, and is reset to 1 after execution
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+// v6.0.0   Added a check for translation across datums without local 
+//          datum info
+//===========================================================================
+
+RESOURCE = "gridwind.gr"
+#include "gridwind.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+EMAP       EMap;
+MAP        Map;
+MVIEW      View;
+
+int        i;                 // utility int
+
+string(STR_FILE)  sGrd;            // Name of input grid
+string(STR_FILE)  sNew;            // Name of new resultant grid
+string(STR_FILE)  sMap;            // Name of new resultant grid
+string(STR_DEFAULT) sTemp;           // Holds parameters
+
+int        iCoord;            // .COORD parameter
+int        iClip;             // .CLIP parameter
+int        iDec;              // .DEC parameter
+real       rXmin;             // .XMIN parameter
+real       rXmax;             // .XMAX parameter
+real       rYmin;             // .YMIN parameter
+real       rYmax;             // .YMAX parameter
+real       rZmin;             // .ZMIN parameter
+real       rZmax;             // .ZMAX parameter
+real       rCsize;            // .CSIZE parameter        
+
+IMG        hIMG;              // Image tied to the input grid
+IPJ        hMapIPJ;           // map     projection
+IPJ        hGridIPJ;          // grid    projection
+PJ         hPJ;               // working projection
+VV         hVVx;
+VV         hVVy;
+
+int        l;
+int        lI;
+int        iSame;
+real       rV,rI;
+
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS()) {
+   
+   
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDWINDForm");
+      
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_0,DGW_FILEPATH,"GRIDWIND","GRD");     
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_1,DGW_FILEPATH,"GRIDWIND","NEW");     
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_2,DGW_LISTALIAS,"GRIDWIND","COORD");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_3,DGW_TEXT,"GRIDWIND","XMIN");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_4,DGW_TEXT,"GRIDWIND","XMAX");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_5,DGW_TEXT,"GRIDWIND","YMIN");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_6,DGW_TEXT,"GRIDWIND","YMAX");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_7,DGW_TEXT,"GRIDWIND","ZMIN");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_8,DGW_TEXT,"GRIDWIND","ZMAX");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_9,DGW_LISTALIAS,"GRIDWIND","CLIP");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_10,DGW_TEXT,"GRIDWIND","CSIZE");    
+      SetInfoSYS_DGW(Diag,_GRIDWINDFORM_11,DGW_TEXT,"GRIDWIND","DEC");    
+      
+
+      i = 1;
+      while (i != 0) {
+      
+      
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+
+
+         // --- interactive window ---
+         
+         if (i == 1) {
+   
+            // --- get window ---
+            
+            EMap = Current_EMAP();
+            DisplayMessage_SYS(_("Define window"),_("Define a grid window using the mouse cursor."));
+
+   			iSetCurrentView_EMAP(EMap,"*Data");
+            rXmin = rYmin = rXmax = rYmax = 0.0;
+            if (iGetBox_EMAP(EMap,_("Specify grid window..."),rXmin,rYmin,rXmax,rYmax) == 0)
+            {
+               // --- Get Map Projection ---
+
+               Map = Lock_EMAP(EMap);
+               View = Create_MVIEW(Map,"*data",MVIEW_READ);
+               hMapIPJ = Create_IPJ();
+               GetIPJ_MVIEW(View,hMapIPJ);
+               Destroy_MVIEW(View);
+               UnLock_EMAP(EMap);
+					 
+					 
+               // --- Remove the Map as a data source since this is only interactive mode and it messes up the lineage ---
+					 
+               GetName_EMAP(EMap,sMap);
+               RemoveLineageSource_SYS(sMap);
+               
+               
+               // --- Get Grid Projection ---
+               
+               GetInfoSYS_DGW(Diag,_GRIDWINDFORM_0,DGW_FILEPATH,"GRIDWIND","GRD");     
+               GetString_SYS("GRIDWIND","GRD",sGrd);
+               hGridIPJ = Create_IPJ();
+               hIMG = CreateFile_IMG(GS_DOUBLE,sGrd,IMG_FILE_READONLY);
+               GetIPJ_IMG(hIMG,hGridIPJ);
+               Destroy_IMG(hIMG);
+               
+               // --- Project Numbers ---
+               
+               iSame = 0;
+               if (!iHasProjection_IPJ(hMapIPJ) || !iHasProjection_IPJ(hGridIPJ) ||
+					(iCoordinateSystemsAreTheSame_IPJ(hMapIPJ, hGridIPJ) &&
+					iWarpsAreTheSame_IPJ(hMapIPJ, hGridIPJ) &&
+					iOrientationsAreTheSame_IPJ(hMapIPJ, hGridIPJ)))
+					iSame = 1;
+			
+               if (iSame == 0)
+               {
+               
+                  // --- check if local datum transform required/supported ---
+   
+                  if (iInteractive_SYS() && iSupportDatumTransform_IPJ(hMapIPJ,hGridIPJ) == 0) {
+                     if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between map and grid coordinate systems may be inaccurate because the local datum transform for one or both systems is not defined.  Do want to continue?")) == 0)
+                           Exit_SYS();
+                  }
+         
+                  hPJ = CreateIPJ_PJ(hMapIPJ,hGridIPJ);
+                  
+                  hVVx = Create_VV(REAL,0);
+                  hVVy = Create_VV(REAL,0);
+                  
+                  lI = 0;
+                  
+                  rI = (rXmax-rXmin)/10.0;
+                  
+                  rV = rXmin;
+                  for (l=0;l<10;l++,lI++) { SetReal_VV(hVVx,lI,rV); SetReal_VV(hVVy,lI,rYmin); rV += rI; }
+                  
+                  rV = rXmin;
+                  for (l=0;l<10;l++,lI++) { SetReal_VV(hVVx,lI,rV); SetReal_VV(hVVy,lI,rYmax); rV += rI; }
+
+
+                  rI = (rYmax-rYmin)/10.0;
+                  
+                  rV = rYmin;
+                  for (l=0;l<10;l++,lI++) {SetReal_VV(hVVx,lI,rXmin);  SetReal_VV(hVVy,lI,rV); rV += rI; }
+                  
+                  rV = rYmin;
+                  for (l=0;l<10;l++,lI++) {SetReal_VV(hVVx,lI,rXmax);  SetReal_VV(hVVy,lI,rV); rV += rI; }
+
+                  
+                  ConvertVV_PJ(hPJ,hVVx,hVVy);
+                  
+                  RangeDouble_VV(hVVx,rXmin,rXmax);
+                  RangeDouble_VV(hVVy,rYmin,rYmax);
+                  
+                  Destroy_PJ(hPJ);
+                  Destroy_VV(hVVx);
+                  Destroy_VV(hVVy);
+               }
+               
+               // --- Destroy Objects ---
+               
+               Destroy_IPJ(hMapIPJ);
+               Destroy_IPJ(hGridIPJ);
+             
+             
+            
+               // --- put range in dialog ---
+
+               FormatR_STR(rXmin,sTemp,14,10);
+               SetInfo_DGW(Diag,_GRIDWINDFORM_3,DGW_TEXT,sTemp);    
+               FormatR_STR(rXmax,sTemp,14,10);
+               SetInfo_DGW(Diag,_GRIDWINDFORM_4,DGW_TEXT,sTemp);    
+               FormatR_STR(rYmin,sTemp,14,10);
+               SetInfo_DGW(Diag,_GRIDWINDFORM_5,DGW_TEXT,sTemp);    
+               FormatR_STR(rYmax,sTemp,14,10);
+               SetInfo_DGW(Diag,_GRIDWINDFORM_6,DGW_TEXT,sTemp);
+             
+             
+               // --- set dialog to ground ---
+               
+               SetInfo_DGW(Diag,_GRIDWINDFORM_2,DGW_TEXT,"GROUND");    
+               
+            }               
+
+         }
+
+      }
+      
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_0,DGW_FILEPATH,"GRIDWIND","GRD");     
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_1,DGW_FILEPATH,"GRIDWIND","NEW");     
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_2,DGW_LISTALIAS,"GRIDWIND","COORD");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_3,DGW_TEXT,"GRIDWIND","XMIN");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_4,DGW_TEXT,"GRIDWIND","XMAX");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_5,DGW_TEXT,"GRIDWIND","YMIN");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_6,DGW_TEXT,"GRIDWIND","YMAX");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_7,DGW_TEXT,"GRIDWIND","ZMIN");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_8,DGW_TEXT,"GRIDWIND","ZMAX");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_9,DGW_LISTALIAS,"GRIDWIND","CLIP");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_10,DGW_TEXT,"GRIDWIND","CSIZE");    
+      GetInfoSYS_DGW(Diag,_GRIDWINDFORM_11,DGW_TEXT,"GRIDWIND","DEC");    
+         
+         
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDWIND","GRD",sGrd);
+   GetString_SYS("GRIDWIND","NEW",sNew);
+   if (!iStrMin2_STR(sGrd))
+      Abort_SYS(_("Input Grid  Not Specified!"));   
+   if (!iStrMin2_STR(sNew))
+      Abort_SYS(_("Output Grid Not Specified!")); 
+      
+
+   if (!iExistReal_SYS("GRIDWIND","CSIZE") &&
+       !iExistInt_SYS("GRIDWIND","DEC")   &&
+       !iExistReal_SYS("GRIDWIND","XMIN")  &&
+       !iExistReal_SYS("GRIDWIND","XMAX")  &&
+       !iExistReal_SYS("GRIDWIND","YMIN")  &&
+       !iExistReal_SYS("GRIDWIND","YMAX")  &&
+       !iExistReal_SYS("GRIDWIND","ZMIN")  &&
+       !iExistReal_SYS("GRIDWIND","ZMAX"))
+      Abort_SYS(_("No windowing or clipping specified.")); 
+
+
+
+
+   // --- get user cell cize ---
+   
+   if (iExistReal_SYS("GRIDWIND","CSIZE")) 
+   {
+      rCsize = rGetReal_SYS("GRIDWIND","CSIZE");  
+      if (rCsize <= 0.0) rCsize = rDUMMY;
+   }else   
+      rCsize = rDUMMY;
+      
+      
+   // --- decimation ---
+   
+   if (iExistInt_SYS("GRIDWIND","DEC")) 
+   {
+      iDec = iGetInt_SYS("GRIDWIND","DEC");  
+      if (iDec <= 0) iDec = 1;
+   }else   
+      iDec = 1;
+      
+      
+   // --- Create Image ---  
+   
+   hIMG = CreateFile_IMG(GS_DOUBLE,sGrd,IMG_FILE_READONLY);
+   
+   // --- determine coordinates ---
+
+   GetString_SYS("GRIDWIND","COORD",sTemp);
+   if (iStrcmp_STR("GRID",sTemp,STR_CASE_TOLERANT) == 0)
+      iCoord = IMU_WIND_GRID;
+   else   
+      iCoord = IMU_WIND_GROUND;
+      
+      
+   // --- get range values ---
+   
+   if (iExistReal_SYS("GRIDWIND","XMIN")) {
+      rXmin = rGetReal_SYS("GRIDWIND","XMIN");
+   } else
+      rXmin = rDUMMY;
+         
+   if (iExistReal_SYS("GRIDWIND","XMAX")) {
+      rXmax = rGetReal_SYS("GRIDWIND","XMAX");  
+   } else
+      rXmax = rDUMMY;
+         
+   if (iExistReal_SYS("GRIDWIND","YMIN")) {
+      rYmin = rGetReal_SYS("GRIDWIND","YMIN");  
+   } else
+      rYmin = rDUMMY;
+         
+   if (iExistReal_SYS("GRIDWIND","YMAX")) {
+      rYmax = rGetReal_SYS("GRIDWIND","YMAX");  
+   } else
+      rYmax = rDUMMY;
+         
+   if (iExistReal_SYS("GRIDWIND","ZMIN"))
+      rZmin = rGetReal_SYS("GRIDWIND","ZMIN");  
+   else
+      rZmin = rDUMMY;
+         
+   if (iExistReal_SYS("GRIDWIND","ZMAX"))
+      rZmax = rGetReal_SYS("GRIDWIND","ZMAX");  
+   else
+      rZmax = rDUMMY;
+
+   GetString_SYS("GRIDWIND","CLIP",sTemp);  
+   if (iStrcmp_STR("CLIPPED",sTemp,STR_CASE_TOLERANT) == 0)
+      iClip = IMU_WIND_CLIP;
+   else
+      iClip = IMU_WIND_DUMMY;
+
+	// --- process ---
+
+	Progress_SYS(1);
+	GridWind_IMU(hIMG,sNew,iCoord,rXmin,rXmax,rYmin,rYmax,rZmin,rZmax,rCsize,iClip,iDec,"");
+	Progress_SYS(0);
+
+	// --- done ---
+
+	Destroy_IMG(hIMG);
+
+
+	// --- Add to the current project ---
+
+	if (iInteractive_SYS())
+	{
+		DefaultInt_SYS("GRIDWIND", "ADDTOPROJECT", 1);
+		i = iGetInt_SYS("GRIDWIND","ADDTOPROJECT");
+		SetInt_SYS("GRIDWIND", "ADDTOPROJECT", 1);
+
+		if (i != 0)
+			iAddDocument_PROJ(sNew,"Grid",1);
+	}
+}

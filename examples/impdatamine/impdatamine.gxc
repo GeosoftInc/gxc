@@ -1,0 +1,643 @@
+//===========================================================================
+NAME          = "Import a datamine DM file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Import a datamine DM file.
+
+    IMPDATAMINE.FILES   Datamine DM file(s), delimited with '|'.
+    IMPDATAMINE.MAPOUT  0: Current map, 1: New Map
+    Current Map:
+      IMPDATAMINE.VIEW     	0: Current data view, 1: 3D View    
+      IMPDATAMINE.VIEW3DNAME  Name of 3D view to import into in scripting mode (defaults to 3D)
+    New Maps:
+      IMPDATAMINE.MAP      New map name
+      IMPDATAMINE.MAPSCALE New map scale (optional) for new maps, 2D views.
+      IMPDATAMINE.ORIENT   0:Plan map, 1:N-S section, 2:E-W section
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map/Import"
+
+// Revision History:
+// v7.1.0: Change how 3D imports are handled (only from within 3D viewer, but supports scripting with name)
+//         Consolidated 2D map creation into new CreateMap2D_GIS function.
+// v6.3.0: New GX based on IMPSURPAC.GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IMPDATAMINE.gr"
+#include "IMPDATAMINE.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        EMap;             // Map handle
+MAP         Map;              // Map handle
+
+MVIEW       MView;            // Map View handle
+IPJ         hIPJ;					// Projection handle
+GIS         hGIS;             // GIS handle
+LST         FileLST;          // Files
+
+DGW         Diag;             // Dialogue handle
+
+string(STR_GROUP) sGrpName;
+string(STR_FILE) sDataFile,sDataFile2,sInfo,sMap,sName,sName2,sExt,sTemp;
+string(STR_DEFAULT_SHORT) sGroup;
+int iRet, iNewMap, iOrientation;
+
+real rScale;
+string(STR_VIEW) s3DView, sView;
+string(STR_DEFAULT_SHORT) sDMType;
+string(STR_DEFAULT_LONG) sParam;
+string(STR_MULTI_PATH) sFiles;
+int iFile,iFiles,iOrient,iNewMapCreated,iPt,iTr;
+int i,i3D,iPos,iPos2,iType,iType2;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+		i3D = 0;
+		if (iHaveCurrent_EMAP())
+		{
+		   EMap = Current_EMAP();
+			i3D = iIs3DView_EMAP(EMap);
+		}
+
+      if(i3D)
+      {
+      
+         // --- Put current values into the dialogue --
+
+         Diag = Create_DGW("IMPDATAMINE_3D");
+         SetInfoSYS_DGW(Diag,_IMPDATAMINE_3D_0,DGW_FILEPATH, "IMPDATAMINE","FILES");  
+         
+
+         // --- Run the Dialogue ---
+
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();
+         
+
+         // --- Read the returned values from the dialogue ---
+   	
+         GetInfoSYS_DGW(Diag,_IMPDATAMINE_3D_0,DGW_FILEPATH, "IMPDATAMINE","FILES");
+         Destroy_DGW(Diag);
+      }
+      else 
+      {
+      
+         // --- Put current values into the dialogue --
+
+         Diag = Create_DGW("IMPDATAMINE");
+         SetInfoSYS_DGW(Diag,_IMPDATAMINE_0,DGW_FILEPATH, "IMPDATAMINE","FILES");  
+         
+
+         // --- Run the Dialogue ---
+
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();
+         
+
+         // --- Read the returned values from the dialogue ---
+   	
+         GetInfoSYS_DGW(Diag,_IMPDATAMINE_0,DGW_FILEPATH, "IMPDATAMINE","FILES");
+         Destroy_DGW(Diag);
+
+
+         // --- Set map target ---
+         
+         SetInt_SYS("IMPDATAMINE","MAPOUT", iRet);   // 0: Current map, 1: New map
+         iNewMap = iRet;
+			if(iNewMap==1)  // New map 
+         {
+            Diag = Create_DGW("IMPDATAMINENEW");
+            SetInfoSYS_DGW(Diag,_IMPDATAMINENEW_0,DGW_LISTALIAS, "IMPDATAMINE","ORIENT");  
+            SetInfoSYS_DGW(Diag,_IMPDATAMINENEW_1,DGW_TEXT,      "IMPDATAMINE","MAPSCALE");           
+            
+            if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_IMPDATAMINENEW_0,DGW_LISTALIAS, "IMPDATAMINE","ORIENT");  
+            GetInfoSYS_DGW(Diag,_IMPDATAMINENEW_1,DGW_TEXT,      "IMPDATAMINE","MAPSCALE");           
+            Destroy_DGW(Diag);
+         }
+      }
+   }
+   
+
+   // --- Get and validate parameters ---
+
+   GetString_SYS("IMPDATAMINE","FILES", sFiles);
+   iFiles = iCountTokens_STR(sFiles,"|");
+
+   // --- Handle 3D ---
+
+	if (iInteractive_SYS())
+	{
+		SetInt_SYS("IMPDATAMINE", "VIEW", i3D);
+		if (i3D)
+		{
+			Get3DViewName_EMAP(EMap, s3DView);
+			SetString_SYS("IMPDATAMINE", "VIEW3DNAME", s3DView);
+		}
+	}
+	else
+	{
+		i3D = iGetInt_SYS("IMPDATAMINE", "VIEW");
+		if (i3D != 1 && i3D != 0) 
+			i3D = 0;  // Default to current view
+		if (i3D)
+		{
+			GetString_SYS("IMPDATAMINE", "VIEW3DNAME", s3DView);
+			if (iStrlen_STR(s3DView) == 0)
+				Strcpy_STR(s3DView, "3D");
+		}
+   }
+   
+   if(i3D)
+   {
+      iNewMap = 0;   
+      iOrientation = 3;
+   }
+   else 
+   {
+      iNewMap = iGetInt_SYS("IMPDATAMINE","MAPOUT");
+      if(iNewMap!=0 && iNewMap!=1)
+         Abort_SYS(_("Invalid map import option"));
+
+      rScale = rGetReal_SYS("IMPDATAMINE","MAPSCALE");
+      iOrientation = iGetInt_SYS("IMPDATAMINE","ORIENT");
+      if(iOrientation<0 || iOrientation>2) iOrientation = 0;
+   }
+
+
+   // --- Transfer all files to a LST ---
+
+   FileLST = Create_LST(2*STR_FILE);
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {      
+      // --- get the file ---
+      
+      GetMFile_STR(sFiles,sDataFile,iFile);
+      AddItem_LST(FileLST, sDataFile, "");
+   }
+   
+   
+   // --- Scan through the files and pair all the wireframe triangle/wireframe point files ---
+   // --- First, look for triangle files not paired with point files ---
+   
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {   
+   
+      // --- get the file ---
+      
+      GetItem_LST(FileLST, 0, iFile, sDataFile);        
+
+
+      // --- Get the Datamine file type. Often, a Datamine file can be opened a number
+      //     of different ways (e.g. as a string file or a as wireframe (point) file.
+      //     The following function checks to see if there is a choice to be made
+      //     between types supported by Geosoft for import. If not, it just returns
+      //     the original type "hint" from Datamine. If there is a choice, it puts up
+      //     the choices for the user to pick from. ---
+      
+      FileNamePart_STR(sDataFile, sParam, STR_FILE_PART_NAME);
+      iType = iDUMMY;
+      if(iInteractive_SYS())
+      {
+         if(iDatamineType_GUI(sDataFile, iType)==-1)
+            Cancel_SYS();     // User cancelled.
+      }
+      else 
+      {
+         // --- Get the stored DMType. Use the file name as the parameter name ---
+         
+         iType = iGetInt_SYS("IMPDATAMINE", sParam);      
+      }        
+      
+      if(iType==iDUMMY)
+         iType = iDatamineType_GIS(sDataFile);
+         
+         
+      if(!iAnd_MATH(iType, GIS_DMTYPE_WIREFRAME_TR) &&
+         !iAnd_MATH(iType, GIS_DMTYPE_WIREFRAME_PT) &&
+         !iAnd_MATH(iType, GIS_DMTYPE_POINTDATA) &&
+         !iAnd_MATH(iType, GIS_DMTYPE_STRING))
+      {
+         if(iAnd_MATH(iType, GIS_DMTYPE_BLOCKMODEL))
+            Abort_SYS(_("This GX does not support the import of Datamine block model files. Use the Voxel Conversions menu."));   
+         else
+            Abort_SYS(_("At present the Datamine import supports only wireframe, string and point data imports."));
+      }
+         
+      
+      // --- Save the type for scripts ---
+      
+      SetInt_SYS("IMPDATAMINE", sParam, iType);
+         
+      
+      // --- Set the type as the "Value" part of the file LST ---
+      
+      FormatI_STR(iType, sDMType, 20);
+      SetItem_LST(FileLST, 1, iFile, sDMType);
+      
+      if(iAnd_MATH(iType, GIS_DMTYPE_WIREFRAME_TR)==GIS_DMTYPE_WIREFRAME_TR)
+      {
+         // --- Locate the corresponding wireframe point file ---
+         
+         iTr = iFile;
+         iPt = -1;
+         
+         
+         // --- If the file name contains "tr", look for a corresponding file name
+         //     with "pt" ---
+         
+         FormatI_STR(GIS_DMTYPE_WIREFRAME_PT, sDMType, 20);
+         
+         FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME);
+         iPos = iStrStr_STR(sName, _n("tr"), STR_CASE_TOLERANT);
+         if(iPos!=-1)
+         {
+            for(i=0;i<iFiles;i++)
+            {
+               if(i==iFile) continue;
+                              
+               GetItem_LST(FileLST, 0, i, sDataFile2);        
+               FileNamePart_STR(sDataFile2, sName2, STR_FILE_PART_NAME);
+
+               iPos2 = iStrStr_STR(sName2, _n("pt"), STR_CASE_TOLERANT);
+               if(iPos2==iPos &&
+                  iStrncmp_STR(sName, sName2, iPos, STR_CASE_TOLERANT)==0)
+               {
+
+                  iType = iDatamineType_GIS(sDataFile2);
+                  if(iAnd_MATH(iType, GIS_DMTYPE_WIREFRAME_PT)==GIS_DMTYPE_WIREFRAME_PT) 
+                  {
+                     iPt = i;
+                     break;
+                  }
+               }
+            }
+         }
+         
+         
+         // --- If the matching file is not found, ask the user for it ---
+         
+         if(iPt==-1) {
+
+            // --- If not interactive, the following file must be a wireframe point file ---
+               
+            if(!iInteractive_SYS())
+            {
+               if(iFile<iFiles-1)
+               {
+                  GetItem_LST(FileLST, 0, iFile+1, sDataFile2);        
+
+                  iType2 = iDatamineType_GIS(sDataFile2);
+                  if(iAnd_MATH(iType2, GIS_DMTYPE_WIREFRAME_PT)==GIS_DMTYPE_WIREFRAME_PT)
+                     iPt = i; 
+               }
+               if(iPt==-1)
+                  Abort_SYS(_("Wireframe triangle and point files must be paired with the triangle one first when running this GX in a script."));
+            }
+            
+            FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME_EXTENSION);
+            
+            Diag = Create_DGW("IMPDATAMINEPT");
+            SetInfo_DGW(Diag,_IMPDATAMINEPT_0, DGW_TEXT, sName);  
+            SetInfoSYS_DGW(Diag,_IMPDATAMINEPT_1,DGW_FILEPATH, "IMPDATAMINE","PTFILE"); 
+         
+            if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_IMPDATAMINEPT_1,DGW_FILEPATH, "IMPDATAMINE","PTFILE");
+            Destroy_DGW(Diag);            
+            
+            
+            // --- See if the item is already in the LST ---
+            
+            GetString_SYS("IMPDATAMINE","PTFILE", sDataFile2);
+            
+            iPt = iFindItem_LST(FileLST, 0, sDataFile2);
+            if(iPt==iTr)
+               Abort_SYS(_("The point file cannot be the triangle file"));
+               
+            if(iPt==-1) 
+            {
+               InsertItem_LST(FileLST, iTr+1, sDataFile2, sDMType);
+               iFile++;
+            }
+            else if(iPt<iTr) 
+            {
+               InsertItem_LST(FileLST, iTr+1, sDataFile2, sDMType);
+               DelItem_LST(FileLST, iPt);            
+            }
+            else if(iPt>iTr) 
+            {
+               DelItem_LST(FileLST, iPt);
+               InsertItem_LST(FileLST, iTr+1, sDataFile2, sDMType);
+               iFile++; 
+            }
+            iFiles = iSize_LST(FileLST);
+         }
+         else {      // Triangle point file is found in the current list; Put if after the triangle file
+         
+            if(iPt<iTr) 
+            {
+               InsertItem_LST(FileLST, iTr+1, sDataFile2, sDMType);
+               DelItem_LST(FileLST, iPt);            
+            }
+            else if(iPt>iTr) 
+            {
+               DelItem_LST(FileLST, iPt);
+               InsertItem_LST(FileLST, iTr+1, sDataFile2, sDMType);
+               iFile++; 
+            }
+            iFiles = iSize_LST(FileLST);         
+         }
+      }
+   }
+
+
+   // --- Second, look for point files not paired with triangle files ---
+   
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {   
+   
+      // --- get the file ---
+      
+      GetItem_LST(FileLST, 0, iFile, sDataFile);
+      iType = iGetInt_LST(FileLST, 1, iFile);
+
+      FormatI_STR(GIS_DMTYPE_WIREFRAME_TR, sDMType, 20);
+         
+      if(iAnd_MATH(iType, GIS_DMTYPE_WIREFRAME_PT)==GIS_DMTYPE_WIREFRAME_PT)
+      {
+         // --- Locate the corresponding wireframe triangle file before it. ---
+         
+         iPt = iFile;
+         iTr = -1;
+         
+         if(iPt>0)
+         {
+            GetItem_LST(FileLST, 0, iPt-1, sDataFile2);        
+            iType2 = iGetInt_LST(FileLST,1,iPt-1);
+            if(iAnd_MATH(iType2, GIS_DMTYPE_WIREFRAME_TR)==GIS_DMTYPE_WIREFRAME_TR)
+               iTr = i;             
+         }
+         
+         // --- Ask user to select the matching file ---
+         
+         if(iTr==-1)
+         {
+            // --- If not interactive, exit with an error ---
+               
+            if(!iInteractive_SYS())
+               Abort_SYS(_("Wireframe triangle and point files must be paired with the triangle one first when running this GX in a script."));
+            
+            FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME_EXTENSION);
+            
+            Diag = Create_DGW("IMPDATAMINETR");
+            SetInfo_DGW(Diag,_IMPDATAMINETR_0, DGW_TEXT, sName);  
+            SetInfoSYS_DGW(Diag,_IMPDATAMINETR_1,DGW_FILEPATH, "IMPDATAMINE","TRFILE"); 
+         
+            if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_IMPDATAMINETR_1,DGW_FILEPATH, "IMPDATAMINE","TRFILE");
+            Destroy_DGW(Diag);            
+            
+            
+            // --- See if the item is already in the LST ---
+            
+            GetString_SYS("IMPDATAMINE","TRFILE", sDataFile2);
+            
+            iTr = iFindItem_LST(FileLST, 0, sDataFile2);
+            if(iTr==iPt)
+               Abort_SYS(_("The triangle file cannot be the point file"));
+               
+            if(iTr==-1) {
+               InsertItem_LST(FileLST, iPt, sDataFile2, sDMType);
+               iFile++;
+            }
+            else if(iTr<iPt-1) 
+            {
+               InsertItem_LST(FileLST, iPt, sDataFile2, sDMType);
+               DelItem_LST(FileLST, iTr);            
+            }
+            else if(iTr>iPt) 
+            {
+               DelItem_LST(FileLST, iTr);
+               InsertItem_LST(FileLST, iPt, sDataFile2, sDMType);
+               iFile++; 
+            }
+            iFiles = iSize_LST(FileLST);
+         }
+      }
+   }
+
+   
+   iOrient = IPJ_ORIENT_PLAN;
+   iNewMapCreated = FALSE;
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {   
+   
+      // --- get the file ---
+      
+      GetItem_LST(FileLST, 0, iFile, sDataFile);  
+      iType = iGetInt_LST(FileLST, 1, iFile);
+
+
+      // --- Set the sInfo value to the type to open ---
+      
+      GetItem_LST(FileLST, 1, iFile, sInfo);
+      
+      
+      // --- Create the GIS object ---
+
+      hGIS = Create_GIS(sDataFile,sInfo,GIS_TYPE_DATAMINE);
+      
+
+      // --- Is this a wireframe triangle/point pair? ---
+            
+      if(iAnd_MATH(iType, GIS_DMTYPE_WIREFRAME_TR)==GIS_DMTYPE_WIREFRAME_TR)
+      {
+         GetItem_LST(FileLST, 0, iFile+1, sDataFile2);        
+         iType2 = iDatamineType_GIS(sDataFile2);
+         if(iAnd_MATH(iType2, GIS_DMTYPE_WIREFRAME_PT)!=GIS_DMTYPE_WIREFRAME_PT)
+            Abort_SYS(_("Wireframe triangle and point files must be paired with the triangle one first"));
+         
+         SetDmWireframePtFile_GIS(hGIS, sDataFile2);                     
+         iFile++;    // skip the point file
+      }      
+
+		
+		// --- Get the GIS IPJ ---      
+      
+      hIPJ = GetIPJ_GIS(hGIS);
+      
+
+      // --- turn on progress ---
+
+      Progress_SYS(1);
+
+
+      // --- New Map ---
+
+      if(iNewMap && !iNewMapCreated)
+      { 
+         GetString_SYS("IMPDATAMINE","MAP",sMap);
+         if (iStrlen_STR(sMap) == 0)
+         {
+            // --- Get the new map name ---
+
+            FileNamePart_STR(sDataFile, sMap, STR_FILE_PART_NAME);
+            SetString_SYS("IMPDATAMINE","MAP",sMap);
+         }
+         
+         if(iInteractive_SYS()) {   
+
+            while(TRUE) {
+
+               Diag = Create_DGW("IMPDATAMINEMAP");
+
+               SetInfoSYS_DGW(Diag,_IMPDATAMINEMAP_0,DGW_FILEPATH, "IMPDATAMINE","MAP");  
+               if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+               GetInfoSYS_DGW(Diag,_IMPDATAMINEMAP_0,DGW_FILEPATH, "IMPDATAMINE","MAP");
+               Destroy_DGW(Diag);
+
+               // --- open the map and set up views ---
+
+               GetString_SYS("IMPDATAMINE","MAP",sMap);
+               if (iLoaded_EMAP(sMap)) {
+                  if (iDisplayQuestion_SYS(_("Map is open"), _("Replace currently open map?")))
+                     UnLoad_EMAP(sMap);
+                  else
+                     continue;
+               }
+
+               break;
+
+            }  // End While
+         }
+   
+
+			// --- Get the map name ---
+			   
+         GetString_SYS("IMPDATAMINE","MAP",sMap);			         
+         if(!iStrlen_STR(sMap)) 
+            Abort_SYS(_("Output map name not specified."));
+
+   
+			// --- Unload and delete existing map ---   
+			         
+         if(iFileExist_SYS(sMap))
+         {
+	         if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+		      iDeleteFile_SYS(sMap);         
+		   }
+         
+
+			// --- Create the new map ---
+			
+			CreateMap2D_GIS(hGIS, sMap, rScale, hIPJ, iOrientation);
+			
+			
+			// --- Load the new map ---
+
+			Load_EMAP(sMap);
+
+
+			// --- Don't do it again ---
+						
+         iNewMapCreated = TRUE;      
+         
+      } // end if(iNewMap && !iNewMapCreated)        
+      
+
+      // --- Get Map ---
+
+      EMap = Current_EMAP();
+
+
+      // --- Lock Map ---
+
+      Map  = Lock_EMAP(EMap);
+
+
+  	   // --- If importing to a 3D view, see if this is a 3D view (test needed for scripting) ---
+	   
+	   if(i3D) 
+	   {
+		   // --- Get the 3D view ---
+		        
+		   MView = Create_MVIEW(Map, s3DView, MVIEW_WRITEOLD);
+		   Strcpy_STR(sView, s3DView);
+
+			if (!iIsView3D_MVIEW(MView))
+			{
+		      Printf_STR(sTemp, sizeof(sTemp), _("Importing to 3D View '%s' but it is not a 3D view"), s3DView);
+		      Abort_SYS(sTemp);
+	   	}
+	   }
+	   else 
+		{
+		   // --- Get the current data view ---
+		        
+		   MView = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
+		   GetName_MVIEW(MView, sView);
+		}
+      
+
+		// --- If this is not a new map, set the working IPJ to the GIS IPJ ---
+      
+      if(!iNewMap)
+			SetWorkingIPJ_MVIEW(MView, hIPJ);
+
+
+      // --- Set the group name ---
+
+      FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME);
+      FileNamePart_STR(sDataFile, sExt, STR_FILE_PART_EXTENSION);
+      if(!iStrcmp_STR(sExt, "dtm", STR_CASE_TOLERANT))
+         GenGroupName_STR("Datamine",sName,"dtm",sGrpName);
+      else
+         GenGroupName_STR("Datamine",sName,"",sGrpName);
+      Strcpy_STR(sGroup,sGrpName);
+      SetThinRes_MVIEW(MView,-1.0);
+      StartGroup_MVIEW (MView, sGroup, MVIEW_GROUP_NEW);
+
+
+      // --- import the map ---
+
+      Progress_SYS(1);
+      ProgName_SYS(_("Import Datamine Map Data"),1);
+      LoadMAP_GIS(hGIS, MView);
+      Progress_SYS(0);      
+
+
+      // --- Destroy the view ---
+
+      Destroy_MVIEW(MView);
+      UnLock_EMAP(EMap);
+      
+      
+      // --- Destroy objects ---
+
+      Destroy_IPJ(hIPJ);
+      Destroy_GIS(hGIS);         
+   }   
+}

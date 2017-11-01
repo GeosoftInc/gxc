@@ -1,0 +1,1753 @@
+//===========================================================================
+NAME          = "CLASYMB GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Plot Solution Symbols"
+
+DESCRIPTION   = "
+Plot classified symbols based on a classification channel prepared
+using CLASSIFY GX.
+
+Parameters:
+
+ CLASYMB.CHANNEL     - Colour channel
+        .NUMRANGES   - Number of Colour ranges
+        .CHANNEL2    - Size channel (MODE = 1)
+        .BASE        - zero base level. (MODE = 1)
+        .SCALE       - symbol size units/mm. (MODE = 1)
+        .SYMBOL      - symbol number
+        .MASK        - Optional mask channel
+        .FONT        - Font name
+        .WEIGHT      - Font weight
+        .COLOR       - Edge Colour
+        .ANGLE       - symbol angle
+        .ITR         - ITR to store all information.
+
+        .MODE : 0: Single channel: Classified Symbols (Colours) (Default)
+                1: Two channels  : Classified Symbols & Proportional size
+
+"
+// Revision History:
+// v7.0.0: Symbol font weight fix-up.
+// v6.4.2: Added symbols for MapInfo font.
+// v6.4.1: Bug fix: not saving font name correctly into ITR.
+// v6.3.0: Turn on the group clipping instead of previous changes.
+// v6.2.1: Reverted data view clipping to reconsider.
+// v6.2.0: Warn against non-positive symbol sizes.
+//         Now clips the data to the data view.
+// v6.0.0: Explicit warning that "None" fills will be changed to White.
+// v5.1.6: If no MASK class channels are located, fill mask channel list with all of them.
+// v5.1.5: Now takes optional mask channel
+//         Up to 12 zones.
+//         Consolidated with CLASYMB2 - Colour/Proportional Size GX
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "CLASYMB.GR"
+#include "CLASYMB.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define MAX_RANGES 12
+
+#define MODE_SINGLE  0
+#define MODE_DOUBLE  1
+
+#define MAIN_DGW     0
+#define RANGES_DGW   1
+#define FILES_DGW    2
+#define SYMBOLS_DGW  3
+#define SIZES_DGW    4 
+#define COLOURS_DGW  5
+#define READ_ITR_DGW 6
+#define SAVE_ITR_DGW 7
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,ZCh,ClassCh,SizeCh,MCh;    // Channel handles
+DB_SYMB    Line;                   // Line handle
+EMAP       EMap;
+MAP        Map;
+MVIEW      View;
+DGW        DiagMain, DiagSub;
+IPJ        DataIPJ;
+IPJ	     ViewIPJ;
+PJ			  Pj;
+LST        List;
+LST        SymbolLST, MapInfoLST, SymbLST;
+VV         XVV,YVV,ZVV,CVV,MVV,SVV;
+PLY   Ply;
+int(MAX_RANGES)  iSym, iSymMapInfo;
+real(MAX_RANGES) rMaxVal, rMaxV;
+real(MAX_RANGES) rSiz;
+VM         sCol_VM;
+BF         Bf;
+ITR        Itr, Itr2;
+REG        Reg, Reg2;
+
+string(STR_GROUP) sGroup;
+string(STR_DB_SYMBOL) sClassCh, sSizeCh, sCh, sMask;
+string(STR_FILE) sSymbFont,sITR,sName;
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sLine;
+string(STR_DEFAULT_LONG) sText, sMsg;
+string(STR_DEFAULT_SHORT) sAngle, sDiag, sLColor, sMax, sNumRanges, sSize, sSym;
+string(STR_DEFAULT_SHORT) sCol, sSymbWt, sVal, sUnits, sParm;
+
+int iLines,iTotLines,iMapInfoLST;
+int i, j, k;
+int iLenVV, iWarn, iFontSetup;
+int iAction, iDone, iValid, iValue, iDelayedDone;
+int iNumRanges;
+int iZones;
+int iCol, iVal, iNPlot, iNone;
+int iSymbWt, iSymbWtCore;
+int iLastCol, iLastk, iLastSymbol, iSymbol, iChimera, iMask, iMode;
+int iOrientation, iHasOrientation;
+real rLastSize;
+
+real rSize,rBase,rScale;
+real rScaleMM;
+real rC,rS,rX,rY,rZ;
+real rSymbAng;
+real rVal, rMaxTemp;
+real rPerc1,rPerc2,rPercD,rOutlierClass,rOutlierSize;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Get current database and map ---
+
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Open the data view ---
+
+   EMap = Current_EMAP();
+   Map  = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+
+	// --- X and Y channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+	 // --- Check for non-plan orientations ---
+
+	 ViewIPJ = Create_IPJ();
+	 iHasOrientation = 0;
+
+	 GetIPJ_MVIEW(View, ViewIPJ);
+
+	 iOrientation = iGetOrientation_IPJ(ViewIPJ);
+	 if(iOrientation != IPJ_ORIENT_DEFAULT && iOrientation != IPJ_ORIENT_PLAN)
+	 {
+		  iHasOrientation = 1;
+		  ZVV = Create_VV(REAL,0);
+
+		  ZCh = GetXYZChanSymb_DB(Data, DB_CHAN_Z);
+		  if (ZCh==NULLSYMB)
+				Abort_SYS(_("A current Z channel is required to correctly locate symbols on an oriented view"));
+		  LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+	 }
+
+
+   // --- Which MODE to run in? Single channel or Two channel? ---
+
+   iMode = iGetInt_SYS("CLASYMB","MODE");
+   if(iMode != MODE_DOUBLE) iMode = MODE_SINGLE;
+   SetInt_SYS("CLASYMB","MODE",MODE_SINGLE);  // Must set every time.
+
+
+   // --- Is it CHIMERA? ---
+
+   iChimera = iGetInt_SYS("CLASYMB","CHIMERA");
+   SetInt_SYS("CLASYMB","CHIMERA",0);  // Must set every time.
+
+
+   // --- Create a couple of symbol LSTs for the two most popular symbol sets ---
+
+   SymbLST = Create_LST(32);
+   SymbolLST = Create_LST(32);
+   AddItem_LST(SymbolLST, _("circle")        , "20");
+   AddItem_LST(SymbolLST, _("dot")           , "1");
+   AddItem_LST(SymbolLST, _n("+")                , "2");            
+   AddItem_LST(SymbolLST, _n("x")                , "3");             
+   AddItem_LST(SymbolLST, _("box")           , "4");                    
+   AddItem_LST(SymbolLST, _("triangle")      , "5");
+   AddItem_LST(SymbolLST, _("inverted triangle"), "6");
+   AddItem_LST(SymbolLST, _("octagon")          , "7");
+   AddItem_LST(SymbolLST, _("small box")        , "8");
+   AddItem_LST(SymbolLST, _("small diamond")    , "9");
+   AddItem_LST(SymbolLST, _("borehole")         , "12");
+   AddItem_LST(SymbolLST, _("mine")             , "11");
+   AddItem_LST(SymbolLST, _("dry well")         , "12");
+   AddItem_LST(SymbolLST, _("oil well")         , "13");
+
+
+   MapInfoLST = Create_LST(32);
+   AddItem_LST(MapInfoLST, _("circle")           , "3");
+   AddItem_LST(MapInfoLST, _("square")           , "1");
+   AddItem_LST(MapInfoLST, _("diamond")          , "2");            
+   AddItem_LST(MapInfoLST, _("five-point-star")  , "4");             
+   AddItem_LST(MapInfoLST, _("triangle")         , "5");
+   AddItem_LST(MapInfoLST, _("inverted triangle"), "6");
+   AddItem_LST(MapInfoLST, _n("+")                , "18");
+   AddItem_LST(MapInfoLST, _n("X")                , "19");
+   AddItem_LST(MapInfoLST, _("star")             , "20");
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      if(iMode==MODE_SINGLE) {
+      
+         DiagMain   = Create_DGW("CLASYMBMAIN");
+			iFontSetup = 0;		
+			
+   
+         // --- Set up colour channel list ---
+
+         List = GetList_DGW(DiagMain,_CLASYMBMAIN_0);
+         SymbLST_DB(Data,List,DB_SYMB_CHAN);
+         Sort_LST(List,0,0);
+
+
+         // --- Set up mask channel list ---
+
+         List = GetList_DGW(DiagMain,_CLASYMBMAIN_2);
+         if(iChimera==1)
+            MaskChanLST_DB(Data,List);
+         else {
+            ClassChanLST_DB(Data,List,"MASK");
+            Sort_LST(List,0,0);
+         }
+
+         if(iSize_LST(List)==0)
+            SymbLST_DB(Data, List, DB_SYMB_CHAN);
+
+      }
+      else {   // --- Colour and proportional size dialog ---
+
+         DiagMain   = Create_DGW("CLASYMB2MAIN");
+			iFontSetup = 0;		
+
+
+         // --- Set up colour and size channel lists ---
+
+         List = GetList_DGW(DiagMain,_CLASYMB2MAIN_0);
+         SymbLST_DB(Data,List,DB_SYMB_CHAN);
+         Sort_LST(List,0,0);
+
+         List = GetList_DGW(DiagMain,_CLASYMB2MAIN_2);
+         SymbLST_DB(Data,List,DB_SYMB_CHAN);
+         Sort_LST(List,0,0);
+
+
+         // --- Set up mask channel list ---
+
+         List = GetList_DGW(DiagMain,_CLASYMB2MAIN_5);
+         if(iChimera==1)
+            MaskChanLST_DB(Data,List);
+         else {
+            ClassChanLST_DB(Data,List,"MASK");
+            Sort_LST(List,0,0);
+         }
+      
+         if(iSize_LST(List)==0)
+            SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      
+      }
+
+		// --- Set default symbol font? ---
+		
+      GetString_SYS("CLASYMB", "FONT", sSymbFont);
+      if(!iStrlen_STR(sSymbFont))
+      {
+         if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sSymbFont) == 0)
+         {
+		      SetString_SYS("CLASYMB", "FONT", sSymbFont);
+			}
+		}			
+
+
+      // --- Allocate VMs ---
+
+      sCol_VM = Create_VM(-32, MAX_RANGES);
+
+      // --- Load the starting variables with defaults ---
+
+      // --- Ranges
+
+      for(i=0; i<MAX_RANGES-1; i++) rMaxVal[i] = 0.0;
+
+      // --- Symbols - default to circles ---
+      
+      for(i=0; i<MAX_RANGES; i++) iSym[i] = 20;
+      for(i=0; i<MAX_RANGES; i++) iSymMapInfo[i] = 3;
+
+      // --- Weight ---
+
+      iSymbWt = MVIEW_FONT_WEIGHT_MEDIUM;	// medium
+
+      // --- Size ---
+
+      rSize = 1.5;   
+      for(i=0; i<MAX_RANGES; i++) rSiz[i] = rSize;
+
+	  // --- Use the RGB model ONLY ---
+
+      SetString_VM(sCol_VM, 0, "K");
+      SetString_VM(sCol_VM, 1, "R");
+      SetString_VM(sCol_VM, 2, "G");
+      SetString_VM(sCol_VM, 3, "B");
+      SetString_VM(sCol_VM, 4, "GB");
+      SetString_VM(sCol_VM, 5, "RB");
+      SetString_VM(sCol_VM, 6, "RG");
+      SetString_VM(sCol_VM, 7, "R128G128B128");
+      SetString_VM(sCol_VM, 8, "RG128");
+      SetString_VM(sCol_VM, 9, "G128");
+      SetString_VM(sCol_VM, 10, "R128G128B");
+      SetString_VM(sCol_VM, 11, "RGB");
+
+      Strcpy_STR(sLColor, _n("k"));
+      rSymbAng = 0.0;
+      iNumRanges = MAX_RANGES;
+      
+
+      // --- See if an ITR file is listed in the INI ---
+      
+      GetString_SYS("CLASYMB","ITR",sITR);
+      if (iFileExist_SYS(sITR)) {
+      
+         // --- set action to read ITR ---
+         
+         iAction = READ_ITR_DGW;
+         
+      } else {
+      
+         // --- Initial action is to run the main dialogue...
+         
+         iAction = MAIN_DGW;
+         
+      }
+
+      iDone = 0;
+      iDelayedDone = 0;
+      while(!iDone) {
+
+         if(iAction == MAIN_DGW) {   // --- Run Main dialogue ---
+
+
+            if(iMode==MODE_SINGLE) {
+
+					// --- Set up the font list ---
+					
+					if(iFontSetup==0)
+					{
+						FontLST_SYS(GetList_DGW(DiagMain,_CLASYMBMAIN_3),SYS_FONT_GFN);
+						FontLST_SYS(GetList_DGW(DiagMain,_CLASYMBMAIN_3),SYS_FONT_TT);
+						iFontSetup = 1;
+					}					
+
+
+               // --- Get defaults from system ---
+
+               SetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_0, DGW_TEXT,      "CLASYMB", "CHANNEL");
+               SetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_1, DGW_TEXT,      "CLASYMB", "NUMRANGES");
+               SetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_2, DGW_TEXT,      "CLASYMB", "MASK");
+               SetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_3, DGW_LISTALIAS, "CLASYMB", "FONT");
+               SetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_4, DGW_LISTALIAS, "CLASYMB", "WEIGHT");
+               SetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_5, DGW_TEXT,      "CLASYMB", "COLOR");
+               SetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_6, DGW_TEXT,      "CLASYMB", "ANGLE");
+
+               iValue = iRunDialogue_DGW(DiagMain);
+               if(iValue==-1) Cancel_SYS();
+
+               GetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_0, DGW_TEXT,      "CLASYMB", "CHANNEL");
+               GetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_1, DGW_TEXT,      "CLASYMB", "NUMRANGES");
+               GetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_2, DGW_TEXT,      "CLASYMB", "MASK");
+               GetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_3, DGW_LISTALIAS, "CLASYMB", "FONT");
+               GetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_4, DGW_LISTALIAS, "CLASYMB", "WEIGHT");
+               GetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_5, DGW_TEXT,      "CLASYMB", "COLOR");
+               GetInfoSYS_DGW(DiagMain,_CLASYMBMAIN_6, DGW_TEXT,      "CLASYMB", "ANGLE");
+
+            }
+            else 
+            {
+
+ 					// --- Set up the font list ---
+					
+					if(iFontSetup==0)
+					{
+						FontLST_SYS(GetList_DGW(DiagMain,_CLASYMB2MAIN_6),SYS_FONT_GFN);
+						FontLST_SYS(GetList_DGW(DiagMain,_CLASYMB2MAIN_6),SYS_FONT_TT);
+						iFontSetup = 1;
+					}
+
+					
+					// --- Get defaults from system ---
+
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_0, DGW_TEXT,      "CLASYMB", "CHANNEL");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_1, DGW_TEXT,      "CLASYMB", "NUMRANGES");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_2, DGW_TEXT,      "CLASYMB", "CHANNEL2");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_3, DGW_TEXT,      "CLASYMB", "BASE");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_4, DGW_TEXT,      "CLASYMB", "SCALE");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_5, DGW_TEXT,      "CLASYMB", "MASK");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_6, DGW_LISTALIAS, "CLASYMB", "FONT");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_7, DGW_LISTALIAS, "CLASYMB", "WEIGHT");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_8, DGW_TEXT,      "CLASYMB", "COLOR");
+               SetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_9, DGW_TEXT,      "CLASYMB", "ANGLE");
+
+               iValue = iRunDialogue_DGW(DiagMain);
+               if(iValue==-1) Cancel_SYS();
+
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_0, DGW_TEXT,      "CLASYMB", "CHANNEL");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_1, DGW_TEXT,      "CLASYMB", "NUMRANGES");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_2, DGW_TEXT,      "CLASYMB", "CHANNEL2");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_3, DGW_TEXT,      "CLASYMB", "BASE");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_4, DGW_TEXT,      "CLASYMB", "SCALE");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_5, DGW_TEXT,      "CLASYMB", "MASK");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_6, DGW_LISTALIAS, "CLASYMB", "FONT");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_7, DGW_LISTALIAS, "CLASYMB", "WEIGHT");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_8, DGW_TEXT,      "CLASYMB", "COLOR");
+               GetInfoSYS_DGW(DiagMain,_CLASYMB2MAIN_9, DGW_TEXT,      "CLASYMB", "ANGLE");
+
+            }
+
+
+            GetString_SYS("CLASYMB", "CHANNEL", sClassCh);
+            GetString_SYS("CLASYMB", "NUMRANGES", sNumRanges);
+            GetString_SYS("CLASYMB", "ANGLE", sAngle);
+            GetString_SYS("CLASYMB", "WEIGHT", sSymbWt);
+            GetString_SYS("CLASYMB", "COLOR", sLColor);
+            GetString_SYS("CLASYMB", "FONT", sSymbFont);
+
+            
+            // --- Use the MapInfo symbol LST? ---
+            
+            iMapInfoLST = FALSE;
+            if(iStrStr_STR(sSymbFont, _n("MapInfo"), STR_CASE_TOLERANT)!=-1)
+               iMapInfoLST = TRUE;
+               
+               
+            // --- Convert the values ---
+
+            iNumRanges = iScanI_STR(sNumRanges);
+            rSymbAng    = rScanR_STR(sAngle);
+            iSymbWt    = iScanI_STR(sSymbWt);
+
+
+            if(iValue == 0) {  // --- Plot ---
+
+
+               // --- save the ITR ---
+               
+               iAction = SAVE_ITR_DGW;
+               iDelayedDone = 1;
+               
+            }
+            
+            else if(iValue == 1) // --- Ranges
+
+               iAction = RANGES_DGW;
+      
+            else if(iValue == 2) // --- Files
+            
+               iAction = FILES_DGW;
+               
+            else if(iValue == -1) // --- Cancel ---
+               
+               Cancel_SYS();    
+
+         }
+      
+         else if(iAction == RANGES_DGW) {  // ---  Run Ranges dialogue ---  
+
+            if(iNumRanges == 1) {
+               DisplayMessage_SYS(_("Ranges Specification"),_("There is no maximum to specify for a single range."));
+               iAction = MAIN_DGW;
+            }
+               else {
+
+               // --- Ensure that the ranges are valid to begin with ---
+
+               for(i=1; i<MAX_RANGES-1; i++) {
+                  if((iNumRanges > i-1) && (rMaxVal[i] < rMaxVal[i-1])) {
+                     rMaxVal[i] = rMaxVal[i-1];
+                  }
+               }
+
+
+               // --- get the appropriate dialog ---
+
+               if(iMode==MODE_SINGLE)               
+                  Strcpy_STR(sDiag,"CLASYMBR");
+               else
+                  Strcpy_STR(sDiag,"CLASYMB2R");
+               FormatI_STR(iNumRanges, sText, 10);
+               Strcat_STR(sDiag,sText);
+
+               DiagSub = Create_DGW(sDiag);
+               
+            
+               // --- Use the rV variables for temp storage of values ---
+
+               for(i=0; i<MAX_RANGES-1; i++) { 
+                  if(i<iNumRanges-1)
+                     rMaxV[i] = rMaxVal[i];
+               }
+               
+            
+               // --- Run the dialogue until acceptable values are found,
+               //     or "Cancel" is pushed ---
+
+               iValid = 0;
+               while(!iValid) {
+
+                  for(i=0; i<MAX_RANGES-1; i++) {
+                     if(i<iNumRanges-1) {
+                        FormatR_STR(rMaxV[i], sMax, 10, 10);
+                        SetInfo_DGW(DiagSub, (DGW_OBJ)i,  DGW_TEXT, sMax);
+                     }
+                  }
+
+                  iValue = iRunDialogue_DGW(DiagSub);
+
+                  if (iValue == 0) { // --- "OK"
+
+                     iValid = 1;
+                     iAction = MAIN_DGW;   // --- Return to main dialogue ---
+                  }
+
+                  else if (iValue == 1) { // --- symbols
+                     iAction = SYMBOLS_DGW;
+                     iValid = 1;
+                  }
+                     
+                  else if (iValue == 2) { // --- sizes
+                     iAction = SIZES_DGW;
+                     iValid = 1;
+                  }
+                     
+                  else if (iValue == 3) { // --- colours
+                     iAction = COLOURS_DGW;
+                     iValid = 1;
+                  }
+                                       
+                  else if (iValue == -1) { // "Cancel"
+                     iAction = MAIN_DGW;   // --- Return to main dialogue ---
+                     iValid = 1;    // --- force exit
+                  }
+                  
+                  // --- if anything but cancel, read the ranges ---
+                  
+                  if (iValue != -1) {
+
+                     for(i=0;i<MAX_RANGES-1;i++) {
+                        if(i<iNumRanges-1) {
+                           GetInfo_DGW(DiagSub, (DGW_OBJ)i, DGW_TEXT, sMax);
+                           rMaxV[i] = rScanR_STR(sMax);
+
+                           // --- See if values decrease ---
+
+                           if(i>0) {
+                              if(rMaxV[i] < rMaxV[i-1]) 
+                                 iValid = 0;
+                           }
+                        }
+                     }
+
+                     if(iValid == 0) {
+                        DisplayMessage_SYS(_("Error Specifying Ranges"),_("Values must increase (or be equal) from level to level."));
+                     }                     
+                     else {
+
+                        // --- Accept values ---
+
+                        for(i=0;i<MAX_RANGES-1;i++) {
+                           if(i<iNumRanges-1) {
+                              rMaxVal[i] = rMaxV[i];
+                           }
+                        }
+                     }
+                  }
+                     
+               }  // End while(iValid)
+
+               Destroy_DGW(DiagSub);
+
+            }  // End if(iNumranges > 1)
+
+         }  // End if(iAction == RANGES_DGW)  (Ranges Dialogue)
+
+
+         else if(iAction == FILES_DGW) {  // --- Files dialogue ---  
+
+            // --- If the channel name is defined, ensure that the channel name in the
+            //     ITR file corresponds ---
+
+            GetString_SYS("CLASYMB","ITR",sITR);
+            GetString_SYS("CLASYMB","CHANNEL",sClassCh);
+
+            if(iStrlen_STR(sITR) && 
+               iStrlen_STR(sClassCh)) {
+
+               if(iFileExist_SYS(sITR)) {
+
+                  Bf = Create_BF(sITR, BF_READ);
+                  Itr = CreateS_ITR(Bf);
+
+                  // --- Look in the REG for the channel name ---
+            
+                  Reg = GetREG_ITR(Itr);
+
+                  Get_REG(Reg, "Channel", sCh, sizeof(sCh));
+
+                  if(iStrlen_STR(sCh)) {
+
+                     if(iStrcmp_STR(sCh, sClassCh, STR_CASE_TOLERANT))
+                        Strcpy_STR(sITR, "");
+                  }
+
+                  DestroyEx_BF(Bf);
+                  Destroy_ITR(Itr);
+               }
+            }
+
+            
+            // --- create ITR file name if none ---
+            
+            if (iStrlen_STR(sITR) == 0 && 
+                iStrlen_STR(sClassCh)) {
+            
+               Strcpy_STR(sITR,"_");
+               Strcat_STR(sITR,sClassCh);
+               Strcat_STR(sITR,".itr");
+
+               SetString_SYS("CLASYMB","ITR",sITR);
+               
+            }
+
+
+            // --- Run the Output ITR dialogue ---
+
+            DiagSub = Create_DGW("CLASYMBITR");
+            
+            SetInfoSYS_DGW(DiagSub,_CLASYMBITR_0,DGW_FILEPATH,"CLASYMB","ITR");     
+
+            iValue = iRunDialogue_DGW(DiagSub);
+
+            if(iValue!=-1) {
+            
+               GetInfoSYS_DGW(DiagSub,_CLASYMBITR_0,DGW_FILEPATH,"CLASYMB","ITR");     
+               GetString_SYS("CLASYMB","ITR",sITR);
+               
+               if (iStrMin2_STR(sITR) > 0) {
+               
+                  if (iValue == 0)
+                     iAction = READ_ITR_DGW;   // --- Input ITR
+                  else   
+                     iAction = SAVE_ITR_DGW;   // --- Output ITR
+                     
+               } else
+                  iAction = MAIN_DGW;   // --- no action
+            
+            } else
+               iAction = MAIN_DGW;   // --- no action
+
+            Destroy_DGW(DiagSub);
+
+         }  // End if(iAction == FILES_DGW)  (Files Dialogue)
+
+         else if(iAction == SYMBOLS_DGW) {  // ---  Run Symbols dialogue ---  
+
+            // --- Create symbol list based on the current font ---
+            
+            GetString_SYS("CLASYMB","FONT",sSymbFont);
+            iMapInfoLST = FALSE;
+            if(iStrStr_STR(sSymbFont, _n("MapInfo"), STR_CASE_TOLERANT)!=-1)
+            {
+               Copy_LST(SymbLST, MapInfoLST);
+               iMapInfoLST = TRUE;
+            }
+            else
+               Copy_LST(SymbLST, SymbolLST);
+               
+            Strcpy_STR(sDiag,"CLASYMBSYM");
+            FormatI_STR(iNumRanges, sText, 10);
+            Strcat_STR(sDiag,sText);
+
+            DiagSub = Create_DGW(sDiag);
+
+            // --- Set dialogue values ---
+
+            
+            for(i=0; i<MAX_RANGES; i++) {
+               if(iNumRanges > i) {
+               
+                  // --- Set up the symbol LST ---
+                  
+                  Copy_LST(GetList_DGW(DiagSub, (DGW_OBJ)i), SymbLST);
+                  
+                  
+                  // --- Set the value ---
+                  
+                  if(iMapInfoLST)
+                     FormatI_STR(iSymMapInfo[i], sSym, 10);                  
+                  else
+                     FormatI_STR(iSym[i], sSym, 10);                  
+
+                  SetInfo_DGW(DiagSub, (DGW_OBJ)i, DGW_LISTALIAS, sSym);
+               }
+            }
+
+            iValue = iRunDialogue_DGW(DiagSub);
+
+            // --- Recover dialogue values ---
+
+            if(iValue == 0) {    // "OK"
+
+               for(i=0; i<MAX_RANGES; i++) {
+                  if(iNumRanges > i) {
+                     GetInfo_DGW(DiagSub, (DGW_OBJ)i, DGW_LISTALIAS, sSym);
+                     if(iMapInfoLST)
+                        iSymMapInfo[i] = iScanI_STR(sSym);
+                     else
+                        iSym[i] = iScanI_STR(sSym);
+                  }
+               }               
+            }
+
+            Destroy_DGW(DiagSub);
+         
+            iAction = RANGES_DGW;   // --- Return to ranges dialogue ---
+
+         }  // End if(iAction==SYMBOLS_DGW) (Symbol Dialogue)
+
+         else if(iAction == SIZES_DGW) {  // ---  Run Sizes dialogue ---  
+
+            Strcpy_STR(sDiag,"CLASYMBSIZ");
+            FormatI_STR(iNumRanges, sText, 10);
+            Strcat_STR(sDiag,sText);
+
+            DiagSub = Create_DGW(sDiag);
+
+            // --- Set dialogue values ---
+
+            for(i=0; i<MAX_RANGES; i++) {
+               if(iNumRanges > i) {
+                  FormatR_STR(rSiz[i], sSize, 10, 10);
+                  SetInfo_DGW(DiagSub, (DGW_OBJ)i, DGW_TEXT, sSize);
+               }
+            }
+
+            iValue = iRunDialogue_DGW(DiagSub);
+
+            // --- Recover dialogue values ---
+
+            if(iValue == 0) {  // "OK"
+
+               iWarn = 0;
+               for(i=0; i<MAX_RANGES; i++) {
+                  if(iNumRanges > i) {
+                     GetInfo_DGW(DiagSub, (DGW_OBJ)i, DGW_TEXT, sSize);
+                     
+                     
+                     // --- Check sizes - must be > zero ---
+                     
+                     rVal = rScanR_STR(sSize);
+                     if(rVal<=0.0)
+                        iWarn = 1;
+                     else
+                        rSiz[i] = rVal;
+                  }
+               }               
+               
+               if(iWarn) {
+                  DisplayMessage_SYS(_("Symbol Sizes"), _("Sizes must be greater than zero."));
+                  Destroy_DGW(DiagSub);
+                  continue;
+               }
+            }
+
+            Destroy_DGW(DiagSub);
+         
+            
+            iAction = RANGES_DGW;   // --- Return to ranges dialogue ---
+
+         }  // End if(iAction==SIZES_DGW) (Sizes Dialogue)
+
+
+         else if(iAction == COLOURS_DGW) {  // ---  Run Colours dialogue ---  
+
+            Strcpy_STR(sDiag,"CLASYMBCOL");
+            FormatI_STR(iNumRanges, sText, 10);
+            Strcat_STR(sDiag,sText);
+
+            DiagSub = Create_DGW(sDiag);
+
+            // --- Set dialogue values ---
+
+            for(i=0; i<MAX_RANGES; i++) {
+               if(iNumRanges > i) {
+                  GetString_VM(sCol_VM, i, sCol);
+                  SetInfo_DGW(DiagSub, (DGW_OBJ)i,   DGW_TEXT, sCol);
+               }
+            }
+
+            iValue = iRunDialogue_DGW(DiagSub);
+
+            // --- Recover dialogue values ---
+
+            if(iValue == 0) { // "OK"
+
+               for(i=0; i<MAX_RANGES; i++) {
+                  if(iNumRanges > i) {
+                     GetInfo_DGW(DiagSub, (DGW_OBJ)i, DGW_TEXT, sCol);
+                     SetString_VM(sCol_VM, i, sCol);
+                  }
+               }               
+            }
+
+            Destroy_DGW(DiagSub);
+
+            iAction = RANGES_DGW;   // --- Return to ranges dialogue ---
+
+         } // End if(iAction==COLOURS_DGW) (Colours Dialogue)
+
+         else if(iAction == READ_ITR_DGW) { // --- Input values from an ITR File
+
+            Bf = Create_BF(sITR, BF_READ);
+            Itr = CreateS_ITR(Bf);
+
+            iZones = iGetSize_ITR(Itr);
+
+            if(iZones > MAX_RANGES) {
+               
+               iZones = MAX_RANGES;
+               FormatI_STR(iZones,sVal,3);
+               Printf_STR(sMsg, sizeof(sMsg), _("This ITR has more than %s zones; using the first %s."), sVal, sVal);
+               DisplayMessage_SYS(_("Reading ITR File"),sMsg);
+            }
+
+
+            if(iZones > 0) {
+            
+               // --- Read the ITR values ---
+
+               iNumRanges = iZones;
+               SetInt_SYS("CLASYMB","NUMRANGES",iNumRanges);
+               for(i=0; i<iNumRanges-1; i++) 
+                  rMaxVal[i] = rGetZoneValue_ITR(Itr, i);
+                  
+               for(i=0; i<iNumRanges; i++) {
+                  GetZoneColor_ITR(Itr, i, iCol);
+                  ColorDescr_MVIEW(iCol, sCol, sizeof(sCol));
+                  SetString_VM(sCol_VM, i, sCol);
+               }
+
+               // --- Look in the REG for the other variables ---
+            
+               Reg = GetREG_ITR(Itr);
+
+               // --- Read the channel ---
+
+               Get_REG(Reg, "Channel", sCh, sizeof(sCh));
+               if(iStrlen_STR(sCh)) {
+                  if(iExistChan_DB(Data,sCh))
+                     Strcpy_STR(sClassCh, sCh);
+               }
+
+               // --- Read the font ---
+
+               Get_REG(Reg, "SymbFont", sSymbFont, sizeof(sSymbFont));
+
+               // --- Read the font weight ---
+	
+               GetInt_REG(Reg, "SymbWt", iSymbWtCore);
+               
+               
+               // --- Must convert core weight values to GX weight values ---
+               
+               if(iSymbWtCore!=iDUMMY) iSymbWt = iSymbWtCore+1;	// values are offset by 1.
+               
+
+               // --- Read the edge colour ---
+
+               GetInt_REG(Reg, "EdgeColor", iVal);
+               ColorDescr_MVIEW(iVal, sLColor, sizeof(sLColor));
+               
+               // --- Read the symbol angle ---
+
+               rVal = 0.0;   // --- eliminates compiler warning ---
+
+               GetReal_REG(Reg, "Angle", rVal);
+               if(rVal!=rDUMMY) rSymbAng = rVal;
+   
+               // --- Read the symbol numbers ---
+
+               for(i=0; i<iNumRanges; i++) {
+                  Strcpy_STR(sLabel,_n("Symbol"));
+                  FormatI_STR(i, sText, 10);
+                  Strcat_STR(sLabel, sText);
+                  GetInt_REG(Reg, sLabel, iVal);
+                  if(iVal!=iDUMMY) 
+                  {
+                     if(iMapInfoLST)
+                        iSymMapInfo[i] = iVal;
+                     else
+                        iSym[i] = iVal;
+                  }
+               }
+
+               // --- Read the symbol sizes ---
+
+               for(i=0; i<iNumRanges; i++) {
+                  Strcpy_STR(sLabel,_n("Size"));
+                  FormatI_STR(i, sText, 10);
+                  Strcat_STR(sLabel, sText);
+                  GetReal_REG(Reg, sLabel, rVal);
+                  if(rVal!=rDUMMY) 
+                     rSiz[i] = rVal;
+               }
+
+               Destroy_REG(Reg);
+               iAction = MAIN_DGW;   // --- Return to main dialogue ---
+
+            }  // --- End if(iZones > 0) 
+            else {
+               DisplayMessage_SYS(_("Error Reading ITR File"),_("This ITR has no zones defined."));
+            }
+
+            // --- Destroy the resources ---
+ 
+            DestroyEx_BF(Bf);
+            Destroy_ITR(Itr);
+
+            iAction = MAIN_DGW;   // --- Return to main dialogue ---
+
+         } // End if(iAction==READ_ITR_DGW) (Input values from an ITR File)
+
+         else if(iAction == SAVE_ITR_DGW)  { // --- Output values to an ITR File
+
+            Itr = Create_ITR();
+
+            SetSize_ITR(Itr, iNumRanges);
+
+            // --- Write the ITR values ---
+
+            for(i=0; i<iNumRanges-1; i++) 
+               SetZoneValue_ITR(Itr, i, rMaxVal[i]);
+               
+            iNone = 0;               
+            for(i=0; i<iNumRanges; i++) {
+               GetString_VM(sCol_VM, i, sCol);
+               if(!iStrcmp_STR(sCol, "N", STR_CASE_TOLERANT)) {
+                  iNone = 1;
+                  Strcpy_STR(sCol, "RGB");
+               }
+               SetZoneColor_ITR(Itr, i, iColor_MVIEW(sCol));
+            }
+            if(iNone)
+               DisplayMessage_SYS(_("Classified Symbols"), _("This GX does not currently support the use of \"None\" (transparent) for symbol fills. They will be recast to white."));
+
+            // --- Put the other variables in the REG ---
+            
+            Reg = GetREG_ITR(Itr);
+
+            // --- Write the channel ---
+
+            if(iStrlen_STR(sClassCh)) 
+               Set_REG(Reg, "Channel", sClassCh);
+
+            // --- Write the units. These are used when plotting legends ---
+
+            if(iStrlen_STR(sClassCh)) {
+
+               Strcpy_STR(sUnits,"");
+               if (iExistChan_DB(Data,sClassCh)) {
+                  ClassCh = FindChan_DB(Data,sClassCh);
+		            GetChanUnit_DB(Data,ClassCh,sUnits);
+               }
+               Set_REG(Reg, "Units", sUnits);
+            }
+
+            // --- Write the font ---
+
+            if(iStrlen_STR(sSymbFont)) 
+               Set_REG(Reg, "SymbFont", sSymbFont);
+
+            // --- Write the font weight; convert to core value first, which is
+            //     offset by 1. Also, the MVIEW_FONT_WEIGHT_NORMAL value is 
+            //     understood to be MEDIUM. ---
+
+				if(iSymbWt==0)
+				   iSymbWtCore = 2;	// MEDIUM in core code.
+				else
+				   iSymbWtCore = iSymbWt-1;
+            SetInt_REG(Reg, "SymbWt", iSymbWtCore);
+            
+
+            // --- Write the edge colour ---
+
+            if(iStrlen_STR(sLColor)) 
+               SetInt_REG(Reg, _n("EdgeColor"), iColor_MVIEW(sLColor));
+
+            // --- Write the symbol angle ---
+
+            SetReal_REG(Reg, "Angle", rSymbAng);
+
+            // --- Write the symbol numbers ---
+
+            for(i=0; i<iNumRanges; i++) {
+               Strcpy_STR(sLabel,_n("Symbol"));
+               FormatI_STR(i, sText, 10);
+               Strcat_STR(sLabel, sText);
+               if(iMapInfoLST)
+                  SetInt_REG(Reg, sLabel, iSymMapInfo[i]);
+               else
+                  SetInt_REG(Reg, sLabel, iSym[i]);
+            }
+
+            // --- Write the symbol sizes ---
+
+            for(i=0; i<iNumRanges; i++) {
+               Strcpy_STR(sLabel,_n("Size"));
+               FormatI_STR(i, sText, 10);
+               Strcat_STR(sLabel, sText);
+               SetReal_REG(Reg, sLabel, rSiz[i]);
+            }
+            
+
+            // --- If the channel name is defined, ensure that the channel name in the
+            //     ITR file corresponds ---
+            
+            if(iStrlen_STR(sITR) && 
+               iStrlen_STR(sClassCh)) {
+
+               if(iFileExist_SYS(sITR)) {
+
+                  Bf = Create_BF(sITR, BF_READ);
+                  Itr2 = CreateS_ITR(Bf);
+
+                  // --- Look in the REG for the channel name ---
+            
+                  Reg2 = GetREG_ITR(Itr2);
+
+                  Get_REG(Reg2, "Channel", sCh, sizeof(sCh));
+                  if(iStrlen_STR(sCh)) {
+
+                     if(iStrcmp_STR(sCh, sClassCh, STR_CASE_TOLERANT))
+                        Strcpy_STR(sITR, "");
+                  }
+
+                  DestroyEx_BF(Bf);
+                  Destroy_ITR(Itr2);
+               }
+            }
+
+            
+            // --- create ITR file name if none ---
+            
+            if (iStrlen_STR(sITR) == 0 &&
+                iStrlen_STR(sClassCh)) {
+            
+               Strcpy_STR(sITR,"_");
+               Strcat_STR(sITR,sClassCh);
+               Strcat_STR(sITR,".itr");
+               
+            }
+            
+
+            // --- Write the ITR file ---
+
+            Bf = Create_BF(sITR, BF_READWRITE_NEW);
+            Serial_ITR(Itr, Bf);
+            SetString_SYS("CLASYMB","ITR", sITR);
+
+
+            // --- Destroy the resources ---
+
+            Destroy_REG(Reg);
+            DestroyEx_BF(Bf);
+            Destroy_ITR(Itr);
+
+            if (iDelayedDone)
+               iDone = 1;
+            else   
+               iAction = MAIN_DGW;   // --- Return to main dialogue ---
+
+         } // End if(iAction == SAVE_ITR_DGW) (Output values to an ITR File)
+
+      }  // --- End While(!iDone) ---
+
+      // --- Destroy the Main Dialogue ---
+
+      Destroy_DGW(DiagMain);
+
+   }
+
+   if (!iInteractive_SYS()) {
+      sCol_VM = Create_VM(-32, MAX_RANGES);
+      
+      for(i=0; i<MAX_RANGES; i++) iSym[i] = 20;
+      for(i=0; i<MAX_RANGES; i++) iSymMapInfo[i] = 3;
+
+      for(i=0; i<MAX_RANGES-1; i++) rMaxVal[i] = 0.0;
+
+      rSize = 1.5;   
+      for(i=0; i<MAX_RANGES; i++) rSiz[i] = rSize;
+      
+      GetString_SYS("CLASYMB","ITR",sITR);
+      GetString_SYS("CLASYMB", "COLOR", sLColor);
+      GetString_SYS("CLASYMB", "CHANNEL", sClassCh);
+      GetString_SYS("CLASYMB", "NUMRANGES", sNumRanges);
+      GetString_SYS("CLASYMB", "ANGLE", sAngle);
+      GetString_SYS("CLASYMB", "WEIGHT", sSymbWt);
+      GetString_SYS("CLASYMB", "COLOR", sLColor);
+      GetString_SYS("CLASYMB", "NEWITR", sText);
+      GetString_SYS("CLASYMB","FONT",sSymbFont);
+   
+   
+		// --- Strip extra path info from the symbol font; can pass only the name and extension ---
+		
+		FileNamePart_STR(sSymbFont, sSymbFont, STR_FILE_PART_NAME_EXTENSION);
+		
+         
+      iMapInfoLST = FALSE;
+      if(iStrStr_STR(sSymbFont, _n("MapInfo"), STR_CASE_TOLERANT)!=-1)
+         iMapInfoLST = TRUE;
+   
+         
+      // --- Convert the values ---
+      iNumRanges = iScanI_STR(sNumRanges);
+      rSymbAng    = rScanR_STR(sAngle);
+      iSymbWt    = iScanI_STR(sSymbWt);
+      
+      if(!iStrcmp_STR(sText, "Y", STR_CASE_TOLERANT)) {
+      
+         Itr = Create_ITR();
+
+         SetSize_ITR(Itr, iNumRanges);
+
+         // --- Write the ITR values ---
+
+         rMaxTemp = 0.0;
+         // Ranges for each level
+         for(i=0; i<iNumRanges-1; i++)  {
+            Strcpy_STR(sParm,"RMAXVAL");
+            FormatI_STR(i+1, sText, 10);
+            Strcat_STR(sParm, sText);
+            
+            GetString_SYS("CLASYMB", sParm, sVal);
+            if (iStrlen_STR(sVal)) {
+               rVal = rScanR_STR(sVal);
+               if (rVal < rMaxTemp)
+                  Abort_SYS(_("Maximum range values must be in increasing order"));
+                  
+               rMaxTemp = rVal;
+               rMaxVal[i] = rVal;
+               SetZoneValue_ITR(Itr, i, rMaxVal[i]);
+            }
+            else {
+               SetZoneValue_ITR(Itr, i, rMaxTemp);
+            }
+            
+            
+            // Colors for each level
+            Strcpy_STR(sParm,"RCOLOR");
+            FormatI_STR(i+1, sText, 10);
+            Strcat_STR(sParm, sText);
+            
+            GetString_SYS("CLASYMB", sParm, sVal);
+            if (iStrlen_STR(sVal)==0) {
+               Strcpy_STR(sVal, "RGB");
+            }
+               
+            if(!iStrcmp_STR(sVal, "N", STR_CASE_TOLERANT)) {
+               Strcpy_STR(sVal, "RGB");
+            }
+            SetZoneColor_ITR(Itr, i, iColor_MVIEW(sVal));
+         
+         }
+         
+         // --- Put the other variables in the REG ---
+         Reg = GetREG_ITR(Itr);
+
+         // --- Write the channel ---
+         if(iStrlen_STR(sClassCh)) 
+            Set_REG(Reg, "Channel", sClassCh);
+
+         // --- Write the units. These are used when plotting legends ---
+
+         if(iStrlen_STR(sClassCh)) {
+            Strcpy_STR(sUnits,"");
+            if (iExistChan_DB(Data,sClassCh)) {
+               ClassCh = FindChan_DB(Data,sClassCh);
+               GetChanUnit_DB(Data,ClassCh,sUnits);
+            }
+            Set_REG(Reg, "Units", sUnits);
+         }
+
+         
+         // --- Write the font ---
+         
+         if(iStrlen_STR(sSymbFont)) 
+            Set_REG(Reg, "SymbFont", sSymbFont);
+
+
+         // --- Write the font weight; convert to core value first, which is
+         //     offset by 1. Also, the MVIEW_FONT_WEIGHT_NORMAL value is 
+         //     understood to be MEDIUM. ---
+
+			if(iSymbWt==0)
+			   iSymbWtCore = 2;	// MEDIUM in core code.
+			else
+			   iSymbWtCore = iSymbWt-1;
+         SetInt_REG(Reg, "SymbWt", iSymbWt);
+
+
+         // --- Write the edge colour ---
+         
+         if(iStrlen_STR(sLColor)) 
+            SetInt_REG(Reg, _n("EdgeColor"), iColor_MVIEW(sLColor));
+
+         
+         // --- Write the symbol angle ---
+
+         SetReal_REG(Reg, "Angle", rSymbAng);
+
+         // --- Write the symbol numbers ---
+         for(i=0; i<iNumRanges; i++) {
+            Strcpy_STR(sParm,"RSYMBOL");
+            FormatI_STR(i+1, sText, 10);
+            Strcat_STR(sParm, sText);
+            
+            GetString_SYS("CLASYMB", sParm, sVal);
+            if (iStrlen_STR(sVal)) {
+               if(iMapInfoLST)
+                  iSymMapInfo[i] = iScanI_STR(sVal);
+               else
+                  iSym[i] = iScanI_STR(sVal);
+            }
+            
+            Strcpy_STR(sLabel,_n("Symbol"));
+            FormatI_STR(i, sText, 10);
+            Strcat_STR(sLabel, sText);
+            if(iMapInfoLST)
+               SetInt_REG(Reg, sLabel, iSymMapInfo[i]);
+            else
+               SetInt_REG(Reg, sLabel, iSym[i]);
+            
+            
+            // --- Write the symbol sizes ---
+            
+            Strcpy_STR(sParm,"RSYMSIZE");
+            FormatI_STR(i+1, sText, 10);
+            Strcat_STR(sParm, sText);
+            
+            GetString_SYS("CLASYMB", sParm, sVal);
+            if (iStrlen_STR(sVal)) {
+               
+               rSiz[i] = rScanR_STR(sVal);
+            }
+            
+            Strcpy_STR(sLabel,_n("Size"));
+            FormatI_STR(i, sText, 10);
+            Strcat_STR(sLabel, sText);
+            SetReal_REG(Reg, sLabel, rSiz[i]);
+         }
+         
+         // --- If the channel name is defined, ensure that the channel name in the
+         //     ITR file corresponds ---
+         
+         if(iStrlen_STR(sITR) && 
+            iStrlen_STR(sClassCh)) {
+
+            if(iFileExist_SYS(sITR)) {
+
+               Bf = Create_BF(sITR, BF_READ);
+               Itr2 = CreateS_ITR(Bf);
+
+               // --- Look in the REG for the channel name ---
+         
+               Reg2 = GetREG_ITR(Itr2);
+
+               Get_REG(Reg2, "Channel", sCh, sizeof(sCh));
+               if(iStrlen_STR(sCh)) {
+
+                  if(iStrcmp_STR(sCh, sClassCh, STR_CASE_TOLERANT))
+                     Strcpy_STR(sITR, "");
+               }
+
+               DestroyEx_BF(Bf);
+               Destroy_ITR(Itr2);
+            }
+         }
+
+         
+         // --- create ITR file name if none ---
+         
+         if (iStrlen_STR(sITR) == 0 &&
+             iStrlen_STR(sClassCh)) {
+         
+            Strcpy_STR(sITR,"_");
+            Strcat_STR(sITR,sClassCh);
+            Strcat_STR(sITR,".itr");
+            
+         }
+         
+
+         // --- Write the ITR file ---
+         Bf = Create_BF(sITR, BF_READWRITE_NEW);
+         Serial_ITR(Itr, Bf);
+         SetString_SYS("CLASYMB","ITR", sITR);
+
+         // --- Destroy the resources ---
+         Destroy_REG(Reg);
+         DestroyEx_BF(Bf);
+         Destroy_ITR(Itr);
+      }
+      
+   }
+
+   // --- Get and validate parameters ---
+
+   GetString_SYS("CLASYMB","CHANNEL",sClassCh);
+   if (!iExistChan_DB(Data,sClassCh))
+      Abort_SYS(_("Classification channel does not exist."));
+
+   GetString_SYS("CLASYMB","FONT",sSymbFont);
+   if(!iStrlen_STR(sSymbFont))
+      Abort_SYS(_("No symbol font specified."));      
+
+   iSymbWt = iGetInt_SYS("CLASYMB","WEIGHT");
+   if(iSymbWt==iDUMMY) iSymbWt = MVIEW_FONT_WEIGHT_MEDIUM; // medium by default
+
+   rSymbAng = rGetReal_SYS("CLASYMB","ANGLE");
+   if(rSymbAng==rDUMMY) rSymbAng = 0.0;   // zero by default
+
+
+   if(iMode == MODE_DOUBLE) {
+      
+      GetString_SYS("CLASYMB","CHANNEL2",sSizeCh);
+      if(!iStrlen_STR(sSizeCh))
+         Abort_SYS(_("No size classification channel specified."));
+
+      rBase = rGetReal_SYS("CLASYMB", "BASE");     
+      if(rBase==rDUMMY)
+         Abort_SYS(_("No symbol size base value specified."));
+
+      rScale = rGetReal_SYS("CLASYMB","SCALE");    
+      if(rScale==rDUMMY)
+         Abort_SYS(_("No symbol size scaling value specified."));
+      if(rScale<=0.0)
+         Abort_SYS(_("Symbol size scaling value must be greater than zero."));
+
+   }
+
+
+   iMapInfoLST = FALSE;
+   if(iStrStr_STR(sSymbFont, _n("MapInfo"), STR_CASE_TOLERANT)!=-1)
+      iMapInfoLST = TRUE;
+
+
+   // --- Save the file name for the Legend plot ---
+   SetString_SYS("CLASYMB","ITR",sITR);
+   SetString_SYS("CLASSLEG","ITR",sITR);
+   
+
+   // --- Get the number of ranges ---
+
+   iNumRanges = iGetInt_SYS("CLASYMB","NUMRANGES");
+   if(iNumRanges<0 || iNumRanges>MAX_RANGES) {
+      FormatI_STR(MAX_RANGES, sText, 10);
+      Printf_STR(sMsg, sizeof(sMsg), _("Invalid number of ranges: must be a value from 1 to %s"), sText);
+      Abort_SYS(sMsg);
+   }
+
+   
+   // --- Load the ITR ---
+
+   Itr = CreateFile_ITR(sITR);
+   if(iNumRanges != iGetSize_ITR(Itr)) {
+      Abort_SYS(_("The number of ranges does not match the number of zones in the ITR."));
+   }
+   for(i=0;i<iNumRanges-1;i++) {
+      rMaxVal[i] = rGetZoneValue_ITR(Itr, i);
+   }
+
+	// --- Get sizes from the ITR if present ---
+	
+	Reg = GetREG_ITR(Itr);
+   for(i=0;i<iNumRanges;i++) 
+	{
+		Strcpy_STR(sLabel,_n("Size"));
+      FormatI_STR(i, sText, 10);
+      Strcat_STR(sLabel, sText);
+
+      GetReal_REG(Reg, sLabel, rSize);
+		if(rSize != rDUMMY)
+			rSiz[i] = rSize;
+	}
+
+
+   // --- Get some VV's ---
+
+   XVV = Create_VV(REAL,0);
+   YVV = Create_VV(REAL,0);
+   CVV = Create_VV(REAL,0);
+   MVV = Create_VV(REAL,0);
+   SVV = Create_VV(REAL,0);
+
+
+   // --- Get classification channels ---
+
+   ClassCh = FindChan_DB(Data,sClassCh);
+   LockSymb_DB(Data,ClassCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   if(iMode==MODE_DOUBLE) {
+      SizeCh = FindChan_DB(Data,sSizeCh);
+      LockSymb_DB(Data,SizeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
+
+   // --- Apply mask? ---
+
+   iMask = 0;
+   GetString_SYS("CLASYMB","MASK",sMask);
+   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (!iExistChan_DB(Data,sMask))  
+         Abort_SYS(_("Mask channel does not exist."));
+      MCh = FindChan_DB(Data,sMask);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+      iMask = 1;
+   }
+
+
+   // --- Clip outliers? ---
+
+   rOutlierClass = rDUMMY;
+   rOutlierSize  = rDUMMY;
+   if(iChimera==1) {
+      GetRegSymbSetting_DB(Data,ClassCh,"OUTLIERLIMIT",sParm, sizeof(sParm));
+      rOutlierClass = rScanR_STR(sParm);
+
+      if(iMode==MODE_DOUBLE) {
+         GetRegSymbSetting_DB(Data,SizeCh,"OUTLIERLIMIT",sParm, sizeof(sParm));
+         rOutlierSize = rScanR_STR(sParm);
+      }
+   }
+   
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+
+	if(iHasOrientation == 1)
+		  Pj = CreateIPJ_PJ(DataIPJ, ViewIPJ);
+	else
+		  SetWorkingIPJ_MVIEW(View,DataIPJ);
+   
+
+   // --- Scale parameters ---
+
+   SetThinRes_MVIEW(View,0.02);
+   rScaleMM = rScaleMM_MVIEW(View);
+   
+
+   // --- Set the group clip mode ---
+   
+   GroupClipMode_MVIEW(View, CLIP_ON);
+   
+   
+   // --- Start a group ---
+
+   GetName_DB(Data,DB_NAME_FILE,sName);
+   FileNamePart_STR(sName,sName,STR_FILE_PART_NAME);
+   if(iMode==MODE_SINGLE)
+      GenGroupName_STR("CLSYMB",sName,sClassCh,sGroup);
+   else {
+      Strcpy_STR(sCh, sClassCh);
+      Strcat_STR(sCh, "_");
+      Strcat_STR(sCh, sSizeCh);
+      GenGroupName_STR("CLPSYMB",sName,sCh,sGroup);
+   }
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- Add makers. Set special switches here for saving by the makers ---
+
+   SetInt_SYS("CLASYMB","MODE",iMode);  
+   SetInt_SYS("CLASYMB","CHIMERA",iChimera);
+
+   if(iMode==MODE_SINGLE)
+      Maker_MVIEW(View,1,1,"CLASYMB",MAKER_GX,_("Classified symbols..."),"CLASYMB;");
+   else
+      Maker_MVIEW(View,1,1,"CLASYMB",MAKER_GX,_("Class/Prop symb..."),"CLASYMB;");
+
+   
+   // --- Reset special switches to default values ---
+
+   SetInt_SYS("CLASYMB","MODE",MODE_SINGLE);  
+   SetInt_SYS("CLASYMB","CHIMERA",0);
+
+
+   // --- Get the view's clip PLY ---
+   
+   Ply = Create_PLY();
+   GetClipPLY_MVIEW(View, Ply);
+   
+   
+   // --- Link ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+ 
+   // --- Set global symbol parameters ---
+
+   SymbFont_MVIEW(View,sSymbFont,TRUE,iSymbWt,FALSE);
+   SymbAngle_MVIEW(View,rSymbAng);
+   
+
+   // --- Put the symbols ---
+
+   iLastCol = -1;
+   iLastk = -1;
+   rLastSize = -1.0;
+   iLastSymbol = -1;
+   iNPlot = 0;
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   rPercD = (real)iTotLines;
+
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Plotting Symbols, Line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      
+      
+      // --- Update progress based on way through current line.
+      //     This works better with single-line (e.g. CHIMERA) databases ---
+
+      rPerc1 = (real) iLines / (real) iTotLines * 100.0;
+      rPerc2 = 0.0;
+      ProgUpdate_SYS((int)(rPerc1+(rPerc2/rPercD)));
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,XCh,XVV);
+      GetChanVV_DB(Data,Line,YCh,YVV);
+		if(iHasOrientation == 1)
+		   GetChanVV_DB(Data,Line,ZCh,ZVV); 
+      GetChanVV_DB(Data,Line,ClassCh,CVV);
+      ReFidVV_VV(XVV,CVV);
+      ReFidVV_VV(YVV,CVV);
+		if(iHasOrientation == 1)
+		  ReFidVV_VV(ZVV,CVV);
+
+      if(iMode==MODE_DOUBLE) {
+         GetChanVV_DB(Data,Line,SizeCh,SVV);
+         ReFidVV_VV(SVV,CVV);
+      }
+
+      // --- mask? ---
+
+      if(iMask) {
+
+         GetChanVV_DB(Data,Line,MCh,MVV);
+         ReFidVV_VV(MVV,CVV);
+         Mask_VVU(XVV,MVV);
+      }
+
+      
+      // --- Outliers? ---
+
+      if(rOutlierClass!=rDUMMY) 
+         Clip_VVU(CVV, rDUMMY, rOutlierClass, VVU_CLIP_LIMIT);
+
+      if(iMode==MODE_DOUBLE) {
+         if(rOutlierSize!=rDUMMY) 
+            Clip_VVU(SVV, rDUMMY, rOutlierSize, VVU_CLIP_LIMIT);
+      }
+   
+
+      // --- Add line link ---
+
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine);
+
+
+      // --- CLSYMB ---
+      
+      SymbColor_MVIEW(View,iColor_MVIEW(sLColor));
+            
+      iLenVV = iLength_VV(XVV);
+      if (iLenVV > iLength_VV(YVV)) iLenVV = iLength_VV(YVV);
+      if (iLenVV > iLength_VV(CVV)) iLenVV = iLength_VV(CVV);
+
+      for (j=0; j < iLenVV; j++)
+      {
+
+         // --- Update progress based on way through current line.
+         //     This works better with single-line databases ---
+         
+         if (j%50==0)
+         {
+             rPerc2 = ((real) j / (real) iLenVV) * 100.0;
+             ProgUpdate_SYS((int)(rPerc1+(rPerc2/rPercD)));
+         }
+
+         
+         // --- Get (X Y) location ---
+
+         rX = rGetReal_VV(XVV, j);
+         rY = rGetReal_VV(YVV, j);
+			if(iHasOrientation == 1)
+				rZ = rGetReal_VV(ZVV, j);
+         rC = rGetReal_VV(CVV, j);
+         
+         rS = 1.0;   // default to non-dummy for single mode
+         if(iMode==MODE_DOUBLE)
+            rS = rGetReal_VV(SVV, j);
+
+         if (rX != rDUMMY && 
+             rY != rDUMMY && 
+             rC != rDUMMY && 
+             rS != rDUMMY)
+         {
+
+            // --- Get the appropriate range ---
+
+            for(k=0; k<iNumRanges-1; k++) {
+               if(rC <= rMaxVal[k]) break;
+            }
+          
+            if(k!=iLastk) 
+            {
+            
+               if(iMapInfoLST)
+                  iSymbol = iSymMapInfo[k];
+               else
+                  iSymbol = iSym[k];
+
+               if(iLastSymbol != iSymbol) {
+                  SymbNumber_MVIEW(View,iSymbol);
+                  iLastSymbol = iSymbol;
+               }
+                  
+               GetZoneColor_ITR(Itr, k, iCol);
+               if(iLastCol != iCol) {
+                  SymbFillColor_MVIEW(View,iCol);
+                  iLastCol = iCol;
+               }
+
+               iLastk = k;
+
+            }
+
+            if(iMode==MODE_SINGLE)
+               rSize = rSiz[k];                 // rSize is in mm.
+            else {      
+               rSize = (rS - rBase)/rScale;     // scale is in units/mm
+               if(rSize <= 0.0) continue;
+            }
+
+            if(rLastSize != rSize) {
+               SymbSize_MVIEW(View,rSize*rScaleMM);
+               rLastSize = rSize;
+            }
+
+				if(iHasOrientation == 1)
+					 ConvertXYZ_PJ(Pj, rX, rY, rZ);
+
+            Symbol_MVIEW(View,rX,rY);
+            iNPlot++;   // count number plotted
+
+         }
+
+      }       
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Done with symbol plot ---
+
+   Progress_SYS(0);
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+	if(iHasOrientation == 1)
+	 UnLockSymb_DB(Data,ZCh);
+   UnLockSymb_DB(Data,ClassCh);
+   if(iMode==MODE_DOUBLE)
+      UnLockSymb_DB(Data,SizeCh);
+   if(iMask) 
+      UnLockSymb_DB(Data,MCh);
+
+
+   // --- Destroy resources ---
+
+   Destroy_VM(sCol_VM);
+   Destroy_ITR(Itr);
+   Destroy_MVIEW(View);  
+   Destroy_IPJ(DataIPJ);  
+
+	if(iHasOrientation == 1)
+		Destroy_PJ(Pj);
+	Destroy_IPJ(ViewIPJ);
+
+   // --- Done ---
+
+	UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+
+}

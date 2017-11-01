@@ -1,0 +1,440 @@
+//===========================================================================
+NAME          = "Find peaks in a grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+
+    Applies a Hanning filter to a grid to reduce the number
+    of low amplitude targets found when running gridpeak. The
+    X, Y coordinates and the grid value of each peak found are
+    written to a specified line within the current database.
+    
+    GRIDPEAK.GRIDIN   :  Input grid file
+            .PASS     :  Number of passes of Hanning filter. Default is 0.
+            .BLAKELY  :  Blakely test:   'one side', 'two sides', 'three sides'
+                         or 'four sides'. Default is 'four sides'.
+            .CUTOFF   :  Grid amplitude cut-off limit 
+            .LINE     :  Output LINE number. Default is D10.
+"
+// Revision History:
+// v5.1.4: Restrict list of output lines to normal flight lines.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "GRIDPEAK.gr"
+#include "GRIDPEAK.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         Diag;                    // Dialogue handle
+VV          XVV,YVV,ZVV,hVV;
+VV          XVV1,YVV1,ZVV1;
+DB          Data;
+EDB         EData;                   // Database handle
+LST         List;
+DB_SYMB     Line,XCh,YCh,GridCh;
+
+IMG         IMG1;                    // Image tied to the input grid
+IMG         IMGO;                    // Image for the output grid
+
+string(STR_FILE) sGridIn,sGridOut;
+string(STR_DB_SYMBOL) sLine,sGridValue,sXCh,sYCh;
+
+real        rTemp,rMult,rXSep,rYSep;
+real        rVV,rXo,rYo;
+real        rCutOff;
+
+int         i,j;                     // Utility
+int         iBlakely,iLenVV,iTemp;
+int         iSet,iDum,iDx,iPass,iUseFile,iLines;
+int         LineCategory;
+
+//===========================================================================
+//                                  CODE
+//===========================================================================
+
+{
+   // --- Initialise variables ---
+
+   iTemp = 0;
+   rTemp = 0.0;
+   rXo   = 0.0;
+   rYo   = 0.0;
+   rXSep = 0.0;
+   rYSep = 0.0;
+   rCutOff = 0.0;
+
+   Strcpy_STR(sGridOut, "_Temp.grd");
+   
+
+   // --- Get current database ---
+         
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDPEAKForm");
+
+
+      // --- Set up line list ---
+
+      List = GetList_DGW(Diag,_GRIDPEAKFORM_4);
+      SymbLST_DB(Data,List,DB_SYMB_LINE);
+
+
+      // --- Remove "group" and non-random type lines ---
+
+      iLines = iSize_LST(List);
+      for(i=iLines-1;i>=0;i--) {
+         
+         Line = (DB_SYMB)iGetInt_LST(List, 1, i);
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE ,DB_WAIT_INFINITY);
+         
+         if(iLineCategory_DB(Data,Line)==DB_CATEGORY_LINE_GROUP) {
+            DelItem_LST(List, i);
+            UnLockSymb_DB(Data,Line);
+            continue;
+         }
+
+         if(iLineType_DB(Data,Line)!=DB_LINE_TYPE_RANDOM) {
+            DelItem_LST(List, i);
+            UnLockSymb_DB(Data,Line);
+            continue;
+         }
+         UnLockSymb_DB(Data,Line);
+      }
+
+
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_GRIDPEAKFORM_0,DGW_FILEPATH,"GRIDPEAK","GRID");    
+      SetInfoSYS_DGW(Diag,_GRIDPEAKFORM_1,DGW_TEXT,"GRIDPEAK","PASS");    
+      SetInfoSYS_DGW(Diag,_GRIDPEAKFORM_2,DGW_LISTALIAS,"GRIDPEAK","BLAKELY");
+      SetInfoSYS_DGW(Diag,_GRIDPEAKFORM_3,DGW_TEXT,"GRIDPEAK","CUTOFF");    
+      SetInfoSYS_DGW(Diag,_GRIDPEAKFORM_4,DGW_TEXT,"GRIDPEAK","LINE");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_GRIDPEAKFORM_0,DGW_FILEPATH,"GRIDPEAK","GRID");    
+      GetInfoSYS_DGW(Diag,_GRIDPEAKFORM_1,DGW_TEXT,"GRIDPEAK","PASS");    
+      GetInfoSYS_DGW(Diag,_GRIDPEAKFORM_2,DGW_LISTALIAS,"GRIDPEAK","BLAKELY");
+      GetInfoSYS_DGW(Diag,_GRIDPEAKFORM_3,DGW_TEXT,"GRIDPEAK","CUTOFF");    
+      GetInfoSYS_DGW(Diag,_GRIDPEAKFORM_4,DGW_TEXT,"GRIDPEAK","LINE");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDPEAK","GRID",sGridIn);
+   iPass    = iGetInt_SYS("GRIDPEAK","PASS");
+   iBlakely = iGetInt_SYS("GRIDPEAK","BLAKELY");
+   rCutOff = rGetReal_SYS("GRIDPEAK","CUTOFF");
+   GetString_SYS("GRIDPEAK","LINE",sLine);
+
+
+   // --- Verify parameters ---
+   
+   if (iPass < 0) iPass = 0;
+   if ((iBlakely < 1) || (iBlakely > 4)) iBlakely = 4;
+
+
+   // --- Check input grid exists ---
+
+   if (iFileExist_SYS(sGridIn) == 0)
+      Abort_SYS(_("The specified grid file does not exist."));
+   if (iStrMin_STR(sLine) == 0) Strcpy_STR(sLine,"D10");
+
+
+   // ---- Get Line handle ---
+
+   LineCategory = DB_CATEGORY_LINE_FLIGHT;
+   if (iExistSymb_DB(Data,sLine,DB_SYMB_LINE))
+   {
+      Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE ,DB_WAIT_INFINITY);
+      LineCategory = iLineCategory_DB(Data, Line);
+      DeleteSymb_DB(Data,Line);
+   }  
+   Line = CreateSymb_DB(Data,sLine,DB_SYMB_LINE,DB_OWN_SHARED,LineCategory);
+
+
+   // --- Get current X and Y channel names ---
+   
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+   // ---- Get the X channel ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh == NULLSYMB)
+      XCh = CreateSymb_DB(Data,sXCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // ---- Get the Y channel ---
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh == NULLSYMB)
+      YCh = CreateSymb_DB(Data,sYCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // ---- Get the grid value channel ---
+
+   Strcpy_STR(sGridValue, "Grid_value");
+   if (!iExistChan_DB(Data,sGridValue))
+      GridCh = CreateSymb_DB(Data,sGridValue,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   GridCh = FindChan_DB(Data,sGridValue);
+   LockSymb_DB(Data,GridCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Set channel protection off ---
+
+   SetChanProtect_DB(Data,XCh,DB_CHAN_UNPROTECTED);
+   SetChanProtect_DB(Data,YCh,DB_CHAN_UNPROTECTED);
+   SetChanProtect_DB(Data,GridCh,DB_CHAN_UNPROTECTED);
+
+
+   // --- Set fiducial ---
+
+   SetFid_DB(Data,Line,XCh,0.0,1.0);
+   SetFid_DB(Data,Line,YCh,0.0,1.0);
+   SetFid_DB(Data,Line,GridCh,0.0,1.0);
+
+
+   // --- Create VVs ---
+
+   XVV = Create_VV(REAL,0);
+   YVV = Create_VV(REAL,0);
+   ZVV = Create_VV(REAL,0);
+
+
+   // --- If user wants to smooth the grid ---
+
+   if (iPass > 0){
+
+      // --- Create VV to store Hanning filter coefficients ---
+
+      hVV = Create_VV(REAL,10);
+
+
+      // --- Hanning filter coefficients --- 
+         
+      iSet = 1;
+      SetReal_VV(hVV,0,0.06);
+      SetReal_VV(hVV,1,0.1);
+      SetReal_VV(hVV,2,0.06);
+      SetReal_VV(hVV,3,0.1);
+      SetReal_VV(hVV,4,0.36);
+      SetReal_VV(hVV,5,0.1);
+      SetReal_VV(hVV,6,0.06);
+      SetReal_VV(hVV,7,0.1);
+      SetReal_VV(hVV,8,0.06);
+
+
+      // --- Do not interpolate the dummies ---
+
+      iDum = IMU_FILT_DUMMY_NO;
+
+
+      // --- Multiplier to apply to grid values ---
+
+      rMult = 1.0;
+
+
+      // --- No horizontal derivative calculated ---
+
+      iDx = IMU_FILT_HZDRV_NO;
+
+
+      // --- No file containing filter coefficients ---
+
+      iUseFile = IMU_FILT_FILE_NO;
+
+
+      // --- Initialise progress bar ---
+
+      Progress_SYS(1);                  
+      ProgName_SYS(_("Creating images..."),1);
+
+
+      // --- Create images tied to the grids ---  
+      
+      IMG1 = CreateFile_IMG(GS_FLOAT,sGridIn,IMG_FILE_READONLY);
+      IMGO = CreateOutFile_IMG(GS_FLOAT,sGridOut,IMG1); 
+
+      ProgName_SYS(_("Filtering Grid..."),1);
+
+
+      // --- Filter the grid ---
+
+      GridFilt_IMU(IMG1,IMGO,iPass,rMult,iDum,iDx,iUseFile,"",hVV);       
+
+      // --- Destroy handles ---
+
+      Destroy_IMG(IMG1);
+      Destroy_IMG(IMGO);
+
+
+      // --- Destroy VV's ---
+
+      Destroy_VV(hVV);
+
+
+      // --- Filtering done ---
+      
+      ProgUpdate_SYS(100);
+      Progress_SYS(0);
+
+   }
+   
+
+   // --- Prepare to run gridpeak ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Pick peaks from grid"),1);
+
+   // --- Create temp VVs ---
+
+   XVV1 = Create_VV(REAL,0);
+   YVV1 = Create_VV(REAL,0);
+   ZVV1 = Create_VV(REAL,0);
+   
+
+   if (iPass > 0)
+      GridPeak_PGU(sGridOut,iBlakely,XVV1,YVV1,ZVV1);
+   else
+      GridPeak_PGU(sGridIn,iBlakely,XVV1,YVV1,ZVV1);
+
+   ProgUpdate_SYS(100);
+   Progress_SYS(0);
+   
+
+   // --- Get grid stats ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Grid stats"),1);
+
+   if (iPass > 0)
+      GridStat_IMU(sGridOut,iTemp,iTemp,iTemp,rXSep,rYSep,iTemp,rXo,rYo,rTemp,rTemp,rTemp);
+   else 
+      GridStat_IMU(sGridIn,iTemp,iTemp,iTemp,rXSep,rYSep,iTemp,rXo,rYo,rTemp,rTemp,rTemp);
+
+   ProgUpdate_SYS(100);
+   Progress_SYS(0);
+
+
+   // --- Check VV length ---
+
+   iLenVV = iLength_VV(XVV1);
+   if (iLenVV < iLength_VV(YVV1))  iLenVV = iLength_VV(YVV1);
+   if (iLenVV < iLength_VV(ZVV1))  iLenVV = iLength_VV(ZVV1);
+
+
+   // --- Get correct X/Y locations ---
+
+   for (i = 0; i < iLenVV; i++)
+   {
+      rVV = rGetReal_VV(XVV1,i);
+      SetReal_VV(XVV1,i,rVV * rXSep + rXo);
+
+      rVV = rGetReal_VV(YVV1,i);
+      SetReal_VV(YVV1,i,rVV * rYSep + rYo);
+   }
+
+
+   // --- Window on analytic signal amplitude ---
+
+
+   if (rCutOff != rDUMMY) {
+      j = 0;
+      for (i = 0; i < iLenVV; i++)
+      {
+         rVV = rGetReal_VV(ZVV1,i);
+         if (rVV >= rCutOff){
+
+            SetReal_VV(XVV,j,rGetReal_VV(XVV1,i));
+            SetReal_VV(YVV,j,rGetReal_VV(YVV1,i));
+            SetReal_VV(ZVV,j,rGetReal_VV(ZVV1,i));
+            
+            j ++;
+         }
+      }
+
+      // --- Write VVs to channels ---
+
+      PutChanVV_DB(Data,Line,XCh,XVV);
+      PutChanVV_DB(Data,Line,YCh,YVV);
+      PutChanVV_DB(Data,Line,GridCh,ZVV);
+
+   } else {
+
+      // --- Write VVs to channels ---
+
+      PutChanVV_DB(Data,Line,XCh,XVV1);
+      PutChanVV_DB(Data,Line,YCh,YVV1);
+      PutChanVV_DB(Data,Line,GridCh,ZVV1);
+   }
+
+   
+   // --- Unlock channels ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,GridCh);
+   
+
+
+   // --- Display channels in output database ---   
+
+   UnLock_EDB(EData);
+
+   if (iInteractive_SYS())
+   {
+      if (!iLoaded_EDB(sXCh)) LoadChan_EDB(EData,sXCh);
+      if (!iLoaded_EDB(sYCh)) LoadChan_EDB(EData,sYCh);
+      if (!iLoaded_EDB(sGridValue)) LoadChan_EDB(EData,sGridValue);
+      GotoLine_EDB(EData,Line);
+   }   
+
+   // --- Delete temp file ---
+   
+//   if (iPass > 0) iDeleteFile_SYS(sGridOut);
+   
+}

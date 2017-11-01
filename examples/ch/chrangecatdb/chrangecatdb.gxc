@@ -1,0 +1,305 @@
+//===========================================================================
+NAME          = "Create a duplicate database and convert assay values to integers depending on the range of values"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+
+      Create a duplicate database and convert assay values to integers 
+      depending on the range of values. The user inputs a list of threshhold
+      values (percentages). The values for a given channel are ordered, and
+      the individual channel values are replaced by an index indicating the
+      particular percent zone. Zero corresponds to a value less than the minimum
+      input percent, and one the first zone, etc.
+
+Parameters:
+
+CHRANGECATDB.SUFFIX  : Suffix added to the original database name for the
+                       new database name.
+CHRANGECATDB.RANGES  : Comma-separated list of threshholds. Up to 8, and 
+                       must be values 0 > val > 100.
+"
+// Revision History:
+// v6.3.0: Clear and reset channel protection.
+// v6.2.0: Set output for values less than detection limit to 0.
+// v6.1.0: New GX.
+//===========================================================================
+
+RESOURCE = "CHRANGECATDB.gr"
+#include "CHRANGECATDB.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    Ch, Line;
+DGW   Diag;
+LST   ChLST, LineLST;
+VV    VVi, VVo, VVr;
+ST    hST;
+
+string(STR_DEFAULT_LONG) sBuff, sMsg;
+string(STR_DEFAULT) sComp, sRanges, sSuffix;
+string(STR_DEFAULT_SHORT) sVal;
+string(STR_DB_SYMBOL) sCh;
+string(STR_FILE) sCurDB, sNewDB, sDir;
+
+int i, iCh, iLine, iR, iNChans, iNLines, iNR, iNProg, iProg;
+int iRet, iInteractive, iProtect;
+
+real(8) rPct;
+real rVal, rDetLimit;
+
+//===========================================================================
+//                           CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   GetName_EDB(EData, sCurDB);
+   Data = Lock_EDB(EData);
+   
+   //--- See if any assay channels are in the database ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   ClassChanLST_DB(Data, ChLST, "ASSAY");
+   SelectedLineLST_DB(Data, LineLST);
+   UnLock_EDB(EData);
+   
+   iNChans = iSize_LST(ChLST);   
+   if(iNChans==0) 
+      Abort_SYS(_("No ASSAY class channels were found in the current database."));
+      
+   iNLines = iSize_LST(LineLST);
+   if(iNLines==0)
+      Abort_SYS(_("There are no lines selected in the current database."));
+      
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if (iInteractive) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHRANGECATDB");
+
+      SetInfoSYS_DGW(Diag,_CHRANGECATDB_0, DGW_TEXT, "CHRANGECATDB", "SUFFIX");
+      SetInfoSYS_DGW(Diag,_CHRANGECATDB_1, DGW_TEXT, "CHRANGECATDB", "RANGES");
+
+      iRet = iRunDialogue_DGW(Diag);
+      if(iRet==-1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_CHRANGECATDB_0, DGW_TEXT, "CHRANGECATDB", "SUFFIX");
+      GetInfoSYS_DGW(Diag,_CHRANGECATDB_1, DGW_TEXT, "CHRANGECATDB", "RANGES");
+
+      Destroy_DGW(Diag);
+   }
+   
+   // --- Get and Validate parameters ---
+
+   GetString_SYS("CHRANGECATDB","SUFFIX",sSuffix);
+   if(!iStrlen_STR(sSuffix))
+      Strcpy_STR(sSuffix,"_Cat");  
+            
+   GetString_SYS("CHRANGECATDB","RANGES",sRanges);
+   if(!iStrlen_STR(sRanges))
+      Strcpy_STR(sRanges,"50,75,87,93,98");  
+
+   GetString_SYS("CHRANGECATDB","DB_DIR",sDir);
+   
+   Strcpy_STR(sBuff, _("The range minima must be entered as a list of 1-7 comma-delimited increasing percent values in the range 0 < value < 100, e.g. \"50,75,87,93,98\""));
+   iNR = iTokens_STR(sRanges, ",");
+   if(iNR<1||iNR>7) {
+      Strcpy_STR(sMsg, _("Invalid number of values detected in the list of range minima.\r\n"));
+      Strcat_STR(sMsg, sBuff);
+      Abort_SYS(sMsg);
+   }
+   
+   rVal = 0.0;    // suppress uninit value error message
+   for(i=0;i<iNR;i++) {
+   
+      GetToken_STR(sVal, sRanges, i);
+      rPct[i] = rScanR_STR(sVal);
+      
+      
+      // --- Validate token ---
+      
+      if(rPct[i]==rDUMMY) {
+         Strcpy_STR(sMsg, _("An invalid number was encountered in the list of range minima.\r\n"));
+         Strcat_STR(sMsg, sBuff);
+         Abort_SYS(sMsg);         
+      }
+
+      if(rPct[i]<=0.0 || rPct[i]>=100.0) {      
+         Strcpy_STR(sMsg, _("An out-of-range value was encountered in the list of range minima.\r\n"));
+         Strcat_STR(sMsg, sBuff);
+         Abort_SYS(sMsg);         
+      }
+      
+      if(i>0) {
+         if(rPct[i]<=rVal) {
+            Strcpy_STR(sMsg, _("Values in the list must be monotonically increasing.\r\n"));
+            Strcat_STR(sMsg, sBuff);
+            Abort_SYS(sMsg);                  
+         }
+      }
+      rVal = rPct[i];
+   }
+   
+
+   // --- Create the new database name from the current database ---
+   
+   FileNamePart_STR(sCurDB, sNewDB, STR_FILE_PART_NAME);
+   Strcat_STR(sNewDB, sSuffix);
+
+	FileCombineParts_STR("", sDir, sNewDB, "gdb", "", sNewDB);
+
+   
+   // --- Call the SAVEGDB.GX to create the new database ---
+   
+   SetString_SYS("SAVEGDB","NAME",sNewDB);   
+   if (iGlobal_SYS("MONTAJ.DB_COMPRESS",sComp) != 0)
+      SetString_SYS("SAVEGDB","COMPRESSION",sComp);   
+   else
+      SetInt_SYS("SAVEGDB","COMPRESSION",DB_COMP_SIZE);   
+   SetInt_SYS("SAVEGDB","UNLOAD",0);
+      
+   SetInteractive_SYS(0);
+   if(iRunGX_SYS("savegdb.gx")!=0) Cancel_SYS();
+   SetInteractive_SYS(iInteractive);
+   
+   
+   
+   // --- The new database should now be current ---
+
+   EData = Load_EDB(sNewDB);   
+   Data = Lock_EDB(EData);   
+
+   Clear_LST(ChLST);
+   Clear_LST(LineLST);
+   ClassChanLST_DB(Data, ChLST, "ASSAY");
+   SelectedLineLST_DB(Data, LineLST);
+      
+   iNChans = iSize_LST(ChLST);   
+   if(iNChans==0) 
+      Abort_SYS(_("No ASSAY class channels were found in the new database."));
+   
+   iNLines = iSize_LST(LineLST);
+   if(iNLines==0)
+      Abort_SYS(_("There are no lines selected in the current database."));
+      
+
+   hST = CreateExact_ST();
+   
+   VVi = Create_VV(REAL, 0);
+   VVo = Create_VV(REAL, 0);
+   VVr = Create_VV(REAL, 0);      
+   
+   iNProg = iNLines*iNChans;
+   iProg = 0;
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Categorizing assay values"),1);
+   for(iCh=0;iCh<iNChans;iCh++) {
+
+
+      Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, iCh);     
+      GetItem_LST(ChLST, 0, iCh, sCh);
+      
+      Strcpy_STR(sMsg, _("Categorizing assay values: "));
+      Strcat_STR(sMsg, sCh);
+      ProgName_SYS(sMsg, 0);
+      
+      LockSymb_DB(Data, Ch, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+
+      // --- Get the detection limit ---
+            
+      rDetLimit = rGetRegSymbSetting_DB(Data, Ch, "DETECTLIMIT");
+          
+      
+      // --- Init stats ---
+      
+      Reset_ST(hST);
+      
+      
+      // --- Get the stats for this channel ---
+      
+      for(iLine=0;iLine<iNLines;iLine++) 
+      {
+         Line = (DB_SYMB)iGetInt_LST(LineLST, 1, iLine);
+         Stat_DU(Data, Line, Ch, hST);
+      }
+      
+      
+      // --- Get the threshhold values for this channel ---
+      
+      for(iR=0;iR<iNR;iR++) {
+         rVal = rEquivalentValue_ST(hST, rPct[iR]);
+         SetReal_VV(VVr, iR, rVal);
+      }
+      
+      
+      // --- Cycle through the data and replace the values with the indices ---
+      
+      for(iLine=0;iLine<iNLines;iLine++) 
+      {
+      
+         // --- Advance progress bar --
+         
+         ProgUpdateL_SYS(iProg, iNProg);
+         iProg++;
+         if(iCheckStop_SYS()) Cancel_SYS();   
+
+         Line = (DB_SYMB)iGetInt_LST(LineLST, 1, iLine);
+
+
+         // --- Do the work ---
+         
+         GetChanVV_DB(Data, Line, Ch, VVi);
+         CategorizeByValueDetLimit_CHIMERA(VVr, VVi, rDetLimit, VVo);   
+         
+         
+         // --- Write the values, clear and reset channel protection. ---
+         
+         iProtect = iGetChanProtect_DB(Data, Ch);
+         SetChanProtect_DB(Data, Ch, DB_CHAN_UNPROTECTED);
+         
+         PutChanVV_DB(Data, Line, Ch, VVo);         
+         
+         SetChanProtect_DB(Data, Ch, iProtect);
+      }      
+      UnLockSymb_DB(Data,Ch);
+   }            
+
+
+   // --- Turn off progress ---
+   
+   Progress_SYS(0);
+
+
+   // --- Destroy objects ---
+
+   Destroy_LST(ChLST);
+   Destroy_LST(LineLST);
+   Destroy_VV(VVr);
+   Destroy_VV(VVi);
+   Destroy_VV(VVo);
+   
+   
+   // --- Release the locks ---
+
+   UnLock_EDB(EData);
+
+}

@@ -1,0 +1,169 @@
+//===========================================================================
+NAME          = "Composite analysis of a Strip Log Map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot"
+
+DESCRIPTION   = "
+   Interactively select intervals on a strip log map, and annotate the
+   map with the composite value.
+"
+// Revision History:
+// v6.4.2  Round to 0.01 even if discretization interval is not defined.
+// v6.4.1  Round input depth range to discretization interval (this used to be
+//         done inside the MFC dialog, so this change means rounding is only
+//         done to values defined directly from the map).
+// v6.1.0: Added Redraw_EMAP because maximized windows dissappeared after the
+//         MakeCurrent_EMAP command.
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+// dialogs
+//===========================================================================
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+#define ARAD  57.29577951
+
+EDB      EData;
+EMAP     EMap;
+MAP      Map;
+DH       Drill;
+REG      Reg;
+
+int         iMode, iPlotType;
+real        rX1, rX2, rY1, rY2, rInt;
+string(STR_FILE) sDB, sMap;
+string(STR_DEFAULT_SHORT) sTemp;
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("The compositing tool cannot be run in script mode."));
+
+
+   // --- get database and current map ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+   EMap = Current_EMAP();
+   GetName_EMAP(EMap, sMap);
+   
+   // Turn on progress 
+
+   Progress_SYS(1);
+
+   // --- get DH handle for current database ---
+   
+   Drill = Create_DH(sDB);
+   
+
+   // --- Make the map current again (opening the DH object can hide it). ---
+
+   MakeCurrent_EMAP(EMap); 
+   Redraw_EMAP(EMap);  
+
+
+   // -- Get the map REG ---
+
+   Map = Lock_EMAP(EMap);
+   Reg = GetREG_MAP(Map);
+
+
+   // --- Get the plot type ---
+
+   GetInt_REG(Reg, "DH.PLOT_TYPE", iPlotType);
+   if(iPlotType != DH_PLOT_STRIPLOG)
+      Abort_SYS(_("The current map is not recognized as a drill-hole strip log plot."));
+
+
+   // Turn off progress 
+
+   Progress_SYS(0);
+   
+
+   // --- Are we running interactively ? ---
+
+   iMode = 0;
+   rX1 = rDUMMY;
+   rY1 = rDUMMY;
+   rY2 = rDUMMY;
+
+   do {
+
+      iMode = iCompositingToolGUI_DH(Drill, Map, rX1, rY1, rY2);
+
+      if(iMode==DH_COMP_CANCEL)
+         break;
+
+
+      // --- Set to return to the same page in the dialogue ---
+
+      if(iMode==DH_COMP_SELECT) {
+
+         UnLock_EMAP(EMap);
+
+         iSetCurrentView_EMAP(EMap, "*data");
+
+
+         // --- Define the plan ---
+
+         iGetBox_EMAP(EMap,_("Select depth interval for composite..."), rX1, rY1, rX2, rY2);
+
+
+         // --- Round the values to the compositing interval, if it is defined ---
+         
+         if (iGlobal_SYS("WHOLEPLOT.DISC_INTERVAL",sTemp) == 0) 
+         {
+            rInt = rScanR_STR(sTemp);
+            if(rInt==rDUMMY || rInt<=0.0) rInt = 0.01;
+         }
+         else
+            rInt = 0.01;
+         
+         rY1 =  rInt*rFloor_MATH(rY1/rInt + 0.5);
+         rY2 =  rInt*rFloor_MATH(rY2/rInt + 0.5);
+         
+
+         
+         // --- Save the values to the INI ---         
+         
+         SetReal_SYS("DHCOMPOSITE", "FROM", rY1);
+         SetReal_SYS("DHCOMPOSITE", "TO", rY2);
+
+         Map = Lock_EMAP(EMap);
+         
+      } 
+      else if(iMode==DH_COMP_REFRESH) {
+
+         UnLock_EMAP(EMap);
+         Redraw_EMAP(EMap);
+         Map = Lock_EMAP(EMap);
+      }
+
+   } while(iMode != DH_COMP_DONE);     // - Modify data dialog
+
+   
+   // --- Clean up ---
+
+   Destroy_DH(Drill);
+
+
+   // --- Bring the current map to the front ---
+
+   EMap = Load_EMAP(sMap);
+   MakeCurrent_EMAP(EMap);
+   
+}

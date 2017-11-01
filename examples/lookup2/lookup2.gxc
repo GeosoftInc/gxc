@@ -1,0 +1,320 @@
+//===========================================================================
+NAME          = "Double index lookup from a table"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Lookup values from a Geosoft ASCII table based on two reference channels.
+
+PARAMETERS:
+
+   LOOKUP2.TABLE     -  The lookup table name.
+          .CHAN1     -  Database primary index channel.
+          .INDEX1    -  Table primary index field.
+          .CHAN2     -  Database secondary index channel.
+          .INDEX2    -  Table secondary index field.
+          .OCHAN     -  Output channel.
+          .OFIELD    -  Table output field.
+          .MODE      -  \"Linear\" or \"Binary\" search mode.
+          .INTERP    -  \"interpolate\" interpolates between table values.
+                        \"nearest\" finds nearest table value.
+                        \"exact\" find exact match only.
+                        \"nearest close\" find nearest match, but
+                          data must be in sample interval.
+                        \"interpolate close\" interpolates between table
+                          values, but data must be in sample interval.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Database Utilities"
+
+// Revision History
+// v5.1.5 Use hFindChan_DB instead of hFindSymb_DB(,,DB_SYMB_CHAN)
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "lookup2.gr"
+#include "lookup2.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sIn1Ch,sIn2Ch,sOutCh;  // Channel names
+string(STR_DB_SYMBOL) sIn1Fd,sIn2Fd,sOutFd;  // Channel names
+string(STR_FILE) sTable;                // Table name
+string(STR_DEFAULT) sInterp;               // Interpolation method
+string(STR_DEFAULT) sMode;                 // Search mode
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT) sSpacing;              // Nominal Spacing
+
+EDB         EData;
+DB          Data;                  // Database
+DGW         Diag;                  // Dialogue handle
+DB_SYMB     In1Ch,In2Ch,OutCh;     // Channel Handles
+DB_SYMB     Line;                  // Line Handle
+TB          Tb;                    // Table Handle
+LST         List;                  // List handle
+
+int         iInterp;               // interpolation method
+int         i;                     // utility
+int         iLines;                // Number of Lines Processed
+int         iTotLines;             // Total Number of Lines to Process
+real        rSpacing;
+int         iCol, iType;
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("LOOKUP2");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_LOOKUP2_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_LOOKUP2_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_LOOKUP2_5);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_LOOKUP2_0,DGW_FILEPATH,"LOOKUP2","TABLE");
+      SetInfoSYS_DGW(Diag,_LOOKUP2_1,DGW_TEXT,"LOOKUP2","CHAN1");    
+      SetInfoSYS_DGW(Diag,_LOOKUP2_2,DGW_TEXT,"LOOKUP2","INDEX1");   
+      SetInfoSYS_DGW(Diag,_LOOKUP2_3,DGW_TEXT,"LOOKUP2","CHAN2");    
+      SetInfoSYS_DGW(Diag,_LOOKUP2_4,DGW_TEXT,"LOOKUP2","INDEX2");   
+      SetInfoSYS_DGW(Diag,_LOOKUP2_5,DGW_TEXT,"LOOKUP2","OCHAN");    
+      SetInfoSYS_DGW(Diag,_LOOKUP2_6,DGW_TEXT,"LOOKUP2","OFIELD");   
+      SetInfoSYS_DGW(Diag,_LOOKUP2_7,DGW_LISTALIAS,"LOOKUP2","INTERP");   
+      SetInfoSYS_DGW(Diag,_LOOKUP2_8,DGW_LISTALIAS,"LOOKUP2","MODE");    
+      SetInfoSYS_DGW(Diag,_LOOKUP2_9,DGW_TEXT,"LOOKUP2","SPACING");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_LOOKUP2_0,DGW_FILEPATH,"LOOKUP2","TABLE");     
+      GetInfoSYS_DGW(Diag,_LOOKUP2_1,DGW_TEXT,"LOOKUP2","CHAN1");     
+      GetInfoSYS_DGW(Diag,_LOOKUP2_2,DGW_TEXT,"LOOKUP2","INDEX1");     
+      GetInfoSYS_DGW(Diag,_LOOKUP2_3,DGW_TEXT,"LOOKUP2","CHAN2");     
+      GetInfoSYS_DGW(Diag,_LOOKUP2_4,DGW_TEXT,"LOOKUP2","INDEX2");     
+      GetInfoSYS_DGW(Diag,_LOOKUP2_5,DGW_TEXT,"LOOKUP2","OCHAN");     
+      GetInfoSYS_DGW(Diag,_LOOKUP2_6,DGW_TEXT,"LOOKUP2","OFIELD");     
+      GetInfoSYS_DGW(Diag,_LOOKUP2_7,DGW_LISTALIAS,"LOOKUP2","INTERP");    
+      GetInfoSYS_DGW(Diag,_LOOKUP2_8,DGW_LISTALIAS,"LOOKUP2","MODE");    
+      GetInfoSYS_DGW(Diag,_LOOKUP2_9,DGW_TEXT,"LOOKUP2","SPACING");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("2 Index Lookup"),1);
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("LOOKUP2","TABLE",sTable);
+   GetString_SYS("LOOKUP2","CHAN1",sIn1Ch);
+   GetString_SYS("LOOKUP2","INDEX1",sIn1Fd);
+   GetString_SYS("LOOKUP2","CHAN2",sIn2Ch);
+   GetString_SYS("LOOKUP2","INDEX2",sIn2Fd);
+   GetString_SYS("LOOKUP2","OCHAN",sOutCh);
+   GetString_SYS("LOOKUP2","OFIELD",sOutFd);
+   GetString_SYS("LOOKUP2","SPACING",sSpacing);
+   
+
+   // --- defaults ---
+
+   if (iStrlen_STR(sIn1Fd) == 0) Strcpy_STR(sIn1Fd,sIn1Ch);
+   if (iStrlen_STR(sIn2Fd) == 0) Strcpy_STR(sIn2Fd,sIn2Ch);
+   if (iStrlen_STR(sOutFd) == 0) Strcpy_STR(sOutFd,sOutCh);
+
+   if (iStrlen_STR(sSpacing) == 0)
+      rSpacing = 0.0;
+   else 
+      rSpacing = rScanR_STR(sSpacing);
+
+
+   // --- secondary interpolation ---
+
+   GetString_SYS("LOOKUP2","INTERP",sInterp);
+   if (iStrcmp_STR(sInterp,_n("interpolate"),0) == 0)
+      iInterp = DU_LOOKUP_INTERPOLATE;
+   else if (iStrcmp_STR(sInterp,_n("nearest"),0) == 0)
+      iInterp = DU_LOOKUP_NEAREST;
+   else if (iStrcmp_STR(sInterp,_n("exact"),0) == 0)
+      iInterp = DU_LOOKUP_EXACT;
+   else if (iStrcmp_STR(sInterp,_n("nearest close"),0) == 0)
+      iInterp = DU_LOOKUP_NEARESTCLOSE;
+   else if (iStrcmp_STR(sInterp,_n("interpolate close"),0) == 0)
+      iInterp = DU_LOOKUP_INTERPCLOSE;
+   else 
+      Abort_SYS(_("Invalid levelling mode."));
+
+
+   // --- Check the input and output channel names ---
+
+   if (iStrlen_STR(sIn1Ch)==0)    
+      Abort_SYS(_("Primary reference channel must be specified"));
+
+   if (iStrlen_STR(sIn2Ch)==0) 
+      Abort_SYS(_("Secondary reference channel must be specified"));
+
+   if (iStrlen_STR(sOutCh)==0)
+      Abort_SYS(_("Output channel must be specified"));
+
+
+   // --- Do the reference channels exist ? ---
+
+   In1Ch = FindChan_DB(Data,sIn1Ch);
+   if (In1Ch==NULLSYMB)
+      Abort_SYS(_("Primary index channel does not exist."));
+   In2Ch = FindChan_DB(Data,sIn2Ch);
+   if (In2Ch==NULLSYMB)
+      Abort_SYS(_("Secondary index channel does not exist."));
+
+   // --- Load the Table into Memory ---
+
+   Printf_STR(sLabel, sizeof(sLabel), _("Loading \"%s\""), sTable);
+   ProgName_SYS(sLabel,1);
+   Tb = Create_TB(sTable);
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   OutCh = FindChan_DB(Data,sOutCh);
+   if (OutCh==NULLSYMB) {
+      iCol = iFindColByName_TB( Tb, sOutFd);
+      if(iCol==-1)
+         Abort_SYS(_("Output field not found in table."));
+
+      iType = iDataType_TB(Tb, iCol);
+      OutCh = CreateSymb_DB(Data, sOutCh, DB_SYMB_CHAN, DB_OWN_USER, iType);
+
+      // --- Set the display format ---
+
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      SetChanFormat_DB(Data, OutCh, iFormat_TB(Tb, iCol));
+      UnLockSymb_DB(Data,OutCh);
+   }
+     
+
+   // --- search mode ---
+
+   GetString_SYS("LOOKUP2","MODE",sMode);
+   if (iStrcmp_STR(sMode,_n("binary"),0) == 0)
+      SetSearchMode_TB(Tb,TB_SEARCH_BINARY);
+   else 
+      SetSearchMode_TB(Tb,TB_SEARCH_LINEAR);
+
+
+   // --- must be different channels ---
+
+   if ( (In1Ch == OutCh) || (In2Ch == OutCh) )
+      Abort_SYS(_("Reference and output channels must be different."));
+
+   if  (In1Ch == In2Ch) 
+      Abort_SYS(_("Primary and Secondary Reference channels must be different."));
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,In1Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,In2Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- lookup ---
+
+      TableLook2_DU(Data,Line,In1Ch,In2Ch,OutCh,sIn1Fd,sIn2Fd,sOutFd,iInterp,rSpacing,Tb);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Look up 2"),"LOOKUP2;");
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,In1Ch);
+   UnLockSymb_DB(Data,In2Ch);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- done ---
+
+
+   Destroy_TB(Tb);
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

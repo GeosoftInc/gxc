@@ -1,0 +1,128 @@
+//===========================================================================
+NAME          = "Create a new location database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Locations"
+
+DESCRIPTION   = "
+
+   Create and open a new location database.
+
+"
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         EData;                 // Database
+DB          Data;                  // Database
+REG         hWorkREG;
+REG         hDataREG;
+DB_SYMB     Ch;
+
+string(STR_FILE) sDB;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- get workspace REG and parameters ---
+   
+   hWorkREG = Create_REG(156);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sDB,sizeof(sDB));
+   if (iStrlen_STR(sDB) == 0)
+      Abort_SYS(_("Location database name not specified."));
+
+
+   // --- create/load a new database ---
+   
+   iDeleteFile_SYS(sDB);
+   Create_DB(sDB,10,50,10+50+20,10,100,"SUPER","");
+   EData = Load_EDB(sDB);
+   Data = Lock_EDB(EData);
+
+
+   // --- set the database type to base ---
+      
+   hDataREG = Create_REG(256);
+   GetRegSymb_DB(Data,NULLSYMB,hDataREG);
+   Set_REG(hDataREG,"GRAVRED.TYPE","Location");
+   SetRegSymb_DB(Data,NULLSYMB,hDataREG);
+   Destroy_SYS(hDataREG);
+   
+
+   // --- Get current X, Y channels ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+   
+   // --- create required channels ---
+
+   Ch = CreateSymb_DB(Data,"Station",DB_SYMB_CHAN,DB_OWN_SHARED,-24);
+   LOCK_RW(Data,Ch);
+   SetChanWidth_DB(Data,Ch,10);
+   UNLOCK(Data,Ch);
+
+   Ch = CreateSymb_DB(Data,"Longitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(Data,Ch);
+   SetChanWidth_DB(Data,Ch,13);
+   SetChanDecimal_DB(Data,Ch,2);
+   SetChanFormat_DB(Data,Ch,DB_CHAN_FORMAT_GEOGR);
+   SetChanUnit_DB(Data,Ch,_("dega"));
+   UNLOCK(Data,Ch);
+
+   Ch = CreateSymb_DB(Data,"Latitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(Data,Ch);
+   SetChanWidth_DB(Data,Ch,13);
+   SetChanDecimal_DB(Data,Ch,2);
+   SetChanFormat_DB(Data,Ch,DB_CHAN_FORMAT_GEOGR);
+   SetChanUnit_DB(Data,Ch,_("dega"));
+   UNLOCK(Data,Ch);
+
+   Ch = CreateSymb_DB(Data,sXCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(Data,Ch);
+   SetChanWidth_DB(Data,Ch,10);
+   SetChanDecimal_DB(Data,Ch,2);
+   SetChanUnit_DB(Data,Ch,_("m"));
+   UNLOCK(Data,Ch);
+
+   Ch = CreateSymb_DB(Data,sYCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(Data,Ch);
+   SetChanWidth_DB(Data,Ch,10);
+   SetChanDecimal_DB(Data,Ch,2);
+   SetChanUnit_DB(Data,Ch,_("m"));
+   UNLOCK(Data,Ch);
+
+   Ch = CreateSymb_DB(Data,"Elevation",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(Data,Ch);
+   SetChanWidth_DB(Data,Ch,10);
+   SetChanDecimal_DB(Data,Ch,2);
+   SetChanUnit_DB(Data,Ch,_("m"));
+   UNLOCK(Data,Ch);
+  
+   AssociateAll_DB(Data,CreateSymb_DB(Data,"Location",DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_GROUP));      
+   
+   UnLock_EDB(EData);
+   DelLine0_EDB(EData);
+   LoadChan_EDB(EData,"Station");
+   LoadChan_EDB(EData,"Longitude");
+   LoadChan_EDB(EData,"Latitude");
+   LoadChan_EDB(EData, sXCh);
+   LoadChan_EDB(EData, sYCh);
+   LoadChan_EDB(EData,"Elevation");
+
+}

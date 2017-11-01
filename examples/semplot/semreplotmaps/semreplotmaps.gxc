@@ -1,0 +1,211 @@
+//===========================================================================
+NAME          = "Replot all maps based on current data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+   Replot all maps based on current data.
+"
+// Revision History
+// v6.3.0: Added support for multiple mineral channels.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.7: Upgrade modifications.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+EMAP        EMap;
+MAP         Map;
+LST         MapLst, ViewLst, GroupLst;
+REG         Reg;
+MVIEW       View;
+
+int i, iN, iM, iMaps, iProcessed, iXY, iReset, iPlots;
+string(STR_FILE) sMap, sDB;
+string(STR_VIEW_GROUP) sViewGroup, sGroup;
+string(STR_VIEW) sView;
+string(STR_DB_SYMBOL) sMaskCh, sMineralCh;
+string(100) sMsg, sBuff;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+
+
+   // --- Get list of loaded maps ---
+
+   MapLst = Create_LST(127);     // for maps
+   ViewLst = Create_LST(64);     // for views
+   
+   iMaps = iGetMapsLST_EMAP(MapLst, EMAP_PATH_FULL);
+
+
+   // --- Does the current database have an X and Y channel for marker plots? ---
+
+   iXY = FALSE;
+   Data = Lock_EDB(EData);
+   if(iExistSymb_DB(Data,"X",DB_SYMB_CHAN ) 
+      && iExistSymb_DB(Data,"Y",DB_SYMB_CHAN )) iXY = TRUE;
+
+
+   // --- Get the current mask channel ---
+
+   GetString_SYS("SEMPLOT","MASK",sMaskCh);
+
+
+   // --- Get mineral channel (not always required, e.g. not for raw data plots) ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+   UnLock_EDB(EData);
+
+   
+   // --- Plot ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Replotting"),1);
+
+   for( iM = 0 ; iM < iMaps ; iM++ ) {
+
+      GetItem_LST(MapLst, 0, iM, sMap);
+
+      Strcpy_STR(sMsg, _("Replotting "));
+      FileNamePart_STR(sMap,sBuff,STR_FILE_PART_NAME_EXTENSION);
+      Strcat_STR(sMsg, sBuff);
+
+      ProgName_SYS(sMsg, 0);
+      ProgUpdateL_SYS(iM, iMaps);
+      if(iCheckStop_SYS()) Cancel_SYS();
+
+      EMap = Load_EMAP(sMap);
+      Map = Lock_EMAP(EMap);
+      Reg = GetREG_MAP(Map);
+
+      Get_REG(Reg, "SEMPLOT_MAP_SOURCE", sDB, sizeof(sDB));     // the actual DB doesn't matter
+      //if(!iStrlen_STR(sDB)) {
+      //   UnLock_EMAP(EMap);
+      //   continue;
+      //}
+
+      // --- Replot all the relevant views ---
+
+//DisplayMessage_SYS( _("sMap"), sMap );
+
+      Clear_LST(ViewLst);
+      ViewList_MAP(Map, ViewLst);
+
+      iProcessed = FALSE;
+      iN = iSize_LST(ViewLst);
+
+
+      iReset = 0;
+      iPlots = 0;
+      for(i=0;i<iN;i++) {
+
+         GetItem_LST(ViewLst,0,i,sView);
+         if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0 ||
+            iStrncmp_STR(sView, "Triplot_", 7, STR_CASE_TOLERANT)==0) {
+
+
+            Data = Lock_EDB( EData );
+
+
+            // --- Reset groups, used channel before first plot in each map ---
+
+            if(!iReset) {
+
+               ResetUsedChannel_SEMPLOT(Data);
+               InitGroupSymbolsUsed_SEMPLOT(Data);
+               iReset = 1;
+            }
+
+
+            // --- Set to this view ---
+                  
+            UnLock_EMAP(EMap);
+            iSetCurrentView_EMAP(EMap, sView);
+            Map = Lock_EMAP(EMap);
+
+            
+            // --- Replot the map ---
+
+            Replot_SEMPLOT(Data, sMaskCh, sMineralCh, Map, sView);
+            UnLock_EDB(EData);
+
+            iProcessed = TRUE;
+            iPlots++;
+         }
+         else
+            continue;
+      }
+
+
+      // --- Replot multiple-plot legend? ---
+
+      if(iPlots > 1) {
+   
+         if(iExistView_MAP(Map, "*Base")) {
+             
+            View = Create_MVIEW(Map, "*Base", MVIEW_WRITEOLD);
+
+            Data = Lock_EDB(EData);
+            RePlotSymbolLegend_SEMPLOT(Data, View);
+            UnLock_EDB(EData);
+
+            Destroy_MVIEW(View);
+         }
+      }
+
+      if( iXY && !iProcessed ) {
+
+         // *** it was not triplot/xyplot => Group name SYMBOLS_XXXXXXXX ***
+         // *** make location plot ***
+
+         GroupLst = Create_LST(4096);     // for Group
+         
+         GroupList_MAP( Map, GroupLst );   
+
+         iN = iSize_LST( GroupLst );
+
+         for( i = 0 ; i < iN ; i++ ) {
+            GetItem_LST( GroupLst, 0, i, sViewGroup );
+            SplitString_STR( sViewGroup, "\\", sGroup );
+            if( 0 == iStrncmp_STR( sGroup, "SYMBOLS_", 8, STR_CASE_TOLERANT ) ) {
+            
+               UnLock_EMAP(EMap);
+               iRunGX_SYS( "semmarkers" );
+               Map = Lock_EMAP(EMap);            }
+         }
+         
+         Destroy_LST( GroupLst );
+      }
+      
+      UnLock_EMAP(EMap);
+      Redraw_EMAP(EMap);
+   }
+ 
+   Progress_SYS(0);
+
+   // --- clear handles ---
+
+   Destroy_LST(MapLst);
+   Destroy_LST(ViewLst);
+
+
+}

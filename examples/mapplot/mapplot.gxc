@@ -1,0 +1,298 @@
+//===========================================================================
+NAME          = "MAPPLOT from a control file."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+Run MAPPLOT from a control file and load the resulting plot into the
+current map.
+
+   MAPPLOT.CON    - control file name.
+          .MS1    - user match strings.
+          .MS2
+          .
+       to .MS10
+       
+    MAPPLOT.NEW   - 0: To current map
+                    1: To new map       
+"
+// Revision History:
+// v6.0.0: Improved usage with "NEW" parameter.
+//===========================================================================
+
+RESOURCE = "mapplot.gr"
+#include "mapplot.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+
+#define ADDMS(A)\
+   if (iExistString_SYS("MAPPLOT",A)) {\
+      GetString_SYS("MAPPLOT",A,sLine);\
+      iNumberOfTokens = iTokens_STR(sLine,"=");\
+      if(iNumberOfTokens!=2) { \
+		Printf_STR(sMsg, sizeof(sMsg), _("Match string %s in incorrect format, the correct format is \".a.=15\""), A); \
+		Abort_SYS(sMsg);  \
+	  } \
+      GetToken_STR (sVar,sLine,0);\
+      GetToken_STR (sRepl,sLine,1);\
+      Set_REG(Reg,sVar,sRepl);\
+   }
+
+
+//===========================================================================
+
+string(STR_FILE) sCon,sMap,sMDF;
+string(STR_DEFAULT_LONG) sLine,sVar,sRepl,sRef,sMsg;
+
+EMAP  EMap;
+MAP   Map;
+MAPL  Mapplot;
+DGW   Diag;
+RA    hRA;
+REG   Reg;
+int   i,iLen,iOK,iMapOK,iNewMap,iNumberOfTokens;
+
+
+
+
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   iOK = FALSE;
+   if (iInteractive_SYS()) while (!iOK) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("mapplot");
+
+      
+      // --- set current map status ---
+      
+      if (iHaveCurrent_EMAP())
+         SetInfo_DGW(Diag,_MAPPLOT_1,DGW_LISTALIAS,"0");     
+      else   
+         SetInfo_DGW(Diag,_MAPPLOT_1,DGW_LISTALIAS,"1");     
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_MAPPLOT_0,DGW_FILEPATH,"MAPPLOT","CON");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_2,DGW_TEXT,"MAPPLOT","MS1");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_3,DGW_TEXT,"MAPPLOT","MS2");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_4,DGW_TEXT,"MAPPLOT","MS3");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_5,DGW_TEXT,"MAPPLOT","MS4");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_6,DGW_TEXT,"MAPPLOT","MS5");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_7,DGW_TEXT,"MAPPLOT","MS6");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_8,DGW_TEXT,"MAPPLOT","MS7");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_9,DGW_TEXT,"MAPPLOT","MS8");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_10,DGW_TEXT,"MAPPLOT","MS9");
+      SetInfoSYS_DGW(Diag,_MAPPLOT_11,DGW_TEXT,"MAPPLOT","MS10");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_MAPPLOT_0,DGW_FILEPATH,"MAPPLOT","CON");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_1,DGW_LISTALIAS,"MAPPLOT","NEW");     
+      GetInfoSYS_DGW(Diag,_MAPPLOT_2,DGW_TEXT,"MAPPLOT","MS1");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_3,DGW_TEXT,"MAPPLOT","MS2");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_4,DGW_TEXT,"MAPPLOT","MS3");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_5,DGW_TEXT,"MAPPLOT","MS4");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_6,DGW_TEXT,"MAPPLOT","MS5");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_7,DGW_TEXT,"MAPPLOT","MS6");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_8,DGW_TEXT,"MAPPLOT","MS7");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_9,DGW_TEXT,"MAPPLOT","MS8");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_10,DGW_TEXT,"MAPPLOT","MS9");
+      GetInfoSYS_DGW(Diag,_MAPPLOT_11,DGW_TEXT,"MAPPLOT","MS10");
+      
+      Destroy_DGW(Diag);
+      
+      iNewMap = iGetInt_SYS("MAPPLOT","NEW");
+      if (iNewMap == 1) {
+      
+         Diag = Create_DGW("NEWMAP");
+         
+         iMapOK = FALSE;
+         while (!iMapOK) {
+            
+            if (!iExistString_SYS("MAPPLOT","MAP")) {
+               GetString_SYS("MAPPLOT","CON",sCon);
+               FileNamePart_STR(sCon,sRef,STR_FILE_PART_NAME);
+               FileExt_STR(sRef,"map",sMap,FILE_EXT_FORCE);
+            }
+                  
+            SetInfoSYS_DGW(Diag,_NEWMAP_0,DGW_FILEPATH,"MAPPLOT","MAP");
+            i = iRunDialogue_DGW(Diag);
+            if (i < 0) Cancel_SYS();
+            else if (i > 0) {
+            
+               GetInfoSYS_DGW(Diag,_NEWMAP_0,DGW_FILEPATH,"MAPPLOT","MAP");
+               iOK = TRUE;
+               
+               // --- if map exists ---
+               
+               GetString_SYS("MAPPLOT","MAP",sMap);
+               if (iFileExist_SYS(sMap)) {
+                  iMapOK = iDisplayQuestion_SYS(sMap,_("File exists. Overwrite?"));
+                  if (iMapOK) UnLoad_EMAP(sMap);
+               } else
+                  iMapOK = TRUE;
+                              
+            } else
+               iMapOK = TRUE;
+         }         
+         Destroy_DGW(Diag);
+         
+      } else {
+         SetString_SYS("MAPPLOT","MAP","");
+         iOK = TRUE;
+      }
+      
+   }
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("MAPPLOT","CON",sCon);
+   if(!iStrlen_STR(sCon))
+      Abort_SYS(_("The Mapplot control file has not been specified."));
+
+   // --- New or current map? ---
+   
+   iNewMap = iGetInt_SYS("MAPPLOT","NEW");
+   if(iNewMap!=0) iNewMap = 1;  // default to new map
+
+
+   FileNamePart_STR(sCon,sRef,STR_FILE_PART_NAME);
+               
+   GetString_SYS("MAPPLOT","MAP",sMap);
+
+
+   // --- open control file and scan for MDFF ---
+
+   Reg = Create_REG(256);
+   
+   ADDMS("MS1")
+   ADDMS("MS2")
+   ADDMS("MS3")
+   ADDMS("MS4")
+   ADDMS("MS5")
+   ADDMS("MS6")
+   ADDMS("MS7")
+   ADDMS("MS8")
+   ADDMS("MS9")
+   ADDMS("MS10")
+   
+   hRA = Create_RA(sCon);
+   iLen = iLen_RA(hRA);
+
+   Strcpy_STR(sMDF,"");    // initialize to no MDF
+
+   for (i=0;i<iLen;i++) {
+
+      iGets_RA(hRA,sLine);
+      if (iTokens_STR(sLine," \t,") >= 2) {
+         GetToken_STR(sMDF,sLine,0);
+         if (iStrcmp_STR(sMDF,"RPLS",STR_CASE_TOLERANT) == 0) {
+            GetToken_STR (sVar,sLine,1);
+            GetToken_STR (sRepl,sLine,2);
+            UnQuote_STR(sRepl);
+            Set_REG(Reg,sVar,sRepl);
+         }
+         if (iStrcmp_STR(sMDF,"MDFF",STR_CASE_TOLERANT) == 0) {
+            GetToken_STR(sMDF,sLine,1);
+            UnQuote_STR(sMDF);
+            MatchString_REG(Reg,sMDF,sRepl,128);
+            Strcpy_STR(sMDF,sRepl);
+            break;
+         } else
+            Strcpy_STR(sMDF,""); // no MDF
+      }
+   }
+   Destroy_RA(hRA);
+   Destroy_REG(Reg);
+
+   if (iStrlen_STR(sMap) && iNewMap) {
+   
+      // --- Create new map ---
+
+      Map = Create_MAP(sMap,MAP_WRITENEW);
+      if (iStrlen_STR(sMDF))
+         MDF_MVU(Map,sMDF,"*Base","*Data");
+      
+   } else {
+   
+      // --- Ensure we have a map and that we are not drawing on grid documents ---
+   
+      if (iRunGX_SYS("sclgrd") == -1) 
+		  Cancel_SYS();
+		  
+      // --- get current map ---
+
+      EMap = Current_EMAP();
+      Map = Lock_EMAP(EMap);
+      
+      
+      // --- Create a new MDF from the map ---      
+
+      if (iStrlen_STR(sMDF))
+         MapMDF_MVU(Map,sMDF,"*Data");
+
+   }
+
+   
+   // --- process ---
+
+   Progress_SYS(1);   
+   ProgName_SYS(_("Mapplot"),1);
+   
+   Reg = Create_REG(256);
+   
+   ADDMS("MS1")
+   ADDMS("MS2")
+   ADDMS("MS3")
+   ADDMS("MS4")
+   ADDMS("MS5")
+   ADDMS("MS6")
+   ADDMS("MS7")
+   ADDMS("MS8")
+   ADDMS("MS9")
+   ADDMS("MS10")
+   
+   Mapplot = CreateREG_MAPL(sCon,sRef,0,Reg);
+   Process_MAPL(Mapplot,Map);
+   Destroy_MAPL(Mapplot);
+   Destroy_REG(Reg);
+   
+
+   // --- Cleanup Map ---
+   
+   if (iStrlen_STR(sMap)) 
+      Destroy_MAP(Map);
+   else
+      UnLock_EMAP(EMap); 
+     
+     
+   // --- Load Map if Interactive ---
+      
+   if (iInteractive_SYS() && iStrlen_STR(sMap))
+      Load_EMAP(sMap);
+
+
+   Progress_SYS(0);   
+}

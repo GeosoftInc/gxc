@@ -1,0 +1,259 @@
+//===========================================================================
+NAME          = "Find the X-Y range of data in a database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools"
+
+DESCRIPTION   = "
+
+   The X,Y range of data will be added to the database INI file
+   parameters:
+   
+            XYRANGE.MIN_X     XYRANGE.MIN_LON
+            XYRANGE.MIN_Y     XYRANGE.MIN_LAT
+            XYRANGE.MAX_X     XYRANGE.MAX_LON
+            XYRANGE.MAX_Y     XYRANGE.MAX_LAT
+
+"
+// Revision History:
+// v5.1.5: Can get range lat/long range of geographic coordinates.
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sTemp,sLabel;
+string(STR_DEFAULT_SHORT) sMinX,sMinY,sMaxX,sMaxY;
+
+EDB      EData;
+DB       Data;
+DB_SYMB  XCh,YCh;          // Channel handles
+DB_SYMB  Line;             // Line handle
+ST       Xstat,Ystat;      // statistics
+ST       LonStat,LatStat;  // statistics
+IPJ      hIPJ;
+PJ       hPJ;
+SBF      hSBF;
+BF       hBF;
+VV       hXVV,hYVV;
+
+int   iLines,iTotLines,iProj,iProjType;
+real  rMinX,rMinY,rMaxX,rMaxY;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- outa here if no database ---
+   
+   if (!iHaveCurrent_EDB()) Exit_SYS();
+    
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (XCh==NULLSYMB || YCh==NULLSYMB) {
+   
+      if (iInteractive_SYS())
+         DisplayMessage_SYS(_("RANGEDB"),_("Current X or Y channel does not exist."));
+      else   
+         Abort_SYS(_("Current X or Y channel does not exist."));
+         
+   } else { 
+   
+      // --- get/serialize IPJ ---
+      
+      hIPJ = Create_IPJ();
+      GetIPJ_DB(Data,XCh,hIPJ);
+      hSBF = hGetSYS_SBF();
+      hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READWRITE_NEW);
+      Serial_IPJ(hIPJ,hBF);
+      DestroyEx_BF(hBF);
+      Destroy_SBF(hSBF);
+      
+      
+      // --- is there a projection? ---
+      
+      iProjType = iSourceType_IPJ(hIPJ);
+      if (iProjType == IPJ_TYPE_PCS) {
+         iProj = TRUE;
+         hPJ = CreateIPJ_PJ(hIPJ,(IPJ)0);
+      } else   
+         iProj = FALSE;
+         
+      Destroy_IPJ(hIPJ);
+      
+      
+      // --- Get stat handles ---
+
+      Xstat = Create_ST();
+      Ystat = Create_ST();
+      
+      if (iProj) {
+         LonStat = Create_ST();
+         LatStat = Create_ST();
+      }
+      
+      
+      // --- Get VVs for data ---
+      
+      hXVV = Create_VV(REAL,0);
+      hYVV = Create_VV(REAL,0);
+
+
+      // --- Lock the channel symbols ---
+
+      LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+      // --- Go through all selected Lines ---
+      
+      Progress_SYS(1);
+      ProgName_SYS(_("Scanning"),1);
+
+      iLines = 0;
+      iTotLines = iCountSelLines_DB(Data);
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+         // --- Update the Progress Bar ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Scanning line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLines,iTotLines);
+         
+         
+         // --- get data ---
+
+         GetChanVV_DB(Data,Line,XCh,hXVV);
+         GetChanVV_DB(Data,Line,YCh,hYVV);
+         ReFidVV_VV(hYVV,hXVV);
+         
+
+         // --- Accumulate stats ---
+
+         Statistics_VV(Xstat,hXVV);
+         Statistics_VV(Ystat,hYVV);
+         
+         
+         // --- project and accumulate ---
+         
+         if (iProj) {
+            ConvertVV_PJ(hPJ,hXVV,hYVV);
+            Statistics_VV(LonStat,hXVV);
+            Statistics_VV(LatStat,hYVV);
+         }            
+            
+
+
+         // --- Advance to Next Line ---        
+
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+         
+      }         
+
+
+      // --- Unlock the channel symbol ---
+
+      UnLockSymb_DB(Data,XCh);
+      UnLockSymb_DB(Data,YCh);
+
+
+      // --- X,Y range ---
+
+      rMinX = rGetInfo_ST(Xstat,ST_MIN);
+      rMaxX = rGetInfo_ST(Xstat,ST_MAX);
+      rMinY = rGetInfo_ST(Ystat,ST_MIN);
+      rMaxY = rGetInfo_ST(Ystat,ST_MAX);
+
+
+      // --- set INI parameters ---
+
+      FormatR_STR(rMinX,sMinX,20,10);
+      FormatR_STR(rMinY,sMinY,20,10);
+      FormatR_STR(rMaxX,sMaxX,20,10);
+      FormatR_STR(rMaxY,sMaxY,20,10);
+
+      SetString_SYS("XYRANGE","MIN_X",sMinX);
+      SetString_SYS("XYRANGE","MIN_Y",sMinY);
+      SetString_SYS("XYRANGE","MAX_X",sMaxX);
+      SetString_SYS("XYRANGE","MAX_Y",sMaxY);
+      
+      
+      // --- lon/lat range ---
+      
+      rMinX = rDUMMY;
+      rMaxX = rDUMMY;
+      rMinY = rDUMMY;
+      rMaxY = rDUMMY;
+
+      if (iProj) {
+
+         rMinX = rGetInfo_ST(LonStat,ST_MIN);
+         rMaxX = rGetInfo_ST(LonStat,ST_MAX);
+         rMinY = rGetInfo_ST(LatStat,ST_MIN);
+         rMaxY = rGetInfo_ST(LatStat,ST_MAX);
+
+      }
+      else if(iProjType == IPJ_TYPE_GCS) {
+
+         rMinX = rGetInfo_ST(Xstat,ST_MIN);
+         rMaxX = rGetInfo_ST(Xstat,ST_MAX);
+         rMinY = rGetInfo_ST(Ystat,ST_MIN);
+         rMaxY = rGetInfo_ST(Ystat,ST_MAX);
+      }
+
+      // --- set INI parameters ---
+      // --- Round the values to 8 significant figures to avoid numerical errors 
+      //     which give values like -49.99999999 and -50.00000024
+
+
+      FormatR_STR(rMinX,sMinX,20,8);
+      FormatR_STR(rMinY,sMinY,20,8);
+      FormatR_STR(rMaxX,sMaxX,20,8);
+      FormatR_STR(rMaxY,sMaxY,20,8);
+
+      SetString_SYS("XYRANGE","MIN_LON",sMinX);
+      SetString_SYS("XYRANGE","MIN_LAT",sMinY);
+      SetString_SYS("XYRANGE","MAX_LON",sMaxX);
+      SetString_SYS("XYRANGE","MAX_LAT",sMaxY);
+         
+
+      // --- destroy resources ---
+
+      Destroy_SYS(Xstat);
+      Destroy_SYS(Ystat);
+      Destroy_SYS(hXVV);
+      Destroy_SYS(hYVV);
+      if (iProj) Destroy_SYS(hPJ);
+      
+   }
+   
+   UnLock_EDB(EData);
+
+   Progress_SYS(0);
+   
+}

@@ -1,0 +1,181 @@
+//===========================================================================
+NAME          = "Create a new subset database"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Create a new subset database.
+   
+   SAVEGDB.NAME        new database name
+   SAVEGDB.COMPRESSION Compression type
+   SAVEGDB.UNLOAD      Unload and discard original DB? (1:yes by default).
+                       Applies only when new subset database is different.
+   
+"
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database"
+
+// Revision History
+// v6.1.0: Added UNLOAD parameter to supress unload/discard when creating a 
+//         new database.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "savegdb.gr"
+#include "savegdb.grh"
+
+#define DUMMY_NONE 0
+#define DUMMY_ENDS 1
+#define DUMMY_ALL  2
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DGW         Diag;
+
+string(STR_FILE) sOldGDB,sNewGDB,sComp;
+string(STR_DB_SYMBOL) sCurLine;
+int i, iUnLoad;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the database ---
+   
+   if (!iHaveCurrent_EDB()) Cancel_SYS();
+   EData = Current_EDB();
+   GetCurLine_EDB(EData, sCurLine);
+   Data = Lock_EDB(EData);
+   GetName_DB(Data,DB_NAME_FILE,sOldGDB);
+   AbsoluteFileName_SYS(sOldGDB,sOldGDB);
+   
+   
+   // --- Unload and discard original database? ---
+   
+   iUnLoad = iGetInt_SYS("SAVEGDB", "UNLOAD");
+   if(iUnLoad!=0) iUnLoad = 1;         // default to unload/discard
+   SetInt_SYS("SAVEGDB", "UNLOAD", 1); // must set every time
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+   
+      // --- Create the dialogue ---
+
+      Diag = Create_DGW("SAVEGDB");
+      
+
+      // --- Set any defaults ---
+
+      SetInfo_DGW(Diag,_SAVEGDB_0,DGW_FILEPATH,sOldGDB);
+      SetInfoSYS_DGW(Diag,_SAVEGDB_1,DGW_LISTALIAS,"SAVEGDB","COMPRESSION");
+      
+
+      i = 0;
+      while (i == 0) {
+      
+      
+         // --- Run the dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+         
+
+         // --- Get the strings ---
+
+         GetInfoSYS_DGW(Diag,_SAVEGDB_0,DGW_FILEPATH,"SAVEGDB","NAME");
+         GetInfoSYS_DGW(Diag,_SAVEGDB_1,DGW_LISTALIAS,"SAVEGDB","COMPRESSION");
+         
+         
+         // --- verify overwriting an existing file ---
+         
+         GetString_SYS("SAVEGDB","NAME",sNewGDB);
+         AbsoluteFileName_SYS(sNewGDB,sNewGDB);
+         
+         if (iStrcmp_STR(sNewGDB,sOldGDB,STR_CASE_TOLERANT) == 0) {
+            Commit_DB(Data);
+            UnLock_EDB(EData);
+            Cancel_SYS();
+         }
+         
+         if (iFileExist_SYS(sNewGDB)) {
+            Strcat_STR(sNewGDB,_(" exists.  Overwrite?"));
+            i = iDisplayQuestion_SYS(_("Database exists"),sNewGDB);
+         } else
+            i = 1;
+
+      }
+
+     
+      // --- Destroy the dialogue ---
+
+      Destroy_DGW(Diag);
+         
+      
+   }
+   
+
+   // --- get parameters ---
+   
+   GetString_SYS("SAVEGDB","NAME",sNewGDB);
+   AbsoluteFileName_SYS(sNewGDB,sNewGDB);
+
+   GetString_SYS("SAVEGDB","COMPRESSION",sComp);
+   
+   
+
+   // --- same as current database, just commit ---
+            
+   UnLock_EDB(EData);
+   if (iStrcmp_STR(sNewGDB,sOldGDB,STR_CASE_TOLERANT) != 0) {
+   
+      // --- save new database ---
+      
+      SetString_SYS("DBSUBSET","NAME",sNewGDB);
+      SetString_SYS("DBSUBSET","LINES","All");
+      SetString_SYS("DBSUBSET","CHANNELS","All");
+      SetString_SYS("DBSUBSET","MASK","");
+      SetString_SYS("DBSUBSET","DIALOG","NO");
+      SetString_SYS("DBSUBSET","COMPRESSION",sComp);
+
+	  SetInt_SYS("DBSUBSET","SAVE_AS",1);  // Must set every time.
+
+      Progress_SYS(1);
+      if (iRunGX_SYS("dbsubset") != 0) Abort_SYS(_("Failed to create new database."));
+      Progress_SYS(0);
+
+      
+      // --- close current database and load new ---
+      
+      if(iUnLoad)
+         UnLoadDiscard_EDB(sOldGDB);
+            
+   }      
+   else {
+        
+      // --- unload old / load new database ---
+   
+      UnLoadVerify_EDB(sOldGDB,EDB_UNLOAD_NO_PROMPT);
+
+   }
+
+   Load_EDB(sNewGDB);   
+   EData = Current_EDB();
+   SetCurLine_EDB(EData, sCurLine);
+   
+}

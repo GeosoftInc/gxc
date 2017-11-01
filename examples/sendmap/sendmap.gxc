@@ -1,0 +1,99 @@
+//===========================================================================
+NAME          = "Send an map using email"
+#include <version.gxh>
+DESCRIPTION   = "
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+
+// Revision History
+// 6.2.0: Added ability to send for versions prior to 6.2. to solve some Unicode compatibility issues
+// 7.0.0: Remove option GUI to send as pre 6.2 version
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+string(GS_MAX_PATH)  sDocName,sMap,sNewMap, sMapName;
+string(64) sLicClass;
+
+int iArcGIS;
+
+EMAP  EMap;
+MAP   Map,NewMap;
+
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, "ArcGIS", STR_CASE_TOLERANT) == 0;
+   
+   // --- get the current map ---
+
+   EMap = Current_EMAP();
+   
+   if (iArcGIS)
+      GetCurrentDoc_ARCSYS(sDocName);
+   else
+      GetName_EMAP(EMap,sDocName);
+      
+   RemoveQualifiers_STR(sDocName, sDocName);
+
+   // --- Ensure the map name ends in appropriate extension ---
+
+   if (iIs3DView_EMAP(EMap) == 0)
+      FileExt_STR(sDocName,".map",sMap,FILE_EXT_FORCE);
+   else
+      FileExt_STR(sDocName,".geosoft_3dv",sMap,FILE_EXT_FORCE);
+   FileNamePart_STR(sMap, sMapName, STR_FILE_PART_NAME_EXTENSION);
+   	 
+   Map = Lock_EMAP(EMap);
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   
+   
+   // --- Generate Temp Name ---
+   
+   if (iIs3DView_EMAP(EMap) == 0)
+      TempFileExt_SYS("map",sNewMap);
+   else
+      TempFileExt_SYS("geosoft_3dv",sNewMap);
+
+   // --- open the map ---
+
+   NewMap = Create_MAP(sNewMap,MAP_WRITENEW);
+   
+   // --- dup the map ---
+   
+   DupMap_MAP(Map,NewMap,DUPMAP_COPY);   
+
+   // --- Pack Map ---
+   
+   Progress_SYS(1);
+   PackFiles_MAP(NewMap);
+   Progress_SYS(0);
+   
+   
+   // --- Close Map ---
+   
+   Destroy_MAP(NewMap);
+   
+   
+   // --- Mail Map ---
+   
+
+   
+   SendMail_INTERNET("","","","",sNewMap,sMapName,"","");
+   
+   
+   // --- done ---
+
+   UnLock_EMAP(EMap);
+   iDeleteFile_SYS(sNewMap);
+}

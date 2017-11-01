@@ -1,0 +1,213 @@
+//===========================================================================
+NAME          = "Make a fiducial channel"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+    MAKEFID.IN    : Channel from which to derive the fiducial.
+           .OUT   : Fiducial channel
+           .TYPE  : Fiducial data type: BYTE, SHORT, LONG, FLOAT or DOUBLE.
+                    The default is FLOAT.
+			  .LOADCHAN: (Script only) Set to 0 to suppress loading of channel.
+" 
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "makefid.gr"
+#include "makefid.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;      // Channel Names
+string(STR_DEFAULT_SHORT) sType;
+
+EDB        EData;
+DB         Data;              // Database handle
+DB_SYMB    InCh,OutCh;        // Channel Handles
+DB_SYMB    Line;              // Line Handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+int        i;                 // Utility int
+int        iLines;            // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iLoadChan;         // Load fid channel (Yes by default)
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+	// --- Suppress channel loading? ---y
+
+	iLoadChan = 1;
+	if(iGetInt_SYS("MAKEFID", "LOADCHAN") == 0)
+	{
+	   iLoadChan = 0;
+		SetInt_SYS("MAKEFID", "LOADCHAN", iDUMMY);
+	}
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("MAKEFIDForm");
+
+      // --- Set up input and output lists ---
+
+      List = GetList_DGW(Diag,_MAKEFIDFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_MAKEFIDFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_MAKEFIDFORM_0,DGW_TEXT,"MAKEFID","IN");     
+      SetInfoSYS_DGW(Diag,_MAKEFIDFORM_1,DGW_TEXT,"MAKEFID","OUT");     
+      SetInfoSYS_DGW(Diag,_MAKEFIDFORM_2,DGW_TEXT,"MAKEFID","TYPE");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_MAKEFIDFORM_0,DGW_TEXT,"MAKEFID","IN");     
+      GetInfoSYS_DGW(Diag,_MAKEFIDFORM_1,DGW_TEXT,"MAKEFID","OUT");     
+      GetInfoSYS_DGW(Diag,_MAKEFIDFORM_2,DGW_TEXT,"MAKEFID","TYPE");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS ("MAKEFID","IN",sInCh);
+   GetString_SYS ("MAKEFID","OUT",sOutCh);
+   GetString_SYS ("MAKEFID","TYPE",sType);
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))  
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) {
+      if (iStrcmp_STR(sType,"BYTE",0)==0)
+         CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_BYTE);
+      else if (iStrcmp_STR(sType,"USHORT",0)==0)
+         CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_USHORT);
+      else if (iStrcmp_STR(sType,"SHORT",0)==0)
+         CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_SHORT);
+      else if (iStrcmp_STR(sType,"LONG",0)==0)
+         CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      else if (iStrcmp_STR(sType,"DOUBLE",0)==0)
+         CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      else
+         CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_FLOAT);
+      }
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   ProgName_SYS(_("MAKEFID Correction"),1);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Making fid on line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Make the fiducial channel ---
+
+      MakeFid_DU(Data,Line,InCh,OutCh);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Fiducial channel"),"MAKEFID;");
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+	// --- display the new Channel ---
+	
+	if (iLoadChan != 0)
+		LoadChan_EDB( EData, sOutCh );
+
+}

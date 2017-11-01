@@ -1,0 +1,106 @@
+//===========================================================================
+NAME          = "Drill Hole - Set Project Projection"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Set the same projection for all databases in the project.
+
+Parameters: 
+
+"
+// Revision History:
+// v7.4.0: Make scriptable.
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v5.1.7: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DH          Drill;            // Drill Hole project
+EDB         EData;            // Database handle
+
+IPJ         Ipj;
+
+string(STR_FILE) sDB, sDrill;
+string(STR_DEFAULT_LONG) s1,s2,s3,s4,s5;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Get DB/DH ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+	Ipj = Create_IPJ();
+
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) 
+   {
+		// --- Create the DH object ---
+
+		Drill  = Create_DH(sDB);
+		GetProjectName_DH(Drill, sDrill);
+
+
+		// --- Get the current projection ---
+
+		GetIPJ_DH(Drill, Ipj);
+		Destroy_DH(Drill);
+
+
+		// --- Let the user modify/set the projection ---
+
+		if(iCoordSysWizard_GUI(Ipj, TRUE, COORDSYS_MODE_PCS_UNKNOWN, _("Project name"), sDrill)==1)
+			Cancel_SYS();
+
+      GetGXF_IPJ(Ipj,s1,s2,s3,s4,s5);   
+
+      SetString_SYS("DHSETIPJ","NAME",s1);
+      SetString_SYS("DHSETIPJ","DATUM",s2);
+      SetString_SYS("DHSETIPJ","METHOD",s3);
+      SetString_SYS("DHSETIPJ","UNITS",s4);
+      SetString_SYS("DHSETIPJ","LOCALDATUM",s5);      
+	}
+	else
+	{
+      // --- script mode, just set using IPJ settings ---
+      
+      GetString_SYS("DHSETIPJ","NAME",s1);
+      GetString_SYS("DHSETIPJ","DATUM",s2);
+      GetString_SYS("DHSETIPJ","METHOD",s3);
+      GetString_SYS("DHSETIPJ","UNITS",s4);
+      GetString_SYS("DHSETIPJ","LOCALDATUM",s5);
+      
+      SetGXF_IPJ(Ipj,s1,s2,s3,s4,s5);   
+	}
+
+   // --- Now reset the projection in each of the project databases ---
+
+   Drill  = Create_DH(sDB);
+   SetIPJ_DH(Drill, Ipj);
+   Destroy_DH(Drill);
+
+ }
+
+
+

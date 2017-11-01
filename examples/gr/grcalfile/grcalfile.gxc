@@ -1,0 +1,168 @@
+//===========================================================================
+NAME          = "Create a calibrations file from existing file."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+
+   GRCALFILE.DATAFILE   - existing calibration data file
+            .INTRUMENT  - instrument ID
+
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grcalfile.gr"
+#include "grcalfile.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW      hDGW;
+RA       hRA;   
+WA       hWA;
+
+string(STR_FILE) sData,sCal;
+string(STR_DEFAULT_LONG) sFileLine,sTemp;
+int i;
+
+#define WRITELINE(A) { Puts_WA(hWA,A); NewLine_WA(hWA); }
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())  {
+
+
+      // --- Dialogue ---
+
+      hDGW = Create_DGW("GRCALFILE");
+      i = 0;
+      while (i == 0) {
+      
+         SetInfoSYS_DGW(hDGW,_GRCALFILE_0,DGW_FILEPATH,"GRCALFILE","DATAFILE");
+         SetInfoSYS_DGW(hDGW,_GRCALFILE_1,DGW_FILEPATH,"GRCALFILE","INSTRUMENT");
+         if (iRunDialogue_DGW(hDGW)) Cancel_SYS();
+         GetInfoSYS_DGW(hDGW,_GRCALFILE_0,DGW_FILEPATH,"GRCALFILE","DATAFILE");
+         GetInfoSYS_DGW(hDGW,_GRCALFILE_1,DGW_FILEPATH,"GRCALFILE","INSTRUMENT");
+      
+      
+         // --- create scale factor file ---
+      
+         GetString_SYS("GRCALFILE","INSTRUMENT",sCal);
+         FileExt_STR(sCal,"csv",sCal,FILE_EXT_FORCE);
+         if (iFileExist_SYS(sCal)) {
+      
+            // --- file exists, just use it? ---
+         
+            Printf_STR(sTemp, sizeof(sTemp), _("\"%s\" exists. Replace?"), sCal);
+            i = iDisplayQuestion_SYS(_("Calibration file exists"),sTemp);
+         } else
+            i = 1;
+            
+      }
+      Destroy_DGW(hDGW);
+      
+   }
+   else {
+		GetString_SYS("GRCALFILE","INSTRUMENT",sCal);
+   }            
+      
+      
+      // --- create new calibration file and write out header ---
+      
+      hWA = Create_WA(sCal,WA_NEW);
+      
+      WRITELINE(_n("/ This is an instrument callibration file."))
+      WRITELINE(_n("/"))
+      WRITELINE(_n("/ Instrument calibration data is stored in a comma-delimited ASCII data file (CSV file)"))
+      WRITELINE(_n("/ that contains two or more columns.  The file may contain comments (like this line)"))
+      WRITELINE(_n("/ that begin with a forward slash character.  Comments are ignored when the file is "))
+      WRITELINE(_n("/ read."))
+      WRITELINE(_n("/"))
+      WRITELINE(_n("/ The file name should be the instrument ID with extension \".csv\"."))
+      WRITELINE(_n("/"))
+      WRITELINE(_n("/ The first non-comment line must contain the names of the data columns, and there"))
+      WRITELINE(_n("/ must be an \"Instrument\" and \"Milligal\" column.  The \"Instrument\" column"))
+      WRITELINE(_n("/ contains instrument dial readings and the \"Milligal\" column contains the "))
+      WRITELINE(_n("/ calibrated milligal equivalent."))
+      
+      
+      // --- is there an existing file? ---
+
+      GetString_SYS("GRCALFILE","DATAFILE",sData);
+      if (iFileExist_SYS(sData)) {
+      
+      
+         // --- file exists ---
+         
+         WRITELINE("/")
+         Puts_WA(hWA,_n("/ Source file: "));
+         IRelativeFileName_SYS(sData,sData,sizeof(sData));
+         WRITELINE(sData)
+         WRITELINE("/")
+         WRITELINE(_n("/ The contents of your file have been appended for you to re-organize"))
+         WRITELINE(_n("/ into columns of \"Instrument\" and \"Milligal\" values as in the"))
+         WRITELINE(_n("/ following example:"))
+         WRITELINE(_n("/-------------------------------------------------------------------------------"))
+         WRITELINE(_n(" Instrument, Milligal"))
+         WRITELINE(_n("        100,   106.40"))
+         WRITELINE(_n("        200,   212.17"))
+         WRITELINE(_n("        300,   219.12"))
+         WRITELINE(_n("/ "))
+         WRITELINE(_n("/ Here is your data:"))
+         WRITELINE(_n("/-------------------------------------------------------------------------------"))
+         
+         
+         // --- copy file ---
+                  
+         hRA = Create_RA(sData);
+         while (iGets_RA(hRA,sFileLine) == 0)
+            WRITELINE(sFileLine)
+         Destroy_RA(hRA);
+         
+      } else {
+      
+         // --- no data file ---                     
+      
+         WRITELINE(_n("/ You did not specify an existing data file, or the file you specified was"))
+         WRITELINE(_n("/ not found.  The following is a template example that you can edit."))
+         WRITELINE(_n("/ Add as many lines are you need."))
+         WRITELINE(_n("/--------------------------------------------------------------------"))
+         WRITELINE(_n(" Instrument, Milligal"))
+         WRITELINE(_n("        100,   106.40"))
+         WRITELINE(_n("        200,   212.17"))
+         WRITELINE(_n("        300,   219.12"))
+         
+      }
+      
+      Destroy_WA(hWA);
+      
+               
+      // --- run the editor to display the file ---
+      
+      SetString_SYS("EDIT","FILE",sCal);
+      SetString_SYS("EDIT","WAIT","");
+      SetString_SYS("EDIT","CHILD","YES");
+	
+	  if (iInteractive_SYS())  
+	      iRunGX_SYS("edit");
+      
+   
+}

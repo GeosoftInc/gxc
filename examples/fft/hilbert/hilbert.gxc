@@ -1,0 +1,382 @@
+//===========================================================================
+NAME          = "Hilbert transform"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D"
+
+DESCRIPTION   = "
+
+Hilbert transform a channel data by using FFT.
+
+Parameters: 
+
+    HILBERT.IN     - Name of the channel to transform
+           .OUT    - Name of the channel of transform   result
+           .DETRD  - Type of trend line to remove
+                     \"remove mean value\"                          , 3
+                     \"remove trend line based on all data points\" , 2   (default)
+                     \"remove trend line based on two edge points\" , 1
+           .EXP    - Minimum expansion (%) (default 10%)
+"
+// Revision History:
+// v5.1.8: New GX.
+//    Reference Paper: "Toward a three-dimensional automatic interpretation of 
+//    potential field data via generalized Hilbert transforms: Fundamental relations",
+//    Misac N. Nabighian, Geophysics, Vol. 49, No. 6, pp. 780-786, 1984.
+
+//===========================================================================
+
+RESOURCE = "hilbert.gr"
+#include "hilbert.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh,sRCh,sICh,sWCh; // Channel Names
+
+EDB        EData;
+DB         Data;
+DB         FreqData;
+DB_SYMB    InCh,OutCh,RCh,ICh,WCh;  // Channel handles
+DB_SYMB    Line;              // Line handle
+DB_SYMB    FreqLine;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List1,List2;       // List handle
+VV         VVs,VVr,VVi;       // VV's
+FFT        hFFT;              // FFT object
+EXP        Exp;               // Expression
+REG        Reg;               
+VA         Va;
+
+int        i,iLen;            // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iDeTrend;          // Type of trend line to remove
+real       rExpansion;        // Minimum expansion (%)
+int        iVAColumn;
+
+string(STR_DEFAULT_SHORT) sTemp;    // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(STR_FILE)  sFreqDB; 
+
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      i = 1;
+      while(i!=0) {
+      
+         switch(i) {
+         
+            case 1:
+   
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("HILBERT1");
+
+               // --- Set up lists ---
+    
+               List1 = GetList_DGW(Diag,_HILBERT1_0);
+               SymbLST_DB(Data,List1,DB_SYMB_CHAN);
+               Sort_LST(List1,0,0);
+               List2 = GetList_DGW(Diag,_HILBERT1_1);
+               SymbLST_DB(Data,List2,DB_SYMB_CHAN);
+               Sort_LST(List2,0,0);
+
+               // --- Set any Defaults from INI ---
+
+               SetInfoSYS_DGW(Diag,_HILBERT1_0,DGW_TEXT,"HILBERT","IN");     
+               SetInfoSYS_DGW(Diag,_HILBERT1_1,DGW_TEXT,"HILBERT","OUT");     
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i==-1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings and replace in INI ---
+
+               GetInfoSYS_DGW(Diag,_HILBERT1_0,DGW_TEXT,"HILBERT","IN");     
+               GetInfoSYS_DGW(Diag,_HILBERT1_1,DGW_TEXT,"HILBERT","OUT");     
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               break;
+            
+            case 2:
+   
+               Diag = Create_DGW("HILBERT2");
+
+               SetInfoSYS_DGW(Diag,_HILBERT2_0,DGW_LISTALIAS,"HILBERT","DETRD");     
+               SetInfoSYS_DGW(Diag,_HILBERT2_1,DGW_TEXT,"HILBERT","EXP");     
+
+               i = iRunDialogue_DGW(Diag);
+
+               if (i!=-1) {
+                  GetInfoSYS_DGW(Diag,_HILBERT2_0,DGW_LISTALIAS,"HILBERT","DETRD");     
+                  GetInfoSYS_DGW(Diag,_HILBERT2_1,DGW_TEXT,"HILBERT","EXP");     
+               }  
+
+               Destroy_DGW(Diag);
+               i = 1;
+               break;
+
+         } // end switch
+      } // end while
+   } // end if
+
+   // --- Get Parameters ---
+
+   GetString_SYS("HILBERT","IN",sInCh);
+   GetString_SYS("HILBERT","OUT",sOutCh);
+   Strcpy_STR(sRCh,sInCh); Strcat_STR(sRCh,"_r");
+   Strcpy_STR(sICh,sInCh); Strcat_STR(sICh,"_i");
+   Strcpy_STR(sWCh,sInCh); Strcat_STR(sWCh,"_w");
+   Strcpy_STR(sFreqDB,sInCh); Strcat_STR(sFreqDB,"_Freq");
+
+   iDeTrend = iGetInt_SYS("HILBERT","DETRD");
+   if(iDeTrend==iDUMMY)          iDeTrend = 2;
+   rExpansion = rGetReal_SYS("HILBERT","EXP");
+   if(rExpansion==rDUMMY)        rExpansion = 10.0;
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+   iVAColumn = iGetColVA_DB(Data, InCh);
+
+
+   // --- Output channels ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data,InCh,sOutCh);       // Create it 
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+   
+   if (iVAColumn != iGetColVA_DB(Data,OutCh)) 
+      Abort_SYS(_("Input and output channels have different array sizes."));
+
+   if (iVAColumn == 1) {
+
+      // --- create/load a new database ---
+
+      if (iFileExist_SYS (sFreqDB))
+         iDeleteFile_SYS(sFreqDB);
+
+      Create_DB(sFreqDB,200,50,200+50+20,10,100,"SUPER","");
+      FreqData = Open_DB(sFreqDB,"SUPER","");
+
+      RCh = DupSymbAcross_DB(Data, FreqData, InCh);
+      LockSymb_DB(FreqData,RCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      SetChanName_DB(FreqData,RCh,sRCh);
+      
+	  DupSymbNoLock_DB(FreqData,RCh,sICh);
+      ICh = FindSymb_DB(FreqData,sICh,DB_SYMB_CHAN);
+
+	  DupSymbNoLock_DB(FreqData,RCh,sWCh);
+      WCh = FindSymb_DB(FreqData,sWCh,DB_SYMB_CHAN);
+
+      // --- set up expression to convert to wavenumber ---
+
+      Exp = Create_EXP(FreqData,"$sWCh=$sWCh*6.2831853;",128);
+   }
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh == OutCh)
+      Abort_SYS(_("Input and output channel are the same."));
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   if (iVAColumn == 1) {
+      LockSymb_DB(FreqData,RCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      LockSymb_DB(FreqData,ICh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      LockSymb_DB(FreqData,WCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   }
+
+   // --- get some VV's ---
+
+   VVs  = Create_VV(REAL,0);
+   VVi = Create_VV(REAL,0);
+   VVr = Create_VV(REAL,0);
+   if(iVAColumn>1)
+      Va = Create_VA(REAL,0,iVAColumn);
+
+
+   // --- Set REG ---
+
+   Reg = Create_REG(50);  
+   SetInt_REG(Reg, "FFT_DETREND", iDeTrend);
+   SetReal_REG(Reg, "FFT_EXPANSION", rExpansion);
+   SetRegSymb_DB(Data, InCh, Reg);
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Hilbert Transform line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+
+      if(iVAColumn == 1) {
+   	     FreqLine = DupSymbAcross_DB(Data, FreqData, Line); 
+         LockSymb_DB(FreqData,FreqLine,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      }   
+
+
+      // --- Get the current channel data into input VV ---
+
+      if(iVAColumn==1)
+         GetChanVV_DB(Data,Line,InCh,VVs);
+      else
+         GetChanVA_DB(Data,Line,InCh,Va);
+      
+
+      // --- Go through the VA column data points ---
+
+      for (i = 0; i < iVAColumn; i++) {
+
+         if(iVAColumn>1)   GetVV_VA (Va,i,VA_COL,VVs);
+
+         // --- if input VV is empty or all dummy, then don't do FFT process ---
+
+         iLen = iLength_VV(VVs);
+         if (iLen>0 && iFindDum_VV(VVs,0,(iLen-1),1,0)!=-1) {
+
+            // --- Forward FFT ---
+
+            hFFT = CreateEx_FFT(VVs,rGetFidIncr_VV(VVs),iDeTrend,rExpansion);
+            
+            GetVV_FFT(hFFT,VVr,VVi);
+
+            if(iVAColumn == 1) {
+        
+               // --- Make RCh, ICh and WCh ---
+
+               PutChanVV_DB(FreqData,FreqLine,RCh,VVr);
+               PutChanVV_DB(FreqData,FreqLine,ICh,VVi);
+               MakeFid_DU(FreqData,FreqLine,RCh,WCh);
+
+               // --- Apply expression to convert to radians/m ---
+
+               UnLockSymb_DB(FreqData,WCh);
+               Math_DU(FreqData,FreqLine,Exp);
+               LockSymb_DB(FreqData,WCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+			}
+
+
+            // --- Apply Hilbert Transform Operator ---
+
+            GetVV_FFT(hFFT,VVi,VVr);
+            Trans_VV(VVi,0.0,-1.0);
+            SetReal_VV(VVr,0,0.0);
+            SetReal_VV(VVi,0,0.0);
+
+            Destroy_FFT(hFFT);
+
+
+            // --- Inverse FFT ---
+
+            hFFT = CreateRefEx_FFT(VVs,rGetFidIncr_VV(VVs),iDeTrend,rExpansion,1.0);
+
+            SetVV_FFT(hFFT,VVr,VVi);
+
+            Inverse_FFT(hFFT,VVr,VVs);
+
+            Destroy_FFT(hFFT);
+         
+         } else	{
+
+            FillReal_VV(VVr,rDUMMY);
+         }
+
+         if(iVAColumn>1)
+            SetVV_VA (Va,i,VA_COL,VVr);
+      }
+      
+      // --- Write the output VV ---
+
+      if(iVAColumn==1)
+         PutChanVV_DB(Data,Line,OutCh,VVr);
+      else
+         PutChanVA_DB(Data,Line,OutCh,Va);
+      
+      SetFid_DB(Data,Line,OutCh,rGetFidStart_DB(Data,Line,InCh),rGetFidIncr_DB(Data,Line,InCh));
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Hilbert transform"),"HILBERT;");
+
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   if(iVAColumn==1)	{
+      UnLockSymb_DB(FreqData,FreqLine);
+      UnLockSymb_DB(FreqData,RCh);
+      UnLockSymb_DB(FreqData,ICh);
+      UnLockSymb_DB(FreqData,WCh);
+   }
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   Destroy_DB(FreqData);
+   UnLock_EDB(EData);
+   Destroy_REG(Reg);
+
+   // --- Display the output chan ---
+
+   if (iInteractive_SYS())
+      LoadChan_EDB(EData,sOutCh);
+}

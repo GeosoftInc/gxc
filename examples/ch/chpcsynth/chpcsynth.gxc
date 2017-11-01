@@ -1,0 +1,500 @@
+
+//===========================================================================
+NAME          = "Perform Principal Component Synthesis"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = " 
+
+         CHPCSYNTH.CHANNELS  \"ASSAY\"
+                           \"DISPLAYED_ASSAY\"
+                           \"LIST\"
+         .LINE   \"D\" for the displayed line only.
+                 \"S\" for selected lines.
+                 \"A\" for all lines
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v5.1.8: Calls CHCHANLST.GX for channel selection.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chpcsynth.gr"
+#include "chpcsynth.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Line, Ch, ChNew;
+DGW         Diag;
+REG         Reg, RegNew;
+
+VV          VVd, VVw, VVm, VVs, VVv, ChNewVV, VVdetect;
+VV          VVfactor, VVtrans, VVdTemp, VVdLen;
+VV          LineVV, LineNameVV;
+PG          PGa, PGv, PGCorr, PGscore, PGload;
+LST         List, ChLST;
+DB_SELECT   Select;        // current selection mode
+
+string(STR_DEFAULT_LONG) sVal, sChOpt, sTemp;
+string(STR_FILE) sData;
+string(2048) sBuff;
+
+string(STR_DB_SYMBOL) sCh,sCh0,sChNew, sLine,sCurLine;
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT_SHORT) sUnits;
+string(STR_DEFAULT_SHORT) sDetLim;
+string(STR_DEFAULT_SHORT) sFactorLim;
+string(STR_DEFAULT_SHORT) sLog;
+string(STR_DEFAULT) sMethod;
+string(STR_DEFAULT_SHORT) sClass;
+string(32768) sChannels;
+
+
+int i,ii,iChans,iNRows, iMax, iWidth, iDec, iLen, iLine, iLines, iStart;
+
+//===========================================================================
+// MACROS
+//===========================================================================
+
+#define CREATE_CHAN(A,B,C,D) \
+   if (iExistChan_DB(D,A)) B = FindChan_DB(D,A);\
+   else B = CreateSymb_DB(D,A,DB_SYMB_CHAN,DB_OWN_SHARED,C);\
+   LockSymb_DB(D,B,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Open current database ---
+
+   EData = Current_EDB();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHPCSYNTH");
+
+      SetInfoSYS_DGW(Diag,_CHPCSYNTH_0,DGW_LISTALIAS,"CHPCSYNTH","CHANNELS");     
+      SetInfoSYS_DGW(Diag,_CHPCSYNTH_1,DGW_TEXT,"CHPCSYNTH","NMAX");     
+      SetInfoSYS_DGW(Diag,_CHPCSYNTH_2,DGW_LISTALIAS,"CHPCSYNTH","LINE");     
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+      
+      GetInfoSYS_DGW(Diag,_CHPCSYNTH_0,DGW_LISTALIAS,"CHPCSYNTH","CHANNELS");     
+      GetInfoSYS_DGW(Diag,_CHPCSYNTH_1,DGW_TEXT,"CHPCSYNTH","NMAX");     
+      GetInfoSYS_DGW(Diag,_CHPCSYNTH_2,DGW_LISTALIAS,"CHPCSYNTH","LINE");     
+      
+   }
+
+   // --- Get currently selected line ---
+   if (iInteractive_SYS()) {
+      GetCurLine_EDB(EData,sCurLine);
+      Line = GetCurLineSymb_EDB(EData);      
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHPCSYNTH","CHANNELS",sChOpt);
+   iMax = iGetInt_SYS("CHPCSYNTH","NMAX");
+
+
+   // --- Set line selection ---
+
+   GetString_SYS("CHPCSYNTH","LINE",sLine);
+   
+   if (iChar_STR(sLine) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChOpt);
+   SetString_SYS("CHCHANLST","GX","CHPCSYNTH");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   
+   if (!iInteractive_SYS()) {
+      GetString_SYS("CHPCSYNTH", "CURLINE", sCurLine);   
+      Line = FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+   }
+
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+
+   // --- Remove any channels at this point which were synthesized using
+   //     CHPCSYNTH.GX.  Including can produce singular matrices, so remove from list ---
+
+   iChans = iSize_LST(ChLST);   
+   for(i=iChans-1;i>=0;i--) {
+
+      Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, i);
+      GetRegSymbSetting_DB(Data, Ch, "ASSAYMETHOD",sMethod, sizeof(sMethod));
+                     
+      Substr_STR (sTemp, sMethod, 0, 21);
+      if (iStrcmp_STR(sTemp,_n("Principal Components:"),STR_CASE_TOLERANT) == 0) {                                 
+         DelItem_LST(ChLST, i);
+         iChans--;
+      }           
+   }      
+
+   if(iChans==0)
+      Abort_SYS(_("No assay channels found"));
+
+   if(iMax==iDUMMY) 
+      Abort_SYS(_("Number of eigenvalues to use in synthesis must be defined."));
+
+   if(iMax>=iChans)
+      Abort_SYS(_("Number of eigenvalues to use in synthesis must be less than the number of channels (or nothing is changed)."));
+
+
+   // --- Adjust the line selection to that required ---
+
+   GetName_DB(Data, DB_NAME_FILE, sData);
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+
+   // --- Make a list of the selected lines ---
+
+   iLines = iCountSelLines_DB(Data);
+   if(iLines==0)
+      Abort_SYS(_("No Lines are selected"));
+
+   LineVV = Create_VV(INT, iLines);
+   LineNameVV = Create_VV(-STR_DB_SYMBOL,0);
+
+   Line = FirstSelLine_DB(Data);
+   SetInt_VV(LineVV, 0, (int)Line);
+   GetSymbName_DB(Data, Line, sLine);
+   SetString_VV(LineNameVV, 0, sLine);
+
+   for(i=1;i<iLines;i++) {
+      Line = NextSelLine_DB(Data, Line);
+      SetInt_VV(LineVV, i, (int)Line);
+      GetSymbName_DB(Data, Line, sLine);
+      SetString_VV(LineNameVV, 0, sLine);
+   }
+
+   // --- reset starting selections ---
+
+   if (iLine != DU_LINES_SELECTED)
+      SetSelect_DB(Data,Select);
+
+
+   // --- Get the length of the data ---
+   
+   Ch = (DB_SYMB)iGetInt_LST(ChLST,1,0);
+   GetItem_LST(ChLST, 0, 0, sCh0);
+   LockSymb_DB(Data, Ch, DB_LOCK_READONLY, DB_WAIT_NONE);
+   
+   VVdLen = Create_VV(INT, iLines);
+
+   iNRows = 0;
+   for(i=0;i<iLines;i++) {
+  
+      Line = (DB_SYMB)iGetInt_VV(LineVV, i);
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_NONE);
+      iLen = iGetChannelLength_DB(Data,Line,Ch);
+      UnLockSymb_DB(Data, Line);
+      SetInt_VV(VVdLen, i, iLen);
+      iNRows += iLen;
+   
+   }
+   UnLockSymb_DB(Data, Ch);
+
+   if(iNRows==0) {
+      Abort_SYS(_("No data found"));
+   }
+
+
+   // --- Create a PG to put the data in ---
+
+   PGa = Create_PG(iNRows, iChans, GS_DOUBLE);
+   PGv = Create_PG(iChans, iChans, GS_DOUBLE);
+   VVw = Create_VV(REAL, iChans);
+   VVd = Create_VV(REAL, iNRows);
+   VVdTemp = Create_VV(REAL, 0);
+   VVv = Create_VV(REAL, iChans);
+   VVdetect = Create_VV(REAL, iChans);
+   VVfactor = Create_VV(REAL, iChans);
+   VVtrans = Create_VV(INT, iChans);
+
+   
+   // --- Turn on progress ---
+
+   Progress_SYS(1);
+
+   
+   // --- Load PGa with the assay data ---
+
+   Reg = Create_REG(128);
+   RegNew = Create_REG(128);
+
+   for (i=0;i<iChans;i++) {
+
+      Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetItem_LST(ChLST, 0, i, sCh);
+      LockSymb_DB(Data, Ch, DB_LOCK_READWRITE, DB_WAIT_NONE);
+
+      iStart = 0;
+      for(ii=0;ii<iLines;ii++) {
+
+         Line = (DB_SYMB)iGetInt_VV(LineVV, ii);
+   
+         LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_NONE);
+         GetChanVV_DB(Data, Line, Ch, VVdTemp);
+         UnLockSymb_DB(Data, Line);
+         
+         // --- Do a check on the data length ---
+         
+         iLen = iGetInt_VV(VVdLen, ii);
+         if(iLen != iLength_VV(VVdTemp)) {
+
+            GetString_VV(LineNameVV, ii, sLine);
+            Printf_STR(sBuff, sizeof(sBuff), _("Error : Channel length mismatch for channel %s [%d] and %s [%d] in line %s. Channels must be of equal length."), sCh0, iLen, sCh, iLength_VV(VVdTemp), sLine);
+            Abort_SYS(sBuff);
+         }
+         
+         Copy2_VV(VVd, iStart, VVdTemp, 0, iLen);
+         iStart += iLen;
+      }
+
+      GetRegSymb_DB(Data,Ch,Reg);
+
+      UnLockSymb_DB(Data, Ch);
+
+      // --- Load the data into PGa ---
+
+      WriteCol_PG(PGa, i, 0, iNRows, VVd);
+
+      // --- Get the transform info ---
+
+      Get_REG(Reg,"DETECTLIMIT",sDetLim,sizeof(sDetLim));
+      Get_REG(Reg,"FACTORLIMIT",sFactorLim,sizeof(sFactorLim));
+      Get_REG(Reg,"LOG",sLog,sizeof(sLog));
+
+      SetReal_VV(VVdetect, i, rScanR_STR(sDetLim));
+      SetReal_VV(VVfactor, i, rScanR_STR(sFactorLim));
+      if(!iStrcmp_STR(sLog,_n("Yes"),STR_CASE_TOLERANT)) 
+         SetInt_VV(VVtrans, i, PGU_TRANS_LOG);
+      else
+         SetInt_VV(VVtrans, i, PGU_TRANS_NONE);
+
+   }
+
+   // --- Transform the data ---
+
+   PCTransform_PGU(PGa, VVdetect, VVfactor, VVtrans, PGU_FORWARD);
+
+   
+   // --- Standardize the data ---
+
+   VVm = Create_VV(REAL,iChans);
+   VVs = Create_VV(REAL,iChans);
+
+   PCStandardize_PGU(PGa, VVm, VVs, PGU_FORWARD);
+
+   
+   // --- Create the correlation matrix ---
+
+   PGCorr = Create_PG(iChans, iChans, GS_DOUBLE);
+   CorrelationMatrix_PGU(PGa, PGCorr);
+
+   
+   // --- Get the eigenvectors, values ---
+
+   Jacobi_PGU(PGCorr, VVw, PGv);
+
+   
+   // --- Calculate loadings ---
+
+   PGload = Create_PG(iChans, iChans, GS_DOUBLE);
+   PCLoadings_PGU(PGa, PGload);
+
+   
+   // --- Calculate scores ---
+
+   PGscore = Create_PG(iNRows, iChans, GS_DOUBLE);
+   PCScores_PGU(PGa, PGload, PGscore);
+
+   
+   // --- Set the loadings for eigenvalues above the cutoff to 0 ---
+
+   SetRealN_VV(VVd, 0, iChans, 0.0);
+
+   for (i=iMax;i<iChans;i++) {
+
+      // --- Load the data into PGa ---
+
+      WriteCol_PG(PGload, i, 0, iChans, VVd);
+
+   }
+
+   
+   // --- Recompute the standardized matrix ---
+   
+   MatrixMult_PGU(PGscore, 0, PGload, 1, PGa);
+
+   
+   // --- De-Standardize the data ---
+
+   PCStandardize_PGU(PGa, VVm, VVs, PGU_BACKWARD);
+   
+   
+   // --- De-transform the data ---
+
+   PCTransform_PGU(PGa, VVdetect, VVfactor, VVtrans, PGU_BACKWARD);
+
+   
+   // --- Add Principal Component Synthesis method to method list ---
+
+   Strcpy_STR(sMethod, _n("Principal Components: "));
+   FormatI_STR(iMax,sVal,4);
+   Strcat_STR(sMethod, sVal);
+
+   List = Create_LST(127);   
+   LoadFile_LST(List,"ch_assay_method");
+   if(iFindItem_LST(List, 0, sMethod)==-1) {
+
+      AddUniqueItem_LST(List,sMethod,"");
+      Sort_LST(List,0,0);
+      SaveFile_LST(List,"ch_assay_method");
+   }
+      
+   
+   // --- Create new channels ---
+
+   ChNewVV = Create_VV(-STR_DB_SYMBOL, iChans);
+   FormatI_STR(iMax,sVal,4);
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sCh);
+      Strcpy_STR(sChNew, sCh);
+      Strcat_STR(sChNew,"_");
+      Strcat_STR(sChNew,sVal);
+
+      if (iExistChan_DB(Data,sChNew)) {
+
+         ChNew = FindChan_DB(Data,sChNew);
+         LockSymb_DB(Data,ChNew,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+      }
+      else {
+      
+         ChNew = CreateSymb_DB(Data,sChNew,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+         GetRegSymb_DB(Data,ChNew,RegNew);
+      
+         Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+         GetRegSymb_DB(Data,Ch,Reg);
+      
+         iWidth = iGetChanWidth_DB(Data, Ch);
+         iDec = iGetChanDecimal_DB(Data, Ch);
+      
+         LockSymb_DB(Data,ChNew,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+         SetChanWidth_DB(Data, ChNew, iWidth);
+         SetChanDecimal_DB(Data, ChNew, iDec);
+
+         // --- Set the attributes of the new channel ---
+
+         Get_REG(Reg,"LABEL",sLabel,sizeof(sLabel));      
+         Get_REG(Reg,"UNITS",sUnits,sizeof(sUnits));
+         Get_REG(Reg,"DETECTLIMIT",sDetLim,sizeof(sDetLim));
+         Get_REG(Reg,"FACTORLIMIT",sFactorLim,sizeof(sFactorLim));
+         Get_REG(Reg,"LOG",sLog,sizeof(sLog));               
+         Get_REG(Reg,"CLASS",sClass,sizeof(sClass));
+
+         Set_REG(RegNew,"LABEL",sLabel);      
+         Set_REG(RegNew,"UNITS",sUnits);
+         Set_REG(RegNew,"DETECTLIMIT",sDetLim);
+         Set_REG(RegNew,"FACTORLIMIT",sFactorLim);
+         Set_REG(RegNew,"LOG",sLog);
+         Set_REG(RegNew,"ASSAYMETHOD",sMethod);  //-- Use Principal component ASSAY METHOD, defined above
+         Set_REG(RegNew,"CLASS",sClass);
+
+         SetRegSymb_DB(Data,ChNew,RegNew);
+
+
+      }
+                      
+      iStart = 0;
+      for(ii=0;ii<iLines;ii++) {
+
+         iLen = iGetInt_VV(VVdLen, ii);
+         ReadCol_PG(PGa, i, iStart, iLen, VVdTemp);
+
+         Line = (DB_SYMB)iGetInt_VV(LineVV, ii);
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         PutChanVV_DB(Data, Line, ChNew, VVdTemp);
+         UnLockSymb_DB(Data, Line);
+
+         iStart += iLen;
+      }
+      
+      UnLockSymb_DB(Data, ChNew);
+
+      // --- Save the channel names ---
+
+      SetString_VV(ChNewVV, i, sChNew);
+
+   }
+
+   // --- Load the channels into the database ---
+
+   UnLock_EDB(EData);
+
+   for(i=0;i<iChans;i++) {
+      GetString_VV(ChNewVV, i, sCh);
+      LoadChan_EDB(EData, sCh);
+   }
+
+   // --- Turn off progress ---
+
+   Progress_SYS(0);
+
+
+
+}

@@ -1,0 +1,158 @@
+//===========================================================================
+NAME          = "DHKRIGRID: KRIGRID Control File Creation"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Creates a control file for the KRIGRID gridding algorithm.
+
+Parameters: 
+
+       KRIGRID.CHAN   - Channel to grid                        
+              .GRID   - Name of New Grid file
+              .ERR    - Name of Error Grid file
+              .INVAR  - Name of Input Variogram file
+              .OUTVAR - Name of Output Variogram file
+              .CS     - Cell size
+              .XY     - Xmin,Ymin,Xmax,Ymax
+              .LOGOPT - Log option
+              .LOGMIN - Log minimum
+              .DSF    - Low-pass desampling factor
+              .BKD    - Blanking distance
+              .RT     - Remove trend
+              .MODEL  - Variogram model
+              .POWER  - Power 
+              .RS     - Range/Slope
+              .NUG    - Nugget
+              .SILL   - Sill
+             
+"
+
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sCtl;          // Name of new control file
+string(STR_DEFAULT) sCS;          //    .
+string(STR_DEFAULT_LONG) sXY;          //    .
+string(STR_DEFAULT) sLogOpt;      //    .
+string(STR_DEFAULT) sLogMin;      //    .
+string(STR_DEFAULT) sDSF;         //    .
+string(STR_DEFAULT) sBKD;         // optional parameter settings
+string(STR_DEFAULT) sRT, sAliasFlag;          //    .
+string(STR_DEFAULT) sModel;       //    .
+string(STR_DEFAULT) sPower;       //    .
+string(STR_DEFAULT) sRS;          //    .
+string(STR_DEFAULT) sNug;         //    .
+string(STR_DEFAULT) sSill;        //    .
+
+WA          WA_con;       // Handle to write to control file
+string(STR_DEFAULT_LONG) sText;        // Line of text to write to control file
+                                           
+
+//==========================================================================
+//                           KRIGRID CODE
+//===========================================================================
+
+{
+
+   GetString_SYS("DHKRIGRIDCTL", "CONTROL_FILE", sCtl);
+   if(!iStrlen_STR(sCtl)) {
+      SetString_SYS("DHKRIGRIDCTL", "CONTROL_FILE", "_dhkrigrid.con");
+      GetString_SYS("DHKRIGRIDCTL", "CONTROL_FILE", sCtl);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("KRIGRID","CS",sCS);     
+   GetString_SYS("KRIGRID","XY",sXY);     
+   GetString_SYS("KRIGRID","LOGOPT",sLogOpt);     
+   if (iStrcmp_STR(sLogOpt,_n("log-linear"),0)==0)
+       Strcpy_STR(sLogOpt,"-1");
+   else if (iStrcmp_STR(sLogOpt,_n("log-log"),0)==0)
+       Strcpy_STR(sLogOpt,"1");
+   else if (iStrcmp_STR(sLogOpt,"-2",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"-1",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"0",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"1",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"2",STR_CASE_TOLERANT)!=0)
+      Strcpy_STR(sLogOpt,"0");
+   GetString_SYS("KRIGRID","LOGMIN",sLogMin);     
+   GetString_SYS("KRIGRID","DSF",sDSF);     
+   GetString_SYS("KRIGRID","BKD",sBKD);     
+   GetString_SYS("KRIGRID","RT",sRT);     
+   GetString_SYS("KRIGRID","RT_ALIAS",sAliasFlag);
+      if (iStrcmp_STR(sRT,_n("Yes"),0)==0 || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))
+         Strcpy_STR(sRT,"1");
+      else 
+         Strcpy_STR(sRT,"0");
+   GetString_SYS("KRIGRID","MODEL",sModel);
+      if (iStrcmp_STR(sModel,_n("spherical"),0)==0)
+         Strcpy_STR(sModel,"2");
+      else if (iStrcmp_STR(sModel,_n("Gaussian"),0)==0)
+         Strcpy_STR(sModel,"3");
+      else if (iStrcmp_STR(sModel,_n("exponential"),0)==0)
+         Strcpy_STR(sModel,"4");
+      else if (iStrcmp_STR(sModel,_n("user-defined"),0)==0)
+         Strcpy_STR(sModel,"0");
+      else 
+         Strcpy_STR(sModel,"1");
+   GetString_SYS("KRIGRID","POWER",sPower);     
+   GetString_SYS("KRIGRID","RS",sRS);     
+   GetString_SYS("KRIGRID","NUG",sNug);     
+   GetString_SYS("KRIGRID","SILL",sSill);     
+   
+      
+   // --- Write control file ---
+
+   WA_con=Create_WA(sCtl,0);
+
+   Puts_WA(WA_con,sCS);
+   NewLine_WA(WA_con);
+
+   Puts_WA(WA_con,sXY);
+   NewLine_WA(WA_con);
+
+   Strcpy_STR(sText,",,,");
+   Strcat_STR(sText,sLogOpt);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLogMin);
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+   
+   Strcpy_STR(sText,sDSF);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sBKD);
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+   
+   Strcpy_STR(sText,sModel);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sNug);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sRS);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sSill);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sPower);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sRT);
+   Puts_WA(WA_con,sText);
+
+   Destroy_WA(WA_con);
+   
+   
+}
+

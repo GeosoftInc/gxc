@@ -1,0 +1,226 @@
+//===========================================================================
+NAME          = "Add a grid to a map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+    VSCTIMG1.NEW      - 1 to create a new map, 0 to use current map
+            .GRID     - grid name
+            .COLOR    - color table name (.TBL .ZON .ITR or .AGG).
+                        Default is the default table file defined in Geosoft.ini.
+                        If undefined in ini file, Colour.tbl is used.
+            .ZONE     - zoning method:  0 - default
+                                        1 - linear
+                                        5 - log-linear
+                                        2 - normal distribution
+                                        3 - histogram equalization
+                                        4 - shaded relief
+            .CONTOUR  - contour interval
+            .REG      - 0 default registration from image
+                        1 fit to user defined area (interactive only)
+
+"
+// Revision History:
+// v6.0:   Replaced iStrMin_STR() by iStrMin2_STR() to keep sColor string unchanged.
+// v5.1.8: New GX.
+//===========================================================================
+
+RESOURCE = "VSCTIMG1.gr"
+#include "VSCTIMG1.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(GS_MAX_PATH) sGrid,sColor,sMap,sGridName;
+string(STR_GROUP)  sAgg;
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+DGW         Diag;
+AGG         Agg;
+int         iZone,iReg,iNew;
+real        rContour;
+real        rMinX,rMaxX,rMinY,rMaxY;
+
+
+//===========================================================================
+//                           VSCTIMG1 CODE
+//===========================================================================
+
+{
+	// --- Ensure we have a map and that we are not drawing on grid documents ---
+   
+   if (iRunGX_SYS("sclgrd") == -1) 
+      Cancel_SYS();
+	  
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("VSCTIMG1");
+      
+      
+      // --- set current map status ---
+      
+      if (iHaveCurrent_EMAP())
+         SetInfo_DGW(Diag,_VSCTIMG1_0,DGW_LISTALIAS,"0");     
+      else   
+         SetInfo_DGW(Diag,_VSCTIMG1_0,DGW_LISTALIAS,"1");     
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_VSCTIMG1_1,DGW_FILEPATH, "VSCTIMG1","GRID");     
+      SetInfoSYS_DGW(Diag,_VSCTIMG1_2,DGW_FILEPATH, "VSCTIMG1","COLOR");     
+      SetInfoSYS_DGW(Diag,_VSCTIMG1_3,DGW_LISTALIAS,"VSCTIMG1","ZONE");     
+      SetInfoSYS_DGW(Diag,_VSCTIMG1_4,DGW_TEXT,     "VSCTIMG1","CONTOUR");     
+      SetInfoSYS_DGW(Diag,_VSCTIMG1_5,DGW_LISTALIAS,"VSCTIMG1","REG");     
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_VSCTIMG1_0,DGW_LISTALIAS,"VSCTIMG1","NEW");     
+      GetInfoSYS_DGW(Diag,_VSCTIMG1_1,DGW_FILEPATH, "VSCTIMG1","GRID");     
+      GetInfoSYS_DGW(Diag,_VSCTIMG1_2,DGW_FILEPATH, "VSCTIMG1","COLOR");     
+      GetInfoSYS_DGW(Diag,_VSCTIMG1_3,DGW_LISTALIAS,"VSCTIMG1","ZONE");     
+      GetInfoSYS_DGW(Diag,_VSCTIMG1_4,DGW_TEXT,     "VSCTIMG1","CONTOUR");     
+      GetInfoSYS_DGW(Diag,_VSCTIMG1_5,DGW_LISTALIAS,"VSCTIMG1","REG");     
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VSCTIMG1","GRID",sGrid);
+   GetString_SYS("VSCTIMG1","COLOR",sColor);
+   iZone = iGetInt_SYS("VSCTIMG1","ZONE");
+   iReg  = iGetInt_SYS("VSCTIMG1","REG");
+   if (iExistReal_SYS("VSCTIMG1","CONTOUR"))
+      rContour = rGetReal_SYS("VSCTIMG1","CONTOUR");
+   else
+      rContour = rDUMMY;
+
+
+   // --- Verify Color table file ---
+
+   if (iStrMin2_STR(sColor) == 0)                             // undefined in dialogue
+      if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor) == 1)  // undefined in parm block
+          Strcpy_STR(sColor,"colour.tbl");                   // hardwire to 
+
+
+   // --- create a new map if required ---
+
+   iNew = iGetInt_SYS("VSCTIMG1","NEW");
+   
+   if (iNew!=0) 
+   {
+      // --- range the grid ---
+   
+      if (iNew==2) SetString_SYS("IMGRANGE","no_clear_warp","100");
+      SetString_SYS("IMGRANGE","FILE",sGrid);
+      if (iRunGX_SYS("imgrange.gx"))
+         Abort_SYS(_("Failed to determine grid range."));
+         
+         
+      // --- run DEFMAP ---
+      
+      FileNamePart_STR(sGrid,sMap,STR_FILE_PART_NAME);
+      Strcat_STR(sMap, ".map");
+      SetString_SYS("DEFMAP","MAP",sMap);
+      if (iRunGX_SYS("defmap.gx")) Cancel_SYS();
+      
+   }
+
+
+   // --- get registration area ---
+
+   if (iInteractive_SYS() && iReg) {
+
+      // --- get the grid location ---
+
+      DisplayMessage_SYS(_("Define Area"),_("Use the mouse to define an area on the map in which to place the image"));
+
+      iSetCurrentView_EMAP(Current_EMAP(),"*Data");
+      rMinX = rMinY = rMaxX = rMaxY = 0.0;
+      if(iGetBox_EMAP(Current_EMAP(), _("Define the area in which to place the image"),rMinX,rMinY,rMaxX,rMaxY))
+         Cancel_SYS();
+
+   } else
+      iReg = 0;
+
+
+   // --- get the map ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+
+   // --- create aggregate ---
+
+   Agg = Create_AGG();
+
+
+   // --- add grid to the agg ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Layer"),1);
+   LayerIMG_AGG(Agg,sGrid,iZone,sColor,rContour);
+   Progress_SYS(0);
+
+
+   // --- open data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   GroupClipMode_MVIEW(View,TRUE);
+
+
+   // --- put the AGG in the view ---
+
+   Strcpy_STR(sAgg,"AGG_");
+   FileNamePart_STR(sGrid,sGridName,STR_FILE_PART_NAME);
+   ToLower_STR(sGridName);
+   Strcat_STR(sAgg,sGridName);
+   if (iZone == 4)
+      Strcat_STR(sAgg,"_s");
+   Aggregate_MVIEW(View,Agg,sAgg);
+
+
+   // --- relocate the aggregate ---
+
+   if (iReg)
+      RelocateGroup_MVIEW(View,sAgg,rMinX,rMinY,rMaxX,rMaxY,IMG_RELOCATE_ASPECT);
+
+      
+   // --- add a maker ---
+
+   GroupClipMode_MVIEW(View,FALSE);
+   StartGroup_MVIEW(View,sAgg,MVIEW_GROUP_APPEND);
+   SetString_SYS("VSCTIMG1","NEW","0");
+   Maker_MVIEW(View,0,1,"vsctimg1",MAKER_GX,_("New image..."),"VSCTIMG1;");
+
+
+   // --- done ---
+
+   Destroy_AGG(Agg);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+
+}

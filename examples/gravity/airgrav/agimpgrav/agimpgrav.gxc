@@ -1,0 +1,323 @@
+//===========================================================================
+NAME          = "Import gravity file into a new database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav/Import"
+
+DESCRIPTION   = "
+
+   AGIMPGRAV.FILE       Name of the data file(s) to import
+            .DATE       Survey date
+         
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.4.0:  Time channel units set to "hours".
+// v6.3:    New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "agimpgrav.gr"
+#include "agimpgrav.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+WA          hWA;              
+EXP         Exp;              
+DB_SYMB     Line,YearCh,DateCh,HourCh,TimeCh;
+VV          hVVd;
+
+int         i,iLen,iFiles,iInt;
+real        rDate,rProg;
+
+string(STR_MULTI_FILE)  sFiles,sTmps,sImportTemplate;
+string(STR_FILE)        sFile,sDatabase;
+string(STR_DEFAULT)     sLine,sName,sDate,sTemp,sLine2;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	// --- Set up properly? ---
+
+	if (_iFindPathEx_SYS("ag_impgrav.i3", FIND_GEOSOFT, GEO_DIRECTORY_USER_ETC, sImportTemplate) != 0)
+		Abort_SYS("Unable to locate the import template file \"ag_impgrav.i3\"");
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGIMPGRAV");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_AGIMPGRAV_0,DGW_FILEPATH,"AGIMPGRAV","FILE");
+      SetInfoSYS_DGW(Diag,_AGIMPGRAV_1,DGW_TEXT,"AGIMPGRAV","DATE");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_AGIMPGRAV_0,DGW_FILEPATH,"AGIMPGRAV","FILE");
+      GetInfoSYS_DGW(Diag,_AGIMPGRAV_1,DGW_TEXT,"AGIMPGRAV","DATE");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get parameter ---
+
+   GetString_SYS("AGIMPGRAV","FILE",sFiles);
+   Strcpy_STR(sTmps,sFiles);
+
+   iFiles = iCountTokens_STR(sTmps,"|");
+   GetMFile_STR(sTmps,sFile,0);        
+  
+   if (!iFileExist_SYS(sFile)) {
+      Printf_STR(sTemp, sizeof(sTemp), _("%s does not exist!"), sFile);
+      Abort_SYS(sTemp);
+   }
+
+      
+   GetString_SYS("AGIMPGRAV", "DATE", sDate);
+   rDate = rScanDate_STR(sDate, DATE_FORMAT_YYYYMMDD);
+   //if (rDate == rDUMMY)      
+   //   rDate = rScanDate_STR(sDate,DATE_FORMAT_MMDDYYYY);
+   //if (rDate == rDUMMY) 
+   //   rDate = rScanDate_STR(sDate,DATE_FORMAT_DDMMYYYY);
+   if (rDate == rDUMMY)
+      Abort_SYS(_("Invalid Survey date, please provide the date string in format YYYY/MM/DD"));
+
+      
+   // --- database name ---
+         
+   FileNamePart_STR(sFile,sName,STR_FILE_PART_NAME);
+   Strcpy_STR(sDatabase,sName);
+   Strcat_STR(sDatabase,".gdb");
+   if (iFileExist_SYS(sDatabase) && iInteractive_SYS())
+      if (!iDisplayQuestion_SYS(sDatabase,_("Database exists.  Overwrite?")))
+         Cancel_SYS();
+         
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing raw gravity data"),1);
+
+
+   // --- create/load the new database ---
+
+   if (iFileExist_SYS(sDatabase))  {
+      if (iLoaded_EDB(sDatabase)) UnLoad_EDB(sDatabase);
+      iDeleteFile_SYS(sDatabase);
+   }
+   Create_DB(sDatabase,10,50,10+50+20,10,100,"SUPER","");
+   EData = Load_EDB(sDatabase);
+   Data = Lock_EDB(EData);
+   
+   Strcpy_STR(sLine,_n("LGravData"));
+
+
+   // --- Import ---
+
+   iInt = iInteractive_SYS();
+
+   for(i=0; i<iFiles; i++) {
+
+      rProg = 100.0*( (real)i / (real)iFiles );
+      ProgUpdate_SYS((int)rProg);
+
+      GetMFile_STR(sTmps,sFile,i);
+              
+      if(i==0) {
+        
+         hWA = Create_WA ("ImportGrav.log",WA_NEW);
+         ImportBIN2_DU(Data,sFile,sImportTemplate,sLine,iDUMMY,rDate,hWA);
+      
+      } else {
+
+         hWA = Create_WA ("ImportGrav.log",WA_APPEND);
+         ImportBIN3_DU(Data,sFile,sImportTemplate,sLine2,iDUMMY,rDate,hWA);
+
+         SetString_SYS("MERGLINE","LINE1",sLine);
+         SetString_SYS("MERGLINE","LINE2",sLine2);
+         SetString_SYS("MERGLINE","OUT",sLine);
+
+         SetInteractive_SYS(0);       
+         UnLock_EDB(EData);
+         if (iRunGX_SYS("MERGLINE.GX") != 0)  {
+            SetInteractive_SYS(1);       
+            Abort_SYS(_("Failure to merge files."));
+         }
+         SetInteractive_SYS(iInt);
+         Data = Lock_EDB(EData);
+   
+         Line = FindSymb_DB(Data,sLine2,DB_SYMB_LINE);
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data,Line);
+      }
+      if(hWA)  Destroy_WA(hWA);
+   }
+   UnLock_EDB(EData);
+
+   
+   // --- Display Errors ---
+
+   if (iInteractive_SYS()) {
+      
+      if (iFileSize_SYS("import_error.log")>3) // 3 characters could be UTF-8 BOM only
+      {
+
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE","import_error.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }
+      
+      if (iFileSize_SYS("ImportGrav.log") > 3) // 3 characters could be UTF-8 BOM only
+      {
+         
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE","ImportGrav.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }
+
+   } 
+
+
+   // --- Delete line 0 and display channels (so math expression can be used) ---
+   
+   DelLine0_EDB(EData);
+   UnLoadAllChans_EDB(EData);
+   
+   Data = Lock_EDB(EData);
+   Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);
+   LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Create "Date" channel and calculate geodate ---
+
+   if ((FindChan_DB(Data,"Year") != NULLSYMB) && (FindChan_DB(Data,"Day") != NULLSYMB)) {
+      
+      YearCh = FindChan_DB(Data,"Year");
+      LockSymb_DB(Data,YearCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      DateCh = DupSymb_DB(Data,YearCh,"Date");        
+      
+
+      hVVd = Create_VV(REAL,0);
+      iLen = iGetChannelLength_DB(Data,Line,YearCh);
+
+      SetLen_VV(hVVd,iLen); 
+      FillReal_VV(hVVd,rDate);
+
+      PutChanVV_DB(Data,Line,DateCh,hVVd);
+      Destroy_VV( hVVd );
+
+
+      // --- Create the Expression ---
+      //Exp = Create_EXP(Data,"Date=Year+DATE_FROM_LONG(Day);",2048);
+      // --- Apply the expression ---
+      //Math_DU(Data,Line,Exp);
+      //Destroy_EXP(Exp);
+      //LockSymb_DB(Data,DateCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+      // --- Set "Date" channel format ---
+
+      SetChanFormat_DB(Data,DateCh,DB_CHAN_FORMAT_DATE);
+      SetChanWidth_DB(Data,DateCh,12);
+   
+      iLen = iGetChannelLength_DB(Data,Line,DateCh);
+      i = 0;
+      while (i<iLen)  {
+         rDate = rGetChanReal_DB(Data,Line,DateCh,i);
+         if(rDate!=rDUMMY) break;      
+         i++;
+      }
+      if(rDate!=rDUMMY)
+         SetLineDate_DB(Data,Line,rDate); 
+
+      UnLockSymb_DB(Data,DateCh);
+      UnLockSymb_DB(Data,YearCh);
+   }
+
+   // --- Create "Time" channel and calculate geotime ---
+
+   if ((FindChan_DB(Data,"Hour")!=NULLSYMB) && (FindChan_DB(Data,"Min")!=NULLSYMB) && (FindChan_DB(Data,"Sec")!=NULLSYMB)) {
+      
+      HourCh = FindChan_DB(Data,"Hour");
+      TimeCh = DupSymbNoLock_DB(Data,HourCh,"Time");        
+      
+
+      // --- Create the Expression ---
+
+      Exp = Create_EXP(Data,"Time=Hour+Min/60.0+Sec/3600.0;",2048);
+
+
+      // --- Apply the expression ---
+
+      Math_DU(Data,Line,Exp);
+
+      Destroy_EXP(Exp);
+
+
+      // --- Set "Time" channel format ---
+
+      LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      SetChanFormat_DB(Data,TimeCh,DB_CHAN_FORMAT_TIME);
+      SetChanWidth_DB(Data,TimeCh,12);
+      SetChanUnit_DB(Data,TimeCh,_("hours"));
+      UnLockSymb_DB(Data,TimeCh);
+   }
+
+
+
+   // --- Release database to EDB ---
+   
+   UnLockSymb_DB(Data,Line);
+   UnLock_EDB(EData);
+   
+   
+   // --- Display channels ---
+   
+   UnLoadAllChans_EDB(EData);
+   LoadChan_EDB(EData,"Date");
+   LoadChan_EDB(EData,"Time");
+   LoadChan_EDB(EData,"Gravity");
+   LoadChan_EDB(EData,"Sprtens");
+   LoadChan_EDB(EData,"CrossCoupl");
+   LoadChan_EDB(EData,"RawBeam");
+      
+   Progress_SYS(0);
+      
+}

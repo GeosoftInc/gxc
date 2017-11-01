@@ -1,0 +1,333 @@
+//===========================================================================
+NAME          = "Import Point sample information from acQuire database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport"
+
+DESCRIPTION   = ""
+// Revision History:
+// v7.0.2: Set number of decimals in temp database to 4, not 1.
+// v6.1.0: Import to shape file in ArcGIS.
+// v6.0.1: Restored prompt to save changes in selection.
+// v6.0.0: Delete empty line L0.
+// v5.1.7: Added auto-convert negatives option.
+// v5.1.6 Fixed bug in core code creating Wholeplot-type channels for point 
+//        databases.
+// v5.1.3 Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "acqPoint.gr"
+#include "acqPoint.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW                     Diag;             // Dialogue handle
+EDB                     EData;            // Database handle
+DB                      Data;             // Database handle
+ACQUIRE                 hAcquire;         // Acquire Handle
+DB_SYMB                 Line, Ch;
+LST                     List;
+LST                     FileList;
+LST                     ChLST;
+
+string(STR_FILE)        sCurrentName;
+string(STR_FILE)        sName, sLine;
+string(STR_FILE)        sSHP;
+string(STR_FILE)        sTmpName;
+string(STR_FILE)        sParFile, sParTemp;
+string(STR_DEFAULT)     sMsg;
+string(STR_DB_SYMBOL)   sChan;
+string(64)              sLicClass;
+
+int                     i, iArcGIS, iLoadToCurrent,iError;
+int                     iBlob, iLine, iChan;
+int                     iImportNegatives;
+int                     iNCh, iType, iDec, iWidth;
+
+CRC                     CRC1, CRC2;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+#define MESSAGE_0 _("Import Database")
+#define MESSAGE_1 _("Import acQuire Point Sample data into the current Geosoft database ?")
+
+{     
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, _n("ArcGIS"), STR_CASE_TOLERANT) == 0;
+   
+   // ---  Load to the current database ?
+   
+   iLoadToCurrent = FALSE;
+
+   if (!iArcGIS)
+   {
+      if (iHaveCurrent_EDB() && iInteractive_SYS()) 
+      {
+         // --- Use Current Database ? ---
+   
+         if ( iDisplayQuestion_SYS( MESSAGE_0, MESSAGE_1 ) == 0) 
+         {
+            iLoadToCurrent = FALSE;
+         } else {
+            iLoadToCurrent = TRUE;
+         } 
+
+      
+         // ---  name of the current gdb
+      
+         EData = Current_EDB();
+         Data = Lock_EDB( EData );
+         GetName_DB( Data, DB_NAME_FILE, sCurrentName );
+         AbsoluteFileName_SYS( sCurrentName, sCurrentName );
+         UnLock_EDB(EData);
+      } 
+   }
+   // --- Run Dialog ---
+
+   if (iInteractive_SYS())
+   {   
+      if (!iArcGIS)
+      {
+         Diag = Create_DGW( "ACQIMPORT" );
+           
+         SetInfoSYS_DGW( Diag, _ACQIMPORT_0, DGW_FILEPATH, "ACQIMPORT", "FILE" );
+         SetInfoSYS_DGW( Diag, _ACQIMPORT_1, DGW_FILEPATH, "ACQIMPORT", "PARFILE2" );
+         SetInfoSYS_DGW( Diag, _ACQIMPORT_2, DGW_LISTALIAS, "ACQIMPORT", "CONVERT_NEGATIVES" );
+   
+         if ( iLoadToCurrent ) SetInfo_DGW( Diag, _ACQIMPORT_0, DGW_FILEPATH, sCurrentName );
+
+         i = iRunDialogue_DGW(Diag);
+         if ( i == -1) Cancel_SYS();
+   
+         GetInfoSYS_DGW( Diag, _ACQIMPORT_0, DGW_FILEPATH, "ACQIMPORT", "FILE" );
+         GetInfoSYS_DGW( Diag, _ACQIMPORT_1, DGW_FILEPATH, "ACQIMPORT", "PARFILE2" );
+         GetInfoSYS_DGW( Diag, _ACQIMPORT_2, DGW_LISTALIAS, "ACQIMPORT", "CONVERT_NEGATIVES" );
+
+         Destroy_DGW(Diag);	   
+      } else {
+         Diag = Create_DGW( "ACQIMPORT_ESRI" );
+           
+         SetInfoSYS_DGW( Diag, _ACQIMPORT_ESRI_0, DGW_FILEPATH, "ACQIMPORT", "FILE" );
+         SetInfoSYS_DGW( Diag, _ACQIMPORT_ESRI_1, DGW_FILEPATH, "ACQIMPORT", "PARFILE2" );
+         SetInfoSYS_DGW( Diag, _ACQIMPORT_ESRI_2, DGW_LISTALIAS, "ACQIMPORT", "CONVERT_NEGATIVES" );
+   
+         i = iRunDialogue_DGW(Diag);
+         if ( i == -1) Cancel_SYS();
+   
+         GetInfoSYS_DGW( Diag, _ACQIMPORT_ESRI_0, DGW_FILEPATH, "ACQIMPORT", "FILE" );
+         GetInfoSYS_DGW( Diag, _ACQIMPORT_ESRI_1, DGW_FILEPATH, "ACQIMPORT", "PARFILE2" );
+         GetInfoSYS_DGW( Diag, _ACQIMPORT_ESRI_2, DGW_LISTALIAS, "ACQIMPORT", "CONVERT_NEGATIVES" );
+
+         Destroy_DGW(Diag);	   
+      }
+   }
+   
+   
+   // --- Retrieve Parameters ---
+   
+   GetString_SYS( "ACQIMPORT", "FILE", sName );
+   GetString_SYS( "ACQIMPORT", "PARFILE2", sParFile );
+   iImportNegatives = iGetInt_SYS("ACQIMPORT","CONVERT_NEGATIVES");
+   
+   
+   // --- Make Names Absolute ---
+   
+   AbsoluteFileName_SYS( sName, sName );
+   AbsoluteFileName_SYS( sParFile, sParFile );
+   
+   // --- Create New Database ---
+   
+   iLine = 500;
+   iChan = 500;
+   iBlob = 10000;
+
+   if (!iArcGIS)   
+   {
+      // ---  In case the currently loaded GDB was re-selected
+   
+      UnLoadVerify_EDB( sName, EDB_UNLOAD_NO_PROMPT );
+      if ( iFileExist_SYS( sName ) )  iDeleteFile_SYS( sName );
+   
+   
+      Create_DB(sName, iLine, iChan, iBlob, 10, 100, "SUPER", "" );
+
+
+      // --- Open the Database ---
+
+      EData = Load_EDB ( sName );
+      Data = Lock_EDB( EData );
+   } else {
+      TempFileExt_SYS("gdb", sTmpName);
+      Create_DB(sTmpName, iLine, iChan, iBlob, 10, 100, "SUPER", "" );
+      Data = Open_DB(sTmpName, "SUPER", "");
+   }
+
+   // --- Create ACQIO object ---
+
+   hAcquire = Create_ACQUIRE();
+   
+   
+   // --- Run the Selection Tool ---
+   
+   if (iInteractive_SYS())  {
+   
+      // --- Save all selection changes to a temporary file ---
+      
+      Strcpy_STR(sParTemp, "_acqpoint.sel");
+      if(iFileExist_SYS(sParTemp))
+         iDeleteFile_SYS(sParTemp);
+      
+      CRC1 = (CRC)0;
+      if(iFileExist_SYS(sParFile)) {   
+         if(iCopyFile_SYS(sParFile, sParTemp))
+            Abort_SYS(_("Unable to make temp copy of the parameter file."));
+         CRC1 = CRCFile_SYS(sParTemp);
+      }                        
+                        
+      // --- Run the selection tool ---
+                              
+      if(iSelectionTool_ACQUIRE(hAcquire,sParTemp,ACQUIRE_SEL_POINT)==0)
+      {
+         
+         // --- Has the parameter file changed? ---
+         
+         CRC2 = CRCFile_SYS(sParTemp);
+         if(CRC1 != CRC2) {
+
+            if(CRC1==(CRC)0) 
+               Strcat_STR(sMsg, _("Save parameters?"));
+            else
+               Strcat_STR(sMsg, _("Save modified parameters?"));
+            if(iDisplayQuestion_SYS(_("acQuire Selections"), sMsg))
+            {
+               if(!iFileSave_GUI(_("Save acQuire parameters"), FILE_FILTER_SEL, sParFile, sParFile))
+               {
+                  if(iCopyFile_SYS(sParTemp, sParFile))
+                     Abort_SYS(_("Unable to save the parameter file."));            
+               }
+            }
+         }
+      }
+      else if(CRC1==(CRC)0) {
+         Abort_SYS(_("No acQuire selection parameter file was specified or saved; cancelling import."));
+      }
+      
+      
+      // --- Use the temporary file name from now on. If the user cancelled out
+      //     of the selection tool, then the original settings are still saved in it. ---
+      
+      Strcpy_STR(sParFile, sParTemp);
+   }
+   
+      
+   // --- Do the Import ---
+   
+   iError = iImportPoint_ACQUIRE( hAcquire, Data, sParFile, iImportNegatives );
+   if (iError)  Abort_SYS( _("acQuire: Import Failed") );
+   
+
+   // --- Delete Empty Channels ---
+
+   DeleteEmptyChan_ACQUIRE(hAcquire, Data);
+
+
+   // --- Close Acquire ---
+   
+   Destroy_ACQUIRE(hAcquire);
+
+   
+   if (!iArcGIS)
+   {
+      // --- Unlock the Database ---
+   
+      UnLock_EDB(EData);
+   
+   
+      // --- Delete empty L0 ---
+   
+      DelLine0_EDB(EData);
+
+
+      // --- Fill in the gaps ---
+
+      UnLoadAllChans_EDB( EData );
+      LoadAllChans_EDB( EData );
+   } 
+   else 
+   {
+      // --- This gets rid of L0 ---
+      Line = FindSymb_DB(Data,"L0",DB_SYMB_LINE);
+      if(Line!=NULLSYMB && iIsLineEmpty_DB(Data, Line)) {
+         LockSymb_DB(Data, Line, DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data, Line);
+      }
+
+
+		// --- Reset the number of decimal places in all numeric fields to at least 3 to preserve
+		//     accuracy ---
+		
+		ChLST = Create_LST(STR_DB_SYMBOL+20);
+		ChanLST_DB(Data, ChLST);
+		
+		iNCh = iSize_LST(ChLST);
+		for(i=0;i<iNCh;i++)
+		{
+			GetSymbItem_LST(ChLST, i, sChan, Ch);
+			LOCK_RW(Data, Ch);
+			
+			iType = iGetChanType_DB(Data, Ch);
+			
+			if(iType == GS_FLOAT || iType == GS_DOUBLE)
+			{			
+				iDec = iGetChanDecimal_DB(Data, Ch);
+				if(iDec<3)
+					SetChanDecimal_DB(Data, Ch, 3);
+					
+				iWidth = iGetChanWidth_DB(Data, Ch);
+				if(iWidth < 12)
+					SetChanWidth_DB(Data, Ch, 12);
+			}
+			UNLOCK(Data, Ch);
+		}
+		
+		
+      // --- Export all to shape ---
+      Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+      List = Create_LST(STR_FILE);
+      SelectedLineLST_DB(Data, List);
+      GetItem_LST(List, 0, 0, sLine);
+
+      FileList = Create_LST(STR_FILE);
+
+      ExportSHP_DU(Data,sLine,(VV)0,DU_CHANNELS_ALL,DU_LINEOUT_SINGLE,sName,FileList);
+      Destroy_DB(Data);
+      iDeleteFile_SYS(sTmpName);
+
+      // --- Display shape file(s) ---
+
+      for (i=0; i< iSize_LST(FileList); i++)
+	   {
+         GetItem_LST(FileList, 0, i, sSHP);
+         LoadShape_ARCMAP(sSHP, "", "");
+      }
+   }   
+
+   // --- Remove the temporary selection file ---
+      
+   if(iFileExist_SYS(sParTemp))
+      iDeleteFile_SYS(sParTemp);
+  
+}

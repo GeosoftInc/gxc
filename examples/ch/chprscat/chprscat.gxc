@@ -1,0 +1,621 @@
+//===========================================================================
+NAME          = "Print Scatter Plot on Map"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+          
+           Interactive/Batch Parameters:
+             
+      CHPRSCAT.TITLE       Scatter Plot Title
+              .WIDTH       Box size (width and height)
+              .X           X location of bottom left corner of boxes
+              .Y           Y location of bottom left corner of boxes
+
+           Additional Batch parameters: 
+
+              .DB          Database
+
+              .HCHAN       Channel/Expression to plot on the horizontal axis
+              .VCHAN       Channel/Expression to plot on the vertical axis
+              .MCHAN       Channel to use as mask for data selection
+              .CCHAN       Channel to use for colour reference (numeric)
+              .SCHAN       Channel to use for classified symbols (string)
+              .ITR         Colour zone file
+
+              .COLTYPE     0: Use SYMCOL value for symbol colour
+                           1: Use ITR and CCHAN values for symbol colour
+                           2: Use CLASSCHAN values for classified symbols
+              
+              .HUNIT       Units for horizontal axis
+              .VUNIT       Units for vertical axis
+
+              .HMIN        Minimum value on the horizontal axis
+              .HMAX        Maximum value on the horizontal axis
+              .VMIN        Minimum value on the vertical axis
+              .VMAX        Maximum value on the vertical axis
+
+              .LHLIN       Use linear scaling for horizontal channel?
+              .LVLIN       Use linear scaling for vertical channel?
+
+				  .SYMFONT     Symbol font (Default: GFN Symbols Medium)
+				  .SYMBNUMBER  Symbol number (Default 4 - square in GFN Symbols)
+              .SYMSIZE     Size of plotted symbols in mm.
+              .SYMANGLE    Symbol rotation angle degrees CCW.
+              .SYMCOL      Colour of the fixed colour symbols.
+              .SYMFILL     Fill Colour of the fixed colour symbols.
+              .MASKCOL     Colour of the mask channel symbols.
+
+              .OVERLAY     Name of plot overlay (\"\" for none)
+              .TEMPLATE    Name of plot template (must be set each time).
+              
+				  .FIXZONEEDGECOLOR  Maintain the edge colour, just vary the fill for zone-coloured symbols
+				  .CLASS_FILE  Symbol class (thematic pattern) CSV file.
+              
+              .NEWMAP  : 0: Plot to current map 1: Plot to new map
+              .XPOS    : Bottom left corner
+              .YPOS    : Bottom left corner
+                            
+"
+// Revision History:
+// v8.1.0: Added symbol font, number and angle as non-interactive parameters
+// v8.1.0: Classified symbols now use a class file.
+// v6.4.2: Fixed bug with bad characters in view names.
+// v6.4.0: Upgraded to accept channel expressions.
+// v6.3.0: Now creates its own view with user warp to give true X,Y values.
+//         Plots to a new or current map.
+//         Passes in Line-Fid info for linking, plot overlay.
+//         Classified symbols.
+//         Removed range variables and plotting.
+// v6.0.0: Fixed map locking bug when getting locations. Make map current 
+//         active object.
+// v5.1.6: Mask channel colour option added.
+//         Zone colour channel and file options added.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE="chprscat.gr"
+#include "chprscat.grh"
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EMAP      EMap;
+MAP       Map;
+MVIEW     View;
+EDB       EData;
+DGW       Diag;       // Dialogue handle
+DB        Data;        // Database handle
+DB_SYMB   MCh, CCh, SCh, Line;
+VV        hX_VV, hY_VV, hMask_VV, hColor_VV, hClass_VV;
+VV        hTmpX_VV, hTmpY_VV, hTmpM_VV, hTmpC_VV, hTmpS_VV;
+VV        hLine_VV, hFid_VV, hVVt;
+ITR       hITR;
+IPJ       hIPJ;
+
+string(STR_DB_SYMBOL) sMChan, sCChan, sSChan;
+string(STR_DEFAULT) sHUnit, sVUnit, sTitle, sOverlay, sTemplate, sStage;
+string(STR_FILE) sDB, sMap;
+string(STR_DEFAULT_LONG) sLabel,sTemp,sMsg;
+string(STR_DEFAULT_LONG) sHExp, sVExp;
+string(STR_FILE) sITR, sSymFont, sClassFile;
+string(STR_VIEW)  sViewName;
+string(STR_VIEW_GROUP) sGrpName;
+real      rX1, rY1, rWidth, rHeight, rFidStart, rFidIncr;
+real      rHMin, rHMax, rVMin, rVMax;
+real      rSymbolSize, rSymbolAngle, rBoxH, rBoxW;
+real      rScaleXMM, rScaleYMM, rX, rY, rXPos, rYPos;
+int       i, iMaskChan, iLine, iTotLines, iN, iN2, iNewMap;
+int       iHLin, iVLin;
+int       iMaskCol, iSymbCol, iSymbFill, iAnnot, iSymNum, iColType;
+int       iUseClassFile, iFixZoneEdgeColor;
+ 
+//===========================================================================
+//                            SCATTER UTIL CODE
+//===========================================================================
+
+{
+   // --- Get Database ---
+
+   GetString_SYS("CHPRSCAT","DB",sDB);
+   EData = Load_EDB(sDB);
+   Data = Lock_EDB(EData);
+      
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHPRSCAT");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CHPRSCAT_0,DGW_TEXT,"CHPRSCAT","TITLE");
+      SetInfoSYS_DGW(Diag,_CHPRSCAT_1,DGW_TEXT,"CHPRSCAT","WIDTH");
+      SetInfoSYS_DGW(Diag,_CHPRSCAT_2,DGW_TEXT,"CHPRSCAT","SYMSIZE");
+      SetInfoSYS_DGW(Diag,_CHPRSCAT_3,DGW_LISTALIAS,"CHPRSCAT","NEWMAP");
+
+      i = iRunDialogue_DGW(Diag);
+      if(i==-1)   Cancel_SYS(); 
+
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CHPRSCAT_0,DGW_TEXT,"CHPRSCAT","TITLE");
+      GetInfoSYS_DGW(Diag,_CHPRSCAT_1,DGW_TEXT,"CHPRSCAT","WIDTH");
+      GetInfoSYS_DGW(Diag,_CHPRSCAT_2,DGW_TEXT,"CHPRSCAT","SYMSIZE");
+      GetInfoSYS_DGW(Diag,_CHPRSCAT_3,DGW_LISTALIAS,"CHPRSCAT","NEWMAP");
+
+   }
+
+   // --- Get Dialog Parameters ---
+
+   GetString_SYS("CHPRSCAT","TITLE",sTitle);
+
+   rWidth   = rGetReal_SYS("CHPRSCAT","WIDTH");
+   rHeight = rWidth;
+   rX1  = 0.0;
+   rY1  = 0.0;
+   rSymbolSize = rGetReal_SYS("CHPRSCAT","SYMSIZE");
+   iNewMap = iGetInt_SYS("CHPRSCAT", "NEWMAP");
+   if(iNewMap!=1) iNewMap = 0;
+   
+
+   // --- Validate parameters ---
+
+   if (rWidth <= 0.0)
+      Abort_SYS(_("Scatter plot size (width and height) must be greater than 0.0"));
+   if(rSymbolSize<=0.0)
+      rSymbolSize = 1.0;
+
+
+   // --- Get Non-Dialog Parameters ---
+
+   GetString_SYS("CHPRSCAT","HCHAN",sHExp);
+   GetString_SYS("CHPRSCAT","VCHAN",sVExp);
+   GetString_SYS("CHPRSCAT","MCHAN",sMChan);
+   GetString_SYS("CHPRSCAT","CCHAN",sCChan);
+   GetString_SYS("CHPRSCAT","SCHAN",sSChan);  
+
+   GetString_SYS("CHPRSCAT","ITR",sITR);
+   iMaskCol = iGetInt_SYS("CHPRSCAT","MASKCOL");
+   if(iMaskCol==iDUMMY) iMaskCol = iColor_MVIEW("R191G191B191");  // default gray
+   iSymbCol = iGetInt_SYS("CHPRSCAT","SYMCOL");
+   if(iSymbCol==iDUMMY) iSymbCol = iColor_MVIEW("R");  // default red
+   
+   iColType = iGetInt_SYS("CHPRSCAT","COLTYPE");
+     
+   GetString_SYS("CHPRSCAT","HUNIT",sHUnit);
+   GetString_SYS("CHPRSCAT","VUNIT",sVUnit);
+
+   rHMin = rGetReal_SYS("CHPRSCAT","HMIN");
+   rHMax = rGetReal_SYS("CHPRSCAT","HMAX");
+   rVMin = rGetReal_SYS("CHPRSCAT","VMIN");
+   rVMax = rGetReal_SYS("CHPRSCAT","VMAX");
+   
+   iHLin = iGetInt_SYS("CHPRSCAT","LHLIN");
+   iVLin = iGetInt_SYS("CHPRSCAT","LVLIN");
+
+   GetString_SYS("CHPRSCAT","OVERLAY",sOverlay);
+
+	iUseClassFile = 0;
+   GetString_SYS("CHPRSCAT","CLASSFILE",sClassFile);
+	if(iStrlen_STR(sClassFile) && iFileExist_SYS(sClassFile)==1)
+		iUseClassFile = 1;
+	SetString_SYS("CHPRSCAT","CLASSFILE", "");	// force setting every time
+
+	iFixZoneEdgeColor = iGetInt_SYS("CHPRSCAT", "FIXZONEEDGECOLOR");
+	if(iFixZoneEdgeColor != 0)
+		iFixZoneEdgeColor = 1;
+
+
+	// --- Non-interactive symbol parameters - must define each time ---
+
+	GetString_SYS("CHPRSCAT", "SYMFONT", sSymFont);
+	SetString_SYS("CHPRSCAT", "SYMFONT", "");
+
+	iSymNum = iGetInt_SYS("CHPRSCAT","SYMNUMBER");
+	if(iSymNum == iDUMMY) iSymNum = 4;
+	SetInt_SYS("CHPRSCAT","SYMNUMBER", 4);
+
+	rSymbolAngle = rGetReal_SYS("CHPRSCAT","SYMANGLE");
+	if(rSymbolAngle == rDUMMY) rSymbolAngle = 0.0;
+	SetReal_SYS("CHPRSCAT","SYMANGLE", 0.0);
+
+   iSymbFill = iGetInt_SYS("CHPRSCAT","SYMFILL");
+   if(iSymbFill==iDUMMY) iSymbFill = iSymbCol;  // default same as the symbol colour
+	SetInt_SYS("CHPRSCAT","SYMFILL", iDUMMY);
+
+
+   // --- Get template name, if defined ---
+   
+   GetString_SYS("CHPRSCAT", "TEMPLATE", sTemplate);
+   SetString_SYS("CHPRSCAT", "TEMPLATE", "");      // must set every time
+
+   
+   // -- Data stage is "Raw Data" for now ---
+   
+   Strcpy_STR(sStage, _n("Raw Data Stage"));
+   
+
+   // --- Validate non-dialog parameters ---
+
+   if (rHMin>=rHMax)
+      Abort_SYS(_("Horizontal channel Min Value should not be greater than Max Value"));
+   if (rVMin>=rVMax)
+      Abort_SYS(_("Vertical channel Min Value should not be greater than Max Value"));
+
+   if(!iHLin && (rHMin<=0.0 || rHMax<=0.0)) 
+      Abort_SYS(_("Horizontal channel cannot have a negative bound on a log scale."));
+   
+   if(!iVLin && (rVMin<=0.0 || rVMax<=0.0)) 
+      Abort_SYS(_("Vertical channel cannot have a negative bound on a log scale."));
+      
+
+   
+   
+   // --- Lock the channels ---
+   
+   if (iStrcmp_STR(sMChan,_("None"),STR_CASE_TOLERANT) == 0)
+      
+      iMaskChan = 0;  // no mask channel
+   else   
+      iMaskChan = 1;    // use a mask channel
+
+   if(iMaskChan) {
+      if (!iExistChan_DB(Data,sMChan))  
+         Abort_SYS(_("Input Mask channel does not exist."));
+      MCh = FindChan_DB(Data,sMChan);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
+
+
+   if(iColType==1)
+   {
+      if(!iStrlen_STR(sCChan))
+         Abort_SYS(_("Zone channel not defined."));
+      if(!iStrlen_STR(sITR))
+         Abort_SYS(_("Zone file not defined."));
+
+      if (!iExistChan_DB(Data,sCChan))  
+         Abort_SYS(_("Input Color reference channel does not exist."));
+      CCh = FindChan_DB(Data,sCChan);
+      LockSymb_DB(Data,CCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);      
+   }
+   else if(iColType==2)
+   {
+      if(!iStrlen_STR(sSChan))
+         Abort_SYS(_("Classification channel not defined."));   
+         
+      SCh = FindChan_DB(Data,sSChan);
+      LockSymb_DB(Data,SCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);               
+   }
+
+
+   // --- Plotting to current map? Get plot location ---
+   
+   if(iNewMap==0)
+   {   
+      // --- Get the current map ---
+      
+      EMap = Current_EMAP();
+   
+      if(iInteractive_SYS())
+      {
+         i = 1;
+         while(i!=0)
+         {
+            
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("CHPRSCAT2");
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(Diag,_CHPRSCAT2_0,DGW_TEXT,"CHPRSCAT","XPOS");
+            SetInfoSYS_DGW(Diag,_CHPRSCAT2_1,DGW_TEXT,"CHPRSCAT","YPOS");
+
+            i = iRunDialogue_DGW(Diag);
+            if(i==-1)   Cancel_SYS(); 
+
+            // --- Put values back in INI ---
+
+            GetInfoSYS_DGW(Diag,_CHPRSCAT2_0,DGW_TEXT,"CHPRSCAT","XPOS");
+            GetInfoSYS_DGW(Diag,_CHPRSCAT2_1,DGW_TEXT,"CHPRSCAT","YPOS");
+            
+            Destroy_DGW(Diag);
+            
+            if(i==1)
+            {
+               iSetCurrentView_EMAP(EMap, "*Base");
+               if(iGetPoint_EMAP(EMap, _("Select location of bottom left corner for plot legend"), rXPos, rYPos)) Cancel_SYS();
+               
+               SetReal_SYS("CHPRSCAT","XPOS", rXPos);  
+               SetReal_SYS("CHPRSCAT","YPOS", rYPos);
+            }
+         }
+      }
+      
+      rX1 = rGetReal_SYS("CHPRSCAT","XPOS");
+      rY1 = rGetReal_SYS("CHPRSCAT","YPOS");
+      if(rX1==rDUMMY) rX1 = 10.0;
+      if(rY1==rDUMMY) rY1 = 10.0;
+   }
+
+
+   // --- Prepare to do the work ---
+
+   hX_VV  = Create_VV(REAL,0);
+   hY_VV  = Create_VV(REAL,0);
+   hMask_VV  = Create_VV(INT,0);
+   hColor_VV = Create_VV(REAL,0);
+   hClass_VV = Create_VV(-64,0);
+   hTmpX_VV  = Create_VV(REAL,0);
+   hTmpY_VV  = Create_VV(REAL,0);
+   hTmpM_VV  = Create_VV(REAL,0);
+   hTmpC_VV  = Create_VV(REAL,0);
+   hTmpS_VV  = Create_VV(-64,0);
+   hLine_VV = Create_VV(INT, 0);
+   hFid_VV = Create_VV(REAL, 0);
+   hVVt = Create_VV(REAL, 2);
+
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS(_("Reading Data"),1);
+   iLine = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Reading data on line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+
+      // --- get data ---
+
+      GetExpressionDataVV_CHIMERA(Data,Line,sStage,sHExp,sTemplate,hTmpX_VV);
+      GetExpressionDataVV_CHIMERA(Data,Line,sStage,sVExp,sTemplate,hTmpY_VV);
+      ReFidVV_VV(hTmpY_VV,hTmpX_VV);
+
+      iN = iLength_VV(hX_VV);
+      iN2 = iLength_VV(hTmpX_VV);
+
+      Append_VV(hX_VV, hTmpX_VV);
+      Append_VV(hY_VV, hTmpY_VV);
+
+      if(iMaskChan) {
+         GetChanVV_DB(Data,Line,MCh,hTmpM_VV);
+         ReFidVV_VV(hTmpM_VV,hTmpX_VV);
+         Append_VV(hMask_VV, hTmpM_VV);
+      }
+
+      if(iColType==1) {
+         GetChanVV_DB(Data,Line,CCh,hTmpC_VV);
+         ReFidVV_VV(hTmpC_VV,hTmpX_VV);
+         Append_VV(hColor_VV, hTmpC_VV);
+      }
+      else if(iColType==2) {
+         GetChanVV_DB(Data,Line,SCh,hTmpS_VV);
+         ReFidVV_VV(hTmpS_VV,hTmpX_VV);
+         Append_VV(hClass_VV, hTmpS_VV);      
+      }
+
+
+      // --- Update the Line and Fid info ---
+      
+      SetLen_VV(hLine_VV, iN+iN2);
+      SetIntN_VV(hLine_VV, iN, iN2, (int)Line);
+
+      rFidStart = rGetFidStart_VV(hTmpX_VV);
+      rFidIncr = rGetFidIncr_VV(hTmpX_VV);
+
+		if(rFidStart == rDUMMY) rFidStart = 0.0;
+		if(rFidIncr == rDUMMY) rFidIncr = 1.0;
+
+      SetReal_VV(hVVt, 0, rFidStart);      
+      SetReal_VV(hVVt, 1, rFidIncr);      
+      PolyFill_VVU(hTmpX_VV, 1, hVVt);
+      Append_VV(hFid_VV, hTmpX_VV);
+      
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   ProgUpdate_SYS(100);
+
+   // --- If there is no mask channel, fill the mask VV with 1.0 --
+   
+   iN = iLength_VV(hX_VV);
+   if(!iMaskChan) {
+      SetRealN_VV(hMask_VV, 0, iN, 1.0);      
+   }
+
+
+   // --- Create a new map ---
+
+   if(iNewMap==1)
+   {   
+      if(iStrlen_STR(sTemplate))
+      {
+         Strcpy_STR(sMap, sTemplate);
+         FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);
+      }
+      else
+      {
+         Strcpy_STR(sMap, "XYplot_");
+         Strcat_STR(sMap, sHExp);
+         Strcat_STR(sMap, "_");
+         Strcat_STR(sMap, sVExp);
+         Strcat_STR(sMap, ".map");
+         ReplaceChar_STR(sMap, "/", "_");
+         ReplaceChar_STR(sMap, "+", "_");
+         ReplaceChar_STR(sMap, "*", "_");         
+      }
+      
+      if(iFileExist_SYS(sMap))
+      {
+         if(iLoaded_EMAP(sMap))
+            UnLoad_EMAP(sMap);
+         if(iDeleteFile_SYS(sMap))
+         {
+            Printf_STR(sMsg, sizeof(sMsg), _("Unable to delete existing file %s."), sMap);
+            Abort_SYS(sMsg);
+         }
+      }
+      Map = Create_MAP(sMap, MAP_WRITENEW);
+   }
+   else
+      Map = Lock_EMAP(EMap);
+
+
+   // --- Create a new data view ---
+
+   if(iStrlen_STR(sTemplate))
+   {
+      Strcpy_STR(sViewName, sTemplate);
+   }
+   else
+   {
+      Strcpy_STR(sViewName, "XYplot_");
+      Strcat_STR(sViewName, sHExp);
+      Strcat_STR(sViewName, "_");
+      Strcat_STR(sViewName, sVExp);
+      ReplaceChar_STR(sViewName, "/", "_");
+      ReplaceChar_STR(sViewName, "+", "_");
+      ReplaceChar_STR(sViewName, "*", "_");         
+   }
+   
+   View = Create_MVIEW(Map,sViewName,MVIEW_WRITENEW);
+   
+
+   // --- Draw Scatter Plot ---
+
+   iAnnot = 0;    // annotate outside
+
+	if(iColType==0)
+	{
+	   FixedSymbolScatterPlot_CHIMERA(View, sTitle, rX1, rY1, rWidth, rHeight,      
+														hX_VV, hY_VV, hMask_VV, iMaskCol,
+														sSymFont, iSymNum, rSymbolSize, rSymbolAngle, iSymbCol, iSymbFill, 
+														Data, hLine_VV, hFid_VV, 
+														iAnnot, sHExp, sVExp, sHUnit, sVUnit,
+														rHMin, rHMax, rVMin, rVMax, iHLin, iVLin, sOverlay); 
+	}
+	else if(iColType == 1)
+	{
+	   ZoneColouredScatterPlot_CHIMERA(View, sTitle, rX1, rY1, rWidth, rHeight,      
+														hX_VV, hY_VV, hMask_VV, iMaskCol,
+														hColor_VV, sITR,
+														sSymFont, iSymNum, rSymbolSize, rSymbolAngle, iSymbCol, iSymbFill, iFixZoneEdgeColor,
+														Data, hLine_VV, hFid_VV, 
+														iAnnot, sHExp, sVExp, sHUnit, sVUnit,
+														rHMin, rHMax, rVMin, rVMax, iHLin, iVLin, sOverlay); 
+	}
+	else
+	{
+	   StringClassifiedScatterPlot_CHIMERA(View, sTitle, rX1, rY1, rWidth, rHeight,      
+														hX_VV, hY_VV, hMask_VV, iMaskCol,
+														hClass_VV, sClassFile, rSymbolSize,
+														Data, hLine_VV, hFid_VV, 
+														iAnnot, sHExp, sVExp, sHUnit, sVUnit,
+														rHMin, rHMax, rVMin, rVMax, iHLin, iVLin, sOverlay); 
+	}
+	
+   
+   // --- Draw colour bar ---
+   
+   rScaleXMM = rScaleMM_MVIEW(View);
+   rScaleYMM = rScaleYMM_MVIEW(View);
+   if(iColType==1) 
+   {
+      
+      // --- Clear the User IPJ ---
+      
+      hIPJ = Create_IPJ();
+      SetWorkingIPJ_MVIEW(View, hIPJ);
+      
+      GenGroupName_STR("COLORBAR",sCChan,"",sGrpName);
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+      
+		hITR = CreateFile_ITR(sITR);
+      rBoxH = rHeight*rScaleYMM / (real)(iGetSize_ITR(hITR));
+      rBoxW = 5.0*rScaleXMM;
+      if(iHLin)
+         rX = rHMax + 15.0*rScaleXMM;
+      else
+         rX = rLog10_MATH(rHMax) + 15.0*rScaleXMM;
+      if(iVLin)
+         rY = rVMin;
+      else
+         rY = rLog10_MATH(rVMin);
+         
+      ColorBar_MVU(View, hITR, 1, 2.0*rScaleXMM, rBoxH, rBoxW, rX, rY);
+      TextRef_MVIEW(View, TEXT_REF_TOP_CENTER);
+      Text_MVIEW(View, sCChan, rX + 0.5*rBoxW, rY - 1.0*rScaleYMM);
+   }
+   else if(iColType==2) 
+   {   
+      // --- Plot the classified symbol legend ---
+      
+      GenGroupName_STR("SYMBLEG",sSChan,"",sGrpName);
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+      
+      rX = rX1 + rWidth + 10.0;
+      SymbSize_MVIEW(View, rSymbolSize*rScaleXMM);
+
+		PlotStringClassifiedSymbolsLegendFromClassFile_CHIMERA(View, sSChan, rX, rY1, rY1+rHeight, sClassFile, hClass_VV);   
+   }
+      
+   
+   
+   // --- add the maker ---
+
+   Maker_MVIEW(View,0,1,"CHPRSCAT",MAKER_GX,_("Scatter Plot..."),"CHPRSCAT;");
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   if(iMaskChan) UnLockSymb_DB(Data,MCh);
+   if(iColType==1) 
+      UnLockSymb_DB(Data,CCh);
+   else if(iColType==2)
+      UnLockSymb_DB(Data,SCh);
+
+   Destroy_MVIEW(View);
+   
+   
+   // --- Commit changes to the map ---
+
+   if(iNewMap==1)   
+   {
+      Destroy_MAP(Map);
+      EMap = Load_EMAP(sMap);
+   }
+   else
+      UnLock_EMAP(EMap);
+      
+
+   // --- Set the current view to the new view ---
+   
+   MakeCurrent_EMAP(EMap);
+   iChangeCurrentView_EMAP(EMap, sViewName);
+
+   
+   // --- Resize ---
+      
+   DoCommand_SYS("[ID] ID_MEDIT_FULLMAP");
+   
+}

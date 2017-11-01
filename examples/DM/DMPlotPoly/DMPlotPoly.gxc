@@ -1,0 +1,329 @@
+//===========================================================================
+NAME          = "Datamine Polygon Plot"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+   Plot Datamine polygons to individual Wholeplot sections.
+
+    DMPLOT.FILE : Datamine polygon file
+"
+// Revision History:
+// v6.0.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "DMPLOTPOLY.gr"
+#include "DMPLOTPOLY.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+LST         List, SelList;    // List handle
+EDB         EData;            // Database handle
+VV          VVx, VVy, VVz, VVMap;
+DH          Drill;
+DMPPLY      DMPoly;
+MVIEW       View;
+EMAP        EMap;
+MAP         Map;
+REG         Reg;
+PLY         Ply;
+
+
+real rAz, rHeight, rScale, rScaleX, rScaleY, rWidth, rXmm, rYmm;
+real rFactor, rXC, rYC, rZC, rSwing, rTol;
+int  i, iD, iDefault, iMod, iNP, iNS, iP, iPage, iS;
+
+//string(STR_DEFAULT_LONG) sMsg;
+string(STR_DEFAULT) sTag, sUnit, sVal;
+string(STR_FILE) sDB, sDir, sFile, sJob, sMap, sProject;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   if(!iInteractive_SYS())
+      Abort_SYS(_("This GX must be run interactively"));
+
+    
+   // --- get Wholeplot database ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+   GetProjectName_DH(Drill, sProject);
+
+    
+   // --- Create the Dialogue ---
+
+   Diag = Create_DGW("DMPLOT");
+
+   SetInfoSYS_DGW(Diag,_DMPLOT_0,DGW_FILEPATH,"DMPLOT","FILE");
+   SetInfoSYS_DGW(Diag,_DMPLOT_1,DGW_TEXT,"DMPLOT","SECTION_THICKNESS");
+   SetInfoSYS_DGW(Diag,_DMPLOT_2,DGW_TEXT,"DMPLOT","LINE_THICKNESS");
+   SetInfoSYS_DGW(Diag,_DMPLOT_3,DGW_TEXT,"DMPLOT","LINE_COLOUR");
+   SetInfoSYS_DGW(Diag,_DMPLOT_4,DGW_TEXT,"DMPLOT","BOX_SIZE");
+
+               
+   // --- Run the Dialogue ---
+
+   iD = iRunDialogue_DGW(Diag);
+   if (iD == -1) Cancel_SYS();
+
+   GetInfoSYS_DGW(Diag,_DMPLOT_0,DGW_FILEPATH,"DMPLOT","FILE");
+   GetInfoSYS_DGW(Diag,_DMPLOT_1,DGW_TEXT,"DMPLOT","SECTION_THICKNESS");
+   GetInfoSYS_DGW(Diag,_DMPLOT_2,DGW_TEXT,"DMPLOT","LINE_THICKNESS");
+   GetInfoSYS_DGW(Diag,_DMPLOT_3,DGW_TEXT,"DMPLOT","LINE_COLOUR");
+   GetInfoSYS_DGW(Diag,_DMPLOT_4,DGW_TEXT,"DMPLOT","BOX_SIZE");
+
+   
+   // --- Destroy the Dialogue ---
+
+   Destroy_DGW(Diag);
+
+   
+   // --- Get the Strings ---
+
+   GetString_SYS("DMPLOT","FILE",sFile);
+   if(!iStrlen_STR(sFile)) {
+      Abort_SYS(_("No Datamine polygon file specified"));
+   }
+
+   rTol = rGetReal_SYS("DMPLOT","SECTION_THICKNESS");
+   if(rTol==rDUMMY) rTol = 10.0;
+
+
+   // --- Open the Datamine polygon file ---
+
+   DMPoly = Create_DMPPLY();
+   Load_DMPPLY(DMPoly, sFile);
+
+
+   // --- Make a list of the available polygons to edit ---
+
+   List = Create_LST(32);
+   SelList = Create_LST(32);
+
+   iNP = iNumPolys_DMPPLY(DMPoly);
+
+   for(i=1;i<=iNP;i++) {
+      FormatI_STR(i, sVal, 3);
+      AddItem_LST(List, sVal, sVal);
+   }
+
+
+   // --- Select the polygons to edit ---
+
+   if(iNP>1) {
+   
+      do {
+         if(iTwoPanelSelection_GUI(List, SelList, _("Select Polygons for editing")))
+            Cancel_SYS();
+
+         if(iSize_LST(SelList)==0)
+            DisplayMessage_SYS(_("Polygon Selection"), _("You must select at least one polygon."));
+         else
+            break;
+      } while(1);
+   }
+   else
+      Copy_LST(SelList, List);
+
+
+   // --- Allocate some vectors ---
+
+   VVx = Create_VV(REAL, 0);
+   VVy = Create_VV(REAL, 0);
+   VVz = Create_VV(REAL, 0);
+
+   VVMap = Create_VV(-STR_FILE, 0);
+
+   Ply = Create_PLY();
+
+
+   // --- Get the current project database directory ---
+
+   GetString_SYS("DH", "PROJECT_DIR", sDir);
+   if(!iStrlen_STR(sDir) || !iDirExist_SYS(sDir)) {
+      GetDirectory_SYS(SYS_DIR_LOCAL, sDir);    // default to workspace directory
+   }
+
+
+   // --- Get the Wholeplot section control file ---
+   
+   Strcpy_STR(sJob, sDir);
+   Strcat_STR(sJob, "DMEdit.ins");
+
+
+   // To modify a job, the job must be defined.
+
+   iDefault = FALSE;
+   if(!iFileExist_SYS(sJob)) {
+      iDefault = TRUE; 
+      CreateDefaultJob_DH(Drill, sJob, DH_PLOT_SECTION);
+   }
+
+   LoadPlotParameters_DH(Drill, sJob, DH_PLOT_SECTION);
+
+
+   // --- Create a section for each polygon ---
+
+   iNS = iSize_LST(SelList);
+   Progress_SYS(1);
+   for(iS=0;iS<iNS;iS++) {
+
+      iP = iGetInt_LST(SelList, 1, iS);
+      if(iP<1 || iP>iNP)
+         Abort_SYS(_("Invalid polygon"));
+
+
+      // --- Get the azimuth and extents of the selected polygon ---
+
+      GetAzimuth_DMPPLY(DMPoly, iP, rAz);
+      GetSwing_DMPPLY(DMPoly, iP, rSwing);
+      GetExtents_DMPPLY(DMPoly, iP, rXC, rYC, rZC, rWidth, rHeight);
+
+
+      // --- Project the polygon onto the created section ---
+
+      ProjectPoly_DMPPLY(DMPoly, iP, rXC, rYC, rZC, rAz, rSwing, VVx, VVy, VVz);
+
+
+      // --- Determine the window necessary and set actual values to fit ---
+
+      SectionWindowSizeMM_DH(Drill, rXmm, rYmm);
+
+      GetUnits_DH(Drill,sUnit,rFactor);
+      rScaleX = rWidth * rFactor  / (0.001 * rXmm);
+      rScaleY = rHeight * rFactor  / (0.001 * rYmm);
+
+
+      // --- Make a scale a bit larger to leave some room at the edges ---
+
+      if(rScaleX > rScaleY)
+         rScale = rRound_MATH(1.1*rScaleX, 3); 
+      else
+         rScale = rRound_MATH(1.1*rScaleY, 3); 
+
+      rWidth  = rScale / rFactor * (0.001 *rXmm);
+      rHeight = rScale / rFactor * (0.001 *rYmm);
+
+
+      // --- Set remaining values in the section job ---
+
+      SetReal_SYS("DH","SCALE", rScale);
+      SetReal_SYS("DH","AZIMUTH",rAz);                                   
+      SetReal_SYS("DH","EAST",rXC);
+      SetReal_SYS("DH","NORTH",rYC);
+      SetReal_SYS("DH","TOLERANCE",0.5*rTol);
+      SetReal_SYS("DH","SWING",rSwing);
+      SetReal_SYS("DH","ELEVATION",rZC);
+      SetInt_SYS("DH","SJUSTIFY",1);   // set elevation at the section center 
+      SetReal_SYS("DH","SECLENGTH", rWidth);
+      SetReal_SYS("DH","VEXTENT", rHeight);
+
+      SetInt_SYS("DHSECTSTACK","STACKED_SECTION",0);    // must be set each time
+      SetReal_SYS("DH","EINT",0.0);
+      SetReal_SYS("DH","NINT",0.0);
+      SetInt_SYS("DH","NSEC", 1);
+
+
+      // --- Add the file name and polygon number as the map tag ---
+
+      FileNamePart_STR(sFile, sTag, STR_FILE_PART_NAME);
+
+      Strcat_STR(sTag, "_Poly_");
+      FormatI_STR(iP, sVal, 4);
+      Strcat_STR(sTag, sVal);
+
+      SetString_SYS("DH","MAP_TAG", sTag);
+
+
+      // --- Resave the job ---
+
+      SaveJob_DH(Drill, sJob, DH_PLOT_SECTION);
+
+
+      // --- Bring up the tabbed dialog in case user wants to modify other parameters ---
+
+      if(iDefault) {
+   
+         iDefault = FALSE;
+
+         iPage = iGetInt_SYS("DHSECT","PAGE");
+         iMod = iModifySectionGUI_DH(Drill, sJob, iPage);
+         SetInt_SYS("DHSECT","PAGE", iPage);
+
+      
+         // --- Handle cancel, but no other special commands. ---
+
+         if(iMod==-1) Cancel_SYS();
+
+         if(iMod!=0)
+            DisplayMessage_SYS(_("DMEditPoly GX"), _("This GX does not allow for interactive definition of section location."));
+
+      }
+
+
+      // --- Create the section ---
+
+      Wholeplot_DH(Drill,sJob,DH_PLOT_SECTION);
+
+
+      // --- Get the name of the map, and bring it to the front ---
+
+      GetMapNamesVV_DH(Drill, VVMap);
+      GetString_VV(VVMap, 0, sMap);
+
+      EMap = Load_EMAP(sMap);
+      Map = Lock_EMAP(EMap);
+
+
+      // --- Add the polygon number and file name to the View REG ---
+
+      View = Create_MVIEW(Map, "Section", MVIEW_WRITEOLD);
+      Reg = GetREG_MVIEW(View);
+
+      Set_REG(Reg, "DMPOLY.FILE", sFile);
+      SetInt_REG(Reg, "DMPOLY.POLY", iP);
+
+      Destroy_MVIEW(View);
+      UnLock_EMAP(EMap);
+
+
+      // --- Plot the polygon on the map ---
+
+      iRunGX_SYS("DMRedraw.gx");
+   }
+
+
+   Progress_SYS(0);
+
+   GetMapNamesVV_DH(Drill, VVMap);
+   GetString_VV(VVMap, 0, sMap);
+
+
+   // --- Don't need Wholeplot any more ---
+
+   Destroy_DH(Drill);
+
+
+   // --- Bring the last map to the top ---
+
+   EMap = Load_EMAP(sMap);
+
+
+}

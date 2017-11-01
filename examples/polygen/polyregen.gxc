@@ -1,0 +1,74 @@
+//===========================================================================
+NAME          = "PolyReGen"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map Tools"
+
+DESCRIPTION   = "
+Re-generate area polygons for an existing object created by polygen.
+
+Interactive only.
+
+"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EMAP     eMAP;
+MAP      hMAP;
+MVIEW    hMV;
+
+string(STR_VIEW) sView;
+string(STR_GROUP) sGroup;
+
+
+//===========================================================================
+//                            GROUP UTIL CODE
+//===========================================================================
+
+{
+
+   // --- Initialize all parameters ---
+
+   if (!iInteractive_SYS())
+      Abort_SYS(_("This GX will only run interactively."));
+   
+   
+   // --- get map and view ---
+      
+   eMAP = Current_EMAP();
+   GetCurrentView_EMAP(eMAP,sView);
+   hMAP  = Lock_EMAP(eMAP);
+   hMV = Create_MVIEW(hMAP,sView,MVIEW_WRITEOLD);
+   
+   
+   // --- get group names ---
+   
+   GetString_SYS("POLYREGEN","GROUP",sGroup);
+   
+      
+   // --- regen group ---
+   
+   Progress_SYS(1);
+   ReGenAreas_MVU(hMV,sGroup);
+   Progress_SYS(0);
+   
+   
+   // --- new maker ---
+   
+//   Maker_MVIEW(hMV,0,1,"polyregen",MAKER_GX,_("Re-generate polygons"),"POLYREGEN;");
+
+   Destroy_MVIEW(hMV);
+   UnLock_EMAP(eMAP);
+   Strcat_STR(sView,"\\");
+   Strcat_STR(sView,sGroup);
+   ActivateGroup_EMAP(eMAP,sView);
+   
+}

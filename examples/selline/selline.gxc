@@ -1,0 +1,117 @@
+//===========================================================================
+NAME          = "Select/Deselect a single line"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Select or de-select a single line.
+
+   SELLINE.LINE      Line name
+          .OPTION    \"Select\" 
+                     \"Deselect\"
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Line/Selections"
+
+// Revision History
+// v5.1.3 For Wholeplot databases, use DHSLNAME GX.
+//        For Wholeplot databases, check for Wholeplot licence.
+//===========================================================================
+
+RESOURCE = "selline.gr"
+#include "selline.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DGW         Diag;
+LST         List;
+
+string(STR_DB_SYMBOL) sLine;
+string(STR_DEFAULT_SHORT) sOpt;
+int i,iWP;
+
+//===========================================================================
+//                             XLEVEL CODE
+//===========================================================================
+
+{
+
+   // --- get current line and database ---
+      
+   EData = Current_EDB();
+   GetCurLine_EDB(EData,sLine);
+   Data = Lock_EDB(EData);
+
+   // --- Is it a Wholeplot line ? ---
+
+   iWP = iIsWholeplot_DB(Data);
+   if(iWP) {
+      UnLock_EDB(EData);
+      iRunGX_SYS("dhslname.gx");
+      Exit_SYS();
+   }
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SelLine");
+
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_SELLINE_0);
+      SymbLST_DB(Data,List,DB_SYMB_LINE);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfo_DGW(Diag,_SELLINE_0,DGW_TEXT,sLine);
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 0)
+         SetString_SYS("SELLINE","OPTION","Select");
+      else if (i == 1)
+         SetString_SYS("SELLINE","OPTION","Deselect");
+      else   
+         Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_SELLINE_0,DGW_TEXT,"SELLINE","LINE");
+
+   }
+
+
+   // --- get parameters ---
+
+   GetString_SYS("SELLINE","LINE",sLine);
+   GetString_SYS("SELLINE","OPTION",sOpt);
+   
+   ToUpper_STR(sOpt);
+
+   if (iCharComp_STR(sOpt,"D"))
+      Select_DB(Data,sLine,DB_LINE_SELECT_EXCLUDE);
+   else
+      Select_DB(Data,sLine,DB_LINE_SELECT_INCLUDE);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

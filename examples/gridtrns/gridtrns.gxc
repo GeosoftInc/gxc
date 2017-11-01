@@ -1,0 +1,120 @@
+//===========================================================================
+NAME          = "GRIDTRNS"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "\
+\r\n\
+Transpose a grid by swapping the grid rows with
+the grid columns.\r\n\
+Parameters: \r\n\
+\r\n\
+       GRIDTRNS.GRD   File Name of the Input Grid.
+                        (.grd file)
+               .TCON  Transpose condition value -
+                        controls whether the grid
+                        should be transposed.           
+
+               Grid Orientation                       TCON
+               ----------------                       ----                                                  
+               Grid Lines MUST Parallel: X or Y Axis    0                   
+                                         Y-Axis ONLY    1
+                                         X-Axis ONLY   -1
+\r\n"
+
+//===========================================================================
+
+RESOURCE = "gridtrns.gr"
+#include "gridtrns.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+
+int        i;                 // utility int
+int        iTcon;             // value interpreted from Tcon value
+                              
+string(STR_FILE)  sGrd;            // Name of grid to transpose
+string(4)    sTcon;           // String for Tcon value
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDTRNSForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDTRNSFORM_0,DGW_FILEPATH,"GRIDTRNS","GRD");     
+      SetInfoSYS_DGW(Diag,_GRIDTRNSFORM_1,DGW_LISTALIAS,"GRIDTRNS","TCON");       
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDTRNSFORM_0,DGW_FILEPATH,"GRIDTRNS","GRD");     
+      GetInfoSYS_DGW(Diag,_GRIDTRNSFORM_1,DGW_LISTALIAS,"GRIDTRNS","TCON");    
+      
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDTRNS","GRD",sGrd);
+   GetString_SYS("GRIDTRNS","TCON",sTcon);
+   
+   
+   // --- Check for null file name string ---
+
+   if (!iStrlen_STR(sGrd))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   // --- Check for valid TCON setting ---
+
+   if (!iStrlen_STR(sTcon))
+      iTcon = IMU_TRANS_DEFAULT;         // default for empty string
+   else if (!iStrcmp_STR(sTcon,"0",0))  iTcon = IMU_TRANS_DEFAULT;
+   else if (!iStrcmp_STR(sTcon,"1",0))  iTcon = IMU_TRANS_Y;
+   else if (!iStrcmp_STR(sTcon,"-1",0)) iTcon = IMU_TRANS_X;
+   else
+      Abort_SYS(_("Invalid Transpose condition choice! Must be 0,1 or -1"));
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Transposing Grid..."),1);
+
+
+   // --- Transpose the grid ---
+
+   GridTrns_IMU(sGrd,iTcon);
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+}

@@ -1,0 +1,298 @@
+//===========================================================================
+NAME          = "Create mask channel from a polygon file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Geostatistics Toolkit"
+
+DESCRIPTION   = "
+
+   Create a mask geochemical mask channel, default is \"ChemMask\".
+	The mask channel is applied to data as it is processed in
+	the geochemistry GX's.
+
+   CHPOLY.FILE  		polygon file (.ply).
+         .MASK 		mask channel - default is \"ChemMask\"
+         .AREA       Work \"Inside\" or \"Outside\" the polygons.
+         .APPEND     Append (0) to mask data or create new (1) mask
+"
+// Revision History:
+// v5.1.8: Set mask channel fiducial start, increment to X channel
+// v5.1.4: Added this GX to the Geophysical Stats package
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chpoly.gr"
+#include   "chpoly.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_FILE) sTable;               // Table Name
+string(STR_DEFAULT_SHORT) sArea;       // Inside or Outside
+
+EDB         EData;
+DB          Data;                      // database handle
+
+DB_SYMB     XCh,YCh,MCh;               // Channel Handles
+DB_SYMB     Line;                      // Line Handle
+DGW         Diag;                      // Dialogue handle
+PLY         Poly;                      // Polygon Object
+LST         List;
+VV          VVx, VVm, VVm2;            // Channel VVs
+
+int         iLine;
+int         iDummy;                    // Inside/Outside option
+int         iTotLines;                 // Total Number of Lines to Process
+int         iAppend;
+
+real rFidStart, rFidIncr;
+
+string(STR_DEFAULT_SHORT) sTemp;                     // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sMask;
+
+int i;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Get Default Mask Channel if required, and if it exists, and if it is
+   //     not set to "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0 &&
+       iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 && iExistChan_DB(Data,sMask))
+            SetString_SYS("CHPOLY","MASK",sMask);
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHPOLY");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_CHPOLY_1);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+      // --- Remove "None" from the list ---
+
+      i = iFindItem_LST(List,0, "None");
+      if(i!=-1) DelItem_LST(List, i);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_CHPOLY_0,DGW_FILEPATH,"CHPOLY","FILE");    
+      SetInfoSYS_DGW(Diag,_CHPOLY_1,DGW_TEXT,"CHPOLY","MASK");     
+      SetInfoSYS_DGW(Diag,_CHPOLY_2,DGW_TEXT,"CHPOLY","AREA");     
+      SetInfoSYS_DGW(Diag,_CHPOLY_3,DGW_LISTALIAS,"CHPOLY","APPEND");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_CHPOLY_0,DGW_FILEPATH,"CHPOLY","FILE");  
+      GetInfoSYS_DGW(Diag,_CHPOLY_1,DGW_TEXT,"CHPOLY","MASK");     
+      GetInfoSYS_DGW(Diag,_CHPOLY_2,DGW_TEXT,"CHPOLY","AREA");  
+      GetInfoSYS_DGW(Diag,_CHPOLY_3,DGW_LISTALIAS,"CHPOLY","APPEND");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Mask to polygons"),1);
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHPOLY","FILE",sTable);
+   GetString_SYS("CHPOLY","MASK",sMask);
+   GetString_SYS("CHPOLY","AREA",sArea);
+   iAppend = iGetInt_SYS("CHPOLY","APPEND");
+
+
+   // --- Mask channel must be specified ---
+
+   if(!iStrlen_STR(sMask) || !iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))
+      Abort_SYS(_("A Mask Channel must be specified."));
+
+
+   // --- channels ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   if (iExistChan_DB(Data,sMask)) {
+      MCh = FindChan_DB(Data,sMask);
+      if (iAppend == 1) {     // New Channel
+	      LockSymb_DB(Data,MCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+	      DeleteSymb_DB(Data,MCh);
+	      CreateSymb_DB(Data,sMask,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      }
+   } else
+      CreateSymb_DB(Data,sMask,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+   MCh = FindChan_DB(Data,sMask);
+   LockSymb_DB(Data,MCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Create VVs ---
+
+   VVx = Create_VV(REAL, 0);
+   VVm = Create_VV(INT, 0);
+   VVm2 = Create_VV(INT, 0);
+
+
+   // --- Set the mask channel CLASS attribute to "MASK" ---
+
+   SetRegSymbSetting_DB(Data,MCh,"CLASS","MASK");
+
+   
+   // --- Mask dummy setting ---
+
+	ToUpper_STR(sArea);
+   if (iCharComp_STR(sArea,"I"))
+      iDummy = DU_MASK_OUTSIDE;
+   else
+      iDummy = DU_MASK_INSIDE;
+
+
+   // --- Create the Poly ---
+
+   Poly = Create_PLY();
+   LoadTable_PLY(Poly,sTable);
+
+
+	// --- Prepare to do the work ---
+
+	iLine = 0;
+	iTotLines = iCountSelLines_DB(Data);
+
+
+	// --- Go through all selected Lines ---
+
+	ProgName_SYS(_("Applying mask"),1);
+	Line = FirstSelLine_DB(Data);
+	while (iIsLineValid_DB(Data,Line))
+	{
+	   // --- Update the Progress Bar ---
+
+	   LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+	   GetSymbName_DB(Data,Line,sTemp);
+	   UnLockSymb_DB(Data,Line);
+	   Strcpy_STR(sLabel,_("Apply mask to line: "));
+	   Strcat_STR(sLabel,sTemp);
+	   ProgName_SYS(sLabel,0);
+	   ProgUpdateL_SYS(iLine,iTotLines);
+
+
+      // --- For appending, get the original mask values ---
+
+ 	   GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,MCh,VVm);
+      ReFidVV_VV(VVm,VVx);
+
+
+      // --- Set fiducials for the mask channel and mask VV ---
+
+      rFidStart = rGetFidStart_VV(VVm);
+      rFidIncr = rGetFidIncr_VV(VVm);
+
+      SetFidStart_VV(VVm2, rFidStart);
+      SetFidIncr_VV(VVm2, rFidIncr);
+
+      SetFid_DB(Data, Line, MCh, rFidStart, rFidIncr);
+
+
+      // --- Init mask channel to 1 values before applying the mask,
+      //     because the mask only turns non-dummies to dummies. ---
+
+      SetIntN_VV(VVm2, 0, iLength_VV(VVm), 1);
+      PutChanVV_DB(Data,Line,MCh,VVm2);    // Mask must be populated or PolyMask_DU won't run
+
+
+      // --- mask ---
+
+		PolyMask_DU(Data,Line,XCh,YCh,MCh,Poly,iDummy);
+
+
+      // --- If appending, keep mask channel "1" if it was not a dummy in either
+      //     the original channel value, or the new one ---
+
+      if(iAppend==0) {
+
+	      GetChanVV_DB(Data,Line,MCh,VVm2);
+         MaskOR_VV(VVm, VVm2, VVm);
+	      PutChanVV_DB(Data,Line,MCh,VVm);
+      }
+
+	   Line = NextSelLine_DB(Data, Line);
+	   iLine++;
+
+	}
+
+	// --- Add maker ---
+
+	EasyMakerSymb_DB(Data,MCh,_("Mask to polygon file..."),"CHPOLY;");
+
+
+	// --- Unlock the Symbol ---
+
+	UnLockSymb_DB(Data,XCh);
+	UnLockSymb_DB(Data,YCh);
+	UnLockSymb_DB(Data,MCh);
+
+
+	// --- Done ---
+
+	Destroy_PLY(Poly);
+	Progress_SYS(0);
+
+    // --- Release the Database ---
+
+    UnLock_EDB(EData);
+}

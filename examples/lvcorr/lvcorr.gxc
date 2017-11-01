@@ -1,0 +1,230 @@
+//===========================================================================
+
+NAME          = "Apply a level correction"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/LevTieLine/Careful Levelling"
+
+DESCRIPTION   = "
+
+   LVCORR.IN      - input channel to correct
+         .CORR    - correction channel (will be added to input)
+         .OUT     - output corrected channel
+         .TYPE    - process \"LINE\", \"TIE\" or \"SELECTED\" lines.
+"
+// Revision History
+// v6.4.1: Treat dummy correction values like 0.0 (See QA 9401).
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "lvcorr.gr"
+#include "lvcorr.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;
+string(STR_DB_SYMBOL) sOutCh;
+string(STR_DB_SYMBOL) sCorCh;
+string(STR_DEFAULT_SHORT) sType;
+
+int         iLines, iTotLines;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     InCh;       
+DB_SYMB     OutCh;       
+DB_SYMB     CorCh;       
+DB_SYMB     Line;
+DB_SELECT   Select;
+EXP         Exp;
+DGW         Diag;
+LST         List;                  // list handle
+int         i;                     // utility int
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("LVCORR");
+
+
+     // --- Setup lists ---
+
+     List = GetList_DGW(Diag,_LVCORR_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_LVCORR_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_LVCORR_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_LVCORR_0,DGW_TEXT,"LVCORR","IN");
+     SetInfoSYS_DGW(Diag,_LVCORR_1,DGW_TEXT,"LVCORR","CORR");
+     SetInfoSYS_DGW(Diag,_LVCORR_2,DGW_TEXT,"LVCORR","OUT");
+     SetInfoSYS_DGW(Diag,_LVCORR_3,DGW_TEXT,"LVCORR","TYPE");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_LVCORR_0,DGW_TEXT,"LVCORR","IN");
+     GetInfoSYS_DGW(Diag,_LVCORR_1,DGW_TEXT,"LVCORR","CORR");
+     GetInfoSYS_DGW(Diag,_LVCORR_2,DGW_TEXT,"LVCORR","OUT");
+     GetInfoSYS_DGW(Diag,_LVCORR_3,DGW_TEXT,"LVCORR","TYPE");
+
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("LVCORR","IN",sInCh);
+   GetString_SYS("LVCORR","CORR",sCorCh);
+   GetString_SYS("LVCORR","OUT",sOutCh);
+   GetString_SYS("LVCORR","TYPE",sType);
+
+
+   // --- Get Channels ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sCorCh,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Input correction channel does not exist."));
+   CorCh = FindSymb_DB(Data,sCorCh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data, InCh, sOutCh);
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+   
+      
+   // --- set up expression ---
+
+   Exp = Create_EXP(Data,"$sOutCh = $sInCh + (($sCorCh==DUMMY)?0.0:$sCorCh);",128);
+
+
+   // --- work out the selection ---
+
+   if (iCharComp_STR(sType,"S")==0) {
+
+      Select = GetSelect_DB(Data);
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+
+      if (iCharComp_STR(sType,"L")) 
+         Select_DB(Data,"L",DB_LINE_SELECT_INCLUDE);
+      else if (iCharComp_STR(sType,"T"))
+         Select_DB(Data,"T",DB_LINE_SELECT_INCLUDE);
+      else
+         Abort_SYS(_("TYPE must be \"Line\", \"Tie\" or \"Selected\""));
+   }
+
+
+   // --- Prepare to do the work ---
+                           
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))  {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sTemp,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- clip ---
+
+      Math_DU(Data,Line,Exp);
+
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Data, Line);
+      iLines++;
+
+   }
+
+
+   // --- return selections ---
+
+   if (iCharComp_STR(sType,"S") == 0)
+      SetSelect_DB(Data,Select);
+
+ 
+   // --- destroy expression ---
+
+   Destroy_EXP(Exp);
+
+
+   // --- Add maker ---
+
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   EasyMakerSymb_DB(Data,OutCh,_("Add level channel to raw channel"),"LVCORR;");
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

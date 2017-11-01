@@ -1,0 +1,284 @@
+//===========================================================================
+NAME          = "FFT frequency -> space domain"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D/Advanced Usage"
+
+DESCRIPTION   = "
+
+Transform a channel from the frequency domain to the space domain.  The
+input real and imaginary channels should have been created or modified
+from channels obtained using the FFTIN GX.
+
+Parameters: 
+
+    FFTOUT.R   - Name of the real channel.
+          .I   - Name of the imaginary channel.
+          .OUT - Output space domain channel.
+          .REF - Name of the original reference channel.
+          .DCMULT - DC level multiple
+"
+// Revision History:
+// v7.0.1: Warn the user if the FFTIN.GX has not been run on the reference channel.
+// v5.1.8: Modified to use de-trend and expansion parameters from RefCh channel REG.
+
+//===========================================================================
+
+RESOURCE = "fftout.gr"
+#include "fftout.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sRefCh,sRCh,sICh,sOCh; // Channel Names
+
+EDB        EData;
+DB         Data;
+DB_SYMB    RefCh,RCh,ICh,OCh; // Channel handles
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+VV         VVs,VVr,VVi;       // VV's
+FFT        hFFT;              // FFT object
+REG        Reg;               
+
+int        i;                 // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iDeTrend;          // Type of trend line to remove
+real       rExpansion;        // Minimum expansion (%)
+real       rDCmult;          // DC level multiple
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFTOUT");
+
+
+      // --- Set up lists ---
+  
+      List = GetList_DGW(Diag,_FFTOUT_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_FFTOUT_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_FFTOUT_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_FFTOUT_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFTOUT_0,DGW_TEXT,"FFTOUT","R");     
+      SetInfoSYS_DGW(Diag,_FFTOUT_1,DGW_TEXT,"FFTOUT","I");     
+      SetInfoSYS_DGW(Diag,_FFTOUT_2,DGW_TEXT,"FFTOUT","REF");     
+      SetInfoSYS_DGW(Diag,_FFTOUT_3,DGW_TEXT,"FFTOUT","OUT");     
+      SetInfoSYS_DGW(Diag,_FFTOUT_4,DGW_TEXT,"FFTOUT","DCMULT");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFTOUT_0,DGW_TEXT,"FFTOUT","R");     
+      GetInfoSYS_DGW(Diag,_FFTOUT_1,DGW_TEXT,"FFTOUT","I");     
+      GetInfoSYS_DGW(Diag,_FFTOUT_2,DGW_TEXT,"FFTOUT","REF");     
+      GetInfoSYS_DGW(Diag,_FFTOUT_3,DGW_TEXT,"FFTOUT","OUT");     
+      GetInfoSYS_DGW(Diag,_FFTOUT_4,DGW_TEXT,"FFTOUT","DCMULT");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FFTOUT","R",sRCh);
+   GetString_SYS("FFTOUT","I",sICh);
+   GetString_SYS("FFTOUT","OUT",sOCh);
+   GetString_SYS("FFTOUT","REF",sRefCh);
+   rDCmult = rGetReal_SYS("FFTOUT","DCMULT");
+   if(rDCmult==rDUMMY)        rDCmult = 1.0;
+
+
+   // --- Input Channels ---
+
+   if (!iExistSymb_DB(Data,sRCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Real channel does not exist."));
+   RCh = FindSymb_DB(Data,sRCh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sICh,DB_SYMB_CHAN))
+      Abort_SYS(_("Imaginary channel does not exist."));
+   ICh = FindSymb_DB(Data,sICh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sRefCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Reference channel does not exist."));
+   RefCh = FindSymb_DB(Data,sRefCh,DB_SYMB_CHAN);
+   
+
+   // --- Output channels ---
+
+   if (!iExistSymb_DB(Data,sOCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data,RefCh,sOCh);       // Create it 
+   OCh = FindSymb_DB(Data,sOCh,DB_SYMB_CHAN);
+
+
+   // --- Lock the channel symbols ---
+
+   if ( (RefCh == RCh) || (RefCh == ICh) || (RCh == ICh) ||
+        (OCh == RCh) || (OCh == ICh) || (OCh == RefCh))
+      Abort_SYS(_("Input and output channels must be different."));
+   LockSymb_DB(Data,RCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ICh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,RefCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- get some VV's ---
+
+   VVi = Create_VV(REAL,0);
+   VVr = Create_VV(REAL,0);
+   VVs = Create_VV(REAL,0);
+
+
+   // --- Get REG to RCh ---
+
+   Reg = Create_REG(50);  
+   GetRegSymb_DB(Data, RefCh, Reg);
+   GetInt_REG(Reg, "FFT_DETREND", iDeTrend);
+   GetReal_REG(Reg, "FFT_EXPANSION", rExpansion);   
+   if(iDeTrend==iDUMMY || rExpansion==rDUMMY)
+      Abort_SYS(_("The FFTIN.GX must be run on the reference channel."));
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("FFT line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+
+   
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,RefCh,VVs);
+
+
+
+      // --- if input VV is empty or all dummy, then don't do FFT process ---
+
+      if (iLength_VV(VVs) > 0) {
+
+         if (iFindDum_VV(VVs,0,(iLength_VV(VVs)-1),1,0) != -1) {
+
+            GetChanVV_DB(Data,Line,RCh,VVr);
+            GetChanVV_DB(Data,Line,ICh,VVi);
+
+
+            // --- Get an FFT based on reference ---
+
+            hFFT = CreateRefEx_FFT(VVs,rGetFidIncr_VV(VVs),iDeTrend,rExpansion,rDCmult);
+
+
+            // --- put the real and imaginary components into FFT ---
+
+            SetVV_FFT(hFFT,VVr,VVi);
+
+
+            // --- inverse FFT ---
+
+            Inverse_FFT(hFFT,VVr,VVs);
+
+            Destroy_FFT(hFFT);
+
+
+            // --- Write the output VV ---
+
+            PutChanVV_DB(Data,Line,OCh,VVr);
+            SetFid_DB(Data,Line,OCh,rGetFidStart_DB(Data,Line,RefCh),rGetFidIncr_DB(Data,Line,RefCh));
+
+         }
+      }
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OCh,_("FFT frequency -> space domain"),"FFTOUT;");
+
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,RCh);
+   UnLockSymb_DB(Data,ICh);
+   UnLockSymb_DB(Data,RefCh);
+   UnLockSymb_DB(Data,OCh);
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+   Destroy_REG(Reg);
+}

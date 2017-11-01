@@ -1,0 +1,528 @@
+//===========================================================================
+NAME          = "Calculate Horizontal Acceleration corrections"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   AGHACCOR.LAT     Latitude channel
+           .LONG    Longitude channel 
+           .DAMPING Platform damping factor
+           .PERIOD  Platform period
+           .OUTCH   Output Free-air anomaly channel
+"
+// Reference: Christopher J. Swain, 1996, Horizontal acceleration corrections 
+//            in airborne gravimetry: Geophysics 61, p273-276.
+
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3: New GX.
+    
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "aghaccor.gr"
+#include "aghaccor.grh"
+
+//===========================================================================
+//                                INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DB          Data;                   // Database handle
+EDB         EData;                  // Edited database handle
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // Channel list handle
+EXP         Exp1,Exp2;
+VV          hVVx,hVVy,hVV;
+//VV          hVVxz,hVVyz;
+
+DB_SYMB     Line,LatCh,LongCh,OutCh,LatDCh,LongDCh,TimeCh,TimeDCh;
+DB_SYMB     XDCh,YDCh,XZCh,YZCh;
+
+int         i,iLen,i1,i2,j,iLine,iTotLines; 
+real        rDamping,rPeriod,rTD,rSum;
+real        rW0,rA,rB,rC0,rC1,rC2,rD0,rD1,rD2;
+real        rX0,rX1,rX2,rY0,rY1,rY2,rZ0,rZ1,rZ2;
+//real        rXa,rYa,rXz,rYz,rXc,rYc,rHacc;
+
+string(STR_DEFAULT)  sLatCh,sLongCh,sOutCh,sLatDCh,sLongDCh,sTimeDCh;
+string(STR_DEFAULT)  sXDCh,sYDCh,sXZCh,sYZCh;
+string(STR_DEFAULT)  sDamping,sPeriod;
+string(STR_DEFAULT)  sTemp,sLabel;
+string(1024)         sFormula1,sFormula2;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGHACCOR");
+                                                 
+
+      // --- Set up channel lists ---
+      
+      List = GetList_DGW(Diag,_AGHACCOR_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGHACCOR_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+      List = GetList_DGW(Diag,_AGHACCOR_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+
+      // --- Set any Defaults ---
+  
+      SetInfoSYS_DGW(Diag,_AGHACCOR_0,DGW_TEXT,"AGHACCOR","LAT");
+      SetInfoSYS_DGW(Diag,_AGHACCOR_1,DGW_TEXT,"AGHACCOR","LONG");
+      SetInfoSYS_DGW(Diag,_AGHACCOR_2,DGW_TEXT,"AGHACCOR","DAMPING");
+      SetInfoSYS_DGW(Diag,_AGHACCOR_3,DGW_TEXT,"AGHACCOR","PERIOD");
+      SetInfoSYS_DGW(Diag,_AGHACCOR_4,DGW_TEXT,"AGHACCOR","OUTCH");
+
+     
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();           // They hit cancel
+                                                 
+     
+      // --- Read inputs from the dialogue box ---
+      
+      GetInfoSYS_DGW(Diag,_AGHACCOR_0,DGW_TEXT,"AGHACCOR","LAT");
+      GetInfoSYS_DGW(Diag,_AGHACCOR_1,DGW_TEXT,"AGHACCOR","LONG");
+      GetInfoSYS_DGW(Diag,_AGHACCOR_2,DGW_TEXT,"AGHACCOR","DAMPING");
+      GetInfoSYS_DGW(Diag,_AGHACCOR_3,DGW_TEXT,"AGHACCOR","PERIOD");
+      GetInfoSYS_DGW(Diag,_AGHACCOR_4,DGW_TEXT,"AGHACCOR","OUTCH");
+     
+      // --- Destroy the Dialogue ---
+     
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGHACCOR","LAT",sLatCh);
+   GetString_SYS("AGHACCOR","LONG",sLongCh);
+   GetString_SYS("AGHACCOR","DAMPING",sDamping);
+   GetString_SYS("AGHACCOR","PERIOD",sPeriod);
+   GetString_SYS("AGHACCOR","OUTCH",sOutCh);
+    
+   if(iStrlen_STR(sDamping)>0)  {
+      rDamping = rGetReal_SYS("AGHACCOR","DAMPING");
+      if(rDamping==rDUMMY)
+         Abort_SYS(_("Invalid Platform Damping Factor value!"));
+   } else
+      Abort_SYS(_("The Platform Damping Factor value does not exist."));
+
+   if(iStrlen_STR(sPeriod)>0)  {
+      rPeriod = rGetReal_SYS("AGHACCOR","PERIOD");
+      if(rPeriod==rDUMMY)
+         Abort_SYS(_("Invalid Platform Period value!"));
+   } else
+      Abort_SYS(_("The Platform Period value does not exist."));
+
+   
+   // --- Get handles to the input data channels ---
+
+   if (!iExistChan_DB(Data,sLatCh))
+      Abort_SYS(_("The latitude channel does not exist."));
+   if (!iExistChan_DB(Data,sLongCh))
+      Abort_SYS(_("The longitude channel does not exist."));
+   if (!iExistChan_DB(Data,"Time")) 
+      Abort_SYS(_("The Time channel does not exist."));
+
+   LatCh  = FindChan_DB(Data,sLatCh);
+   LongCh = FindChan_DB(Data,sLongCh);
+   TimeCh = FindChan_DB(Data,"Time");                       
+   LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,LongCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Get handle to the output channel ---
+
+   if (!iExistChan_DB(Data,sOutCh)) 
+      OutCh = DupSymb_DB(Data,LatCh,sOutCh);
+   else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);     
+   }   
+                         
+
+   // --- Create First derivative of Lat,Long,Time channels ---
+
+   Strcpy_STR(sLatDCh,"Lat_Deriv2");
+   if (iExistChan_DB(Data,sLatDCh)) {
+      LatDCh = FindChan_DB(Data,sLatDCh);
+      LockSymb_DB(Data,LatDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   } else
+      LatDCh = DupSymb_DB(Data,LatCh,sLatDCh);        
+
+   Strcpy_STR(sLongDCh,"Long_Deriv2");
+   if (iExistChan_DB(Data,sLongDCh)) {
+      LongDCh = FindChan_DB(Data,sLongDCh);
+      LockSymb_DB(Data,LongDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   } else
+      LongDCh = DupSymb_DB(Data,LongCh,sLongDCh);        
+
+   Strcpy_STR(sTimeDCh,"Time_Deriv");
+   if (iExistChan_DB(Data,sTimeDCh)) {
+      TimeDCh = FindChan_DB(Data,sTimeDCh);
+      LockSymb_DB(Data,TimeDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   } else
+      TimeDCh = DupSymb_DB(Data,TimeCh,sTimeDCh);        
+
+
+   // --- Create X/Y acceletaion channels ---
+
+   Strcpy_STR(sXDCh,"X_Deriv2");
+   if (iExistChan_DB(Data,sXDCh)) {
+      XDCh = FindChan_DB(Data,sXDCh);
+      LockSymb_DB(Data,XDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   } else
+      XDCh = DupSymb_DB(Data,LatCh,sXDCh);        
+
+   Strcpy_STR(sYDCh,"Y_Deriv2");
+   if (iExistChan_DB(Data,sYDCh)) {
+      YDCh = FindChan_DB(Data,sYDCh);
+      LockSymb_DB(Data,YDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   } else
+      YDCh = DupSymb_DB(Data,LatCh,sYDCh);        
+
+   Strcpy_STR(sXZCh,_n("ThetaX"));
+   if (iExistChan_DB(Data,sXZCh)) {
+      XZCh = FindChan_DB(Data,sXZCh);
+      LockSymb_DB(Data,XZCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   } else
+      XZCh = DupSymb_DB(Data,LatCh,sXZCh);        
+
+   Strcpy_STR(sYZCh,_n("ThetaY"));
+   if (iExistChan_DB(Data,sYZCh)) {
+      YZCh = FindChan_DB(Data,sYZCh);
+      LockSymb_DB(Data,YZCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   } else
+      YZCh = DupSymb_DB(Data,LatCh,sYZCh);        
+
+
+   // --- Create expression ---
+
+   Strcpy_STR(sFormula1,_n("@r2d=57.29578; @a=6378137.0; @f=1/298.257223563; @g=9.8;"));
+   Strcat_STR(sFormula1,_n("@lat=$sLatCh/@r2d; @long=$sLongCh/@r2d; @slat2=sin(@lat)**2; @clat=cos(@lat);"));
+   //Strcat_STR(sFormula1,_n("@e2=2*@f-@f**2; @e2p=1-@e2*@slat2; @se2p=sqrt(@e2p);"));	   //fortran code see below
+   Strcat_STR(sFormula1,_n("@e2=2*@f-@f**2; @e2p=(1-@e2)*@slat2; @se2p=sqrt(@e2p);"));	   //fortran file formula
+
+   Strcat_STR(sFormula1,_n("$sXDCh=-$sLongDCh/@r2d*@a*@clat/@se2p/@g;"));
+   Strcat_STR(sFormula1,_n("$sYDCh=-$sLatDCh/@r2d*@a*(1-@e2)/(@e2p*@se2p)/@g;"));
+
+   Exp1 = Create_EXP(Data,sFormula1,1024);
+
+
+   //C---horizacc.for--------------------------------------------------------------------------
+   //
+   //C  Conversion factors needed to convert GPS long. and lat. into horizontal
+   //C  directions X and Y. Essentially converting Lat and Long to arc distances
+   //C  on a spheroid.
+   //C  Standard formulas given in Bomford (1980) or Swain (1991)
+   //C  In the notation of Swain (1991) 
+   //C
+   //C  Conversion factor to convert long into X (equation 7a)
+   //C 
+   //C          XCOR = (AA*cos(lat))/SE2P
+   //C
+   //C  where   SE2P = (((1-F)**2)*(sin(lat))**2)**0.5
+   //C
+   //C  Conversion factor to convert lat into Y (equation 7b)
+   //C 
+   //C          YCOR = (AA*((1-F)**2)/SE2P1
+   //C
+   //C  where   SE2P1 = (((1-F)**2)*(sin(lat))**2)**1.5
+   //C
+   //C-----------------------------------------------------------------------------
+   //
+   //            PHI = XLAT(I) * RAD
+   //            E2P = ONE - E2 * SIN(PHI)**2
+   //            SE2P = SQRT(E2P)
+   //
+   //            XCOR = RAD * AA * COS(phi) / SE2P
+   //            YCOR = RAD * AA * (ONE - E2) / (E2P * SE2P)
+   //      
+   //            XA(I) = XDD * XCOR   
+   //            YA(I) = YDD * YCOR
+   //
+   //C-----------------------------------------------------------------------------
+   //C   Divide X acceleration by G ready to calculate Platform 
+   //C   level error PLE(x) from x acceleration
+   //C   Placed here to reduce loops through whole data base
+   //C
+   //C   WHERE
+   //C
+   //C   G   = acceleration due to Earth's gravity (m/s**2)
+   //C-----------------------------------------------------------------------------
+   //
+   //            X(I) = -XA(I) / G
+   //
+
+
+   Strcpy_STR(sFormula2,_n("@g=9.8; @xa=-@g*$sXDCh; @xc=(-@xa-0.5*@g*$sXZCh)*$sXZCh;"));
+   Strcat_STR(sFormula2,_n("@ya=-@g*$sYDCh; @yc=(-@ya-0.5*@g*$sYZCh)*$sYZCh;"));
+   Strcat_STR(sFormula2,"$sOutCh=(@xc+@yc)*100000.0;");
+
+   Exp2 = Create_EXP(Data,sFormula2,1024);
+
+
+   //C---horizacc.for--------------------------------------------------------------------------
+   //
+   //            XA(I) = -XA(I) * Y(I) - HALF * (Y(I)**2) * G  
+   //            YA(I) = -YA(I) * Y(I) - HALF * (Y(I)**2) * G  
+   //
+   //C-----------------------------------------------------------------------------
+   //C   Calculate Platform level error PLE(x) from x acceleration
+   //C
+   //C   PLE(x) = H(w) * XA/G
+   //C
+   //C   WHERE
+   //C
+   //C   G   = acceleration due to Earth's gravity (m/s**2)
+   //C-----------------------------------------------------------------------------
+   //C    Gravity error from PLE(x)
+   //C
+   //C    See LaCoste (1967) 
+   //C    error in gravity (eg)
+   //C
+   //C    eg = -XA * PLE - (G * (PLE**2))/2
+   //C-----------------------------------------------------------------------------
+   //C    Calculate total gravity error and convert to mgals
+   //C-----------------------------------------------------------------------------
+   //
+   //            X(I) = (XA(I) + YA(I)) * FACT
+   //
+
+
+   hVVx = Create_VV(REAL,0);
+   hVVy = Create_VV(REAL,0);
+   hVV  = Create_VV(REAL,0);
+   //hVVxz = Create_VV(REAL,0);
+   //hVVyz = Create_VV(REAL,0);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating Horizontal acceletaion corrections"),0);
+
+   iLine=0;
+   iTotLines = iCountSelLines_DB(Data);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+      
+      if(iGetChannelLength_DB(Data, Line, LatCh) > 0) {
+
+         GetChanVV_DB(Data,Line,TimeCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,TimeDCh,hVV);
+
+         GetChanVV_DB(Data,Line,LatCh,hVV);
+         Diff_VV(hVV,2);
+         PutChanVV_DB(Data,Line,LatDCh,hVV);
+
+         GetChanVV_DB(Data,Line,LongCh,hVV);
+         Diff_VV(hVV,2);
+         PutChanVV_DB(Data,Line,LongDCh,hVV);
+
+
+         // --- Evaluate expression to set X/Y acc channels---
+
+         Math_DU(Data,Line,Exp1);
+
+
+         // --- Get the GPS sampling period from TimeDCh ---
+
+         GetChanVV_DB(Data,Line,TimeDCh,hVV);
+         iLen = iLength_VV(hVV);
+         i1 = iFindDum_VV(hVV,0,iLen-1,1,0);
+         i2 = iFindDum_VV(hVV,0,iLen-1,1,1);
+         if(i2-i1>100)  i2=i1+100;
+         j = 0;
+         rSum = 0.0;
+         for(i=i1; i<i2; i++) {
+            rTD = rGetReal_VV(hVV,i);
+            if(rTD!=rDUMMY && rTD!=0.0) {
+               rSum += rTD;  j++;
+            }            
+         }            
+         rTD = rSum/(real)j*3600.0;
+
+
+         // --- Apply "Platform error filter" ---
+
+         rW0 = (2.0*3.141592654)/rPeriod;
+         rA  = 4.0*rDamping*rW0*rTD;
+         rB  = (rW0*rTD)*(rW0*rTD);
+         rD0 = 4.0+rA+rB;
+         rC0 = (rA+rB)/rD0;
+         rC1 = 2.0*rB/rD0;
+         rC2 = (rB-rA)/rD0;
+         rD1 = (8.0-2.0*rB)/rD0;
+         rD2 = (rA-rB-4.0)/rD0;
+
+         GetChanVV_DB(Data,Line,XDCh,hVVx);
+         Interp_VVU(hVVx,VVU_INTERP_EDGE_LINEAR,VVU_INTERP_EDGE_LINEAR);
+         iLen = iLength_VV(hVVx);
+         SetLen_VV(hVV,iLen);
+         SetRealN_VV(hVV,0,i1,rDUMMY);
+
+         rX0 = rGetReal_VV(hVVx,i1+0);
+         rZ0 = rC0*rX0;
+         SetReal_VV(hVV,i1+0,rZ0);
+         rX1 = rGetReal_VV(hVVx,i1+1);
+         rZ1 = rC0*rX1+rC1*rX0+rD1*rZ0;
+         SetReal_VV(hVV,i1+1,rZ1);
+
+         for(i=i1+2; i<iLen; i++) {
+            rX2 = rGetReal_VV(hVVx,i);
+            rZ2 = rC0*rX2+rC1*rX1+rC2*rX0+rD1*rZ1+rD2*rZ0;
+            SetReal_VV(hVV,i,rZ2);
+            rX0 = rX1;
+            rX1 = rX2;
+            rZ0 = rZ1;
+            rZ1 = rZ2;
+         }
+         PutChanVV_DB(Data,Line,XZCh,hVV);
+
+         GetChanVV_DB(Data,Line,YDCh,hVVy);
+         Interp_VVU(hVVy,VVU_INTERP_EDGE_LINEAR,VVU_INTERP_EDGE_LINEAR);
+         iLen = iLength_VV(hVVy);
+         SetLen_VV(hVV,iLen);
+         SetRealN_VV(hVV,0,i1,rDUMMY);
+
+         rY0 = rGetReal_VV(hVVy,i1+0);
+         rZ0 = rC0*rY0;
+         SetReal_VV(hVV,i1+0,rZ0);
+         rY1 = rGetReal_VV(hVVy,i1+1);
+         rZ1 = rC0*rY1+rC1*rY0+rD1*rZ0;
+         SetReal_VV(hVV,i1+1,rZ1);
+
+         for(i=i1+2; i<iLen; i++) {
+            rY2 = rGetReal_VV(hVVy,i);
+            rZ2 = rC0*rY2+rC1*rY1+rC2*rY0+rD1*rZ1+rD2*rZ0;
+            SetReal_VV(hVV,i,rZ2);
+            rY0 = rY1;
+            rY1 = rY2;
+            rZ0 = rZ1;
+            rZ1 = rZ2;
+         }
+         PutChanVV_DB(Data,Line,YZCh,hVV);
+
+
+         // --- Evaluate expression to set hacc channel ---
+
+         Math_DU(Data,Line,Exp2);
+
+         //GetChanVV_DB(Data,Line,XZCh,hVVxz);
+         //GetChanVV_DB(Data,Line,YZCh,hVVyz);
+         //
+         //for(i=0; i<iLen; i++) {
+         //     
+         //   rXa = -9.8*rGetReal_VV(hVVx,i);
+         //   rYa = -9.8*rGetReal_VV(hVVy,i);
+         //
+         //   rXz = rGetReal_VV(hVVxz,i);
+         //   rYz = rGetReal_VV(hVVyz,i);
+         //
+         //   rXc = (-rXa-0.5*9.8*rXz)*rXz;
+         //   rYc = (-rYa-0.5*9.8*rYz)*rYz;
+         //
+         //   rHacc = (rXc+rYc)*100000.0;
+         //   SetReal_VV(hVV,i,rHacc);
+         //}
+         //PutChanVV_DB(Data,Line,OutCh,hVV);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+      iLine++;
+   }
+   Progress_SYS(0);      
+   Destroy_EXP(Exp1);
+   Destroy_EXP(Exp2);
+   Destroy_VV(hVV);
+   Destroy_VV(hVVx);
+   Destroy_VV(hVVy);
+   //Destroy_VV(hVVxz);
+   //Destroy_VV(hVVyz);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Horizontal Acceleration corrections"),"AGHACCOR;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Hacc Correction"));
+   SetChanFormat_DB(Data,OutCh,DB_CHAN_FORMAT_NORMAL);   
+   SetChanDecimal_DB(Data,OutCh,2);
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   DeleteSymb_DB(Data,LatDCh);
+   DeleteSymb_DB(Data,LongDCh);
+   DeleteSymb_DB(Data,TimeDCh);
+   DeleteSymb_DB(Data,XDCh);
+   DeleteSymb_DB(Data,YDCh);
+   DeleteSymb_DB(Data,XZCh);
+   DeleteSymb_DB(Data,YZCh);
+
+   UnLockSymb_DB(Data,LatCh);
+   UnLockSymb_DB(Data,LongCh);
+   UnLockSymb_DB(Data,TimeCh);
+   UnLockSymb_DB(Data,OutCh);
+
+   UnLock_EDB(EData);
+
+
+   // --- Load output channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);      
+}
+

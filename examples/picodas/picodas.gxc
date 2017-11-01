@@ -1,0 +1,134 @@
+//===========================================================================
+NAME          = "Import PICODAS binary flight data"
+#include <version.gxh>
+DESCRIPTION   = "
+Import binary Picodas data.
+
+    PICODAS.DATA     : Input data file name
+           .TEMPLATE : Import template file name (.I1 assumed)
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/Picodas PDAS"
+
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//         Unload all channels before loading, X, Y then all channels
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "picodas.gr"
+#include "picodas.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+
+int         i;                // Utility 
+
+string(STR_FILE) sData;
+string(STR_FILE) sTemplate;          
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- get database ---
+      
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("PICODASForm");
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_PICODASFORM_0,DGW_FILEPATH,"PICODAS","DATA");
+     SetInfoSYS_DGW(Diag,_PICODASFORM_1,DGW_FILEPATH,"PICODAS","TEMPLATE");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_PICODASFORM_0,DGW_FILEPATH,"PICODAS","DATA");
+     GetInfoSYS_DGW(Diag,_PICODASFORM_1,DGW_FILEPATH,"PICODAS","TEMPLATE");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }  
+
+   // --- Get Parameters ---
+
+   GetString_SYS("PICODAS","DATA",sData);
+   GetString_SYS("PICODAS","TEMPLATE",sTemplate);
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import Picodas"),1);
+
+   // --- import ---
+
+   ImportPico_DU(Data,sTemplate,sData,128);
+
+
+   // --- Get current X, Y channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+   UnLock_EDB(EData);
+
+   if (iInteractive_SYS()) {         
+      
+      // --- display data ---
+      
+      DelLine0_EDB(EData);
+      UnLoadAllChans_EDB(EData);
+      LoadChan_EDB(EData, sXCh);
+      LoadChan_EDB(EData, sYCh);
+      LoadAllChans_EDB(EData);
+      DelLine0_EDB(EData);
+      
+   }
+   
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+
+}

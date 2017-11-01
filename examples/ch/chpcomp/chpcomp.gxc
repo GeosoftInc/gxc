@@ -1,0 +1,1071 @@
+//===========================================================================
+NAME          = "Perform Principal Component Analysis"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = " 
+
+         CHPCOMP.CHANNELS  \"ASSAY\"
+                           \"DISPLAYED_ASSAY\"
+                           \"LIST\"
+                .NMAX
+                .CUTOFF
+                .V_TRANSFORMATION
+                .SCORES (0:No, 1:Yes)
+                .NORMSCORES
+                .LINE   \"D\" for the displayed line only.
+                        \"S\" for selected lines.
+                        \"A\" for all lines
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v5.1.8: Varimax transformation now optional - previously always performed.
+//         Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+//         Scores plotted as channels by default
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chpcomp.gr"
+#include "chpcomp.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Line, Ch;
+DGW         Diag;
+REG         Reg;
+LST         ChLST;
+
+VV          VVd, VVw, VVm, VVs, VVdetect, VVv, ChScoresVV;
+VV          VVfactor, VVtrans, VVdTemp, VVdLen;
+VV          LineVV, LineNameVV;
+PG          PGa, PGv, PGCorr, PGscore, PGload, PGvarimax;
+WA          WAlog;
+DB_SELECT   Select;        // current selection mode
+
+string(STR_DB_SYMBOL) sCh, sCh0, sLine, sCurLine;
+string(STR_DEFAULT_LONG) sTemp, sVal, sChOpt, sDetLim, sFactorLim, sLog;
+string(STR_FILE) sData, sLogfile;
+string(2048) sBuff;
+string(STR_DEFAULT) sMethod;
+string(32768) sChannels;
+
+int   i,ii,iChans,iNRows,j,iLen,iVal,iChLen, iMax, iN, iNorm,iLines;
+int   iLine, iStart, iVarimax;
+real  rVal, rTot, rBase, rMult, rMin, rMax, rCutOff;
+
+//===========================================================================
+// MACROS
+//===========================================================================
+
+#define CREATE_CHAN(A,B,C,D) \
+   if (iExistChan_DB(D,A)) B = FindChan_DB(D,A);\
+   else B = CreateSymb_DB(D,A,DB_SYMB_CHAN,DB_OWN_SHARED,C);\
+   LockSymb_DB(D,B,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Open current database ---
+
+   EData = Current_EDB();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHPCOMP");
+
+      SetInfoSYS_DGW(Diag,_CHPCOMP_0,DGW_LISTALIAS,"CHPCOMP","CHANNELS");     
+      SetInfoSYS_DGW(Diag,_CHPCOMP_1,DGW_TEXT,"CHPCOMP","NMAX");     
+      SetInfoSYS_DGW(Diag,_CHPCOMP_2,DGW_TEXT,"CHPCOMP","CUTOFF"); 
+      SetInfoSYS_DGW(Diag,_CHPCOMP_3,DGW_LISTALIAS,"CHPCOMP","V_TRANSFORMATION");    
+      SetInfoSYS_DGW(Diag,_CHPCOMP_4,DGW_LISTALIAS,"CHPCOMP","SCORES");     
+      SetInfoSYS_DGW(Diag,_CHPCOMP_5,DGW_LISTALIAS,"CHPCOMP","NORMSCORES");     
+      SetInfoSYS_DGW(Diag,_CHPCOMP_6,DGW_LISTALIAS,"CHPCOMP","LINE");     
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+      
+      GetInfoSYS_DGW(Diag,_CHPCOMP_0,DGW_LISTALIAS,"CHPCOMP","CHANNELS");     
+      GetInfoSYS_DGW(Diag,_CHPCOMP_1,DGW_TEXT,"CHPCOMP","NMAX");     
+      GetInfoSYS_DGW(Diag,_CHPCOMP_2,DGW_TEXT,"CHPCOMP","CUTOFF");
+      GetInfoSYS_DGW(Diag,_CHPCOMP_3,DGW_LISTALIAS,"CHPCOMP","V_TRANSFORMATION");       
+      GetInfoSYS_DGW(Diag,_CHPCOMP_4,DGW_LISTALIAS,"CHPCOMP","SCORES");     
+      GetInfoSYS_DGW(Diag,_CHPCOMP_5,DGW_LISTALIAS,"CHPCOMP","NORMSCORES");     
+      GetInfoSYS_DGW(Diag,_CHPCOMP_6,DGW_LISTALIAS,"CHPCOMP","LINE");     
+      
+   }
+
+   // --- Get currently selected line ---
+   if (iInteractive_SYS()) {
+      GetCurLine_EDB(EData,sCurLine);
+      Line = GetCurLineSymb_EDB(EData);      
+   }
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("CHPCOMP","CHANNELS",sChOpt);
+   iMax = iGetInt_SYS("CHPCOMP","NMAX");
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChOpt);
+   SetString_SYS("CHCHANLST","GX","CHPCOMP");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   
+   if (!iInteractive_SYS()) {
+      GetString_SYS("CHPCOMP", "CURLINE", sCurLine);   
+      Line = FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+   }
+            
+   
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+
+   // --- Remove any channels at this point which were synthesized using
+   //     CHPCSYNTH.GX.  Including can produce singular matrices, so remove from list ---
+
+   iChans = iSize_LST(ChLST);   
+   for(i=iChans-1;i>=0;i--) {
+
+      Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, i);
+      GetRegSymbSetting_DB(Data, Ch, "ASSAYMETHOD",sMethod, sizeof(sMethod));
+                     
+      Substr_STR (sTemp, sMethod, 0, 21);
+      if (iStrcmp_STR(sTemp,_n("Principal Components:"),STR_CASE_TOLERANT) == 0) {                                 
+         DelItem_LST(ChLST, i);
+      }           
+   }      
+
+   
+   // --- nothing to do ---
+
+   iChans = iSize_LST(ChLST);   
+   if (iChans <= 0) Abort_SYS(_("No channels to process."));
+
+
+   rCutOff = rGetReal_SYS("CHPCOMP","CUTOFF");
+   if(rCutOff==rDUMMY) rCutOff = 1.0;
+
+   iVarimax = iGetInt_SYS("CHPCOMP","V_TRANSFORMATION");
+   if(iVarimax != 0) iVarimax = 1;     // default to calc Varimax transformation
+
+   iNorm = iGetInt_SYS("CHPCOMP","NORMSCORES");
+   if(iNorm!=0) iNorm = 1;     // default to normalized scores
+  
+   GetString_SYS("CHPCOMP","LINE",sLine);
+   
+   if (iChar_STR(sLine) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+   
+   
+   // --- Get the database name ---
+
+   GetName_DB(Data, DB_NAME_FILE, sData);
+
+
+   if(iMax==iDUMMY) iMax = iChans;
+   iN = iChans;
+   if(iN>iMax) iN=iMax;    // number of components to display
+
+   
+   // --- Adjust the line selection to that required ---
+
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+   
+   // --- Make a list of the selected lines ---
+
+   iLines = iCountSelLines_DB(Data);
+   if(iLines==0)
+      Abort_SYS(_("No Lines are selected"));
+
+   LineVV = Create_VV(INT, iLines);
+   LineNameVV = Create_VV(-STR_DB_SYMBOL,0);
+
+   Line = FirstSelLine_DB(Data);
+   SetInt_VV(LineVV, 0, (int)Line);
+   GetSymbName_DB(Data, Line, sLine);
+   SetString_VV(LineNameVV, 0, sLine);
+
+   for(i=1;i<iLines;i++) {
+      Line = NextSelLine_DB(Data, Line);
+      SetInt_VV(LineVV, i, (int)Line);
+      GetSymbName_DB(Data, Line, sLine);
+      SetString_VV(LineNameVV, 0, sLine);
+   }
+
+   
+   // --- reset starting selections ---
+
+   if (iLine != DU_LINES_SELECTED)
+      SetSelect_DB(Data,Select);
+
+
+   // --- Get the length of the data ---
+   
+   Ch = (DB_SYMB)iGetInt_LST(ChLST,1,0);
+   GetItem_LST(ChLST, 0, 0, sCh0);
+   LockSymb_DB(Data, Ch, DB_LOCK_READONLY, DB_WAIT_NONE);
+   
+   VVdLen = Create_VV(INT, iLines);
+
+   iNRows = 0;
+   for(i=0;i<iLines;i++) {
+  
+      Line = (DB_SYMB)iGetInt_VV(LineVV, i);
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_NONE);
+      iLen = iGetChannelLength_DB(Data,Line,Ch);
+      UnLockSymb_DB(Data, Line);
+      SetInt_VV(VVdLen, i, iLen);
+      iNRows += iLen;
+   
+   }
+   UnLockSymb_DB(Data, Ch);
+
+   if(iNRows==0) {
+      Abort_SYS(_("No data found"));
+   }
+
+
+   // --- Create a PG to put the data in ---
+
+   PGa = Create_PG(iNRows, iChans, GS_DOUBLE);
+   PGv = Create_PG(iChans, iChans, GS_DOUBLE);
+   VVw = Create_VV(REAL, iChans);
+   VVd = Create_VV(REAL, iNRows);
+   VVdTemp = Create_VV(REAL, 0);
+   VVv = Create_VV(REAL, iChans);
+   VVdetect = Create_VV(REAL, iChans);
+   VVfactor = Create_VV(REAL, iChans);
+   VVtrans = Create_VV(INT, iChans);
+
+   
+   // --- Turn on progress ---
+
+   Progress_SYS(1);
+
+
+   // --- Load PGa with the assay data ---
+
+   Reg = Create_REG(128);
+   for (i=0;i<iChans;i++) {
+
+      Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetItem_LST(ChLST, 0, i, sCh);
+      LockSymb_DB(Data, Ch, DB_LOCK_READONLY, DB_WAIT_NONE);
+
+      iStart = 0;
+      for(ii=0;ii<iLines;ii++) {
+
+         Line = (DB_SYMB)iGetInt_VV(LineVV, ii);
+   
+         LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_NONE);
+         GetChanVV_DB(Data, Line, Ch, VVdTemp);
+         UnLockSymb_DB(Data, Line);
+         
+         // --- Do a check on the data length ---
+         
+         iLen = iGetInt_VV(VVdLen, ii);
+         if(iLen != iLength_VV(VVdTemp)) {
+            
+            GetString_VV(LineNameVV, ii, sLine);
+            
+            Printf_STR(sBuff, sizeof(sBuff), _("Error : Channel length mismatch for channels %s [%d] and %s [%d] in line %s. Channels must be of equal length."), sCh0, iLen, sCh, iLength_VV(VVdTemp), sLine); 
+            Abort_SYS(sBuff);
+         }
+         
+         Copy2_VV(VVd, iStart, VVdTemp, 0, iLen);
+         iStart += iLen;
+      }
+      
+      GetRegSymb_DB(Data,Ch,Reg);
+
+      UnLockSymb_DB(Data, Ch);
+
+      // --- Load the data into PGa ---
+
+      WriteCol_PG(PGa, i, 0, iNRows, VVd);
+
+      // --- Get the transform info ---
+
+      Get_REG(Reg,"DETECTLIMIT",sDetLim,sizeof(sDetLim));
+      Get_REG(Reg,"FACTORLIMIT",sFactorLim,sizeof(sFactorLim));
+      Get_REG(Reg,"LOG",sLog,sizeof(sLog));
+
+      SetReal_VV(VVdetect, i, rScanR_STR(sDetLim));
+      SetReal_VV(VVfactor, i, rScanR_STR(sFactorLim));
+      if(!iStrcmp_STR(sLog, _n("Yes"),STR_CASE_TOLERANT)) 
+         SetInt_VV(VVtrans, i, PGU_TRANS_LOG);
+      else
+         SetInt_VV(VVtrans, i, PGU_TRANS_NONE);
+
+   }
+
+   
+   // --- Transform the data ---
+
+   PCTransform_PGU(PGa, VVdetect, VVfactor, VVtrans, PGU_FORWARD);
+
+   
+   // --- Standardize the data ---
+
+   VVm = Create_VV(REAL,iChans);
+   VVs = Create_VV(REAL,iChans);
+
+   PCStandardize_PGU(PGa, VVm, VVs, PGU_FORWARD);
+
+   
+   // --- Create the correlation matrix ---
+
+   PGCorr = Create_PG(iChans, iChans, GS_DOUBLE);
+   CorrelationMatrix_PGU(PGa, PGCorr);
+
+   
+   // --- Get the eigenvectors, values ---
+
+   Jacobi_PGU(PGCorr, VVw, PGv);
+
+   
+   // --- Calculate loadings ---
+
+   PGload = Create_PG(iChans, iChans, GS_DOUBLE);
+   PCLoadings_PGU(PGa, PGload);
+
+   
+   // --- Calculate scores ---
+
+   PGscore = Create_PG(iNRows, iChans, GS_DOUBLE);
+   PCScores_PGU(PGa, PGload, PGscore);
+
+   
+   // --- Normalize scores ---
+
+   if(iNorm) {
+      
+      // --- Tranform PG to values between 0 and 100 ---
+
+      for(i=0;i<iN;i++) {
+
+         ReadCol_PG(PGscore, i, 0, 0, VVd);
+         RangeDouble_VV(VVd, rMin, rMax);
+         if(rMin!=rDUMMY && rMin!=rMax) {
+            rBase = - rMin;
+            rMult = 100.0/(rMax - rMin);
+            Trans_VV(VVd, rBase, rMult);
+            WriteCol_PG(PGscore, i, 0, 0, VVd);
+         }
+      }
+
+   }
+
+   
+   // --- Create new channels with the scores ---
+
+   if(iGetInt_SYS("CHPCOMP","SCORES")!=0) {     // default is to save scores
+      
+      ChScoresVV = Create_VV(-STR_DB_SYMBOL, iChans);
+
+      for(i=0;i<iN;i++) {
+
+         Strcpy_STR(sCh,"SC");
+         FormatI_STR(i+1,sVal,2);
+         Strcat_STR(sCh, sVal);
+
+         if (iExistChan_DB(Data,sCh)) 
+            Ch = FindChan_DB(Data,sCh);
+         else 
+            Ch = CreateSymb_DB(Data,sCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+                      
+         LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+         SetChanWidth_DB(Data, Ch, 7);
+         SetChanDecimal_DB(Data, Ch, 3);
+
+         iStart = 0;
+         for(ii=0;ii<iLines;ii++) {
+
+            iLen = iGetInt_VV(VVdLen, ii);
+            ReadCol_PG(PGscore, i, iStart, iLen, VVdTemp);
+
+            Line = (DB_SYMB)iGetInt_VV(LineVV, ii);
+            LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+            PutChanVV_DB(Data, Line, Ch, VVdTemp);
+            UnLockSymb_DB(Data, Line);
+
+            iStart += iLen;
+         }
+
+         UnLockSymb_DB(Data, Ch);
+
+         // --- Save the channel names ---
+
+         SetString_VV(ChScoresVV, i, sCh);
+
+      }
+
+
+      // --- Delete any other PC channels ---
+
+      for(i=iN; i<64; i++) {
+
+         Strcpy_STR(sCh,"SC");
+         FormatI_STR(i+1,sVal,2);
+         Strcat_STR(sCh, sVal);
+
+         if (iExistChan_DB(Data,sCh)) {
+
+            Ch = FindChan_DB(Data,sCh);
+            LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+            DeleteSymb_DB(Data,Ch);
+
+         }
+      }
+
+      // --- Load the channels into the database ---
+
+      UnLock_EDB(EData);
+
+      for(i=0;i<iN;i++) {
+         GetString_VV(ChScoresVV, i, sCh);
+         LoadChan_EDB(EData, sCh);
+      }
+   }
+   else
+      UnLock_EDB(EData);
+
+
+   // --- Write loadings, eigenvalues, to a log file ---
+   
+   GetString_SYS("CHPCOMP","LOGFILE",sLogfile);
+   
+   if(iStrlen_STR(sLogfile) == 0)
+      Strcpy_STR(sLogfile, "princomp.log");
+   WAlog = Create_WA(sLogfile,WA_NEW);
+   
+
+   Puts_WA(WAlog,_("Principal Component analysis: "));
+   Puts_WA(WAlog,sData);
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+
+   Puts_WA(WAlog,_("Number of channels included: "));
+   FormatI_STR(iChans,sVal,4);
+   Puts_WA(WAlog,sVal);
+
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,_("Number of principal components displayed: "));
+   iVal = iMax;
+   if(iVal>iChans) iVal = iChans;
+   FormatI_STR(iVal,sVal,4);
+   Puts_WA(WAlog,sVal);
+
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,_("Number of rows of data: "));
+   FormatI_STR(iNRows,sVal,4);
+   Puts_WA(WAlog,sVal);
+
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+
+   // --- Figure out space needed for channel names ---
+
+   iChLen = 0;
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sCh);
+      LoadChan_EDB(EData, sCh);
+      iVal = iStrlen_STR(sCh);
+      if(iVal > iChLen) iChLen = iVal;
+   }
+
+   // --- Write the transform methods ---
+
+   Puts_WA(WAlog,_("Data Transformations"));
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"--------------------");
+   NewLine_WA(WAlog);
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sVal);
+
+      Puts_WA(WAlog, "  ");
+      Justify_STR(sVal, sVal, iChLen+2, STR_JUSTIFY_LEFT);      
+      Puts_WA(WAlog, sVal);
+
+      iVal = iGetInt_VV(VVtrans, i);
+      if(iVal==PGU_TRANS_LOG)
+         Puts_WA(WAlog, _(": Logarithmic Normal Distribution"));
+      else
+         Puts_WA(WAlog, _(": Linear Normal Distribution"));
+      NewLine_WA(WAlog);
+
+   }
+
+
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,_("Correlations of Standardized Data"));
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"---------------------------------");
+   NewLine_WA(WAlog);
+
+   iLen = iChLen;
+   
+   Strcpy_STR(sBuff, "");
+   Justify_STR(sBuff, sBuff, iLen+2, STR_JUSTIFY_LEFT);
+   Strcat_STR(sBuff,"   ");
+
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sVal);
+      Justify_STR(sVal, sVal, 8, STR_JUSTIFY_CENTER);
+      Strcat_STR(sBuff, sVal);
+
+   }
+   Puts_WA(WAlog,sBuff);
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"");
+   NewLine_WA(WAlog);
+
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sVal);
+
+      Strcpy_STR(sBuff, "  ");
+      Justify_STR(sVal, sVal, iLen+2, STR_JUSTIFY_LEFT);
+      Strcat_STR(sBuff, sVal);
+
+      ReadRow_PG(PGCorr, i, 0, iChans, VVv);
+
+      for(j=0;j<iChans;j++) {
+
+         Strcat_STR(sBuff, " ");
+         rVal = rGetReal_VV(VVv, j);
+         FormatR2_STR(rVal, sVal, 6, 3);
+         Justify_STR(sVal, sVal, 7, STR_JUSTIFY_RIGHT);
+         Strcat_STR(sBuff, sVal);
+      }
+
+      Puts_WA(WAlog,sBuff);
+      NewLine_WA(WAlog);
+   }
+
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+
+   Puts_WA(WAlog,_("Eigenvalues of correlation matrix"));
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"---------------------------------");
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,_("  Factor  Eigenvalue  cum. %"));
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"  --------------------------");
+   NewLine_WA(WAlog);
+
+   rTot = 0.0;
+   for(i=0;i<iChans;i++) {
+     
+      Strcpy_STR(sBuff, "  ");
+      FormatI_STR(i+1,sVal,4);
+      Justify_STR(sVal, sVal, 4, STR_JUSTIFY_RIGHT);
+      Strcat_STR(sBuff, sVal);
+      Strcat_STR(sBuff, "  ");
+    
+
+      rVal = rGetReal_VV(VVw, i);
+      FormatR2_STR(rVal, sVal, 10, 3);
+      Justify_STR(sVal, sVal, 10, STR_JUSTIFY_RIGHT);
+      Strcat_STR(sBuff, sVal);
+
+      rTot += 100.0 * rVal / (real)iChans;
+      FormatR2_STR(rTot, sVal, 9, 1);
+      Justify_STR(sVal, sVal, 9, STR_JUSTIFY_RIGHT);
+      Strcat_STR(sBuff, sVal);
+
+      Puts_WA(WAlog,sBuff);
+      NewLine_WA(WAlog);
+   }
+
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,_("Eigenvectors of correlation matrix"));
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"----------------------------------");
+   NewLine_WA(WAlog);
+
+   iLen = iChLen;
+   Strcpy_STR(sBuff,"  ");
+   for(i=0;i<iLen;i++)
+      Strcat_STR(sBuff," ");
+
+   Strcat_STR(sBuff,"    ");
+
+   for(i=0;i<iN;i++) {
+
+      Strcpy_STR(sVal,"  PC");
+      Strcat_STR(sBuff, sVal);
+      FormatI_STR(i+1,sVal,2);
+      Strcat_STR(sBuff, sVal);
+      Strcat_STR(sBuff, "   ");
+   }
+   Puts_WA(WAlog,sBuff);
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"");
+   NewLine_WA(WAlog);
+
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sVal);
+
+      Strcpy_STR(sBuff, "  ");
+      Justify_STR(sVal, sVal, iLen+2, STR_JUSTIFY_LEFT);
+      Strcat_STR(sBuff, sVal);
+
+      ReadRow_PG(PGv, i, 0, iN, VVv);
+
+      for(j=0;j<iN;j++) {
+
+         Strcat_STR(sBuff, " ");
+         rVal = rGetReal_VV(VVv, j);
+         FormatR2_STR(rVal, sVal, 6, 3);
+         Justify_STR(sVal, sVal, 7, STR_JUSTIFY_RIGHT);
+         Strcat_STR(sBuff, sVal);
+      }
+
+      Puts_WA(WAlog,sBuff);
+      NewLine_WA(WAlog);
+   }
+
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,_("Principal component loadings"));
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"----------------------------");
+   NewLine_WA(WAlog);
+
+   iLen = iChLen;
+   Strcpy_STR(sBuff,"  ");
+   for(i=0;i<iLen;i++)
+      Strcat_STR(sBuff," ");
+
+   Strcat_STR(sBuff,"    ");
+
+   for(i=0;i<iN;i++) {
+
+      Strcpy_STR(sVal,"  PC");
+      Strcat_STR(sBuff, sVal);
+      FormatI_STR(i+1,sVal,2);
+      Strcat_STR(sBuff, sVal);
+      Strcat_STR(sBuff, "   ");
+   }
+   Puts_WA(WAlog,sBuff);
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"");
+   NewLine_WA(WAlog);
+
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sVal);
+
+      Strcpy_STR(sBuff, "  ");
+      Justify_STR(sVal, sVal, iLen+2, STR_JUSTIFY_LEFT);
+      Strcat_STR(sBuff, sVal);
+
+      ReadRow_PG(PGload, i, 0, iN, VVv);
+
+      for(j=0;j<iN;j++) {
+
+         Strcat_STR(sBuff, " ");
+         rVal = rGetReal_VV(VVv, j);
+         FormatR2_STR(rVal, sVal, 6, 3);
+         Justify_STR(sVal, sVal, 7, STR_JUSTIFY_RIGHT);
+         Strcat_STR(sBuff, sVal);
+      }
+
+      Puts_WA(WAlog,sBuff);
+      NewLine_WA(WAlog);
+   }
+
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,_("Proportion of variables explained by factors"));
+   NewLine_WA(WAlog);
+   Puts_WA(WAlog,"--------------------------------------------");
+   NewLine_WA(WAlog);
+
+   iLen = iChLen;
+   if(iLen<8) iLen=8;    // enough space for "variables" label
+
+   Justify_STR(" ", sBuff, iLen+5, STR_JUSTIFY_LEFT);
+   Strcat_STR(sBuff, _n("No. of factors"));
+   Puts_WA(WAlog,sBuff);
+   NewLine_WA(WAlog);
+
+   Strcpy_STR(sBuff, "  ");
+   Justify_STR(_n("Variable"), sVal, iLen+2, STR_JUSTIFY_LEFT);
+   Strcat_STR(sBuff, sVal);
+
+   for(i=0;i<iN;i++) {
+      FormatI_STR(i+1,sVal,2);
+      Justify_STR(sVal, sVal, 4, STR_JUSTIFY_RIGHT);
+      Strcat_STR(sBuff, sVal);
+      Strcat_STR(sBuff, "    ");
+   }
+   Puts_WA(WAlog,sBuff);
+   NewLine_WA(WAlog);
+   NewLine_WA(WAlog);
+
+   for(i=0;i<iChans;i++) {
+
+      GetItem_LST(ChLST, 0, i, sVal);
+
+      Strcpy_STR(sBuff, "  ");
+      Justify_STR(sVal, sVal, iLen, STR_JUSTIFY_LEFT);
+      Strcat_STR(sBuff, sVal);
+
+      ReadRow_PG(PGload, i, 0, iN, VVv);
+
+      rTot = 0.0;
+      for(j=0;j<iN;j++) {
+
+         Strcat_STR(sBuff, " ");
+         rVal = rGetReal_VV(VVv, j);
+         rTot += rVal*rVal;
+         FormatR2_STR(rTot, sVal, 6, 3);
+         Justify_STR(sVal, sVal, 7, STR_JUSTIFY_RIGHT);
+         Strcat_STR(sBuff, sVal);
+      }
+
+      Puts_WA(WAlog,sBuff);
+      NewLine_WA(WAlog);
+   }
+
+   // --- Count number of components with eigenvalues above the cutoff ---
+
+   iN = 0;
+   for(i=0;i<iChans;i++) {
+     
+      rVal = rGetReal_VV(VVw, i);
+      if(rVal<rCutOff) break;
+      iN++;
+   }
+   if(iN==0) {
+   
+      NewLine_WA(WAlog);
+      Puts_WA(WAlog,_("Cannot calculate varimax - there are no eigenvalues"));
+      NewLine_WA(WAlog);
+      FormatR2_STR(rCutOff, sVal, 6, 3);
+      Printf_STR(sBuff, sizeof(sBuff), _("above the cutoff of %s"), sVal);
+      Puts_WA(WAlog,sBuff);
+   }
+   else {
+
+      // --- Calculate the approximation to the standardized data matrix. ---
+      // --- Set the loadings for eigenvalues above the cutoff to 0 ---
+
+      SetRealN_VV(VVd, 0, iChans, 0.0);
+
+      for (i=iN;i<iChans;i++) {
+
+         // --- Load the zero columns into PGload ---
+   
+         WriteCol_PG(PGload, i, 0, iChans, VVd);
+
+      }
+
+      // --- Recompute the standardized matrix ---
+   
+      MatrixMult_PGU(PGscore, 0, PGload, 1, PGa);
+
+
+      // --- Calculate Varimax loadings if required ---
+
+      PGvarimax = Create_PG(iChans, iN, GS_DOUBLE);
+      
+      if (iVarimax) 
+         PCVarimax_PGU(PGload, PGvarimax);
+      else 
+         CopySubset_PG(PGvarimax, PGload, 0, 0, 0, 0, iChans, iN);
+      
+
+      // --- Calculate scores ---
+
+      if(iNCols_PG(PGscore) != iN) {
+         Destroy_PG(PGscore);
+         PGscore = Create_PG(iNRows, iN, GS_DOUBLE);
+      }
+
+      PCScores_PGU(PGa, PGvarimax, PGscore);
+
+      // --- Normalize scores ---
+
+      if(iNorm) {
+      
+         // --- Tranform PG to values between 0 and 100 ---
+
+         for(i=0;i<iN;i++) {
+   
+            ReadCol_PG(PGscore, i, 0, 0, VVd);
+            RangeDouble_VV(VVd, rMin, rMax);
+            if(rMin!=rDUMMY && rMin!=rMax) {
+               rBase = - rMin;
+               rMult = 100.0/(rMax - rMin);
+               Trans_VV(VVd, rBase, rMult);
+               WriteCol_PG(PGscore, i, 0, 0, VVd);
+            }
+         }
+
+      }
+
+      NewLine_WA(WAlog);
+      NewLine_WA(WAlog);
+
+
+      // --- Write Varimax values to log file? ---
+
+      if (iVarimax) {
+         Puts_WA(WAlog,_("Varimax Principal component loadings"));
+         NewLine_WA(WAlog);
+         Puts_WA(WAlog,"------------------------------------");
+         NewLine_WA(WAlog);
+   
+         iLen = iChLen;
+         Strcpy_STR(sBuff,"  ");
+         for(i=0;i<iLen;i++)
+            Strcat_STR(sBuff," ");
+
+         Strcat_STR(sBuff,"    ");
+
+         for(i=0;i<iN;i++) {
+
+            Strcpy_STR(sVal,"  PC");
+            Strcat_STR(sBuff, sVal);
+            FormatI_STR(i+1,sVal,2);
+            Strcat_STR(sBuff, sVal);
+            Strcat_STR(sBuff, "   ");
+         }
+         Puts_WA(WAlog,sBuff);
+         NewLine_WA(WAlog);
+         Puts_WA(WAlog,"");
+         NewLine_WA(WAlog);
+
+         for(i=0;i<iChans;i++) {
+
+            GetItem_LST(ChLST, 0, i, sVal);
+   
+            Strcpy_STR(sBuff, "  ");
+            Justify_STR(sVal, sVal, iLen+2, STR_JUSTIFY_LEFT);
+            Strcat_STR(sBuff, sVal);
+
+            ReadRow_PG(PGvarimax, i, 0, iN, VVv);
+
+            for(j=0;j<iN;j++) {
+
+               Strcat_STR(sBuff, " ");
+               rVal = rGetReal_VV(VVv, j);
+               FormatR2_STR(rVal, sVal, 6, 3);
+               Justify_STR(sVal, sVal, 7, STR_JUSTIFY_RIGHT);
+               Strcat_STR(sBuff, sVal);
+            }
+
+            Puts_WA(WAlog,sBuff);
+            NewLine_WA(WAlog);
+         }
+
+         NewLine_WA(WAlog);
+         NewLine_WA(WAlog);
+         Puts_WA(WAlog,_("Proportion of variables explained by varimax factors"));
+         NewLine_WA(WAlog);
+         Puts_WA(WAlog,"----------------------------------------------------");
+         NewLine_WA(WAlog);
+
+         iLen = iChLen;
+         if(iLen<8) iLen=8;    // enough space for "variables" label
+
+         Justify_STR(" ", sBuff, iLen+5, STR_JUSTIFY_LEFT);
+         Strcat_STR(sBuff, _n("No. of factors"));
+         Puts_WA(WAlog,sBuff);
+         NewLine_WA(WAlog);
+
+         Strcpy_STR(sBuff, "  ");
+         Justify_STR(_n("Variable"), sVal, iLen+2, STR_JUSTIFY_LEFT);
+         Strcat_STR(sBuff, sVal);
+
+         for(i=0;i<iN;i++) {
+            FormatI_STR(i+1,sVal,2);
+            Justify_STR(sVal, sVal, 4, STR_JUSTIFY_RIGHT);
+            Strcat_STR(sBuff, sVal);
+            Strcat_STR(sBuff, "    ");
+         }
+         Puts_WA(WAlog,sBuff);
+         NewLine_WA(WAlog);
+         NewLine_WA(WAlog);
+
+         for(i=0;i<iChans;i++) {
+
+            GetItem_LST(ChLST, 0, i, sVal);
+
+            Strcpy_STR(sBuff, "  ");
+            Justify_STR(sVal, sVal, iLen, STR_JUSTIFY_LEFT);
+            Strcat_STR(sBuff, sVal);
+
+            ReadRow_PG(PGvarimax, i, 0, iN, VVv);
+
+            rTot = 0.0;
+            for(j=0;j<iN;j++) {
+
+               Strcat_STR(sBuff, " ");
+               rVal = rGetReal_VV(VVv, j);
+               rTot += rVal*rVal;
+               FormatR2_STR(rTot, sVal, 6, 3);
+               Justify_STR(sVal, sVal, 7, STR_JUSTIFY_RIGHT);
+               Strcat_STR(sBuff, sVal);
+            }
+
+            Puts_WA(WAlog,sBuff);
+            NewLine_WA(WAlog);
+         }
+      }
+
+
+      // --- Create new channels with the scores ---
+
+      if(iGetInt_SYS("CHPCOMP","SCORES")==1) {
+      
+         Data = Lock_EDB(EData);
+         ChScoresVV = Create_VV(-STR_DB_SYMBOL, iChans);
+
+         for(i=0;i<iN;i++) {
+
+            Strcpy_STR(sCh,"VSC");
+            FormatI_STR(i+1,sVal,2);
+            Strcat_STR(sCh, sVal);
+
+            if (iExistChan_DB(Data,sCh)) 
+               Ch = FindChan_DB(Data,sCh);
+            else 
+               Ch = CreateSymb_DB(Data,sCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+                      
+            LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+            SetChanWidth_DB(Data, Ch, 7);
+            SetChanDecimal_DB(Data, Ch, 3);
+
+            iStart = 0;
+            for(ii=0;ii<iLines;ii++) {
+
+               iLen = iGetInt_VV(VVdLen, ii);
+               ReadCol_PG(PGscore, i, iStart, iLen, VVdTemp);
+
+               Line = (DB_SYMB)iGetInt_VV(LineVV, ii);
+               LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+               PutChanVV_DB(Data, Line, Ch, VVdTemp);
+               UnLockSymb_DB(Data, Line);
+
+               iStart += iLen;
+            }
+
+            UnLockSymb_DB(Data, Ch);
+
+            // --- Save the channel names ---
+
+            SetString_VV(ChScoresVV, i, sCh);
+
+         }
+
+         // --- Delete any other VSC channels ---
+
+         for(i=iN; i<64; i++) {
+
+            Strcpy_STR(sCh,"VSC");
+            FormatI_STR(i+1,sVal,2);
+            Strcat_STR(sCh, sVal);
+
+            if (iExistChan_DB(Data,sCh)) {
+
+               Ch = FindChan_DB(Data,sCh);
+               LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+               DeleteSymb_DB(Data,Ch);
+
+            }
+         }
+
+         // --- Load the channels into the database ---
+
+         UnLock_EDB(EData);
+
+         for(i=0;i<iN;i++) {
+            GetString_VV(ChScoresVV, i, sCh);
+            LoadChan_EDB(EData, sCh);
+         }
+      }
+   }
+
+   Destroy_WA(WAlog);
+
+   // --- Turn off progress ---
+
+   Progress_SYS(0);
+
+
+   // --- Anything to display ---
+
+   if (iFileSize_SYS(sLogfile)>3 && iInteractive_SYS()) // 3 characters could be UTF-8 BOM only
+   {
+
+      // --- edit ---
+
+      SetString_SYS("EDIT","FILE","princomp.log");
+      SetString_SYS("EDIT","WAIT","");
+      SetString_SYS("EDIT","CHILD","YES");
+      iRunGX_SYS("EDIT");
+
+   }
+}

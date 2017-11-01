@@ -1,0 +1,147 @@
+//===========================================================================
+NAME          = "Select/Deselect a flight"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Select or de-select a flight.
+
+   SELFLT.FLIGHT      Flight number
+         .OPTION      \"Select\" 
+                      \"Deselect\"
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Line/Selections"
+
+//===========================================================================
+
+RESOURCE = "selflt.gr"
+#include "selflt.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SELECT   Select;           // current selection mode
+DB_SYMB     Line;
+DGW         Diag;
+LST         List;
+
+string(STR_DEFAULT_SHORT) sFlight,sOpt,sFlt;
+int         i, iFlight;
+
+//===========================================================================
+//                             XLEVEL CODE
+//===========================================================================
+
+{
+
+   // --- get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SelFlt");
+
+      List = GetList_DGW(Diag,_SELFLT_0);
+   
+
+      // --- Get current selection, then select all the lines ---   
+      
+      Select = GetSelect_DB(Data);
+      Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+         // --- Get the flight number and add it to the list ---
+
+         LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+         iFlight = iLineFlight_DB(Data, Line);
+         UnLockSymb_DB(Data, Line);
+
+         FormatI_STR(iFlight,sFlt,10);
+         AddUniqueItem_LST(List, sFlt, sFlt);
+
+
+         // --- Advance to Next Line ---        
+
+         Line = NextSelLine_DB(Data, Line );
+      }
+
+      // --- Reset selections ---
+
+      SetSelect_DB(Data,Select);
+
+
+      // --- Sort the list ---
+
+      Sort_LST(List, 0, 0);
+
+      
+      // --- Set any Defaults from INI ---
+
+      GetString_SYS("SELFLT","FLIGHT",sFlt);
+      if(!iStrlen_STR(sFlt)) {
+         GetItem_LST(List, 0, 0, sFlt);
+         SetString_SYS("SELFLT","FLIGHT",sFlt);
+      }
+
+      SetInfoSYS_DGW(Diag,_SELFLT_0,DGW_TEXT,"SELFLT","FLIGHT");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 0)
+         SetString_SYS("SELFLT","OPTION","Select");
+      else if (i == 1)
+         SetString_SYS("SELFLT","OPTION","Deselect");
+      else   
+         Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_SELFLT_0,DGW_TEXT,"SELFLT","FLIGHT");
+
+   }
+
+
+   // --- get parameters ---
+
+   GetString_SYS("SELFLT","FLIGHT",sFlight);
+   ToUpper_STR(sFlight);
+   if (!iCharComp_STR(sFlight,"F")) {
+      Strcpy_STR(sFlt,"F");
+      Strcat_STR(sFlt,sFlight);
+   } else
+      Strcpy_STR(sFlt,sFlight);
+
+   GetString_SYS("SELFLT","OPTION",sOpt);
+
+   ToUpper_STR(sOpt);
+   if (iCharComp_STR(sOpt,"D"))
+      Select_DB(Data,sFlt,DB_LINE_SELECT_EXCLUDE);
+   else
+      Select_DB(Data,sFlt,DB_LINE_SELECT_INCLUDE);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

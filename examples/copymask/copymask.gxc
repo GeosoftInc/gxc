@@ -1,0 +1,223 @@
+//===========================================================================
+NAME          = "Copy one channel to another using a mask channel"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Copies one channel to another using a mask channel.  If the new channel 
+does not exist, it will be created with the same definition as the original channel.  
+Where the mask channel is a dummy, the copied channel is also set to dummy,
+otherwise the data value is copied.
+
+Parameters: 
+
+    COPYMASK.FROM     - Original channel
+            .TO       - Destination channel
+            .MASK     - Mask channel
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History:
+// v5.1.4: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "copymask.gr"
+#include "copymask.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;            // Channel Names
+string(STR_DB_SYMBOL) sOutCh;           // Channel Names
+string(STR_DB_SYMBOL) sMaskCh;           // Channel Names
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     InCh;             // Channel Handle
+DB_SYMB     OutCh;            // Channel Handle
+DB_SYMB     MaskCh;            // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+
+int         i;                // Utility 
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("COPYForm");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_COPYFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_COPYFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_COPYFORM_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_COPYFORM_0,DGW_TEXT,"COPYMASK","FROM");     
+     SetInfoSYS_DGW(Diag,_COPYFORM_1,DGW_TEXT,"COPYMASK","TO");     
+     SetInfoSYS_DGW(Diag,_COPYFORM_2,DGW_TEXT,"COPYMASK","MASK");    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // The user hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_COPYFORM_0,DGW_TEXT,"COPYMASK","FROM");    
+     GetInfoSYS_DGW(Diag,_COPYFORM_1,DGW_TEXT,"COPYMASK","TO");    
+     GetInfoSYS_DGW(Diag,_COPYFORM_2,DGW_TEXT,"COPYMASK","MASK");    
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("COPYMASK","FROM",sInCh);
+   GetString_SYS("COPYMASK","TO",sOutCh);
+   GetString_SYS("COPYMASK","MASK",sMaskCh);
+
+   // --- Verify parameters ---
+
+   if(!iStrlen_STR(sInCh))
+      Abort_SYS(_("Input channel not specified."));
+
+   if(!iStrlen_STR(sOutCh))
+      Abort_SYS(_("Output channel not specified."));
+
+   if(!iStrlen_STR(sMaskCh))
+      Abort_SYS(_("Mask channel not specified."));
+
+   if(!iStrcmp_STR(sMaskCh, sOutCh, STR_CASE_TOLERANT))
+      Abort_SYS(_("Output and mask channel cannot be the same"));
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sInCh))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindChan_DB(Data,sInCh);
+
+
+   // --- Does the Mask Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sMaskCh))
+      Abort_SYS(_("Mask channel does not exist."));
+   MaskCh = FindChan_DB(Data,sMaskCh);
+
+   
+   // --- Does the Output Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sOutCh)) {
+      OutCh = DupSymb_DB(Data,InCh,sOutCh);       // Create it 
+      UnLockSymb_DB(Data,OutCh);
+   } else   
+      OutCh = FindChan_DB(Data,sOutCh);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,MaskCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel, _("Copy line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Copy/Decimate ---
+
+      if(InCh!=OutCh)
+         Decimate_DU(Data,Line,InCh,OutCh,1);
+
+
+      // --- Mask the output ---
+
+      Mask_DU(Data, Line, OutCh, MaskCh);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh, _("Copy channel with mask"),"COPYMASK;");
+
+   // --- Unlock the Channel Symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLockSymb_DB(Data,MaskCh);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   UnLock_EDB(EData);         // --- Release the database ---
+}

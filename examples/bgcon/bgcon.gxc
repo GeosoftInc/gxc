@@ -1,0 +1,271 @@
+//===========================================================================
+NAME          = "Bi-directional line gridding from a control file."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Gridding/From Control File"
+
+DESCRIPTION   = "\
+
+Bi-directional gridding using a gridding control file.
+
+Parameters: 
+
+      BGCON.GRDNAME  - name of new grid file
+           .CONNAME  - control file name
+           .CHAN     - data channel
+           .GCHAN    - gradient data channel
+           
+"
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+// v5.1.5: Added support fror gradient gridding
+
+//===========================================================================
+
+RESOURCE = "bgcon.gr"
+#include "bgcon.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sGrdName;     // Name of new grid file
+string(STR_FILE) sConName;     // Name of control file
+string(STR_FILE) sTemp;        // Temporary string
+string(STR_DB_SYMBOL) sXCh, sYCh, sZCh, sGCh;    // channels
+                                           
+BIGRID     Bigrid;
+DAT        InDat;         // Handle to Input DAT data object 
+                          // associated with database
+DAT        OutDat;        // Handle to Output DAT data object
+                          // associated with output grid file
+EDB        EData;
+DB         Data;          // Database handle
+DGW        Diag;          // Dialogue handle
+WA         ConFile;        
+RA         BlankFile;
+LST        List;
+ 
+int        i;             // utility int
+
+DB_SYMB     XCh;
+IPJ         hIPJ;
+
+
+//===========================================================================
+//                           BGCON CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Make a BGCON object ---
+
+   Bigrid = Create_BIGRID();
+
+
+   // --- INTERACTIVE ---
+
+   if (iInteractive_SYS()) {
+   
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("BGCON");
+
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_BGCON_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      Copy_LST(GetList_DGW(Diag,_BGCON_1),List);
+
+      
+      // --- display dialogue until OK ---
+      
+      i = 1;
+      while (i != 0) {
+      
+         
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_BGCON_0,DGW_TEXT,"BGCON","CHAN");
+         SetInfoSYS_DGW(Diag,_BGCON_1,DGW_TEXT,"BGCON","GCHAN");
+         SetInfoSYS_DGW(Diag,_BGCON_2,DGW_FILEPATH,"BGCON","GRDNAME");
+         SetInfoSYS_DGW(Diag,_BGCON_3,DGW_FILEPATH,"BGCON","CONNAME");
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+            
+         
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag,_BGCON_0,DGW_TEXT,"BGCON","CHAN");
+         GetInfoSYS_DGW(Diag,_BGCON_1,DGW_TEXT,"BGCON","GCHAN");
+         GetInfoSYS_DGW(Diag,_BGCON_2,DGW_FILEPATH,"BGCON","GRDNAME");
+         GetInfoSYS_DGW(Diag,_BGCON_3,DGW_FILEPATH,"BGCON","CONNAME");
+
+
+         if (i == 1)         // edit control file
+         {
+         
+         
+            // --- control file name ---
+            
+            GetString_SYS("BGCON","CONNAME",sConName);
+            if (iStrMin2_STR(sConName) == 0) {
+            
+               GetString_SYS("BGCON","GRDNAME",sGrdName);
+               FileNamePart_STR(sGrdName,sConName,STR_FILE_PART_NAME);
+               Strcat_STR(sConName,".con");
+               
+            }
+            
+            
+            // --- if file does not exist, make a blank copy ---
+            
+            if (iFileExist_SYS(sConName) == 0) {
+            
+            
+               // --- find bigrid blank ---
+                 
+               if (iFindPathNameEx_SYS("bigrid.con",FIND_GEOSOFT,GEO_DIRECTORY_ETC,sTemp) == 0) {
+
+                  BlankFile = Create_RA(sTemp);
+                  ConFile = Create_WA(sConName,WA_NEW);            
+                  
+                  while (iGets_RA(BlankFile,sTemp) == 0) {
+                     Puts_WA(ConFile,sTemp);
+                     NewLine_WA(ConFile);
+                  }
+                  
+                  Destroy_SYS(BlankFile);
+                  Destroy_SYS(ConFile);
+                  
+               }
+            }
+            
+            
+            // --- edit file ---
+                  
+            SetString_SYS("EDIT","FILE",sConName);
+            SetString_SYS("EDIT","WAIT","WAIT");
+            iRunGX_SYS("edit");
+            GetString_SYS("EDIT","FILE",sConName);
+            SetString_SYS("BGCON","CONNAME",sConName);
+
+         }
+         
+      }         
+
+      Destroy_DGW(Diag);
+      
+   } 
+
+               
+   // --- Get Parameters ---
+
+   GetString_SYS("BGCON","CHAN",sZCh); 
+   GetString_SYS("BGCON","GCHAN",sGCh); 
+   GetString_SYS("BGCON","GRDNAME",sGrdName);
+   GetString_SYS("BGCON","CONNAME",sConName);
+   if (!iFileExist_SYS(sConName))
+      Abort_SYS(_("Control file does not exist."));
+
+
+   // --- See if grid channels exist ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+   if (!iExistSymb_DB(Data,sXCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Current X Channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,sYCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Current Y Channel does not exist in database"));
+
+   if (!iExistSymb_DB(Data,sZCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Z Channel does not exist in database"));
+      
+      
+   
+   // --- get the input DAT using the database and channel handles ---
+
+   if (iStrMin_STR(sGCh)) {
+      if (!iExistSymb_DB(Data,sGCh,DB_SYMB_CHAN))
+         Abort_SYS(_("Gradient Channel does not exist in database"));
+      Strcat_STR(sZCh,",");
+      Strcat_STR(sZCh,sGCh);
+   }
+   
+   
+   // --- Get the Projection ---
+   
+   XCh = FindSymb_DB(Data,"X",DB_SYMB_CHAN);
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,hIPJ);
+   UnLockSymb_DB(Data,XCh);
+   
+   
+   // --- Create Input DAT ---
+   
+   InDat = CreateDB_DAT(Data,sXCh,sYCh,sZCh);
+
+
+   // --- get the output DAT using the output grid name ---
+
+   OutDat = CreateXGD_DAT(sGrdName,DAT_XGD_NEW);
+
+
+
+   // --- Load up the Bigrid control parameters ---
+
+   if (iLoadParms_BIGRID(Bigrid,sConName))
+      Abort_SYS(_("Could not read the Control file - Please check the format and parameters"));
+      
+      
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- Execute Bigrid program ---
+
+   Run2_BIGRID(Bigrid,"",InDat,OutDat,hIPJ);
+
+   Progress_SYS(0);
+   
+ 
+   // --- Destroy the DATs and Bigrid object ---
+   
+   Destroy_BIGRID(Bigrid);
+   Destroy_DAT(InDat);
+   Destroy_DAT(OutDat);   
+
+   
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sGrdName,"Grid",1);
+   
+   
+   // --- Release the Database ---
+
+   Destroy_IPJ(hIPJ);
+   UnLock_EDB(EData);
+}

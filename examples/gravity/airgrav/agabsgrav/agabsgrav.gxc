@@ -1,0 +1,227 @@
+//===========================================================================
+NAME          = "Calculate absolute gravity"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   AGABSGRAV.INCH    Recalculated relative gravity channel
+            .OUTCH   Output absolute gravity channel
+            .GRELBEG Relative still reading at beginning
+            .GRELEND Relative still reading at end
+            .TBEG    Time at relative still reading at beginning (HH:MM:SS)
+            .TEND    Time at relative still reading at end       (HH:MM:SS)
+            .GABS    Absolute reading at base station
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3: New GX.
+    
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "agabsgrav.gr"
+#include "agabsgrav.grh"
+
+//===========================================================================
+//                                INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DB          Data;                   // Database handle
+EDB         EData;                  // Edited database handle
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // Channel list handle
+EXP         Exp;
+
+DB_SYMB     Line,InCh,OutCh,TimeCh;
+
+int         i;                      // Utility
+real        rGrelbeg,rGrelend,rGabs,rTbeg,rTend,rDrift;
+
+string(STR_DEFAULT)  sInCh,sOutCh;
+string(STR_DEFAULT)  sTbeg,sTend;
+string(512)          sFormula;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGABSGRAV");
+                                                 
+
+      // --- Set up channel lists ---
+      
+      List = GetList_DGW(Diag,_AGABSGRAV_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGABSGRAV_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+
+      // --- Set any Defaults ---
+  
+      SetInfoSYS_DGW(Diag,_AGABSGRAV_0,DGW_TEXT,"AGABSGRAV","INCH");
+      SetInfoSYS_DGW(Diag,_AGABSGRAV_1,DGW_TEXT,"AGABSGRAV","OUTCH");
+      SetInfoSYS_DGW(Diag,_AGABSGRAV_2,DGW_TEXT,"AGABSGRAV","GRELBEG");
+      SetInfoSYS_DGW(Diag,_AGABSGRAV_3,DGW_TEXT,"AGABSGRAV","GRELEND");
+      SetInfoSYS_DGW(Diag,_AGABSGRAV_4,DGW_TEXT,"AGABSGRAV","TBEG");
+      SetInfoSYS_DGW(Diag,_AGABSGRAV_5,DGW_TEXT,"AGABSGRAV","TEND");
+      SetInfoSYS_DGW(Diag,_AGABSGRAV_6,DGW_TEXT,"AGABSGRAV","GABS");
+                           
+                             
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();           // They hit cancel
+                                                 
+     
+      // --- Read inputs from the dialogue box ---
+      
+      GetInfoSYS_DGW(Diag,_AGABSGRAV_0,DGW_TEXT,"AGABSGRAV","INCH");
+      GetInfoSYS_DGW(Diag,_AGABSGRAV_1,DGW_TEXT,"AGABSGRAV","OUTCH");
+      GetInfoSYS_DGW(Diag,_AGABSGRAV_2,DGW_TEXT,"AGABSGRAV","GRELBEG");
+      GetInfoSYS_DGW(Diag,_AGABSGRAV_3,DGW_TEXT,"AGABSGRAV","GRELEND");
+      GetInfoSYS_DGW(Diag,_AGABSGRAV_4,DGW_TEXT,"AGABSGRAV","TBEG");
+      GetInfoSYS_DGW(Diag,_AGABSGRAV_5,DGW_TEXT,"AGABSGRAV","TEND");
+      GetInfoSYS_DGW(Diag,_AGABSGRAV_6,DGW_TEXT,"AGABSGRAV","GABS");
+     
+      // --- Destroy the Dialogue ---
+     
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGABSGRAV","INCH",   sInCh);
+   GetString_SYS("AGABSGRAV","OUTCH",  sOutCh);
+   GetString_SYS("AGABSGRAV","TBEG",   sTbeg);
+   GetString_SYS("AGABSGRAV","TEND",   sTend);
+   rGrelbeg = rGetReal_SYS("AGABSGRAV","GRELBEG");
+   rGrelend = rGetReal_SYS("AGABSGRAV","GRELEND");
+   rGabs    = rGetReal_SYS("AGABSGRAV","GABS");
+    
+   if(rGrelbeg==rDUMMY || rGrelend==rDUMMY)   
+      Abort_SYS(_("Invalid relative still reading at beginning/end."));
+   if(rGabs==rDUMMY)   
+      Abort_SYS(_("Invalid absolute reading at base station."));
+   
+   rTbeg = rScanTime_STR(sTbeg,TIME_FORMAT_COLON);
+   rTend = rScanTime_STR(sTend,TIME_FORMAT_COLON);
+
+   if(rTbeg==rDUMMY || rTend==rDUMMY || rTbeg>=rTend)   
+      Abort_SYS(_("Invalid time at beginning/end."));
+
+
+   // --- Calculate rDrift ---
+
+   rDrift = (rGrelend-rGrelbeg)/(rTend-rTbeg);
+
+
+   // --- Get handles to the input data channels ---
+
+   if (!iExistChan_DB(Data,sInCh)) 
+      Abort_SYS(_("The recalculated relative gravity channel does not exist."));
+   if (!iExistChan_DB(Data,"Time")) 
+      Abort_SYS(_("The Time channel does not exist."));
+
+   InCh = FindChan_DB(Data,sInCh);
+   TimeCh = FindChan_DB(Data,"Time");                       
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Get handle to the output channel ---
+
+   if (!iExistChan_DB(Data,sOutCh)) 
+      OutCh = DupSymb_DB(Data,InCh,sOutCh);
+   else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+      SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);     
+   }   
+
+
+   // --- Create expression ---
+
+   Strcpy_STR(sFormula,"$sOutCh=($sInCh-$rGrelbeg)+$rGabs+$rDrift*(Time-$rTbeg);");
+
+   Exp = Create_EXP(Data,sFormula,512);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating absolute gravity"),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, InCh) > 0) {
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Calculate absolute gravity"),"AGABSGRAV;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Absolute Gravity"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,TimeCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+
+
+   // --- Load channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);
+}
+

@@ -1,0 +1,124 @@
+//===========================================================================
+NAME          = "UBC 3D Model & MSH file import"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Imports a UBC MeshTools format MOD model file using the header MSH file.
+
+   IMPUBCMODMSH.MOD:  One or more MOD files, delimited with \"|\".
+   IMPUBCMODMSH.MSH:  Mesh file
+   IMPUBCMODMSH.DIR:  Slice direction: (0-2) \"X\", \"Y\", \"Z\"
+   IMPUBCMODMSH.DUMMY: Value to use as NULL (dummy).
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v6.0.0   First version
+//===========================================================================
+
+RESOURCE = "impubcmodmsh.gr"
+#include "impubcmodmsh.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         hDGW;   
+EDB         EData;            
+DB          Data;            
+
+string(STR_FILE) sMod,sMsh;
+int i, iDir;
+real rDummy;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     hDGW = Create_DGW("IMPUBCMODMSH");
+
+     
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_0,DGW_FILEPATH,"IMPUBCMODMSH","MOD");     
+     SetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_1,DGW_FILEPATH,"IMPUBCMODMSH","MSH");     
+     SetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_2,DGW_LISTALIAS,"IMPUBCMODMSH","DIR");     
+     SetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_3,DGW_TEXT,"IMPUBCMODMSH","DUMMY");     
+
+     
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(hDGW);
+     if (i != 0) Cancel_SYS();    // The user hit cancel
+
+     
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_0,DGW_FILEPATH,"IMPUBCMODMSH","MOD");    
+     GetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_1,DGW_FILEPATH,"IMPUBCMODMSH","MSH");  
+     GetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_2,DGW_LISTALIAS,"IMPUBCMODMSH","DIR");     
+     GetInfoSYS_DGW(hDGW,_IMPUBCMODMSH_3,DGW_TEXT,"IMPUBCMODMSH","DUMMY");     
+     
+     
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(hDGW);       
+   }
+   
+   
+   // --- Get and verify parameters ---
+
+   GetString_SYS("IMPUBCMODMSH","MOD",sMod);
+   GetString_SYS("IMPUBCMODMSH","MSH",sMsh);
+   iDir = iGetInt_SYS("IMPUBCMODMSH","DIR");
+   rDummy = rGetReal_SYS("IMPUBCMODMSH","DUMMY");
+   if(!iStrlen_STR(sMod))
+      Abort_SYS(_("No MOD file specified."));   
+   if(!iStrlen_STR(sMsh))
+      Abort_SYS(_("No MSH file specified."));  
+   if(iDir<0 || iDir>2) iDir = 2;      // Z-Direction default 
+   if(rDummy==rDUMMY) rDummy = -9.0;      
+
+   
+   // --- Up to 5 Mod files can be imported ---
+   
+   if(iCountTokens_STR(sMod,"|")>5)
+       Abort_SYS(_("A maximum of 5 mod files can be imported at once."));
+
+
+   // --- Do the import ---
+   
+   Progress_SYS(1);
+   ImportUBCModMsh_DU(Data, sMsh, sMod, iDir, rDummy); 
+   Progress_SYS(0);
+   
+   
+   UnLock_EDB(EData);
+   
+   
+   // --- Display the channels ---
+   
+   LoadAllChans_EDB(EData);     
+}

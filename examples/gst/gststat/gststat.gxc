@@ -1,0 +1,585 @@
+//===========================================================================
+NAME          = "Calculate statistics of marked data"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Geostatistics Toolkit"
+
+DESCRIPTION   = "
+
+Calculates statistics of the currently selected data in Oasis.
+
+PARAMETERS:
+
+     GSTSTAT.CHANNEL  channel to calculate stats.
+     GSTSTAT.MASK     Mask channel to use. Blank for none.
+"
+// Revision History:
+//
+//===========================================================================
+
+RESOURCE = "gststat.gr"
+#include "gststat.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+real        rItems, rDummies, rMin, rMax, rRange, rMean, rMedian, rSum;
+real        rGeoMean, rSumSq, rVariance, rStdDev, rStdErr, rMode;
+real        rSkewness, rKurtosis;
+int         iLine,iTotLines,iStat,iMask;
+
+ST          hST;
+DGW         Diag,Report;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch,MCh;
+DB_SYMB     Line;
+LST         List;
+VV          VVd,VVm;
+WA          hWA;
+
+string(STR_DB_SYMBOL) sStr,sCh,sMask,sLastCh,sLastMask,sDB,sFile,Str;
+string(STR_DEFAULT_LONG) sTemp,sLabel;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Report statistics ---
+
+   if (!iInteractive_SYS())
+      Abort_SYS(_("This GX will only run interactively."));
+      
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get Default Mask Channel if required, and if it exists or is "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 &&
+            (iExistChan_DB(Data,sMask) || 
+             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+            SetString_SYS("GSTSTAT","MASK",sMask);
+         }
+      }
+   }
+
+
+   // --- Create the Dialogue ---
+
+   Diag = Create_DGW("GSTSTAT");
+
+
+   // --- Set up lists ---
+
+   List = GetList_DGW(Diag,_GSTSTAT_0);
+   SymbLST_DB(Data,List,DB_SYMB_CHAN);
+   Sort_LST(List,0,0);
+
+   // --- Set up mask channel list ---
+
+   List = GetList_DGW(Diag,_GSTSTAT_1);
+   MaskChanLST_CHIMERA(Data,List);
+   Sort_LST(List,0,0);
+
+
+   Strcpy_STR(sLastCh,_n("NoChannel"));
+   Strcpy_STR(sLastMask,_n("NoChannel"));
+   
+   do {
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GSTSTAT_0,DGW_TEXT,"GSTSTAT","CHANNEL");     
+      SetInfoSYS_DGW(Diag,_GSTSTAT_1,DGW_TEXT,"GSTSTAT","MASK");     
+
+
+      // --- Run the Dialogue ---
+
+      iStat = iRunDialogue_DGW(Diag);
+      if (iStat == -1) Cancel_SYS();
+      
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GSTSTAT_0,DGW_TEXT,"GSTSTAT","CHANNEL");     
+      GetInfoSYS_DGW(Diag,_GSTSTAT_1,DGW_TEXT,"GSTSTAT","MASK");     
+
+
+      // --- get settings ---
+
+      GetString_SYS("GSTSTAT","CHANNEL",sCh);
+      GetString_SYS("GSTSTAT","MASK",sMask);
+
+      if(iStrcmp_STR(sCh,sLastCh,STR_CASE_TOLERANT) ||
+         iStrcmp_STR(sMask, sLastMask, STR_CASE_TOLERANT)) {
+
+         // --- calculate statistics ---
+
+         hST = CreateExact_ST();
+
+
+         // --- Does the Input Channel Exist ? ---
+
+         if (!iExistChan_DB(Data,sCh))  
+            Abort_SYS(_("Input channel does not exist."));
+         Ch = FindChan_DB(Data,sCh);
+         LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+
+         // --- Apply mask? ---
+
+         iMask = 0;
+         if(iStrlen_STR(sMask)  && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+            if (!iExistChan_DB(Data,sMask))  
+               Abort_SYS(_("Mask channel does not exist."));
+            MCh = FindChan_DB(Data,sMask);
+            LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+            iMask = 1;
+         }
+
+
+         // --- get some VV's ---
+
+         VVd  = Create_VV(REAL,0);
+         VVm = Create_VV(INT,0);
+
+
+         // --- Prepare to do the work ---
+
+         iTotLines = iCountSelLines_DB(Data);
+         Progress_SYS(1);
+
+
+         // --- Go through all selected Lines ---
+
+         ProgName_SYS(_("Accumulating statistics"),1);
+         iLine = 0;
+         Line = FirstSelLine_DB(Data);
+         while (iIsLineValid_DB(Data,Line))
+         {
+
+
+            // --- Update the Progress Bar ---
+
+            LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+            GetSymbName_DB(Data,Line,sTemp);
+            UnLockSymb_DB(Data,Line);
+            Strcpy_STR(sLabel,_("Accumulate stats on line: "));
+            Strcat_STR(sLabel,sTemp);
+            ProgName_SYS(sLabel,0);
+            ProgUpdateL_SYS(iLine,iTotLines);
+
+
+           // --- get data ---
+
+           GetChanVV_DB(Data,Line,Ch,VVd);
+
+            if(iMask) {
+
+               GetChanVV_DB(Data,Line,MCh,VVm);
+               ReFidVV_VV(VVm,VVd);
+               Mask_VVU(VVd,VVm);
+
+            }
+
+
+            // --- stat ---
+
+            Statistics_VV(hST,VVd);
+
+            Line = NextSelLine_DB(Data, Line);
+            iLine++;
+
+         }
+
+
+         // --- Setup for histogram ---
+
+         Histogram_ST(hST,200);
+
+
+         // --- Go through all selected Lines ---
+
+         ProgName_SYS(_("Accumulating statistics"),1);
+         iLine = 0;
+         Line = FirstSelLine_DB(Data);
+         while (iIsLineValid_DB(Data,Line))
+         {
+
+
+            // --- Update the Progress Bar ---
+
+            LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+            GetSymbName_DB(Data,Line,sTemp);
+            UnLockSymb_DB(Data,Line);
+            Strcpy_STR(sLabel,_("Calculating Histogram..."));
+            Strcat_STR(sLabel,sTemp);
+            ProgName_SYS(sLabel,0);
+            ProgUpdateL_SYS(iLine,iTotLines);
+
+
+           // --- get data ---
+
+           GetChanVV_DB(Data,Line,Ch,VVd);
+
+            if(iMask) {
+
+               GetChanVV_DB(Data,Line,MCh,VVm);
+               ReFidVV_VV(VVm,VVd);
+               Mask_VVU(VVd,VVm);
+
+           }
+
+
+            // --- stat ---
+
+            Statistics_VV(hST,VVd);
+
+            Line = NextSelLine_DB(Data, Line);
+            iLine++;
+
+         }
+         Progress_SYS(0);
+
+
+         // --- Unlock the channel symbols ---
+
+         UnLockSymb_DB(Data,Ch);
+         if(iMask)
+            UnLockSymb_DB(Data,MCh);
+
+         Strcpy_STR(sLastCh,sCh);
+         Strcpy_STR(sLastMask,sMask);
+
+      }
+      
+      
+      // --- standard stats ---
+
+      rItems   = rGetInfo_ST(hST, ST_ITEMS);
+      rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+      rMin     = rGetInfo_ST(hST, ST_MIN); 
+      rMax     = rGetInfo_ST(hST, ST_MAX);   
+      rRange   = rGetInfo_ST(hST, ST_RANGE);
+      rMean    = rGetInfo_ST(hST, ST_MEAN);  
+      rStdDev  = rGetInfo_ST(hST, ST_STDDEV);
+
+
+      // --- Create the Dialogue ---
+
+      Report = Create_DGW("REPORT");
+
+
+      // --- Set values in the dialogue ---
+   
+      SetInfo_DGW(Report,_REPORT_0,DGW_TEXT,sCh);
+
+      FormatR_STR(rItems,sStr,20,19);
+      SetInfo_DGW(Report,_REPORT_1,DGW_TEXT,sStr);
+
+      FormatR_STR(rDummies,sStr,20,19);
+      SetInfo_DGW(Report,_REPORT_2,DGW_TEXT,sStr);
+
+      FormatR_STR(rMin,sStr,20,10);
+      SetInfo_DGW(Report,_REPORT_3,DGW_TEXT,sStr);
+
+      FormatR_STR(rMax,sStr,20,10);
+      SetInfo_DGW(Report,_REPORT_4,DGW_TEXT,sStr);
+
+      FormatR_STR(rRange,sStr,20,10);
+      SetInfo_DGW(Report,_REPORT_5,DGW_TEXT,sStr);
+
+      FormatR_STR(rMean,sStr,20,10);
+      SetInfo_DGW(Report,_REPORT_6,DGW_TEXT,sStr);
+
+      FormatR_STR(rStdDev,sStr,20,6);
+      SetInfo_DGW(Report,_REPORT_7,DGW_TEXT,sStr);
+
+
+      // --- display report ---
+
+      iStat = iRunDialogue_DGW(Report);
+      
+      
+      if (iStat == 2) {
+
+         // --- More stats ---
+
+         rItems    = rGetInfo_ST(hST, ST_NPOS);
+         rGeoMean  = rGetInfo_ST(hST, ST_GEOMEAN);
+         rSum      = rGetInfo_ST(hST, ST_SUM);
+         rSumSq    = rGetInfo_ST(hST, ST_SUM2); 
+         rVariance = rGetInfo_ST(hST, ST_VARIANCE);   
+         rStdDev   = rGetInfo_ST(hST, ST_STDDEV);  
+         rStdErr   = rGetInfo_ST(hST, ST_STDERR);
+         rMean     = rGetInfo_ST(hST, ST_MEAN);
+         rMedian   = rGetInfo_ST(hST, ST_MEDIAN);
+         rMode     = rGetInfo_ST(hST, ST_MODE);
+         rSkewness = rGetInfo_ST(hST, ST_SKEW);
+         rKurtosis = rGetInfo_ST(hST, ST_KURTOSIS);
+
+
+         // --- Create the Dialogue ---
+
+         Report = Create_DGW("REPORT2");
+
+
+         // --- Set values in the dialogue ---
+      
+         SetInfo_DGW(Report,_REPORT2_0,DGW_TEXT,sCh);
+
+         FormatR_STR(rItems,sStr,20,19);
+         SetInfo_DGW(Report,_REPORT2_1,DGW_TEXT,sStr);
+
+         FormatR_STR(rGeoMean,sStr,20,10);
+         SetInfo_DGW(Report,_REPORT2_2,DGW_TEXT,sStr);
+
+         FormatR_STR(rSum,sStr,20,17);
+         SetInfo_DGW(Report,_REPORT2_3,DGW_TEXT,sStr);
+
+         FormatR_STR(rSumSq,sStr,20,17);
+         SetInfo_DGW(Report,_REPORT2_4,DGW_TEXT,sStr);
+
+         FormatR_STR(rVariance,sStr,20,6);
+         SetInfo_DGW(Report,_REPORT2_5,DGW_TEXT,sStr);
+
+         FormatR_STR(rStdDev,sStr,20,6);
+         SetInfo_DGW(Report,_REPORT2_6,DGW_TEXT,sStr);
+
+         FormatR_STR(rStdErr,sStr,20,10);
+         SetInfo_DGW(Report,_REPORT2_7,DGW_TEXT,sStr);
+
+         FormatR_STR(rMean,sStr,20,10);
+         SetInfo_DGW(Report,_REPORT2_8,DGW_TEXT,sStr);
+
+         FormatR_STR(rMedian,sStr,20,10);
+         SetInfo_DGW(Report,_REPORT2_9,DGW_TEXT,sStr);
+
+         FormatR_STR(rMode,sStr,20,10);
+         SetInfo_DGW(Report,_REPORT2_10,DGW_TEXT,sStr);
+
+         FormatR_STR(rSkewness,sStr,20,6);
+         SetInfo_DGW(Report,_REPORT2_11,DGW_TEXT,sStr);
+
+         FormatR_STR(rKurtosis,sStr,20,6);
+         SetInfo_DGW(Report,_REPORT2_12,DGW_TEXT,sStr);
+
+
+         // --- display report ---
+
+         iStat = iRunDialogue_DGW(Report);
+      
+         
+         // --- Run save stats ---
+      
+         if (iStat == 3)
+         {
+            // --- File save dialog ---
+
+            Report = Create_DGW("REPORT3");
+
+            SetInfoSYS_DGW(Report,_REPORT3_0,DGW_FILEPATH,"STAT","FILE");     
+
+            iStat = iRunDialogue_DGW(Report);
+
+            if (iStat == 1)
+            {
+                GetInfoSYS_DGW(Report,_REPORT3_0,DGW_FILEPATH,"STAT","FILE");     
+
+                GetString_SYS("STAT","FILE",sFile);
+
+                hWA = Create_WA(sFile,0);
+               
+                Puts_WA(hWA,_n("Statistics Information"));
+                NewLine_WA(hWA);
+                NewLine_WA(hWA);
+
+                // --- Get database name ---
+
+                GetName_DB(Data,DB_NAME_FILE,sDB);
+
+                Puts_WA(hWA,_n("          Database: "));
+                Puts_WA(hWA,sDB);
+                NewLine_WA(hWA);
+                NewLine_WA(hWA); 
+
+                FormatR_STR(rItems,Str,20,19);
+                Puts_WA(hWA,_n("   Number of items: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+
+                FormatR_STR(rGeoMean,Str,20,17);
+                Puts_WA(hWA,_n("    Geometric mean: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rSum,Str,20,17);
+                Puts_WA(hWA,_n("    Arithmetic sum: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rSumSq,Str,20,17);
+                Puts_WA(hWA,_n("    Sum of squares: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rVariance,Str,20,17);
+                Puts_WA(hWA,_n("          Variance: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rStdDev,Str,20,17);
+                Puts_WA(hWA,_n("Standard deviation: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+
+                FormatR_STR(rStdErr,Str,20,17);
+                Puts_WA(hWA,_n("    Standard error: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rMean,Str,20,17);
+                Puts_WA(hWA,_n("        Mean value: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+
+                FormatR_STR(rMedian,Str,20,17);
+                Puts_WA(hWA,_n("      Median value: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rMode,Str,20,17);
+                Puts_WA(hWA,_n("        Mode value: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rSkewness,Str,20,17);
+                Puts_WA(hWA,_n("          Skewness: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                FormatR_STR(rKurtosis,Str,20,17);
+                Puts_WA(hWA,_n("          Kurtosis: "));
+                Puts_WA(hWA,Str);
+                NewLine_WA(hWA);
+                
+                Destroy_WA(hWA);
+
+            }
+
+            // --- Destroy the dialogue ---
+
+            Destroy_DGW(Report);             
+         }
+      
+      }
+      
+      // --- Run save stats ---
+      
+      if (iStat == 3)
+      {
+         // --- File save dialog ---
+
+         Report = Create_DGW("REPORT3");
+
+         SetInfoSYS_DGW(Report,_REPORT3_0,DGW_FILEPATH,"STAT","FILE");     
+
+         iStat = iRunDialogue_DGW(Report);
+
+         if (iStat == 1)
+         {
+             GetInfoSYS_DGW(Report,_REPORT3_0,DGW_FILEPATH,"STAT","FILE");     
+
+             GetString_SYS("STAT","FILE",sFile);
+
+             hWA = Create_WA(sFile,0);
+         
+             Puts_WA(hWA,_n("Statistics Information"));
+             NewLine_WA(hWA);
+             NewLine_WA(hWA);
+
+             // --- Get database name ---
+
+             GetName_DB(Data,DB_NAME_FILE,sDB);
+
+             Puts_WA(hWA,_n("          Database: "));
+             Puts_WA(hWA,sDB);
+             NewLine_WA(hWA);
+             NewLine_WA(hWA); 
+
+             FormatR_STR(rItems,Str,20,19);
+             Puts_WA(hWA,_n("   Number of items: "));
+             Puts_WA(hWA,Str);
+             NewLine_WA(hWA);
+      
+             FormatR_STR(rDummies,Str,20,19);
+             Puts_WA(hWA,_n(" Number of dummies: "));
+             Puts_WA(hWA,Str);
+             NewLine_WA(hWA);
+      
+             FormatR_STR(rMin,Str,20,17);
+             Puts_WA(hWA,_n("     Minimum value: "));
+             Puts_WA(hWA,Str);
+             NewLine_WA(hWA);
+
+             FormatR_STR(rMax,Str,20,17);
+             Puts_WA(hWA,_n("     Maximum value: "));
+             Puts_WA(hWA,Str);
+             NewLine_WA(hWA);
+
+             FormatR_STR(rRange,Str,20,17);
+             Puts_WA(hWA,_n("             Range: "));
+             Puts_WA(hWA,Str);
+             NewLine_WA(hWA);
+
+             FormatR_STR(rMean,Str,20,17);
+             Puts_WA(hWA,_n("        Mean value: "));
+             Puts_WA(hWA,Str);
+             NewLine_WA(hWA);
+
+             FormatR_STR(rStdDev,Str,20,17);
+             Puts_WA(hWA,_n("Standard deviation: "));
+             Puts_WA(hWA,Str);
+             NewLine_WA(hWA);
+                
+             Destroy_WA(hWA);
+          
+         }
+      }
+      
+   } while (iStat != -1);
+
+
+   // --- Destroy ---
+
+   Destroy_SYS(Diag);
+   Destroy_SYS(Report);
+   Destroy_SYS(VVd);
+   Destroy_SYS(VVm);
+
+   Destroy_ST(hST);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+   // --- cancel the GX to prevent adding it to a GS ---
+
+   Cancel_SYS();
+
+}

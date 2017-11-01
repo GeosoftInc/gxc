@@ -1,0 +1,226 @@
+//===========================================================================
+NAME          = "Average duplicate samples in a database."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Average duplicate samples in a database.
+
+    IP.DUPMASK : Reference channel for duplicates
+    IP.LINES : Line selections:
+               A : All lines
+               S : Selected lines
+               D : Displayed line
+    IP.DUPOUT: 0: Create new averaged values every time
+               1: Overwrite existing averages  
+"
+// Revision History:
+// v5.1.6: Include QC channel in the mask channel list.
+// v5.1.3: Using "Current" X, Y and Z channels - WinnowChanList2_IP.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPDUP.gr"
+#include "IPDUP.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+DB_SELECT   Select;           // current selection mode
+LST         List, QCList;
+
+int         i;                // Utility 
+
+string(STR_DB_SYMBOL) sCurLine, sChan, sQCChan;
+string(STR_DEFAULT_SHORT) sLines;
+string(STR_DEFAULT) sMsg;
+int iDone, iOut;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();
+   
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   Data = Lock_EDB(EData);
+
+   
+	// --- Create the IP object ---
+
+   Ip = Create_IP();
+	
+	
+	// --- Get the QC channel LST ---
+
+	QCList = Create_LST(2*STR_DB_SYMBOL);
+	QCChanLST_IP(Ip, Data, QCList);
+
+
+   // --- Are we running interactively ? ---
+
+   iDone = 0;
+   while (iInteractive_SYS() && !iDone)
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPDUP");
+
+      // --- Create Mask channel list ---
+
+      List = GetList_DGW(Diag,_IPDUP_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      WinnowChanList2_IP(List, Data);
+
+
+      // --- Add the QC channels back in to the list ---
+
+		Append_LST(List, QCList);
+      Sort_LST(List,0,0);
+
+
+		// --- Create the QC channel list ---
+
+      List = GetList_DGW(Diag,_IPDUP_2);
+		Copy_LST(List, QCList);
+		InsertItem_LST(List, 0, "", "");		// Put an empty item at the start
+
+
+		// --- Set QC default ---
+
+		GetString_SYS("IP","QC_CHAN",sQCChan);
+		if(iStrlen_STR(sQCChan)==0 || iExistChan_DB(Data, sQCChan)==0)
+		{
+			if(iSize_LST(QCList)>1)
+			{
+				GetItem_LST(QCList, LST_ITEM_NAME, 1, sQCChan);  // First item is blank, get the second.
+				SetString_SYS("IP","QC_CHAN",sQCChan);
+			}
+		}
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPDUP_0,DGW_LISTALIAS,"IP","LINES");
+      SetInfoSYS_DGW(Diag,_IPDUP_1,DGW_TEXT,"IP","DUPMASK");
+      SetInfoSYS_DGW(Diag,_IPDUP_2,DGW_TEXT,"IP","QC_CHAN");
+      SetInfoSYS_DGW(Diag,_IPDUP_3,DGW_LISTALIAS,"IP","DUPOUT");
+      
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPDUP_0,DGW_LISTALIAS,"IP","LINES");
+      GetInfoSYS_DGW(Diag,_IPDUP_1,DGW_TEXT,"IP","DUPMASK");
+      GetInfoSYS_DGW(Diag,_IPDUP_2,DGW_TEXT,"IP","QC_CHAN");
+      GetInfoSYS_DGW(Diag,_IPDUP_3,DGW_LISTALIAS,"IP","DUPOUT");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+      // --- Verify input ---
+ 
+      iDone = 1;
+   } 
+  
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","LINES",sLines);
+   ToUpper_STR(sLines);
+
+   GetString_SYS("IP","DUPMASK",sChan);
+   GetString_SYS("IP","QC_CHAN",sQCChan);
+
+
+   // --- Validate Mask channel ---
+
+   if(!iStrlen_STR(sChan))
+       Abort_SYS(_("Mask channel not defined."));
+
+   if(!iExistChan_DB(Data, sChan)) {
+      Printf_STR(sMsg, sizeof(sMsg), _("Mask channel %s does not exist in the current database."), sChan);
+      Abort_SYS(sMsg);
+   }
+
+
+   // --- Validate QC channel ---
+
+   if(iStrlen_STR(sQCChan))  // it is optional
+	{
+	   if(!iExistChan_DB(Data, sQCChan)) {
+	      Printf_STR(sMsg, sizeof(sMsg), _("QC channel %s does not exist in the current database."), sQCChan);
+		   Abort_SYS(sMsg);
+		}
+   }
+
+
+   iOut = iGetInt_SYS("IP","DUPOUT");
+
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Averaging duplicate samples"),1);
+
+
+   // --- Do the line selection ---
+
+   Select = GetSelect_DB(Data);
+   if(iCharComp_STR(sLines,"D")) {
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+      Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+   }
+   else if(iCharComp_STR(sLines,"A")) {
+      Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+   // --- average ---
+
+   AverageDuplicatesQC_IP(Ip, Data, sChan, sQCChan, iOut);
+
+
+   // --- Restore the line selection ---
+
+   SetSelect_DB(Data, Select);
+
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+
+   // --- run the recalc GX, but do not recalculate XYZ, because the user may have set the current XYZ to other channels ---
+
+	SetInt_SYS("IPRECALC", "CALCULATE_XYZ", 0);
+   iRunGX_SYS("iprecalc.gx");
+   
+}

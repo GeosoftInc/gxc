@@ -1,0 +1,889 @@
+//===========================================================================
+NAME          = "Draw base map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D"
+
+DESCRIPTION   = "Draw a base map"
+
+// Revision History
+// v6.1.0: INM Corrected correction for inside data margin on LL maps
+//         INM removed debug output to ini files
+//         RA  Added functionality to custom control "Edit" button.
+// v6.0.0: Adjust inside margin for Lat-long clipped maps.
+// v5.1.7: Added BASEMAP2.SCRIPTSETTINGS parameter to allow user to override
+//         setting parameters from map REG.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "basemap2.gr"
+#include "basemap2.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+#define STYLE_MAP    0
+#define STYLE_FIGURE 1
+#define STYLE_CUSTOM 2
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+int         i,iJump,iLines,iRet;
+int         iStyle;
+int         iMapLL;
+string(STR_DEFAULT) sStyle, sNorth;
+string(STR_DEFAULT) sPar;
+string(2)   sTemp3;
+string(STR_FILE) sTemp,sTemp2,sCon;
+
+DGW      Diag;
+EMAP     EMap;
+MAP      Map;
+REG      MapReg;
+MVIEW    DataView;
+MVIEW    BaseView;
+MAPL     Mapplot;
+RA       Master;     // Master control file
+WA       ConFile;    // Control File
+IPJ      Ipj,UserIpj;
+
+real     rXminD,rYminD,rXmaxD,rYmaxD;
+real     rXminB,rYminB,rXmaxB,rYmaxB;
+real     rScale,rNewScale,rNorth;
+real     rMbottom,rMright,rMtop,rMleft;
+real     rMinsideOld,rMinsideNew,rAdjust;
+real     rX, rY, rZ, rRot, rExtra;
+
+string(STR_DEFAULT_LONG) sBuff;
+int iProj, iVal, iUseScriptSettings;
+int iRotatedPlanMap, iOrient;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- escape strings for titles and replacement strings ---
+   
+#define UNDO_ESCAPE(A) GetString_SYS("MAP",A,sTemp); Escape_STR(sTemp,ESCAPE_REPLACE); SetString_SYS("MAP",A,sTemp);
+   
+   UNDO_ESCAPE("TITLE")     
+   UNDO_ESCAPE("SUB_1")     
+   UNDO_ESCAPE("SUB_2")     
+   UNDO_ESCAPE("TA1")
+   UNDO_ESCAPE("TB1")
+   UNDO_ESCAPE("TB2")
+   UNDO_ESCAPE("TB3")
+   UNDO_ESCAPE("TC1")
+   UNDO_ESCAPE("TC2")
+   UNDO_ESCAPE("TC3")
+   UNDO_ESCAPE("TC4")
+   UNDO_ESCAPE("TD1")
+   UNDO_ESCAPE("RPL0")
+   UNDO_ESCAPE("RPL1")
+   UNDO_ESCAPE("RPL2")
+   UNDO_ESCAPE("RPL3")
+   UNDO_ESCAPE("RPL4")
+   UNDO_ESCAPE("RPL5")
+   UNDO_ESCAPE("RPL6")
+   UNDO_ESCAPE("RPL7")
+   UNDO_ESCAPE("RPL8")
+   UNDO_ESCAPE("RPL9")
+
+
+   // --- Ensure we have a map and that we are not drawing on grid documents ---
+   
+   if (iRunGX_SYS("sclgrd") == -1) 
+      Cancel_SYS();
+
+   // --- get current map info ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   if (iExistView_MAP(Map,"*Data") == FALSE)
+      Abort_SYS(_("The MAP has no \"Data\" view."));
+   
+   
+   // --- 
+   // if interactive, and base view already exists, clear MAP settings
+   // because we will get them from the map.  Otherwise, this is the first time
+   // through on this map so re-use the settings we have.
+   // This procedure is used unless specifically overridden by setting the 
+   // script parameter "BASEMAP2.SCRIPTSETTINGS" to 1.
+   // ---
+   
+   if (iInteractive_SYS() && iExistView_MAP(Map,"*Base"))  ClearGroup_SYS("MAP");
+   
+   
+   iUseScriptSettings = iGetInt_SYS("BASEMAP2","USESCRIPTSETTINGS");
+   if(iUseScriptSettings!=1) iUseScriptSettings = 0;
+   SetInt_SYS("BASEMAP2","USESCRIPTSETTINGS",iDUMMY);    // clear each time.
+
+
+   // --- now get the map reg and set the environent ---
+
+   
+   MapReg = GetREG_MAP(Map);
+
+   if(!iUseScriptSettings) {   
+      SetREG_SYS(MapReg);
+   }
+   
+
+	// --- Lat-lon clipped map? ---
+
+	GetInt_REG(MapReg,"MAP_LL.CLIP", iMapLL);   
+	if(iMapLL != 1) iMapLL = 0;
+
+
+   // --- Get current inside margin ---
+   												
+   if (iExistReal_SYS("MAP","MARGIN_INSIDE"))
+      rMinsideOld = rGetReal_SYS("MAP","MARGIN_INSIDE");
+   else
+      rMinsideOld = rDUMMY;
+   
+   
+   // --- update parameters for actual map limits ---
+   
+   DataView = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+
+	// --- Cannot run BASEMAP2.GX on section views - direct the user to the SectionSurround GX ---
+
+	if(iIsSection_MVIEW(DataView) == 1)
+		Abort_SYS(_("The current data view is a section view. This GX is designed to run only on plan views. Use the \"Draw Section Surround\" GX to plot surrounds for section views."));
+
+
+   rXminD=rYminD=rXmaxD=rYmaxD=0.0;
+   Extent_MVIEW(DataView,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_PLOT,rXminD,rYminD,rXmaxD,rYmaxD);
+   
+
+	// --- is this a rotated map? ---
+
+	iRotatedPlanMap = FALSE;
+   Ipj = Create_IPJ();
+	GetIPJ_MVIEW(DataView, Ipj);
+	if(iGetOrientation_IPJ(Ipj) == IPJ_ORIENT_PLAN)
+	{
+		rX = 0.0;
+		rY = 0.0;
+		rZ = 0.0;
+		rRot = 0.0;
+		rExtra = 0.0;
+		GetOrientationInfo_IPJ(Ipj, rX, rY, rZ, rRot, rExtra);
+		if(rRot != 0.0)
+		iRotatedPlanMap = TRUE;
+	}
+
+
+   // --- See if a projection exists in the data view, and it is not geographic ---
+
+   UserIpj = Create_IPJ();
+	GetUserIPJ_MVIEW(DataView, UserIpj);
+   
+   iProj = iSourceType_IPJ(Ipj);
+   
+   
+   // --- determine current map scale and North ---
+   
+   rScale = rGetMapScale_MVIEW(DataView);
+   if (rScale <= 0.0) Abort_SYS(_("Invalid map scale ( <= 0 )."));
+      
+   rNorth = rNorth_MVIEW(DataView);
+	if (rNorth == rDUMMY) 
+		Strcpy_STR(sNorth, "0");
+	else
+		IFormatReal_STR(rNorth, sNorth, STR_DEFAULT, FORMAT_DECIMAL, 10, 2);
+   
+   // --- determine current margins ---
+   
+   rMbottom = 4.0;      // set default margins
+   rMright = 1.0;
+   rMtop = 1.0;
+   rMleft = 1.0;
+   rMinsideNew = 1.0;
+   
+   if (iExistView_MAP(Map,"*Base")) {
+   
+      BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+      rXminB=rYminB=rXmaxB=rYmaxB=0.0;
+      Extent_MVIEW(BaseView,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_PLOT,rXminB,rYminB,rXmaxB,rYmaxB);
+      
+      if (rXminB > -1000000.0) {
+      
+         rMbottom = (real)((int)(rYminD - rYminB + 0.5))/1000.0;
+         rMright  = (real)((int)(rXmaxB - rXmaxD + 0.5))/1000.0;
+         rMtop    = (real)((int)(rYmaxB - rYmaxD + 0.5))/1000.0;
+         rMleft   = (real)((int)(rXminD - rXminB + 0.5))/1000.0;
+         rMinsideNew = rGetReal_SYS("MAP","MARGIN_INSIDE");
+         
+      }
+           
+   } else {
+      BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITENEW);      
+   }
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      SetString_SYS("MAPCONFIG","NORTH",sNorth);
+      SetReal_SYS("MAP","SCALE",rScale);
+      
+      SetReal_SYS("MAP","MARGIN_BOTTOM",rMbottom);
+      SetReal_SYS("MAP","MARGIN_RIGHT",rMright);
+      SetReal_SYS("MAP","MARGIN_TOP",rMtop);
+      SetReal_SYS("MAP","MARGIN_LEFT",rMleft);
+      SetReal_SYS("MAP","MARGIN_INSIDE",rMinsideNew);
+   
+      iJump = 0;                     
+      while (iJump != 99) {
+      
+         switch (iJump) {
+         
+            case 0:
+            
+               // --- Create the Dialogue ---
+
+					if(iMapLL == 1)
+					{
+						Diag = Create_DGW("BASEMAP0LL");
+						SetInfoSYS_DGW(Diag,_BASEMAP0_0,DGW_LISTALIAS,"MAP","STYLE");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_1,DGW_TEXT,"MAP","SCALE");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_2,DGW_TEXT,"MAP","MARGIN_BOTTOM");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_3,DGW_TEXT,"MAP","MARGIN_RIGHT");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_4,DGW_TEXT,"MAP","MARGIN_TOP");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_5,DGW_TEXT,"MAP","MARGIN_LEFT");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_6,DGW_TEXT,"MAP","UP_DIRECTION");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_7,DGW_TEXT,"MAP","UP_ANGLE");     
+						if (iRunDialogue_DGW(Diag) < 0) Cancel_SYS();
+						GetInfoSYS_DGW(Diag,_BASEMAP0_0,DGW_LISTALIAS,"MAP","STYLE");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_1,DGW_TEXT,"MAP","SCALE");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_2,DGW_TEXT,"MAP","MARGIN_BOTTOM");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_3,DGW_TEXT,"MAP","MARGIN_RIGHT");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_4,DGW_TEXT,"MAP","MARGIN_TOP");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_5,DGW_TEXT,"MAP","MARGIN_LEFT");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_6,DGW_TEXT,"MAP","UP_DIRECTION");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_7,DGW_TEXT,"MAP","UP_ANGLE");     
+						Destroy_DGW(Diag);
+					}
+					else
+					{
+						Diag = Create_DGW("BASEMAP0");
+						SetInfoSYS_DGW(Diag,_BASEMAP0_0,DGW_LISTALIAS,"MAP","STYLE");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_1,DGW_TEXT,"MAP","SCALE");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_2,DGW_TEXT,"MAP","MARGIN_BOTTOM");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_3,DGW_TEXT,"MAP","MARGIN_RIGHT");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_4,DGW_TEXT,"MAP","MARGIN_TOP");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_5,DGW_TEXT,"MAP","MARGIN_LEFT");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_6,DGW_TEXT,"MAP","MARGIN_INSIDE");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_7,DGW_TEXT,"MAP","UP_DIRECTION");     
+						SetInfoSYS_DGW(Diag,_BASEMAP0_8,DGW_TEXT,"MAP","UP_ANGLE");     
+						if (iRunDialogue_DGW(Diag) < 0) Cancel_SYS();
+						GetInfoSYS_DGW(Diag,_BASEMAP0_0,DGW_LISTALIAS,"MAP","STYLE");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_1,DGW_TEXT,"MAP","SCALE");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_2,DGW_TEXT,"MAP","MARGIN_BOTTOM");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_3,DGW_TEXT,"MAP","MARGIN_RIGHT");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_4,DGW_TEXT,"MAP","MARGIN_TOP");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_5,DGW_TEXT,"MAP","MARGIN_LEFT");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_6,DGW_TEXT,"MAP","MARGIN_INSIDE");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_7,DGW_TEXT,"MAP","UP_DIRECTION");     
+						GetInfoSYS_DGW(Diag,_BASEMAP0_8,DGW_TEXT,"MAP","UP_ANGLE");     
+						Destroy_DGW(Diag);               }
+               
+               // --- get the option ---
+               
+               GetString_SYS("MAP","STYLE",sStyle);
+               ToUpper_STR(sStyle);
+               if (iCharComp_STR(sStyle,"M"))
+                  iStyle = STYLE_MAP;
+               else if (iCharComp_STR(sStyle,"F"))
+                  iStyle = STYLE_FIGURE;
+               else   
+                  iStyle = STYLE_CUSTOM;
+               
+               
+               // --- next dialog ---
+               
+               if (iStyle == STYLE_FIGURE)
+                  iJump = 1;
+               else if (iStyle == STYLE_MAP)
+                  iJump = 3;
+               else 
+                  iJump = 5;
+               
+               break;
+               
+            
+            case 1:     // --- figure map ---
+            
+            
+               // --- dialogue ---
+               
+               Diag = Create_DGW("BASEMAP1");
+               
+               SetInfoSYS_DGW(Diag,_BASEMAP1_0 ,DGW_TEXT     ,"MAPCONFIG","NORTH");     
+               SetInfoSYS_DGW(Diag,_BASEMAP1_1 ,DGW_LISTALIAS,"MAPCONFIG","REFGRID");
+               SetInfoSYS_DGW(Diag,_BASEMAP1_2 ,DGW_TEXT     ,"MAPCONFIG","REFSPACE");
+               SetInfoSYS_DGW(Diag,_BASEMAP1_3 ,DGW_LISTALIAS,"MAPCONFIG","COMPASS");     
+               SetInfoSYS_DGW(Diag,_BASEMAP1_4 ,DGW_TEXT     ,"MAPCONFIG","REFTHICK");
+               SetInfoSYS_DGW(Diag,_BASEMAP1_5 ,DGW_TEXT     ,"MAPCONFIG","REFCOLOR");     
+               SetInfoSYS_DGW(Diag,_BASEMAP1_6 ,DGW_LISTALIAS,"MAPCONFIG","YORIENT");
+               SetInfoSYS_DGW(Diag,_BASEMAP1_7 ,DGW_LISTALIAS,"MAPCONFIG","LLGRID");
+               SetInfoSYS_DGW(Diag,_BASEMAP1_8 ,DGW_TEXT     ,"MAPCONFIG","LLINCLONG");
+               SetInfoSYS_DGW(Diag,_BASEMAP1_9 ,DGW_TEXT     ,"MAPCONFIG","LLINCLAT");
+               SetInfoSYS_DGW(Diag,_BASEMAP1_10 ,DGW_TEXT     ,"MAPCONFIG","LLTHICK");     
+               SetInfoSYS_DGW(Diag,_BASEMAP1_11,DGW_TEXT     ,"MAPCONFIG","LLCOLOR");
+
+               i = iRunDialogue_DGW(Diag);
+               if (i < 0) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_BASEMAP1_0 ,DGW_TEXT     ,"MAPCONFIG","NORTH");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_1 ,DGW_LISTALIAS,"MAPCONFIG","REFGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_2 ,DGW_TEXT     ,"MAPCONFIG","REFSPACE");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_3 ,DGW_LISTALIAS,"MAPCONFIG","COMPASS");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_4 ,DGW_TEXT     ,"MAPCONFIG","REFTHICK");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_5 ,DGW_TEXT     ,"MAPCONFIG","REFCOLOR");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_6 ,DGW_LISTALIAS,"MAPCONFIG","YORIENT");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_7 ,DGW_LISTALIAS,"MAPCONFIG","LLGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_8 ,DGW_TEXT     ,"MAPCONFIG","LLINCLONG");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_9 ,DGW_TEXT     ,"MAPCONFIG","LLINCLAT");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_10 ,DGW_TEXT    ,"MAPCONFIG","LLTHICK");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_11,DGW_TEXT     ,"MAPCONFIG","LLCOLOR");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_0 ,DGW_TEXT     ,"MAP","NORTH");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_1 ,DGW_LISTALIAS,"MAP","REFGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_2 ,DGW_TEXT     ,"MAP","REFSPACE");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_3 ,DGW_LISTALIAS,"MAP","COMPASS");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_4 ,DGW_TEXT     ,"MAP","REFTHICK");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_5 ,DGW_TEXT     ,"MAP","REFCOLOR");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_6 ,DGW_LISTALIAS,"MAP","YORIENT");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_7 ,DGW_LISTALIAS,"MAP","LLGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_8 ,DGW_TEXT     ,"MAP","LLINCLONG");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_9 ,DGW_TEXT     ,"MAP","LLINCLAT");
+               GetInfoSYS_DGW(Diag,_BASEMAP1_10 ,DGW_TEXT    ,"MAP","LLTHICK");     
+               GetInfoSYS_DGW(Diag,_BASEMAP1_11, DGW_TEXT    ,"MAP","LLCOLOR");
+
+               Destroy_DGW(Diag);
+               
+               // --- Validate the LLGRID parameter - there must be a valid projection
+               //     to do Lat-Long annotations ---
+
+               iVal = iGetInt_SYS("MAPCONFIG","LLGRID");
+               if(iVal!=-5 && iProj!=IPJ_TYPE_PCS) {
+                  Strcpy_STR(sBuff, _("There is no valid projection defined in the current data view. You cannot display lat-long annotations."));
+                  DisplayMessage_SYS(_("Lat-Long Annotations"),sBuff);
+                                     
+                  SetInt_SYS("MAPCONFIG","LLGRID",-5);
+                  break;
+               }
+               
+               if (i == 0)
+                  iJump = 0;      // back
+               else
+                  iJump = 2;      // next
+                  
+               break;                  
+                           
+            case 2:
+            
+               Diag = Create_DGW("BASEMAP2");
+               
+               SetInfoSYS_DGW(Diag,_BASEMAP2_0 ,DGW_TEXT     ,"MAPTITLE","TITLE");     
+               SetInfoSYS_DGW(Diag,_BASEMAP2_1 ,DGW_TEXT     ,"MAPTITLE","SUB_1");     
+               SetInfoSYS_DGW(Diag,_BASEMAP2_2 ,DGW_TEXT     ,"MAPTITLE","SUB_2");     
+
+               i = iRunDialogue_DGW(Diag);
+               if (i < 0) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_BASEMAP2_0 ,DGW_TEXT     ,"MAPTITLE","TITLE");     
+               GetInfoSYS_DGW(Diag,_BASEMAP2_1 ,DGW_TEXT     ,"MAPTITLE","SUB_1");     
+               GetInfoSYS_DGW(Diag,_BASEMAP2_2 ,DGW_TEXT     ,"MAPTITLE","SUB_2");     
+               GetInfoSYS_DGW(Diag,_BASEMAP2_0 ,DGW_TEXT     ,"MAP","TITLE");     
+               GetInfoSYS_DGW(Diag,_BASEMAP2_1 ,DGW_TEXT     ,"MAP","SUB_1");     
+               GetInfoSYS_DGW(Diag,_BASEMAP2_2 ,DGW_TEXT     ,"MAP","SUB_2");     
+               
+               Destroy_DGW(Diag);
+               
+               if (i == 0)
+                  iJump = 1;      // back
+               else
+                  iJump = 99;     // finished
+                  
+               break;                  
+               
+            case 3:
+            
+               // --- dialogue ---
+               
+               Diag = Create_DGW("BASEMAP3");
+               
+               SetInfoSYS_DGW(Diag,_BASEMAP3_0 ,DGW_TEXT     ,"MAPCONFIG","NORTH");     
+               SetInfoSYS_DGW(Diag,_BASEMAP3_1 ,DGW_LISTALIAS,"MAPCONFIG","REFGRID");
+               SetInfoSYS_DGW(Diag,_BASEMAP3_2 ,DGW_TEXT     ,"MAPCONFIG","REFSPACE");
+               SetInfoSYS_DGW(Diag,_BASEMAP3_3 ,DGW_TEXT     ,"MAPCONFIG","REFTHICK");
+               SetInfoSYS_DGW(Diag,_BASEMAP3_4 ,DGW_TEXT     ,"MAPCONFIG","REFCOLOR");     
+               SetInfoSYS_DGW(Diag,_BASEMAP3_5 ,DGW_LISTALIAS,"MAPCONFIG","YORIENT");     
+               SetInfoSYS_DGW(Diag,_BASEMAP3_6 ,DGW_LISTALIAS,"MAPCONFIG","COMPASS");     
+               SetInfoSYS_DGW(Diag,_BASEMAP3_7 ,DGW_LISTALIAS,"MAPCONFIG","LLGRID");
+               SetInfoSYS_DGW(Diag,_BASEMAP3_8 ,DGW_TEXT     ,"MAPCONFIG","LLINCLONG");
+               SetInfoSYS_DGW(Diag,_BASEMAP3_9 ,DGW_TEXT     ,"MAPCONFIG","LLINCLAT");
+               SetInfoSYS_DGW(Diag,_BASEMAP3_10,DGW_TEXT     ,"MAPCONFIG","LLTHICK");     
+               SetInfoSYS_DGW(Diag,_BASEMAP3_11,DGW_TEXT     ,"MAPCONFIG","LLCOLOR");
+
+               i = iRunDialogue_DGW(Diag);
+               if (i < 0) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_BASEMAP3_0 ,DGW_TEXT     ,"MAPCONFIG","NORTH");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_1 ,DGW_LISTALIAS,"MAPCONFIG","REFGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_2 ,DGW_TEXT     ,"MAPCONFIG","REFSPACE");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_3 ,DGW_TEXT     ,"MAPCONFIG","REFTHICK");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_4 ,DGW_TEXT     ,"MAPCONFIG","REFCOLOR");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_5 ,DGW_LISTALIAS,"MAPCONFIG","YORIENT");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_6 ,DGW_LISTALIAS,"MAPCONFIG","COMPASS");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_7 ,DGW_LISTALIAS,"MAPCONFIG","LLGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_8 ,DGW_TEXT     ,"MAPCONFIG","LLINCLONG");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_9 ,DGW_TEXT     ,"MAPCONFIG","LLINCLAT");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_10,DGW_TEXT     ,"MAPCONFIG","LLTHICK");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_11,DGW_TEXT     ,"MAPCONFIG","LLCOLOR");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_0 ,DGW_TEXT     ,"MAP","NORTH");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_1 ,DGW_LISTALIAS,"MAP","REFGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_2 ,DGW_TEXT     ,"MAP","REFSPACE");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_3 ,DGW_TEXT     ,"MAP","REFTHICK");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_4 ,DGW_TEXT     ,"MAP","REFCOLOR");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_5 ,DGW_LISTALIAS,"MAP","YORIENT");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_6 ,DGW_LISTALIAS,"MAP","COMPASS");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_7 ,DGW_LISTALIAS,"MAP","LLGRID");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_8 ,DGW_TEXT     ,"MAP","LLINCLONG");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_9 ,DGW_TEXT     ,"MAP","LLINCLAT");
+               GetInfoSYS_DGW(Diag,_BASEMAP3_10,DGW_TEXT     ,"MAP","LLTHICK");     
+               GetInfoSYS_DGW(Diag,_BASEMAP3_11,DGW_TEXT     ,"MAP","LLCOLOR");
+
+               Destroy_DGW(Diag);
+
+               // --- Validate the LLGRID parameter - there must be a valid projection
+               //     to do Lat-Long annotations ---
+
+               iVal = iGetInt_SYS("MAPCONFIG","LLGRID");
+               if(iVal!=-5 && iProj!=IPJ_TYPE_PCS) {
+                  Strcpy_STR(sBuff, _("There is no valid projection defined in the current data view. You cannot display lat-long annotations."));
+                  DisplayMessage_SYS(_("Lat-Long Annotations"),sBuff);
+                                     
+                  SetInt_SYS("MAPCONFIG","LLGRID",-5);
+                  break;
+               }
+               
+               if (i == 0)
+                  iJump = 0;      // back
+               else
+                  iJump = 4;      // next
+                           
+               break;                  
+               
+            case 4:
+            
+               Diag = Create_DGW("BASEMAP4");
+               
+               SetInfoSYS_DGW(Diag,_BASEMAP4_0 ,DGW_TEXT,"MAPTITLE","TA1");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_1 ,DGW_TEXT,"MAPTITLE","TB1");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_2 ,DGW_TEXT,"MAPTITLE","TB2");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_3 ,DGW_TEXT,"MAPTITLE","TB3");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_4 ,DGW_TEXT,"MAPTITLE","TC1");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_5 ,DGW_TEXT,"MAPTITLE","TC2");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_6 ,DGW_TEXT,"MAPTITLE","TC3");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_7 ,DGW_TEXT,"MAPTITLE","TC4");
+               SetInfoSYS_DGW(Diag,_BASEMAP4_8 ,DGW_TEXT,"MAPTITLE","TD1");
+
+               i = iRunDialogue_DGW(Diag);
+               if (i < 0) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_BASEMAP4_0 ,DGW_TEXT,"MAPTITLE","TA1");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_1 ,DGW_TEXT,"MAPTITLE","TB1");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_2 ,DGW_TEXT,"MAPTITLE","TB2");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_3 ,DGW_TEXT,"MAPTITLE","TB3");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_4 ,DGW_TEXT,"MAPTITLE","TC1");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_5 ,DGW_TEXT,"MAPTITLE","TC2");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_6 ,DGW_TEXT,"MAPTITLE","TC3");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_7 ,DGW_TEXT,"MAPTITLE","TC4");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_8 ,DGW_TEXT,"MAPTITLE","TD1");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_0 ,DGW_TEXT,"MAP","TA1");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_1 ,DGW_TEXT,"MAP","TB1");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_2 ,DGW_TEXT,"MAP","TB2");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_3 ,DGW_TEXT,"MAP","TB3");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_4 ,DGW_TEXT,"MAP","TC1");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_5 ,DGW_TEXT,"MAP","TC2");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_6 ,DGW_TEXT,"MAP","TC3");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_7 ,DGW_TEXT,"MAP","TC4");
+               GetInfoSYS_DGW(Diag,_BASEMAP4_8 ,DGW_TEXT,"MAP","TD1");
+               
+               Destroy_DGW(Diag);
+               
+               if (i == 0)
+                  iJump = 3;      // back
+               else
+                  iJump = 99;     // finished
+
+               break;                  
+               
+            case 5:
+            
+               Diag = Create_DGW("BASEMAP5");
+               
+               SetInfoSYS_DGW(Diag,_BASEMAP5_0 ,DGW_FILEPATH ,"MAP","CONFILE");     
+               SetInfoSYS_DGW(Diag,_BASEMAP5_1 ,DGW_TEXT     ,"MAP","RPL0");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_2 ,DGW_TEXT     ,"MAP","RPL1");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_3 ,DGW_TEXT     ,"MAP","RPL2");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_4 ,DGW_TEXT     ,"MAP","RPL3");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_5 ,DGW_TEXT     ,"MAP","RPL4");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_6 ,DGW_TEXT     ,"MAP","RPL5");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_7 ,DGW_TEXT     ,"MAP","RPL6");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_8 ,DGW_TEXT     ,"MAP","RPL7");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_9 ,DGW_TEXT     ,"MAP","RPL8");
+               SetInfoSYS_DGW(Diag,_BASEMAP5_10,DGW_TEXT     ,"MAP","RPL9");
+
+               i = iRunDialogue_DGW(Diag);
+               if (i < 0) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_BASEMAP5_0 ,DGW_FILEPATH ,"MAP","CONFILE");     
+               GetInfoSYS_DGW(Diag,_BASEMAP5_1 ,DGW_TEXT     ,"MAP","RPL0");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_2 ,DGW_TEXT     ,"MAP","RPL1");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_3 ,DGW_TEXT     ,"MAP","RPL2");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_4 ,DGW_TEXT     ,"MAP","RPL3");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_5 ,DGW_TEXT     ,"MAP","RPL4");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_6 ,DGW_TEXT     ,"MAP","RPL5");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_7 ,DGW_TEXT     ,"MAP","RPL6");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_8 ,DGW_TEXT     ,"MAP","RPL7");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_9 ,DGW_TEXT     ,"MAP","RPL8");
+               GetInfoSYS_DGW(Diag,_BASEMAP5_10,DGW_TEXT     ,"MAP","RPL9");
+               
+               Destroy_DGW(Diag);
+               
+               if (i == 0)
+                  iJump = 0;      // back
+               else if (i == 2) {   // Edit
+                  
+                  GetString_SYS("MAP","CONFILE",sCon);
+
+                  
+                  // --- Run the EDIT GX ---
+                  
+                  SetString_SYS("EDIT","FILE",sCon);
+                  SetString_SYS("EDIT","WAIT","Wait");
+                  SetString_SYS("EDIT","CHILD","Skip");
+                  
+                  iRet = iRunGX_SYS("EDIT.GX");
+                  if(iRet) break;  // use cancelled or error.
+                  
+                  GetString_SYS("EDIT","FILE",sCon);
+                  SetString_SYS("MAP","CONFILE",sCon);
+               }
+               else
+                  iJump = 99;     // finished
+                  
+               break;                  
+               
+            default:
+            
+               DisplayInt_SYS(_("I'm lost"),i);            
+               break;
+               
+         }            
+            
+      }
+      
+   }
+   
+      
+   // --- style ---
+   
+   GetString_SYS("MAP","STYLE",sStyle);
+   ToUpper_STR(sStyle);
+   if (iCharComp_STR(sStyle,"M"))
+      iStyle = STYLE_MAP;
+   else if (iCharComp_STR(sStyle,"F"))
+      iStyle = STYLE_FIGURE;
+   else   
+      iStyle = STYLE_CUSTOM;
+               
+   
+   // --- change the map scale? ---
+   
+   rNewScale = rGetReal_SYS("MAP","SCALE");
+
+   if (rNewScale > 0.0 && rNewScale != rScale) {
+      ReScale_MVIEW(DataView,rScale/rNewScale);
+      Extent_MVIEW(DataView,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_PLOT,rXminD,rYminD,rXmaxD,rYmaxD);
+   }
+   
+   
+   // --- adjust data view for inside margin ---
+   
+      
+   // --- reset the base view location from data view ---
+   
+   if (iMapLL == 0 && rMinsideOld != rDUMMY) 
+	{
+      rMinsideNew = rGetReal_SYS("MAP","MARGIN_INSIDE");
+      rAdjust = (rMinsideNew - rMinsideOld) * 1000.0;
+      
+      if (rAdjust != 0.0) {
+         rXminD -= rAdjust;
+         rYminD -= rAdjust;
+         rXmaxD += rAdjust;
+         rYmaxD += rAdjust;
+         if ((rXminD >= rXmaxD) || (rYminD >= rYmaxD))
+            Abort_SYS(_("Invalid inside data margin."));
+         SetWindow_MVIEW(DataView,rXminD,rYminD,rXmaxD,rYmaxD,MVIEW_UNIT_PLOT);
+      }
+   }
+         
+   
+   // --- establish base view ---
+   
+   rMbottom = rGetReal_SYS("MAP","MARGIN_BOTTOM");
+   rMright  = rGetReal_SYS("MAP","MARGIN_RIGHT");
+   rMtop    = rGetReal_SYS("MAP","MARGIN_TOP");
+   rMleft   = rGetReal_SYS("MAP","MARGIN_LEFT");
+   
+   // --- adjust margins for map style ---
+   
+   if (rMbottom < 0.0) rMbottom = 0.0;
+   if (rMtop    < 0.0) rMtop    = 0.0;
+   if (rMleft   < 0.0) rMleft   = 0.0;
+   if (rMright  < 0.0) rMright  = 0.0;
+   SetReal_SYS("MAP","MARGIN_BOTTOM",rMbottom );
+   SetReal_SYS("MAP","MARGIN_RIGHT" ,rMright  );
+   SetReal_SYS("MAP","MARGIN_TOP"   ,rMtop    );
+   SetReal_SYS("MAP","MARGIN_LEFT"  ,rMleft   );
+   
+   rMbottom *= 1000.0;
+   rMright  *= 1000.0;
+   rMtop    *= 1000.0;
+   rMleft   *= 1000.0;
+   rXminB   = rXminD - rMleft;
+   rYminB   = rYminD - rMbottom;
+   rXmaxB   = rXmaxD + rMright;
+   rYmaxB   = rYmaxD + rMtop;
+   TranScale_MVIEW(BaseView,-rXminB*0.01,-rYminB*0.01,1.0,1.0);
+   SetWindow_MVIEW(BaseView,0.0,0.0,(rXmaxB-rXminB)*0.01,(rYmaxB-rYminB)*0.01,MVIEW_UNIT_VIEW);
+   
+
+   // --- put the projection back in the data view ---
+   
+	SetIPJ_MVIEW(DataView, Ipj);
+	SetUserIPJ_MVIEW(DataView, UserIpj);
+   
+   
+   // --- destroy views ---
+   
+   Destroy_MVIEW(BaseView);
+   Destroy_MVIEW(DataView);
+   
+   
+   // --- save current map info into the map REG ---
+   
+   GetREG_SYS(MapReg,"MAP");
+   SetREG_MAP(Map,MapReg);
+// debug   SaveINI_REG(MapReg,"map2.ini");
+   
+   
+   // --- Get parameters and set defaults ---
+
+   GetString_SYS("MAP","NORTH",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","NORTH","0");
+
+   GetString_SYS("MAP","REFGRID",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","REFGRID","3");
+
+   GetString_SYS("MAP","COMPASS",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","COMPASS","-1");
+
+   GetString_SYS("MAP","REFTHICK",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","REFTHICK","150");
+
+   GetString_SYS("MAP","REFCOLOR",sPar);
+   ToLower_STR(sPar);
+   SetString_SYS("MAP","REFCOLOR",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","REFCOLOR","black");
+
+   GetString_SYS("MAP","LLGRID",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","LLGRID","-5");
+
+   GetString_SYS("MAP","LLTHICK",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","LLTHICK","150");
+
+   GetString_SYS("MAP","LLCOLOR",sPar);
+   ToLower_STR(sPar);
+   SetString_SYS("MAP","LLCOLOR",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","LLCOLOR","k");
+
+	SetInt_SYS("MAP", "XORIENT", 0);
+   GetString_SYS("MAP","YORIENT",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+	{
+      SetString_SYS("MAP","XORIENT","0");
+      SetString_SYS("MAP","YORIENT","-1");
+	}
+	else // new orientation options affect X-axis labels
+	{
+		iOrient = iGetInt_SYS("MAP","YORIENT");
+		if (iOrient >= 2)
+			SetInt_SYS("MAP", "XORIENT", iOrient);
+	}
+      
+      
+   // --- escape strings for titles and replacement strings ---
+   
+#define ESCAPE(A) GetString_SYS("MAP",A,sTemp); Escape_STR(sTemp,ESCAPE_CONVERT); SetString_SYS("MAP",A,sTemp);
+   
+   ESCAPE("TITLE")     
+   ESCAPE("SUB_1")     
+   ESCAPE("SUB_2")     
+   ESCAPE("TA1")
+   ESCAPE("TB1")
+   ESCAPE("TB2")
+   ESCAPE("TB3")
+   ESCAPE("TC1")
+   ESCAPE("TC2")
+   ESCAPE("TC3")
+   ESCAPE("TC4")
+   ESCAPE("TD1")
+   ESCAPE("RPL0")
+   ESCAPE("RPL1")
+   ESCAPE("RPL2")
+   ESCAPE("RPL3")
+   ESCAPE("RPL4")
+   ESCAPE("RPL5")
+   ESCAPE("RPL6")
+   ESCAPE("RPL7")
+   ESCAPE("RPL8")
+   ESCAPE("RPL9")
+   
+   
+   // --- Create control file ---
+
+   if (iStyle == STYLE_FIGURE) {
+   
+      if (iFindPathNameEx_SYS("figmap.con",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_USER_ETC,sCon) == 1)
+         Abort_SYS(_("Cannot find master control file \"figmap.con\"."));
+         
+   } else if (iStyle == STYLE_MAP) {
+   
+      if (iFindPathNameEx_SYS("fullmap.con",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_USER_ETC,sCon) == 1)
+         Abort_SYS(_("Cannot find master control file \"fullmap.con\"."));
+         
+   } else {
+      GetString_SYS("MAP","CONFILE",sTemp);
+      if (iFindPathNameEx_SYS(sTemp,FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_USER_ETC,sCon) == 1) {
+         Printf_STR(sTemp2, sizeof(sTemp2), _("Cannot find the master control file \"%s\"."), sCon);
+         Abort_SYS(sTemp2);
+      }         
+   }
+   
+   Master  = Create_RA(sCon);
+   ConFile = Create_WA("_basemap.con",0);
+   
+   
+   // --- go through master file ---
+   
+   iLines = iLen_RA(Master);
+   for(i=0;i<iLines;i++) {
+   
+      iGets_RA(Master,sTemp);
+      
+      
+      // --- strip comment ---
+      
+      SplitString_STR(sTemp,"/",sTemp2);
+      if (iCharComp_STR(sTemp2,"%")) {
+      
+      
+         // --- test dependency ---
+         
+         SplitString_STR(sTemp2," ",sTemp3);
+         ReplaceString_SYS(sTemp2,sTemp2,"MAP");
+         
+         if (iStrMin_STR(sTemp2) == 0) continue; 
+         
+      }         
+      
+      
+      // --- replace variables ---         
+      
+      ReplaceString_SYS(sTemp,sTemp,"MAP");
+      
+      
+      // --- write out control file ---
+      
+      Puts_WA(ConFile,sTemp);
+      NewLine_WA(ConFile);
+      
+   }
+   
+   Destroy_RA(Master);
+   Destroy_WA(ConFile);
+
+   
+   // --- create MDF file ---
+
+   MapMDF_MVU(Map,"_basemap.mdf","*Data");
+
+   
+   // --- process ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Processing _basemap.con"),1);
+   Mapplot = Create_MAPL("_basemap.con","base",0);
+   Process_MAPL(Mapplot,Map);
+   Destroy_MAPL(Mapplot);
+   
+   
+   // --- add makers ---
+   
+   DataView = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+   StartGroup_MVIEW(BaseView,"Surround",MVIEW_GROUP_APPEND);
+   Maker_MVIEW(BaseView,0,1,_("basemap2"),MAKER_GX,_("Redraw basemap..."),"MAP;MAPCONFIG;MAPTITLE;");
+   StartGroup_MVIEW(BaseView,"Titles",MVIEW_GROUP_APPEND);
+   Maker_MVIEW(BaseView,0,1,"basemap2",MAKER_GX,_("Redraw basemap..."),"MAP;MAPCONFIG;MAPTITLE;");
+   
+   StartGroup_MVIEW(DataView,"Coordinates",MVIEW_GROUP_APPEND);
+   Maker_MVIEW(DataView,0,1,"basemap2",MAKER_GX,_("Redraw basemap..."),"MAP;MAPCONFIG;MAPTITLE;");
+   
+   
+   // --- done with the views ---
+   
+   Destroy_MVIEW(BaseView);
+   Destroy_MVIEW(DataView);
+   
+
+   // --- Clean up empty groups from all views in map ---
+
+   Clean_MAP(Map);
+   
+   
+   // --- done ---
+
+   Destroy_SYS(MapReg);
+   UnLock_EMAP(EMap);
+
+   Progress_SYS(0);
+   
+}

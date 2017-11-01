@@ -1,0 +1,406 @@
+//===========================================================================
+NAME          = "GRPARM - set survey parameters"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+
+   Set gravity processing parameters in a GravRed workspace.  Only parameters
+   set immediately before calling GRPARM will be changed.  Following are 
+   parameters that can be set:
+
+   Survey parameters:
+      
+      GRAVRED.SURVEY_DATABASE       if defined, survey parameters are set
+      GRAVRED.OPERATOR
+      GRAVRED.DATE
+      GRAVRED.INSTRUMENT
+      GRAVRED.INSTRUMENT_SCALE
+      GRAVRED.GMT_DIFFERENCE
+      
+   Global parameters:
+      
+      GRAVRED.BASE_DATABASE
+      GRAVRED.LOCATION_DATABASE
+      GRAVRED.FORMULA
+      GRAVRED.FREE_AIR
+      GRAVRED.DENSITY_EARTH
+      GRAVRED.DENSITY_WATER
+      GRAVRED.DENSITY_ICE
+      GRAVRED.LOCAL_LONGITUDE       local coordinate system
+      GRAVRED.LOCAL_LATITUDE
+      GRAVRED.LOCAL_X
+      GRAVRED.LOCAL_Y
+      GRAVRED.LOCAL_ROTATION
+
+"
+// Revision History
+// v6.2:   Added survey type parameter (ground/shipborne/airborne).
+// v6.1.0: Default formula fixed.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grparm.gr"
+#include "grparm.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         eDB;              // Database handle
+DB          hDB;              // Database handle
+DGW         hDGW;             // Dialogue handle
+REG         hDataREG;         // Gravity data REG
+REG         hWorkREG;         // Gravity work REG
+LST         hFormulaLST;
+LST         hFaLST;
+real        r;
+
+string(STR_FILE)  sSurvey;
+string(STR_FILE)  sFile;
+string(STR_DEFAULT_SHORT) sType;
+string(STR_DEFAULT_SHORT) sOperator;
+string(STR_DEFAULT_SHORT) sDate;
+string(STR_DEFAULT_SHORT) sInstrument;
+string(STR_FILE)  sInstrument_scale;
+string(STR_DEFAULT_SHORT) sGmt_diff;
+string(STR_FILE)  sBase;
+string(STR_FILE)  sLocation;
+string(STR_DEFAULT) sFormula;
+string(STR_DEFAULT) sFa;
+string(STR_DEFAULT_SHORT) sCurvature;
+string(STR_DEFAULT_SHORT) sUnits;
+string(STR_DEFAULT_SHORT) sDensity_earth;
+string(STR_DEFAULT_SHORT) sDensity_water;
+string(STR_DEFAULT_SHORT) sDensity_ice;
+string(STR_DEFAULT_SHORT) sMap_projection;
+string(STR_DEFAULT_SHORT) sLocal_longitude;
+string(STR_DEFAULT_SHORT) sLocal_latitude;
+string(STR_DEFAULT_SHORT) sLocal_x;
+string(STR_DEFAULT_SHORT) sLocal_y;
+string(STR_DEFAULT_SHORT) sLocal_rotation;
+string(STR_DEFAULT_SHORT) sTemp;
+string(STR_DEFAULT_SHORT) sSurveyType;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+#define SET(A,B) if (iStrlen_STR(B) != 0) Set_REG(hDataREG,A,B);
+
+#define DEF(A,B) Get_REG(hWorkREG,A,sTemp,sizeof(sTemp));\
+        if (iStrlen_STR(sTemp) == 0) Set_REG(hWorkREG,A,B); 
+
+#define GET(A,B,C) GetString_SYS("GRAVRED",B,C);\
+        if (iStrlen_STR(C) != 0) {Set_REG(hWorkREG,A,C); SetString_SYS("GRAVRED",B,"");}
+
+{
+
+   // --- workspace REG ---
+   
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+
+   
+   // --- defaults ---
+   
+   DEF("GRAVRED.GRAVITY"           ,_n("Gravity"))
+   DEF("GRAVRED.BOUGUER"           ,_n("Bouguer"))
+   DEF("GRAVRED.INSTRUMENT_SCALE"  ,"1.0"   )
+   DEF("GRAVRED.FORMULA"           ,"1967"  )
+   DEF("GRAVRED.CURVATURE"         ,_n("No"))
+   DEF("GRAVRED.DISTANCE_UNITS"    ,_("m"))
+   DEF("GRAVRED.DENSITY_EARTH"     ,"2.67"  )
+   DEF("GRAVRED.DENSITY_WATER"     ,"1.0"   )
+   DEF("GRAVRED.DENSITY_ICE"       ,"0.95"  )
+   DEF("GRAVRED.SURVEYTYPE"        ,_n("Ground Survey"))
+   
+      
+   // --- batch setting ---
+   
+   if (!iInteractive_SYS()) {
+   
+   
+      // --- check script settings ---
+   
+      GET("GRAVRED.OPERATOR"           ,"OPERATOR"          ,sOperator)
+      GET("GRAVRED.DATE"               ,"DATE"              ,sDate)
+      GET("GRAVRED.INSTRUMENT"         ,"INSTRUMENT"        ,sInstrument)
+      GET("GRAVRED.INSTRUMENT_SCALE"   ,"INSTRUMENT_SCALE"  ,sInstrument_scale)
+      GET("GRAVRED.GMT_DIFFERENCE"     ,"GMT_DIFFERENCE"    ,sGmt_diff)
+      GET("GRAVRED.BASE_DATABASE"      ,"BASE_DATABASE"     ,sBase)
+      GET("GRAVRED.LOCATION_DATABASE"  ,"LOCATION_DATABASE" ,sLocation)
+      GET("GRAVRED.SURVEY_DATABASE"    ,"SURVEY_DATABASE"   ,sSurvey)
+      GET("GRAVRED.FORMULA"            ,"FORMULA"           ,sFormula)
+      GET("GRAVRED.FREE_AIR"           ,"FREE_AIR"          ,sFa)
+      GET("GRAVRED.CURVATURE"          ,"CURVATURE"         ,sCurvature)
+      GET("GRAVRED.DISTANCE_UNITS"     ,"DISTANCE_UNITS"    ,sUnits)
+      GET("GRAVRED.DENSITY_EARTH"      ,"DENSITY_EARTH"     ,sDensity_earth)
+      GET("GRAVRED.DENSITY_WATER"      ,"DENSITY_WATER"     ,sDensity_water)
+      GET("GRAVRED.DENSITY_ICE"        ,"DENSITY_ICE"       ,sDensity_ice)
+      GET("GRAVRED.MAP_PROJECTION"     ,"MAP_PROJECTION"    ,sMap_projection)
+      GET("GRAVRED.LOCAL_LONGITUDE"    ,"LOCAL_LONGITUDE"   ,sLocal_longitude)
+      GET("GRAVRED.LOCAL_LATITUDE"     ,"LOCAL_LATITUDE"    ,sLocal_latitude)
+      GET("GRAVRED.LOCAL_X"            ,"LOCAL_X"           ,sLocal_x)
+      GET("GRAVRED.LOCAL_Y"            ,"LOCAL_Y"           ,sLocal_y)
+      GET("GRAVRED.LOCAL_ROTATION"     ,"LOCAL_ROTATION"    ,sLocal_rotation)
+      GET("GRAVRED.SURVEYTYPE"         ,"SURVEYTYPE"        ,sSurveyType)
+      
+      SetWorkspaceREG_SYS(hWorkREG);
+      
+      
+      // --- if a survey database was defined, set survey parameters ---
+      
+      if (iStrlen_STR(sSurvey)) {
+      
+         if (iLoaded_EDB(sSurvey)) {
+            eDB = Load_EDB(sSurvey);
+            hDB = Lock_EDB(eDB);
+         } else   
+            hDB = Open_DB(sSurvey,"SUPER","");
+            
+         hDataREG = Create_REG(256);
+         GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+         
+         SET("GRAVRED.OPERATOR",sOperator)
+         SET("GRAVRED.DATE",sDate)
+         SET("GRAVRED.INSTRUMENT",sInstrument)
+         SET("GRAVRED.INSTRUMENT_SCALE",sInstrument_scale)
+         SET("GRAVRED.GMT_DIFFERENCE",sGmt_diff)
+      
+         SetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+         
+         if (iLoaded_EDB(sSurvey))
+            UnLock_EDB(eDB);
+         else
+            Destroy_SYS(hDB);
+               
+      }
+         
+      Exit_SYS();
+      
+   }
+   
+   
+   // --- interactive ---
+
+   
+   // --- get the REG data ---
+   
+   Get_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sBase,sizeof(sBase));
+   Get_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sLocation,sizeof(sLocation));
+   Get_REG(hWorkREG,"GRAVRED.FORMULA",sFormula,sizeof(sFormula));
+   Get_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa,sizeof(sFa));
+   Get_REG(hWorkREG,"GRAVRED.DENSITY_EARTH",sDensity_earth,sizeof(sDensity_earth));
+   Get_REG(hWorkREG,"GRAVRED.DENSITY_WATER",sDensity_water,sizeof(sDensity_water));
+   Get_REG(hWorkREG,"GRAVRED.DENSITY_ICE",sDensity_ice,sizeof(sDensity_ice));
+   Get_REG(hWorkREG,"GRAVRED.MAP_PROJECTION",sMap_projection,sizeof(sMap_projection));
+   Get_REG(hWorkREG,"GRAVRED.SURVEYTYPE",sSurveyType,sizeof(sSurveyType));
+   
+   if (iHaveCurrent_EDB()) {
+      eDB = Current_EDB();
+      GetName_EDB(eDB,sSurvey);
+      FileNamePart_STR(sSurvey,sSurvey,STR_FILE_PART_NAME_EXTENSION);
+      hDataREG = Create_REG(256);
+      hDB = Lock_EDB(eDB);
+      GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+      UnLock_EDB(eDB);
+   }      
+   
+   
+   // --- get/create formula list ---
+   
+   hFormulaLST = Create_LST(256);
+   LoadFile_LST(hFormulaLST,"Gravity_Formulas");
+   if (iSize_LST(hFormulaLST) == 0) {
+   
+      // --- default formulas are shared with other GX's ---
+#include "../gravity_formulas.gxh"
+
+      SaveFile_LST(hFormulaLST,"Gravity_Formulas");
+      
+   }
+   
+   
+   // --- default formula ---
+   
+   if (iStrlen_STR(sFormula) == 0 ||
+       iFindItem_LST(hFormulaLST,0,sFormula)==-1)
+   {
+      // --- Latest one available... ---
+      
+      if(iFindItem_LST(hFormulaLST,0,"1984"))
+         Strcpy_STR(sFormula, "1984");
+      else
+         GetItem_LST(hFormulaLST,0,0,sFormula);
+   }
+
+
+   // --- free-air list ---      
+      
+   hFaLST = Create_LST(256);
+   LoadFile_LST(hFaLST,"Gravity_Free_Air");
+   if (iSize_LST(hFaLST) == 0) {
+   
+   
+      // --- the grparm gx contains the default formulas ---
+   
+#include "../gravity_free_air.gxh"
+   
+      SaveFile_LST(hFaLST,"Gravity_Free_Air");
+      
+   }
+   
+
+   // --- default free-air correction ---
+   
+   if (iStrlen_STR(sFa) == 0)
+      GetItem_LST(hFaLST,0,0,sFa);
+   
+   
+   // --- is this a survey file? ---
+   
+   if (iHaveCurrent_EDB()) 
+      Get_REG(hDataREG,"GRAVRED.TYPE",sType,sizeof(sType));
+   else
+      Strcpy_STR(sType,"");
+         
+   if (iCharComp_STR(sType,"S")) {
+   
+      // --- data file ---
+      
+      Get_REG(hDataREG,"GRAVRED.FILE",sFile,sizeof(sFile));
+      FileNamePart_STR(sFile,sFile,STR_FILE_PART_NAME_EXTENSION);
+      Get_REG(hDataREG,"GRAVRED.DATE",sDate,sizeof(sDate));
+      Get_REG(hDataREG,"GRAVRED.OPERATOR",sOperator,sizeof(sOperator));
+      Get_REG(hDataREG,"GRAVRED.INSTRUMENT",sInstrument,sizeof(sInstrument));
+      Get_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",sInstrument_scale,sizeof(sInstrument_scale));
+      Get_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",sGmt_diff,sizeof(sGmt_diff));
+      
+
+      // --- Create the Dialogue ---
+
+      hDGW = Create_DGW("GRPARM");
+      Copy_LST(GetList_DGW(hDGW,_GRPARM_10),hFormulaLST);
+      Copy_LST(GetList_DGW(hDGW,_GRPARM_11),hFaLST);
+      SetInfo_DGW(hDGW,_GRPARM_0 ,DGW_TEXT,sSurvey);
+      SetInfo_DGW(hDGW,_GRPARM_1 ,DGW_TEXT,sFile);
+      SetInfo_DGW(hDGW,_GRPARM_2 ,DGW_TEXT,sDate);
+      SetInfo_DGW(hDGW,_GRPARM_3 ,DGW_TEXT,sOperator);
+      SetInfo_DGW(hDGW,_GRPARM_4 ,DGW_TEXT,sInstrument);
+      SetInfo_DGW(hDGW,_GRPARM_7 ,DGW_TEXT,sGmt_diff);
+      SetInfo_DGW(hDGW,_GRPARM_8 ,DGW_FILEPATH,sBase);
+      SetInfo_DGW(hDGW,_GRPARM_9 ,DGW_FILEPATH,sLocation);
+      SetInfo_DGW(hDGW,_GRPARM_10,DGW_TEXT,sFormula);
+      SetInfo_DGW(hDGW,_GRPARM_11,DGW_TEXT,sFa);
+      SetInfo_DGW(hDGW,_GRPARM_12,DGW_TEXT,sDensity_earth);
+      SetInfo_DGW(hDGW,_GRPARM_13,DGW_TEXT,sDensity_water);
+      SetInfo_DGW(hDGW,_GRPARM_14,DGW_TEXT,sDensity_ice);
+      SetInfo_DGW(hDGW,_GRPARM_15,DGW_TEXT,sSurveyType);
+   
+   
+      // --- is instrument scale a number? ---
+   
+      r = rScanR_STR(sInstrument_scale);
+      if (r == rDUMMY)
+         SetInfo_DGW(hDGW,_GRPARM_6,DGW_FILEPATH,sInstrument_scale);
+      else   
+         SetInfo_DGW(hDGW,_GRPARM_5,DGW_TEXT,sInstrument_scale);
+   
+   
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(hDGW) != 0) Cancel_SYS();
+
+      GetInfo_DGW(hDGW,_GRPARM_0 ,DGW_TEXT,sSurvey);
+      GetInfo_DGW(hDGW,_GRPARM_1 ,DGW_TEXT,sFile);
+      GetInfo_DGW(hDGW,_GRPARM_2 ,DGW_TEXT,sDate);
+      GetInfo_DGW(hDGW,_GRPARM_3 ,DGW_TEXT,sOperator);
+      GetInfo_DGW(hDGW,_GRPARM_4 ,DGW_TEXT,sInstrument);
+      GetInfo_DGW(hDGW,_GRPARM_7 ,DGW_TEXT,sGmt_diff);
+      GetInfo_DGW(hDGW,_GRPARM_8 ,DGW_FILEPATH,sBase);
+      GetInfo_DGW(hDGW,_GRPARM_9 ,DGW_FILEPATH,sLocation);
+      GetInfo_DGW(hDGW,_GRPARM_10,DGW_TEXT,sFormula);
+      GetInfo_DGW(hDGW,_GRPARM_11,DGW_TEXT,sFa);
+      GetInfo_DGW(hDGW,_GRPARM_12,DGW_TEXT,sDensity_earth);
+      GetInfo_DGW(hDGW,_GRPARM_13,DGW_TEXT,sDensity_water);
+      GetInfo_DGW(hDGW,_GRPARM_14,DGW_TEXT,sDensity_ice);
+      GetInfo_DGW(hDGW,_GRPARM_15,DGW_TEXT,sSurveyType);
+   
+      GetInfo_DGW(hDGW,_GRPARM_5,DGW_TEXT,sInstrument_scale);
+      if (iStrMin_STR(sInstrument_scale) == 0)
+         GetInfo_DGW(hDGW,_GRPARM_6,DGW_FILEPATH,sInstrument_scale);
+      
+      Destroy_DGW(hDGW);
+   
+      Set_REG(hDataREG,"GRAVRED.OPERATOR",sOperator);
+      Set_REG(hDataREG,"GRAVRED.DATE",sDate);
+      Set_REG(hDataREG,"GRAVRED.INSTRUMENT",sInstrument);
+      Set_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",sInstrument_scale);
+      Set_REG(hDataREG,"GRAVRED.GMT_DIFFERENCE",sGmt_diff);
+      
+      hDB = Lock_EDB(eDB);
+      SetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+      UnLock_EDB(eDB);
+      
+   } else {
+   
+      // --- global parameters ---      
+
+      hDGW = Create_DGW("GRPARMG");
+      Copy_LST(GetList_DGW(hDGW,_GRPARM_2),hFormulaLST);
+      Copy_LST(GetList_DGW(hDGW,_GRPARM_3),hFaLST);
+      SetInfo_DGW(hDGW,_GRPARMG_0 ,DGW_FILEPATH,sBase);
+      SetInfo_DGW(hDGW,_GRPARMG_1 ,DGW_FILEPATH,sLocation);
+      SetInfo_DGW(hDGW,_GRPARMG_2 ,DGW_TEXT,sFormula);
+      SetInfo_DGW(hDGW,_GRPARMG_3 ,DGW_TEXT,sFa);
+      SetInfo_DGW(hDGW,_GRPARMG_4 ,DGW_TEXT,sDensity_earth);
+      SetInfo_DGW(hDGW,_GRPARMG_5 ,DGW_TEXT,sDensity_water);
+      SetInfo_DGW(hDGW,_GRPARMG_6 ,DGW_TEXT,sDensity_ice);
+      SetInfo_DGW(hDGW,_GRPARMG_7 ,DGW_TEXT,sSurveyType);
+   
+      if (iRunDialogue_DGW(hDGW) != 0) Cancel_SYS();
+
+      GetInfo_DGW(hDGW,_GRPARMG_0 ,DGW_FILEPATH,sBase);
+      GetInfo_DGW(hDGW,_GRPARMG_1 ,DGW_FILEPATH,sLocation);
+      GetInfo_DGW(hDGW,_GRPARMG_2 ,DGW_TEXT,sFormula);
+      GetInfo_DGW(hDGW,_GRPARMG_3 ,DGW_TEXT,sFa);
+      GetInfo_DGW(hDGW,_GRPARMG_4 ,DGW_TEXT,sDensity_earth);
+      GetInfo_DGW(hDGW,_GRPARMG_5 ,DGW_TEXT,sDensity_water);
+      GetInfo_DGW(hDGW,_GRPARMG_6 ,DGW_TEXT,sDensity_ice);
+      GetInfo_DGW(hDGW,_GRPARMG_7 ,DGW_TEXT,sSurveyType);
+   
+      Destroy_DGW(hDGW);
+      
+   }      
+   
+   // --- set global parameters ---
+   
+   Set_REG(hWorkREG,"GRAVRED.OPERATOR",sOperator);
+   Set_REG(hWorkREG,"GRAVRED.DATE",sDate);
+   Set_REG(hWorkREG,"GRAVRED.INSTRUMENT",sInstrument);
+   Set_REG(hWorkREG,"GRAVRED.INSTRUMENT_SCALE",sInstrument_scale);
+   Set_REG(hWorkREG,"GRAVRED.GMT_DIFFERENCE",sGmt_diff);
+   Set_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sBase);
+   Set_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sLocation);
+   Set_REG(hWorkREG,"GRAVRED.FORMULA",sFormula);
+   Set_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa);
+   Set_REG(hWorkREG,"GRAVRED.DENSITY_EARTH",sDensity_earth);
+   Set_REG(hWorkREG,"GRAVRED.DENSITY_WATER",sDensity_water);
+   Set_REG(hWorkREG,"GRAVRED.DENSITY_ICE",sDensity_ice);
+   Set_REG(hWorkREG,"GRAVRED.MAP_PROJECTION",sMap_projection);
+   Set_REG(hWorkREG,"GRAVRED.SURVEYTYPE",sSurveyType);
+   
+   SetWorkspaceREG_SYS(hWorkREG);
+   
+}

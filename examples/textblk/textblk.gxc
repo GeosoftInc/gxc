@@ -1,0 +1,253 @@
+//===========================================================================
+NAME          = "Place a text block on a map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+   TEXTBLK.FILE      text file
+          .FONT      font name
+          .HEIGHT    posting size (mm)
+          .SPACING   posting angle (deg CCW from X)
+          .JUSTIFY   justification (0-9)
+          .X         X location
+          .Y         Y location
+
+"
+// Revision History
+// v6.3.1: Previous changes broke location; always returned zero.
+// v6.3.0: Changes to allow editing/creation of new file.
+//===========================================================================
+
+RESOURCE = "textblk.gr"
+#include "textblk.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+                                
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile,sEdit;
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT_LONG) sFont,sLine;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+LST   List;
+DGW   Diag;
+RA    TextRA;
+int   i,iLines,iJust;
+real  rHeight,rSpace,rX,rY,rScaleMM;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+   // --- get EMap ---
+   
+   EMap = Current_EMAP();
+   
+   
+   // --- Set defaults ---
+   
+   if (!iExistString_SYS("TEXTBLK","FONT")) {
+      if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+         Strcpy_STR(sFont,"Arial(TT)");
+      SetString_SYS("TEXTBLK","FONT",sFont);
+   }
+   DefaultReal_SYS("TEXTBLK","HEIGHT",2.5);
+   DefaultReal_SYS("TEXTBLK","SPACING",1.5);
+   DefaultInt_SYS("TEXTBLK","JUSTIFY",0);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TEXTBLK");
+      
+      
+      // --- set up font list ---
+      
+      List = GetList_DGW(Diag,_TEXTBLK_1);
+      FontLST_EMAP(EMap,List,EMAP_FONT_TT);
+      FontLST_EMAP(EMap,List,EMAP_FONT_GFN);
+      Sort_LST(List,0,0);
+
+      i = 1;
+      while (i != 0) 
+      {
+
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_TEXTBLK_0,DGW_FILEPATH, "TEXTBLK","FILE");
+         SetInfoSYS_DGW(Diag,_TEXTBLK_1,DGW_LISTALIAS,"TEXTBLK","FONT");     
+         SetInfoSYS_DGW(Diag,_TEXTBLK_2,DGW_TEXT,     "TEXTBLK","HEIGHT");
+         SetInfoSYS_DGW(Diag,_TEXTBLK_3,DGW_TEXT,     "TEXTBLK","SPACING");     
+         SetInfoSYS_DGW(Diag,_TEXTBLK_4,DGW_LISTALIAS,"TEXTBLK","JUSTIFY");     
+         SetInfoSYS_DGW(Diag,_TEXTBLK_5,DGW_TEXT,     "TEXTBLK","X");
+         SetInfoSYS_DGW(Diag,_TEXTBLK_6,DGW_TEXT,     "TEXTBLK","Y");
+
+      
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+         
+         
+         // --- locate ---
+         
+         if (i == 1) 
+         {         
+            iSetCurrentView_EMAP(EMap,"*Base");
+            if (iGetPoint_EMAP(EMap,_("Locate first line of text block..."),rX,rY)) Cancel_SYS(); 
+
+            SetReal_SYS("TEXTBLK","X",rX);
+            SetReal_SYS("TEXTBLK","Y",rY);       
+            SetInfoSYS_DGW(Diag,_TEXTBLK_5,DGW_TEXT,     "TEXTBLK","X");
+            SetInfoSYS_DGW(Diag,_TEXTBLK_6,DGW_TEXT,     "TEXTBLK","Y");
+         } 
+         else if (i == 2) 
+         {                  
+            // --- get editor ---
+
+            if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sEdit))
+               iRunGX_SYS("newedit");
+            iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sEdit);
+
+            if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR_TYPE",sLine))
+               i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_WAIT;
+
+            else 
+            {
+               ToUpper_STR(sLine);
+               if (iCharComp_STR(sLine,"D"))
+                  i = SYS_RUN_TYPE_DOS;
+               else
+                  i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_WAIT;
+            }
+
+
+            // --- edit ---
+
+            GetInfo_DGW(Diag,_TEXTBLK_0,DGW_FILEPATH,sFile);
+            if (iRun_SYS(sEdit,sFile,i)) {
+
+               Strcpy_STR(sLine,_("Unable to run: "));
+               Strcat_STR(sLine,sEdit);
+               Abort_SYS(sLine);
+            }      
+         }      
+         
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag,_TEXTBLK_0,DGW_FILEPATH, "TEXTBLK","FILE");
+         GetInfoSYS_DGW(Diag,_TEXTBLK_1,DGW_LISTALIAS,"TEXTBLK","FONT");     
+         GetInfoSYS_DGW(Diag,_TEXTBLK_2,DGW_TEXT,     "TEXTBLK","HEIGHT");
+         GetInfoSYS_DGW(Diag,_TEXTBLK_3,DGW_TEXT,     "TEXTBLK","SPACING");     
+         GetInfoSYS_DGW(Diag,_TEXTBLK_4,DGW_LISTALIAS,"TEXTBLK","JUSTIFY");     
+         GetInfoSYS_DGW(Diag,_TEXTBLK_5,DGW_TEXT,     "TEXTBLK","X");
+         GetInfoSYS_DGW(Diag,_TEXTBLK_6,DGW_TEXT,     "TEXTBLK","Y");                    
+         
+         if(i==0)
+         {                  
+            // --- Need to validate on the file name ---
+         
+            GetString_SYS("TEXTBLK","FILE",sFile);
+            if(iStrlen_STR(sFile)==0)
+            {
+               DisplayMessage_SYS(_("Place a text block on a map"), _("You must enter a file name."));
+               i = 1;
+            }
+         }                
+      }         
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("TEXTBLK","FILE",sFile);
+   GetString_SYS("TEXTBLK","FONT",sFont);
+   rHeight = rGetReal_SYS("TEXTBLK","HEIGHT");     
+   rSpace  = rGetReal_SYS("TEXTBLK","SPACING");     
+   iJust   = iGetInt_SYS("TEXTBLK","JUSTIFY");     
+   rX      = rGetReal_SYS("TEXTBLK","X");     
+   rY      = rGetReal_SYS("TEXTBLK","Y");
+        
+
+   // --- open the data view ---
+
+   Map  = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+
+   // --- scale parameters ---
+
+   rScaleMM = rScaleMM_MVIEW(View);
+   rHeight  *= rScaleMM;
+   rSpace   *= rHeight;
+
+
+   // --- start a group ---
+
+   FileNamePart_STR(sFile,sGroup,STR_FILE_PART_NAME);
+   FileNamePart_STR(sFile,sLine,STR_FILE_PART_EXTENSION);
+   Strcat_STR(sGroup,".");
+   Strcat_STR(sGroup,sLine);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- add maker ---
+
+   Maker_MVIEW(View,1,1,"TEXTBLK",MAKER_GX,_("Text Block..."),"TEXTBLK;");
+
+
+   // --- set parameters ---
+
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextAngle_MVIEW(View,0.0);
+   TextSize_MVIEW(View,rHeight);
+   TextRef_MVIEW(View,iJust);
+   
+   
+   // --- open file ---
+   
+   TextRA = Create_RA(sFile);
+   iLines = iLen_RA(TextRA);
+   
+   
+   // --- plot the text ---
+   
+   for (i=0;i<iLines;i++) {
+   
+      if (iGets_RA(TextRA,sLine)) Abort_SYS(_("Unexpected end of file."));
+      Text_MVIEW(View,sLine,rX,rY);
+      rY -= rSpace;
+      
+   }
+      
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+}

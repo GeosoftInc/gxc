@@ -1,0 +1,361 @@
+//===========================================================================
+NAME          = "Plot/Edit an existing Semplot template"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+   Edit/Plot a SEMPLOT TriPlot Template.
+   
+         SEMPLOT.TEMPLATE   Template Name
+
+         SEMPLOT.USE_LEGEND_PREFERENCE: Set this to 1 in a script, and the
+         global setting \"SEMPLOT.SYMBLEGEND\" will be used instead of
+         SEMPLOT.LEGEND.
+
+"
+// Revision History
+// v6.3.1: Improve behaviour when using "New" button. Don't need to clear the
+//         template field first anymore.
+// v6.3.0: Added support for multiple mineral channels.
+//         Set map REG parameter to indicate map is SEMPLOT.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+//         Added  USE_LEGEND_PREFERENCE parameter to control legend plotting in 
+//            script mode, and always to use preference as default interactively.
+// v5.1.7: New GX for v2 SEMPLOT
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "SEMPLOT.gr"
+#include "SEMPLOT.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define PLOT 0
+#define EDIT_FILE 1
+#define NEW_FILE 2
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+LST         List, TempLST;
+EMAP        EMap;
+MAP         Map;
+REG         Reg;
+
+int         i, iRet, iType, iLegend, iGlobalLegend, iInteractive;    
+
+string(STR_FILE) sMap, sTemplate, sModel, sMapDir;
+string(STR_DB_SYMBOL) sMaskCh, sMineralCh;
+string(STR_DEFAULT) sTemp;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if (iInteractive) {
+   
+      // --- Set up the template list ---
+
+      TempLST = Create_LST(128);
+      TemplateLST_SEMPLOT(TempLST, SEMPLOT_PLOT_ALL);
+      Sort_LST(TempLST,0,0);
+      
+      i = PLOT;
+      while (i != -1) {
+
+         switch (i) {
+         
+            case PLOT:
+            
+               // --- Get Template name or create/edit template ---
+            
+               Diag = Create_DGW("SEMPLOT");
+
+               List = GetList_DGW(Diag,_SEMPLOT_0);
+               Copy_LST(List, TempLST);
+
+               List = GetList_DGW(Diag,_SEMPLOT_1);
+               ClassChanLST_DB(Data, List, _("Mask"));
+               Sort_LST(List,0,0);
+               
+               
+               // --- Use Global setting for legend ---
+
+               if (iGlobal_SYS("SEMPLOT.SYMBLEGEND",sTemp)==0) {
+                  iLegend = iScanI_STR(sTemp);
+                  if(iLegend!=0) iLegend=1;
+                  SetInt_SYS("SEMPLOT","LEGEND",iLegend);
+               }
+               
+               SetInfoSYS_DGW(Diag,_SEMPLOT_0,DGW_TEXT,"SEMPLOT","TEMPLATE");
+               SetInfoSYS_DGW(Diag,_SEMPLOT_1,DGW_TEXT,"SEMPLOT","MASK");
+               SetInfoSYS_DGW(Diag,_SEMPLOT_2,DGW_LISTALIAS,"SEMPLOT","LEGEND");
+               
+               iRet = iRunDialogue_DGW(Diag);
+               if (iRet == -1) Cancel_SYS();
+               
+               GetInfoSYS_DGW(Diag,_SEMPLOT_0,DGW_TEXT,"SEMPLOT","TEMPLATE");
+               GetInfoSYS_DGW(Diag,_SEMPLOT_1,DGW_TEXT,"SEMPLOT","MASK");
+               GetInfoSYS_DGW(Diag,_SEMPLOT_2,DGW_LISTALIAS,"SEMPLOT","LEGEND");
+               
+               Destroy_DGW(Diag);
+
+
+               // --- Validate Template name unless creating a new template ---
+
+               if(iRet!=2) {
+                  GetString_SYS("SEMPLOT","TEMPLATE",sTemplate);
+                  if(!iStrlen_STR(sTemplate)) {
+                     DisplayMessage_SYS(_("Plot"), _("The \"Template\" field is required"));
+                     break;
+                  }
+                  if(iFindItem_LST(TempLST, LST_ITEM_NAME, sTemplate)==-1)
+                  {
+                     DisplayMessage_SYS(_("Plot"), _("The \"Template\" value must be a list item unless you are creating a new template."));
+                     break;
+                  }
+               }
+
+               if(iRet==1)
+                  i = EDIT_FILE;
+               else if(iRet==2)
+                  i = NEW_FILE;
+               else
+                  i = -1;   // plot using the template                  
+               break;
+               
+            case EDIT_FILE:
+            
+               // --- template ---
+               
+               Diag = Create_DGW("SEMPLOTEDIT");
+
+               GetString_SYS("SEMPLOT","TEMPLATE",sTemplate);
+               SetInfo_DGW(Diag,_SEMPLOTEDIT_0,DGW_TEXT,sTemplate);
+
+               iRet = iRunDialogue_DGW(Diag);
+               if (iRet == -1) {
+                  i = PLOT;
+                  Destroy_DGW(Diag);                  
+                  break;
+               }
+
+               Destroy_DGW(Diag);
+
+               if(iRet==1) 
+                  EditPlotComponents_SEMPLOT(Data, sTemplate);
+               else if(iRet==2)
+                  EditPlotParameters_SEMPLOT(Data, sTemplate);
+               else
+                  i = PLOT;
+                                          
+               break;
+                           
+            case NEW_FILE:
+            
+               // --- template ---
+               
+               Diag = Create_DGW("SEMPLOTNEW");
+
+
+               // --- Set up the template list ---
+
+               List = GetList_DGW(Diag,_SEMPLOTNEW_1);
+               TemplateLST_SEMPLOT(List, SEMPLOT_PLOT_ALL);
+               Sort_LST(List,0,0);
+               
+               
+               // --- Use Global setting for legend default ---
+
+               if (iGlobal_SYS("SEMPLOT.SYMBLEGEND",sTemp)==0)
+                  iLegend = iScanI_STR(sTemp);
+               
+               
+               // --- If the "TEMPLATE" is defined, and is NOT in the template list, use it
+               //     for the new template name ---
+               
+               GetString_SYS("SEMPLOT", "TEMPLATE", sTemplate);
+               if(iStrlen_STR(sTemplate))
+               {
+                  if(iFindItem_LST(List,0,sTemplate)==-1)
+                  {
+                     SetString_SYS("SEMPLOT", "NEWTEMPLATE", sTemplate);
+                  }
+               }
+               
+               SetInfoSYS_DGW(Diag,_SEMPLOTNEW_0,DGW_TEXT,"SEMPLOT", "NEWTEMPLATE");
+               SetInfoSYS_DGW(Diag,_SEMPLOTNEW_1,DGW_TEXT,"SEMPLOT","MODEL");
+
+               iRet = iRunDialogue_DGW(Diag);
+               if (iRet == -1) {
+                  i = PLOT;
+                  Destroy_DGW(Diag);                  
+                  break;
+               }
+
+               GetInfoSYS_DGW(Diag,_SEMPLOTNEW_0,DGW_TEXT,"SEMPLOT", "NEWTEMPLATE");
+               GetInfoSYS_DGW(Diag,_SEMPLOTNEW_1,DGW_TEXT,"SEMPLOT","MODEL");
+
+               Destroy_DGW(Diag);
+
+               if(iRet==1)
+                  iType = SEMPLOT_PLOT_XYPLOT;
+               else if(iRet==2)
+                  iType = SEMPLOT_PLOT_TRIPLOT;
+               else
+                  Abort_SYS(_("This shouldn't happen."));
+
+
+               GetString_SYS("SEMPLOT","NEWTEMPLATE",sTemplate);
+               GetString_SYS("SEMPLOT","MODEL",sModel);
+
+
+               // --- Create the new template ---
+
+               NewTemplate_SEMPLOT(sTemplate, iType, sModel);
+               SetString_SYS("SEMPLOT","TEMPLATE",sTemplate);
+
+               EditPlotComponents_SEMPLOT(Data, sTemplate);
+               EditPlotParameters_SEMPLOT(Data, sTemplate);
+
+               
+               // --- Refresh the global template list ---
+
+               TemplateLST_SEMPLOT(TempLST, SEMPLOT_PLOT_ALL);
+               Sort_LST(TempLST,0,0);
+
+               i = PLOT;
+                                          
+               break;
+         }                              
+      }
+   }
+
+      
+   // --- Plot symbol legend? ---
+
+   iGlobalLegend = iGetInt_SYS("SEMPLOT", "USE_LEGEND_PREFERENCE");
+   SetInt_SYS("SEMPLOT", "USE_LEGEND_PREFERENCE", 0);  // must reset each time
+
+   iLegend = 1;   // default is to plot a legend
+   if(iGlobalLegend==1) {
+
+      // --- Use Global setting for legend ---
+
+      if (iGlobal_SYS("SEMPLOT.SYMBLEGEND",sTemp)==0)
+         iLegend = iScanI_STR(sTemp);
+   }
+   else {
+
+      // --- Use local setting for legend ---
+
+      iLegend = iGetInt_SYS("SEMPLOT","LEGEND");
+   }
+   if(iLegend!=0) iLegend = 1;
+   
+   
+   // --- get template name ---
+   
+   GetString_SYS("SEMPLOT","TEMPLATE",sTemplate);
+   if(!iStrlen_STR(sTemplate))
+      Abort_SYS(_("SEMPLOT template not specified"));
+
+
+   // --- Get mask channel ---
+
+   GetString_SYS("SEMPLOT","MASK",sMaskCh);
+
+
+   // --- Create mask channel if it does not exist ---
+
+   if(iStrlen_STR(sMaskCh)==0 ||
+      iExistChan_DB(Data, sMaskCh)==0)
+   {
+      // --- Create a new mask channel ---
+
+      SetInteractive_SYS(0);
+      UnLock_EDB(EData);
+
+      iRunGX_SYS("semmask.gx");
+
+      SetInteractive_SYS(iInteractive);
+      Data = Lock_EDB(EData);
+   }
+
+
+   // --- Get mineral channel (not always required, e.g. not for raw data plots) ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+
+   // --- Get the directory to store map
+
+   GetString_SYS("SEMPLOT","MAPDIR",sMapDir);
+   
+
+   // --- Create the map name from the template name ---
+   
+	FileCombineParts_STR("", sMapDir, sTemplate, "map", "", sMap);
+
+   
+   // --- Unload the any existing map (harmless if not loaded) ---
+   
+   UnLoad_EMAP(sMap);
+
+
+   // --- Plot ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating Plot"),1);
+
+   
+   // --- Track which values are plotted ---
+   
+   ResetUsedChannel_SEMPLOT(Data);
+   
+
+   // --- Track which symbols are used ---
+   
+   InitGroupSymbolsUsed_SEMPLOT(Data);
+   
+   
+   // --- Plot the template ---
+   
+   Plot_SEMPLOT(Data, sTemplate, sMaskCh, sMineralCh, sMap, MAP_WRITENEW, iLegend);
+
+   Progress_SYS(0);
+
+
+   UnLock_EDB(EData);
+
+   // --- display map ---
+
+   EMap = Load_EMAP(sMap);
+   
+   
+   // --- Mark it as a SEMPLOT map ---
+
+   Map = Lock_EMAP(EMap);
+   Reg = GetREG_MAP(Map);
+   
+   SetInt_REG(Reg, "SEMPLOT_MAP", 1);
+   SetREG_MAP(Map, Reg);
+   UnLock_EMAP(EMap);
+}

@@ -1,0 +1,133 @@
+//===========================================================================
+NAME          = "CHIMERA scatter launch from a group"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = ""
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+int iN,iX,iY,iLinX,iLinY,iXTrans,iYTrans;
+real rX,rY,rDx,rDy,rCx,rCy,rMinX,rMaxX,rMinY,rMaxY;
+string(STR_DEFAULT_LONG) sTemp,sX,sY,sVal;
+string(STR_FILE) sData;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) Cancel_SYS();
+   
+   
+   // --- Add maker ---
+   
+   rX = rGetReal_SYS("CHMSCPICK","X");
+   rY = rGetReal_SYS("CHMSCPICK","Y");
+   rDx = rGetReal_SYS("CHMSCPICK","DX");
+   rDy = rGetReal_SYS("CHMSCPICK","DY");
+   iN = iGetInt_SYS("CHMSCPICK","NC");
+   
+   
+   // --- get cursor location ---
+
+   rCx = rCy = 0.0;   
+   GetCursor_EMAP(Current_EMAP(),rCx,rCy);
+   
+   
+   // --- work out reference ---
+   
+   iX = (int)((rCx-rX)/rDx);
+   iY = (int)(((rY+(real)iN*rDy)-rCy)/rDy);
+   if ((iX < 0) || (iY < 0) || (iX >= iN) || (iY >= iN)) 
+      Abort_SYS(_("The cursor must be inside data area."));
+      
+      
+   // --- channel names ---
+      
+   Strcpy_STR(sTemp,"C");
+   FormatI_STR(iX,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   GetString_SYS("CHMSCPICK",sTemp,sX);
+   
+   Strcpy_STR(sTemp,"C");
+   FormatI_STR(iY,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   GetString_SYS("CHMSCPICK",sTemp,sY);
+   
+   
+   // --- Channel ranges ---
+   
+   Strcpy_STR(sTemp,"MIN");
+   FormatI_STR(iX,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   rMinX = rGetReal_SYS("CHMSCPICK",sTemp);
+   
+   Strcpy_STR(sTemp,"MAX");
+   FormatI_STR(iX,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   rMaxX = rGetReal_SYS("CHMSCPICK",sTemp);
+   
+   Strcpy_STR(sTemp,"MIN");
+   FormatI_STR(iY,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   rMinY = rGetReal_SYS("CHMSCPICK",sTemp);
+   
+   Strcpy_STR(sTemp,"MAX");
+   FormatI_STR(iY,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   rMaxY = rGetReal_SYS("CHMSCPICK",sTemp);
+   
+   
+   // --- Transforms ---
+   
+   Strcpy_STR(sTemp,"LIN");
+   FormatI_STR(iX,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   iLinX = iGetInt_SYS("CHMSCPICK",sTemp);   
+   iXTrans = 0;
+   if(iLinX == 0) iXTrans = 1;
+   
+   Strcpy_STR(sTemp,"LIN");
+   FormatI_STR(iY,sVal,4); iStrMin_STR(sVal);
+   Strcat_STR(sTemp,sVal);
+   iLinY = iGetInt_SYS("CHMSCPICK",sTemp);
+   iYTrans = 0;
+   if(iLinY == 0) iYTrans = 1;
+
+   
+   // --- load database ---
+   
+   GetString_SYS("CHMSCPICK","DATABASE",sData);
+   if (!iLoaded_EDB(sData)) Load_EDB(sData);
+   
+   
+   // --- launch scatter tool ---
+   
+   SetString_SYS("SCATTER","STM","none");
+   SetString_SYS("SCATTER","STM_NAME","");
+   SetString_SYS("SCATTER","X",sX);
+   SetString_SYS("SCATTER","Y",sY);
+   SetReal_SYS("SCATTER","XMIN",rMinX);
+   SetReal_SYS("SCATTER","XMAX",rMaxX);
+   SetInt_SYS("SCATTER","XTRANS",iXTrans);
+   SetReal_SYS("SCATTER","YMIN",rMinY);
+   SetReal_SYS("SCATTER","YMAX",rMaxY);
+   SetInt_SYS("SCATTER","YTRANS",iYTrans);
+
+   SetString_SYS("SCATTER","MASK","");
+   
+   LaunchScatter_CHIMERA(sData);
+   
+}

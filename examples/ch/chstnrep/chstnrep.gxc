@@ -1,0 +1,603 @@
+//===========================================================================
+NAME          = "Display a graphical report of standard results"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport/Standards"
+
+DESCRIPTION   = "
+
+   CHSTNREP.DATABASE    database name
+           .CHANNELS    channel option
+
+"
+// Revision History:
+// v6.2.0: No longer treats single-sequence databases as "old" data.
+// v5.1.8: Uses defined standards directory as default location.
+//         Added project description to title block. Description labels
+//         not included if descriptions not defined.
+//         Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+// v5.1.4: Fixed for "DISPLAYED" option.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "chstnrep.gr"
+#include "chstnrep.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define HEADER 16.0
+#define X1 20.0
+#define X2 ((real)iNx*rDx*0.45+X1)
+#define X3 ((real)iNx*rDx*0.80)
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_FILE) sData, sStandardDir;
+string(STR_FILE) sMap, sLine;
+string(STR_DEFAULT_SHORT) sChOpt, sLabel, sYPlotChan, sView, sGroup;
+string(STR_DEFAULT_LONG) sTemp,sStandard, sMapfile;
+string(STR_DB_SYMBOL) sBatch;
+
+EDB      EData;
+DB       Data;
+DGW      Diag;
+DB_SYMB  Ln,Ch;
+MAP      Map;
+MVIEW    View;
+MVIEW    ViewPlot;
+REG      hReg;
+IPJ      DataIPJ;
+
+LST      ChLST;
+VV       hVV;
+VV       hVVX;
+VV       hVVLine;
+VV       hVVFid;
+
+real     rY,rY1,rYMax,rYH,rDx,rDy,rSizeX,rSizeY,rTol,rTol2,rMin,rMax,rXPlot,rInc,rVVMin,rVVMax,rSizeX2,rMinX,rMinY,rMaxX,rMaxY,rMinYPlotted,rMaxYPlotted,rPadX;
+int      i,iNx,iNy,iX,iY,j;
+int      iCh,iSeq,iData,iNew,iTolSel,iNumElements;
+
+string(STR_DEFAULT_LONG) sName,sDescr,sGeo,sDate,sCompany;
+string(STR_DEFAULT) sUnit,sBuff,sProg;
+string(32768) sChannels;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Set default directory for standards ---
+
+      GetString_SYS("CHSTNREP","DATABASE",sData);
+      GetString_SYS("CHIMERA","STANDARDS_DIRECTORY",sStandardDir);
+
+      if(!iStrlen_STR(sData) &&
+          iStrlen_STR(sStandardDir)) {
+         Strcat_STR(sStandardDir, "\\");
+         SetString_SYS("CHSTNREP","DATABASE",sStandardDir);
+      }
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHSTNREP");
+
+      SetInfoSYS_DGW(Diag,_CHSTNREP_0,DGW_FILEPATH, "CHSTNREP","DATABASE");
+      SetInfoSYS_DGW(Diag,_CHSTNREP_1,DGW_LISTALIAS,"CHSTNREP","CHANNELS");     
+      SetInfoSYS_DGW(Diag,_CHSTNREP_2,DGW_LISTALIAS,"CHSTNREP","TOLSELECT");     
+      SetInfoSYS_DGW(Diag,_CHSTNREP_3,DGW_TEXT,"CHSTNREP","TOLERANCE");     
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+      
+      GetInfoSYS_DGW(Diag,_CHSTNREP_0,DGW_FILEPATH, "CHSTNREP","DATABASE");
+      GetInfoSYS_DGW(Diag,_CHSTNREP_1,DGW_LISTALIAS,"CHSTNREP","CHANNELS");     
+      GetInfoSYS_DGW(Diag,_CHSTNREP_2,DGW_LISTALIAS,"CHSTNREP","TOLSELECT");     
+      GetInfoSYS_DGW(Diag,_CHSTNREP_3,DGW_TEXT,"CHSTNREP","TOLERANCE");     
+      
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHSTNREP","DATABASE",sData);
+   GetString_SYS("CHSTNREP","CHANNELS",sChOpt);
+   GetString_SYS("CHSTNREP","MAPFILE",sMapfile);
+   
+   
+   iTolSel = iGetInt_SYS("CHSTNREP","TOLSELECT");
+   if(iTolSel!=1) iTolSel=0;  // default to using standard deviations
+
+   if (iExistReal_SYS("CHSTNREP","TOLERANCE")) {
+      rTol = rGetReal_SYS("CHSTNREP","TOLERANCE");
+      if (rTol <= 0.0) rTol = 2.0;
+   } else
+      rTol = 2.0;   
+      
+   
+   // --- get current database ---
+
+   EData = Load_EDB(sData);
+   if (iInteractive_SYS())
+      Ln = GetCurLineSymb_EDB(EData);
+   
+   
+   
+   // --- gotta have batch and sequence channels ---
+   
+   Data = Lock_EDB(EData); 
+   
+   if (!iInteractive_SYS()) {
+      GetString_SYS("CHSTNREP", "CURLINE", sLine);   
+      Ln = FindSymb_DB(Data, sLine, DB_SYMB_LINE);
+   }
+   
+   if (!iExistChan_DB(Data,"Batch"))
+      Abort_SYS(_("No \"Batch\" channel."));
+   if (!iExistChan_DB(Data,"Seq"))
+      Abort_SYS(_("No \"Seq\" channel."));
+   UnLock_EDB(EData); 
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChOpt);
+   SetString_SYS("CHCHANLST","GX","CHSTNREP");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+
+   // --- nothing to do ---
+
+   iCh = iSize_LST(ChLST);   
+   if (iCh <= 0) Abort_SYS(_("No channels to plot."));
+
+   
+   // --- sort the database by sequence ---
+  
+   SetString_SYS("SORTALL2","CHANNEL1","Seq");
+   SetString_SYS("SORTALL2","CHANNEL2","Order");
+   SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+   SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+   SetString_SYS("SORTALL2","READONLY","YES");
+
+   UnLock_EDB(EData);
+   if (iRunGX_SYS("sortal2") != 0) 
+      Abort_SYS(_("Sort failed"));
+   Data = Lock_EDB(EData); 
+   
+      
+   // --- get batch name ---
+   
+   hVV = Create_VV(-32,0);
+   Ch = FindChan_DB(Data,"Batch");
+   LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
+   
+   GetChanVV_DB(Data,Ln,Ch,hVV);
+   UnLockSymb_DB(Data,Ch);
+   iData = iLength_VV(hVV);
+   if (iData == 0) Abort_SYS(_("No data"));
+   GetString_VV(hVV,iData-1,sBatch);
+   Destroy_SYS(hVV);
+   
+   // --- count sequence ---
+   
+   hVV = Create_VV(INT,0);
+   Ch = FindChan_DB(Data,"Seq");
+   LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
+   GetChanVV_DB(Data,Ln,Ch,hVV);
+   UnLockSymb_DB(Data,Ch);
+   
+   if (iLength_VV(hVV) != iData) 
+      Abort_SYS(_("Seq and Batch channels different lengths."));
+      
+   iNew = 1;
+   iSeq = iGetInt_VV(hVV,iData-1);
+   for (i = iData-2;i>=0;i--) {
+      if (iGetInt_VV(hVV,i) != iSeq) break;
+      iNew++;
+   }
+   Destroy_SYS(hVV);
+   
+
+   // --- get the workspace REG ---
+      
+   hReg = Create_REG(128);
+   GetWorkspaceREG_SYS(hReg);
+   Get_REG(hReg,"CHPROJ.COMPANY",sCompany,sizeof(sCompany));  
+   Get_REG(hReg,"CHPROJ.NAME",sName,sizeof(sName));
+   Get_REG(hReg,"CHPROJ.DESCR",sDescr,sizeof(sDescr));
+   Get_REG(hReg,"CHPROJ.SCIENTIST",sGeo,sizeof(sGeo));  
+   Get_REG(hReg,"CHPROJ.DATE",sDate,sizeof(sDate));
+   
+   
+   // --- work out optimal graph size to fit all in 16x20 cm area ---
+   
+   if (iCh <= 40) {
+   
+      // --- optimize arrangement ---
+      
+      if (iCh == 1) {
+         rDx = 160.0;
+         rDy = 50.0;
+         iNx = 1;
+      } else if (iCh == 2) {
+         rDx = 80.0;
+         rDy = 40.0;
+         iNx = 2;
+      } else if (iCh <= 21) {
+         rDx = 160.0/3.0;
+         rDy = rDx/2.0;
+         iNx = 3;
+      } else {
+         rDx = 40.0;
+         rDy = 20.0;
+         iNx = 4;
+      }
+      
+   } else {
+   
+      // --- optimize for large number of plots by reducing size ---
+      
+      iNx = 4;
+      rDx = 40.0;
+      i = iCh - 40;
+      while (i > 0) {
+         iNx++;
+         rDx = 180.0/(real)iNx;
+         rDy = rDx/2.0;
+         iNy = (int)(200.0/(real)rDy);
+         i = iCh - (iNx * iNy);
+      }
+   }
+   iNy = iCh/iNx;
+   if ((iNx*iNy) < iCh) iNy++;
+   
+   
+   // --- area ---
+   
+   rSizeX = rDx * (real)iNx;      
+   rSizeY = rDy * (real)iNy;      
+   
+   
+   // --- create a map ---
+   if (iStrlen_STR(sMapfile) > 0) {
+      Strcpy_STR(sMap,sMapfile);
+      FileNamePart_STR(sData,sStandard,STR_FILE_PART_NAME);
+      Strcpy_STR(sTemp,sStandard);
+      
+   }
+   else {
+      Strcpy_STR(sTemp,"Standard_");
+      FileNamePart_STR(sData,sStandard,STR_FILE_PART_NAME);
+      Strcat_STR(sTemp,sStandard);
+      FileExt_STR(sTemp,"map",sMap,FILE_EXT_FORCE);
+   }
+   
+   UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+   
+   
+   // --- create a Surrounds view ---
+   
+   rYH = HEADER;
+   if(iStrlen_STR(sName))  rYH += 3.0;
+   if(iStrlen_STR(sDescr)) rYH += 3.0;
+   if(iStrlen_STR(sGeo))   rYH += 3.0;
+   if(iStrlen_STR(sDate))  rYH += 3.0;
+    
+   View = Create_MVIEW(Map,sTemp,MVIEW_WRITENEW);
+   FitWindow_MVIEW(View,1.0,1.0,1.0+rSizeX,1.0+rSizeY+rYH,
+                        0.0,0.0,rSizeX,rSizeY+rYH);
+
+
+   // --- get a data VV ---
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Plotting"),1);
+   hVV = Create_VV(REAL,0);
+   hVVX = Create_VV(REAL, 0);
+   hVVLine = Create_VV(INT, 0);
+   hVVFid = Create_VV(REAL, 0);
+   i = 0;
+   for (iY = 0; iY < iNy; iY++) {
+   
+      rY = rSizeY - (real)(iY+1) * rDy;
+      
+      for (iX = 0; iX < iNx; iX++) {
+      
+      
+         // --- get the next channel data ---
+         
+         if(i>=iCh) continue;
+         Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i++);
+      
+
+         // --- read the data ---
+            
+         LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+         GetChanVV_DB(Data,Ln,Ch,hVV);
+         UnLockSymb_DB(Data,Ch);
+
+         iNumElements = iLength_VV(hVV);
+         SetLen_VV(hVVX, iNumElements);
+         SetLen_VV(hVVLine, iNumElements);
+         SetLen_VV(hVVFid, iNumElements);
+            
+            
+         // --- get the data label and unit ---
+            
+         GetChanLabel_DB(Data,Ch,sLabel);
+         GetChanUnit_DB(Data,Ch,sUnit);
+
+
+         // --- Get the Min and Max values, if they exist ---
+
+         rMin = rDUMMY;
+         rMax = rDUMMY;
+         if(iTolSel==1) {
+            GetRegSymbSetting_DB(Data, Ch, "STANDARDMIN", sBuff, sizeof(sBuff));
+            rMin = rScanR_STR(sBuff);
+            GetRegSymbSetting_DB(Data, Ch, "STANDARDMAX", sBuff, sizeof(sBuff));
+            rMax = rScanR_STR(sBuff);
+         }
+
+         rTol2 = rDUMMY;
+         if(rMin==rDUMMY || rMax==rDUMMY) rTol2 = rTol;
+               
+               
+         // --- progress ---
+                           
+         Strcpy_STR(sProg,_("Plotting "));               
+         Strcat_STR(sProg,sName);               
+         ProgName_SYS(sProg,1);
+         ProgUpdateL_SYS(i,iCh);
+            
+            
+         // --- plot ---
+
+         GetChanName_DB(Data, Ch, sYPlotChan);
+
+         rXPlot = 0.0;
+         rInc = 0.0;
+         RangeDouble_VV(hVV, rVVMin, rVVMax);
+         if (rVVMax - rVVMin == 0.0)
+            rSizeX2 = 3.0;
+         else
+            rSizeX2 = (rVVMax - rVVMin) * 3.0;
+         if (iNumElements > 1)
+            rInc = rSizeX2 / (real)(iNumElements - 1);
+         for (j = 0; j < iNumElements; j++)
+         {
+            SetReal_VV(hVVX, j, rXPlot);
+            SetInt_VV(hVVLine, j, Ln);
+            SetReal_VV(hVVFid, j, (real)j);
+            rXPlot += rInc;
+         }
+
+         if (iY == 0 && iX == 0)
+         {
+            DataIPJ = Create_IPJ();
+            GetIPJ_DB(Data, Ch, DataIPJ);
+         }
+
+         Strcpy_STR(sView, sYPlotChan);
+         Strcpy_STR(sGroup, sYPlotChan);
+         Strcat_STR(sGroup, "_plot");
+
+         StandardView_CHIMERA(Map, sView, sGroup, DataIPJ, hVV, iData - iNew, rTol2, rMin, rMax, sLabel, sUnit, rSizeX2, hVVX, hVVLine, hVVFid, Data, rMinYPlotted, rMaxYPlotted);
+
+         ViewPlot = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
+
+         rMinX = ((real)iX * rDx) + 1.0;
+         rMinY = rY + 1.0;
+         rMaxX = rMinX + rDx;
+         rMaxY = rMinY + rDy;
+
+         rPadX = rInc;
+
+         FitWindow_MVIEW(ViewPlot, rMinX, rMinY, rMaxX, rMaxY, 0.0 - rPadX, rMinYPlotted, rSizeX2 + rPadX, rMaxYPlotted);
+
+         Destroy_MVIEW(ViewPlot);
+      }
+   }
+   
+   
+   // --- add title block ---                             
+   
+   StartGroup_MVIEW(View, "Title", MVIEW_GROUP_NEW);
+
+   // --- put a line across the top of the graphs ---
+
+   LineColor_MVIEW(View,C_BLACK);
+   LineThick_MVIEW(View,0.35);
+   LineStyle_MVIEW(View,0,0.0);
+
+   rY = (real)iNy*rDy;
+   Line_MVIEW(View,0.0,rY,(real)iNx*rDx,rY);
+     
+   
+   // --- set the default font ---
+   
+   TextColor_MVIEW(View,C_BLACK);
+   TextAngle_MVIEW(View,0.0);
+   TextSize_MVIEW(View,2.0);
+   
+   
+   // --- label from bottom up ---
+
+   rY1 = rY+2.0;     // bottom of labels
+
+
+   // --- Left column: ---
+
+   rY = rY1;
+   if(iStrlen_STR(sDate)) {
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+      Text_MVIEW(View,_("Project date:"),X1,rY);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,sDate,X1+1.0,rY);
+      rY += 3.0;
+   }
+
+   if(iStrlen_STR(sGeo)) {
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+      Text_MVIEW(View,_("Scientist:"),X1,rY);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,sGeo,X1+1.0,rY);
+      rY += 3.0;
+   }
+
+   if(iStrlen_STR(sDescr)) {
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+      Text_MVIEW(View,_("Description:"),X1,rY);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,sDescr,X1+1.0,rY);
+      rY += 3.0;
+   }
+
+   if(iStrlen_STR(sName)) {
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+      Text_MVIEW(View,_("Project:"),X1,rY);
+      TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+      TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+      Text_MVIEW(View,sName,X1+1.0,rY);
+      rY += 3.0;
+   }
+
+   TextSize_MVIEW(View,3.0);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   rY += 3.0;
+   Text_MVIEW(View,sCompany,1.5,rY);
+   
+   rY += 5.0;
+   TextSize_MVIEW(View,4.0);
+   Text_MVIEW(View,_("Standards Report"),1.5,rY);
+
+   rYMax = rY + 4.0 + 3.0;    // 3mm above Standards Report title
+   
+
+   // --- Middle Column ---
+            
+   rY = rY1;
+   TextSize_MVIEW(View,2.0);
+      
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Report date:"),X2,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   FormatDate_STR(rDate_SYS(),sDate,10,DATE_FORMAT_YYYYMMDD);
+   Text_MVIEW(View,sDate,X2+1.0,rY);
+   rY += 3.0;   
+
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Standard:"),X2,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TrimSpace_STR(sStandard, STR_TRIMBOTH);
+   Text_MVIEW(View,sStandard,X2+1.0,rY);
+   rY += 3.0;         
+
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Batch:"),X2,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TrimSpace_STR(sBatch, STR_TRIMBOTH);
+   Text_MVIEW(View,sBatch,X2+1.0,rY);
+      
+
+   // --- Right column ---
+
+   rY = rY1;
+
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Historic:"),X3,rY);
+   
+   LineThick_MVIEW(View,0.1);
+   LineStyle_MVIEW(View,0,0.0);
+   FillColor_MVIEW(View,iColor_MVIEW("K"));
+   Ellipse_MVIEW(View,X3+2.0,rY+1.1,0.7,1.0,0.0);
+   rY += 3.0;         
+
+
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Pass:"),X3,rY);
+   
+   LineThick_MVIEW(View,0.1);
+   LineStyle_MVIEW(View,0,0.0);
+   FillColor_MVIEW(View,iColor_MVIEW("R64G255B64"));
+   Ellipse_MVIEW(View,X3+2.0,rY+1.1,0.8,1.0,0.0);
+   rY += 3.0;         
+
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Fail:"),X3,rY);
+   
+   LineThick_MVIEW(View,0.1);
+   LineStyle_MVIEW(View,0,0.0);
+   FillColor_MVIEW(View,iColor_MVIEW("R255G0B0"));
+   Ellipse_MVIEW(View,X3+2.0,rY+1.1,1.0,1.0,0.0);
+      
+   FormatR_STR(rTol,sTemp,4,3);      
+   Printf_STR(sLabel, sizeof(sLabel), _("Default +/-%s std. dev."), sTemp);
+   
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sLabel,X3+4.0,rY);
+
+
+   // --- Surround ---
+   
+   FillColor_MVIEW(View,C_TRANSPARENT);
+   LineColor_MVIEW(View,C_BLACK);
+   LineThick_MVIEW(View,0.35);
+   LineStyle_MVIEW(View,0,0.0);
+   Rectangle_MVIEW(View,0.0,0.0,(real)iNx*rDx,rYMax);
+         
+   
+   // --- done ---
+
+   Progress_SYS(0);
+   Destroy_MVIEW(View);
+   Destroy_MAP(Map);
+   Destroy_REG(hReg);
+   Destroy_IPJ(DataIPJ);
+   UnLock_EDB(EData);
+   Load_EMAP(sMap);
+   
+}

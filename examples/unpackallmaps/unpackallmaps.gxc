@@ -1,0 +1,67 @@
+//===========================================================================
+NAME          = "Unpack all open maps"
+#include <version.gxh>
+DESCRIPTION   = "
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+// Revision History:
+// v5.1.6 New GX.
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+EMAP  EMap;
+LST   Lst;
+string(STR_FILE) sCurMap, sMap;
+int i, iNMaps;
+string(STR_MULTI_FILE) sNewDir;
+string(STR_MULTI_FILE) sMapDirPath;
+
+//===========================================================================
+
+{
+	SetString_SYS(_n("UNPACKMAP"),_n("WORKINGDIR"),_n(""));
+   // --- get the current map ---
+  
+   EMap = Current_EMAP();
+   GetName_EMAP(EMap, sCurMap);
+
+
+   // --- Get list of all open maps ---
+
+   Lst = Create_LST(512);  // Maximum size for a list
+   iNMaps = iGetMapsLST_EMAP(Lst, EMAP_PATH_FULL);
+
+   if(iNMaps==0) Cancel_SYS();
+   if (iInteractive_SYS())
+   {
+		IStrcpy_STR(sMapDirPath,_n(""),sizeof(sMapDirPath));
+		ITransferPath_SYS(sCurMap,sMapDirPath,sizeof(sMapDirPath));
+		if(IiBrowseDir_GUI(_("Unpack Map"),sMapDirPath,sNewDir,sizeof(sNewDir))==1)
+			Cancel_SYS();
+		SetString_SYS(_n("UNPACKMAP"),_n("WORKINGDIR"),sNewDir);
+   }
+   
+
+   // --- Call the UNPACKMAP GX to unpack each map ---
+
+   for(i=0;i<iNMaps;i++) {
+      GetItem_LST(Lst, 0, i, sMap);
+      EMap = Load_EMAP(sMap);
+   
+	  if (!iIsGrid_EMAP(EMap))
+		 iRunGX_SYS("unpackmap.gx");
+   }   
+   
+   
+   // --- reset the current map ---
+
+   Load_EMAP (sCurMap);
+   SetString_SYS(_n("UNPACKMAP"),_n("WORKINGDIR"),_n(""));
+}

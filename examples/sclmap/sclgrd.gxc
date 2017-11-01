@@ -1,0 +1,51 @@
+//===========================================================================
+NAME          = "Save current grd as map for drawing"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map Tools"
+
+DESCRIPTION   = "
+
+   Check if current document is a grd and and prompt to save as map via sclmap.
+   This GX also prevents any operations on packed maps.
+"
+// Revision History:
+// v9.0:   First version
+//===========================================================================
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+
+EMAP  EMap;
+int iPackedFiles, iGrid;
+//===========================================================================
+
+{
+   // --- gotta have a current EMAP ---
+   
+   if (!iHaveCurrent_EMAP()) 
+      Exit_SYS();
+   
+   
+   // --- get current map information ---
+
+   EMap = Current_EMAP();
+   iGrid = iIsGrid_EMAP(EMap);   
+   iPackedFiles = iPackedFiles_EMAP(EMap);
+   
+   // --- done ---
+   
+   if (iPackedFiles || iGrid)
+   {
+        if (iGrid)
+            SetInt_SYS("SCLMAP","GRID_ONLY", 1);
+        // scclmap will show the error for packed maps
+        if (iRunGX_SYS("sclmap") != 0) 
+            Cancel_SYS();
+   }
+}

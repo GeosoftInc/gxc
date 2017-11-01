@@ -1,0 +1,245 @@
+//===========================================================================
+NAME          = "Select Data from Map using a Polygon"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+   Select Data from Map using a Polygon
+   
+"
+// Revision History
+// v6.3.0: Allow for multiple mineral channels.
+// v6.2.0: Auto re-draw should be enabled by default.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.8: Added "Remove" option
+// v5.1.7: Semplot upgrade modifications.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semselectpoly.gr"
+#include "semselectpoly.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define XYPLOT_VIEW  ( 0 )
+#define TRIPLOT_VIEW ( 1 )
+#define LOCMAP_VIEW  ( 2 )
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+EMAP        EMap;
+MAP         Map;
+LST         Lst, GroupLst;
+MVIEW       View;
+PLY         Ply;
+VV          VVx, VVy;
+DGW         Diag;
+LST         List;
+DB_SYMB     MaskCh;
+
+
+string(STR_VIEW) sView, sView2;
+string(STR_DB_SYMBOL) sMaskCh, sMineralCh;
+string(STR_DEFAULT_SHORT) sVal;
+string(STR_VIEW_GROUP) sGroup, sGroup2;
+int i,iType,iN,iVal,iMode,iRet;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("This GX must be run interactively"));
+
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   Diag = Create_DGW("SEMSELECTPOLY");
+
+
+   // --- Create Lists ---
+
+   List = GetList_DGW(Diag,_SEMSELECTPOLY_0);
+   ClassChanLST_DB(Data,List,"MASK");
+   Sort_LST(List,0,0);
+
+   SetInfoSYS_DGW(Diag,_SEMSELECTPOLY_0,DGW_TEXT,"SEMPLOT","MASK");
+   SetInfoSYS_DGW(Diag,_SEMSELECTPOLY_1,DGW_LISTALIAS,"SEMSELECTPOLY","MODE");
+                  
+   iRet = iRunDialogue_DGW(Diag);
+   if (iRet == -1) Cancel_SYS();
+
+   GetInfoSYS_DGW(Diag,_SEMSELECTPOLY_0,DGW_TEXT,"SEMPLOT","MASK");
+   GetInfoSYS_DGW(Diag,_SEMSELECTPOLY_1,DGW_LISTALIAS,"SEMSELECTPOLY","MODE");
+
+   Destroy_DGW(Diag);
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+   iMode = iGetInt_SYS("SEMSELECTPOLY", "MODE");
+   if(iMode!=1 && iMode!=2) iMode = 0;
+
+
+   // --- Create mask channel if it does not exist ---
+
+   MaskCh = FindChan_DB(Data, sMaskCh);
+   if(MaskCh==NULLSYMB) {
+
+
+      // --- Create a new mask channel ---
+
+      SetInteractive_SYS(0);
+      UnLock_EDB(EData);
+
+      iRunGX_SYS("semmask.gx");
+
+      SetInteractive_SYS(1);
+      Data = Lock_EDB(EData);
+   }
+
+
+   // --- Get the mineral channel ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+   
+
+   EMap = Current_EMAP();
+   GetCurrentView_EMAP(EMap, sView);
+
+
+   // --- See if the current view is an XYPlot or TRIPlot view ---
+
+   iType = -1;
+   if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0)
+      iType = XYPLOT_VIEW;
+   else if(iStrncmp_STR(sView, "Triplot_", 8, STR_CASE_TOLERANT)==0)
+      iType = TRIPLOT_VIEW;
+
+
+   // --- If a required view is not the current view, search all the views ---
+
+   if(iType==-1) {
+
+      Map = Lock_EMAP(EMap);
+
+      Lst = Create_LST(64);
+      ViewList_MAP(Map, Lst);
+
+      iN = iSize_LST(Lst);
+      for(i=0;i<iN;i++) {
+
+         GetItem_LST(Lst,0,i,sView);
+         if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0)
+            iType = XYPLOT_VIEW;
+         else if(iStrncmp_STR(sView, "Triplot_", 7, STR_CASE_TOLERANT)==0)
+            iType = TRIPLOT_VIEW;
+
+         // --- Set to this view ---
+         
+         if(iType!=-1) {         
+            iSetCurrentView_EMAP(EMap, sView);
+            break;
+         }
+      }
+
+      UnLock_EMAP(EMap);
+   }
+
+   
+   // --- if the map is not XYplot nor TriPlot, search for the group "SYMB" ---
+
+   if( 0 > iType ) {
+      Map = Lock_EMAP( EMap );
+      GroupLst = Create_LST(4096);     // for Group
+      GroupList_MAP( Map, GroupLst );       
+      iN = iSize_LST( GroupLst );
+
+      for( i = 0 ; ( 0 > iType ) && i < iN ; i++ ) {
+         GetItem_LST( GroupLst, 0, i, sGroup );
+         SplitString_STR( sGroup, "\\", sGroup2 );
+         if( 0 == iStrncmp_STR( sGroup2, "SYMB", 4, STR_CASE_TOLERANT ) ) {
+            iType = LOCMAP_VIEW;
+         }
+      }
+
+      UnLock_EMAP(EMap);
+
+      if ( 0 > iType ) {
+         Abort_SYS( _("The current map does not appear to contain any XY/Tri/Location plot.") );
+      }
+      
+      Map = Lock_EMAP( EMap );
+      Lst = Create_LST( 64 );
+      ViewList_MAP( Map, Lst );
+      iN = iSize_LST(Lst);
+
+      for( i = 0 ; i < iN ; i++ ) {
+         GetItem_LST( Lst, 0, i, sView );
+         if(iStrncmp_STR(sView, _n("data"), 4, STR_CASE_TOLERANT)==0) {
+            Strcpy_STR( sView2, sView );
+         }
+      }
+
+      UnLock_EMAP(EMap);
+
+      iSetCurrentView_EMAP( EMap, sView2 );
+   }
+
+   
+   // --- get polygon ---
+   
+   VVx = Create_VV(REAL, 0);
+   VVy = Create_VV(REAL, 0);
+
+   if(iGetPolyLine_EMAP(EMap, _("Select points, right-click done to finish."), VVx, VVy))
+      Cancel_SYS();
+
+   Ply = Create_PLY();
+   AddPolygon_PLY(Ply, VVx, VVy);
+
+   // --- Select the data; update mask channel ---
+
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map, sView, MVIEW_READ);   
+
+   
+   // --- Do the selection ---
+
+   SelectPoly_SEMPLOT( Data, View, sMaskCh, sMineralCh, Ply, iMode );
+
+
+   UnLock_EDB(EData);   
+   UnLock_EMAP(EMap);   
+
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+
+   
+   // --- Replot maps? ---
+
+   iGlobal_SYS("SEMPLOT.AUTOREDRAW",sVal);
+   iVal = iScanI_STR(sVal);
+   if(iVal!=0)   // yes by default
+      iRunGX_SYS("semreplotmaps");
+
+   
+}

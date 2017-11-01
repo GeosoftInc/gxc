@@ -1,0 +1,566 @@
+//===========================================================================
+NAME          = "Average repeats"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+
+       GRREPEAT.IN       : Input channel
+               .OUT      : Output averaged channel
+					.MODE     : Replace with 0: Mean, 1: Median (default), 2: Maximum, 3: Minimum
+					.SORT     : Sort by stations: 0: No (default), 1: Yes
+"
+// Revision History
+// v8.1.0: Added selection of statistic to replace value with (use to be just the average).
+// v5.1.7: Loaded new channel, REPDIFF, as well as associating them.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grrepeat.gr"
+#include "grrepeat.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define REPORT "Repeat_Report.txt"
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;     // Channel Names
+
+EDB         eDB;             // Database handle
+DB          hDB;             // Database handle
+DB_SYMB     InCh,OutCh,LineCh,StnCh,DiffCh,FidCh;    // Channel Handles
+DB_SYMB     Group;             // Group Handle
+DGW         hDGW;             // Dialogue handle
+LST         List;             // List handle
+VV          LineVV,StnVV,DataVV,AvgVV,DiffVV;
+ST          hST;
+WA          hWA;
+REG         hREG;
+
+int         i,iRep, iInteractive, j, k;
+
+int         iStn,iRdgs,iReps,iRepStn,iMode,iSort,iNumRepeats,iRepeat,iStart;
+real        rAvg, rData;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_DB_SYMBOL) sStnLast,sStnNext,sFidChan;
+string(STR_DB_SYMBOL) sLineLast,sLineNext, sLine;
+string(STR_DB_SYMBOL) sStn,sPrcStn,sRdgs,sRepRdgs,sPrcRdgs;
+string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+#define LINE(A) Puts_WA(hWA,A); NewLine_WA(hWA);
+
+{
+
+   // --- get current line ---
+
+
+   eDB = Current_EDB();
+   if (iInteractive_SYS()) {
+	   Group = GetCurLineSymb_EDB(eDB);
+	   if (Group == NULLSYMB) Abort_SYS(_("No line displayed in current database."));
+   }
+
+   // --- Get database ---
+   
+   hDB = Lock_EDB(eDB);
+   
+   if (!iInteractive_SYS()) { 
+		GetString_SYS("GRREPEAT","GROUP",sLine);
+		Group = FindSymb_DB(hDB, sLine, DB_SYMB_LINE);
+   }   
+
+
+   // --- get workspace REG ---
+   
+   hREG = Create_REG(128);
+   GetWorkspaceREG_SYS(hREG);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     hDGW = Create_DGW("GRREPEAT");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(hDGW,_GRREPEAT_0);
+     SymbLST_DB(hDB,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(hDGW,_GRREPEAT_1);
+     SymbLST_DB(hDB,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_0,DGW_TEXT,"GRREPEAT","IN");     
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_1,DGW_TEXT,"GRREPEAT","OUT");
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_2,DGW_LISTALIAS,"GRREPEAT","LINE");
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_3,DGW_LISTALIAS,"GRREPEAT","MODE");
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_4,DGW_LISTALIAS,"GRREPEAT","SORT");
+
+
+     // --- Run the Dialogue ---
+
+     if (iRunDialogue_DGW(hDGW) == -1) Cancel_SYS();
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_0,DGW_TEXT,"GRREPEAT","IN");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_1,DGW_TEXT,"GRREPEAT","OUT");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_2,DGW_LISTALIAS,"GRREPEAT","LINE");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_3,DGW_LISTALIAS,"GRREPEAT","MODE");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_4,DGW_LISTALIAS,"GRREPEAT","SORT");
+
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(hDGW);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRREPEAT","IN",sInCh);
+   GetString_SYS("GRREPEAT","OUT",sOutCh);
+	iMode = iGetInt_SYS("GRREPEAT","MODE");
+	if(iMode<0 || iMode>3) iMode = 1; // default to the median
+	iSort = iGetInt_SYS("GRREPEAT", "SORT");
+	if(iSort != 1) iSort = 0;  // default no sorting
+
+
+   // --- Does the station, line and data channels Exist ? ---
+
+   if (!iExistSymb_DB(hDB,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Input Gravity channel does not exist."));
+   StnCh  = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
+   if (!iExistSymb_DB(hDB,"Station",DB_SYMB_CHAN))
+      Abort_SYS(_("No Station channel"));
+   InCh = FindSymb_DB(hDB,sInCh,DB_SYMB_CHAN);
+   if (iGetYesNo_SYS("GRREPEAT","LINE") && iExistSymb_DB(hDB,"Line",DB_SYMB_CHAN)) 
+      LineCh = FindSymb_DB(hDB,"Line",DB_SYMB_CHAN);
+   else {
+      LineCh = NULLSYMB;   
+      SetString_SYS("GRREPEAT","LINE","No");
+   }
+   
+
+   // --- Output Channel ---
+
+   if (!iExistSymb_DB(hDB,sOutCh,DB_SYMB_CHAN)) {
+      OutCh = CreateSymb_DB(hDB,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LOCK_RW(hDB,OutCh);
+      SetChanWidth_DB(hDB,OutCh,12);
+      SetChanDecimal_DB(hDB,OutCh,3);
+      UNLOCK(hDB,OutCh);
+   } else
+      OutCh = FindSymb_DB(hDB,sOutCh,DB_SYMB_CHAN);
+   AddAssociatedLoad_DB(hDB,Group,OutCh);
+
+
+   // --- create repeat difference channel ---
+
+   if (!iExistSymb_DB(hDB,"RepDiff",DB_SYMB_CHAN)) {
+      DiffCh = CreateSymb_DB(hDB,"RepDiff",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      LOCK_RW(hDB,DiffCh);
+      SetChanWidth_DB(hDB,DiffCh,8);
+      SetChanDecimal_DB(hDB,DiffCh,3);
+      UNLOCK(hDB,DiffCh);
+   } else   
+      DiffCh = FindSymb_DB(hDB,"RepDiff",DB_SYMB_CHAN);
+   AddAssociatedLoad_DB(hDB,Group,DiffCh);
+
+
+   // --- working VV's ---
+   
+   StnVV  = Create_VV(-STR_DB_SYMBOL,0);
+   LineVV = Create_VV(-STR_DB_SYMBOL,0);
+   DataVV = Create_VV(REAL,0);
+   AvgVV  = Create_VV(REAL,0);
+   DiffVV  = Create_VV(REAL,0);
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Averaging"),0);
+
+
+	// --- If not sorting, then need a FID channel to reverse it when done ---
+
+	if(iSort == 0)
+	{
+		Strcpy_STR(sFidChan, _n("__Fid"));
+		SetString_SYS("MAKEFID", "IN", "Station");
+		SetString_SYS("MAKEFID", "OUT", sFidChan);
+		SetString_SYS("MAKEFID", "TYPE", "DOUBLE");
+		SetString_SYS("MAKEFID", "LOADCHAN", "0");
+
+		iInteractive = iInteractive_SYS();
+		SetInteractive_SYS(0);
+      UnLock_EDB(eDB);
+      if (iRunGX_SYS("makefid") != 0)
+         Abort_SYS(_("Make fid channel failed."));
+		SetInteractive_SYS(iInteractive);
+      hDB = Lock_EDB(eDB);
+	}
+
+
+   if (LineCh == NULLSYMB) {
+   
+      // --- sort by station ---
+      
+      SetString_SYS("SORTALLN","CHANNEL1","Station");
+		if(iSort == 0)
+			SetString_SYS("SORTALLN","CHANNEL2",sFidChan);
+		else
+			SetString_SYS("SORTALLN","CHANNEL2","");
+      SetString_SYS("SORTALLN","CHANNEL3","");
+      SetString_SYS("SORTALLN","CHANNEL4","");
+
+      SetString_SYS("SORTALLN","ORDER1","ASCENDING");
+      SetString_SYS("SORTALLN","ORDER2","ASCENDING");
+      SetString_SYS("SORTALLN","READONLY","YES");
+
+      UnLock_EDB(eDB);
+		SetInteractive_SYS(0);
+      if (iRunGX_SYS("sortaln") != 0)
+         Abort_SYS(_("Sort failed."));
+		SetInteractive_SYS(iInteractive);
+      hDB = Lock_EDB(eDB);
+
+   } else {
+   
+   
+      // --- sort by line and station ---
+      
+      SetString_SYS("SORTALLN","CHANNEL1","Line");
+      SetString_SYS("SORTALLN","CHANNEL2","Station");
+
+		if(iSort == 0)
+			SetString_SYS("SORTALLN","CHANNEL3",sFidChan);
+		else
+			SetString_SYS("SORTALLN","CHANNEL3","");
+      SetString_SYS("SORTALLN","CHANNEL4","");
+
+      SetString_SYS("SORTALLN","ORDER1","ASCENDING");
+      SetString_SYS("SORTALLN","ORDER2","ASCENDING");
+      SetString_SYS("SORTALLN","READONLY","YES");
+
+      UnLock_EDB(eDB);
+		SetInteractive_SYS(0);
+      if (iRunGX_SYS("sortaln") != 0)
+         Abort_SYS(_("Sort failed."));
+		SetInteractive_SYS(iInteractive);
+      hDB = Lock_EDB(eDB);
+
+      
+      // --- get line data ---
+      
+      LockSymb_DB(hDB,LineCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetChanVV_DB(hDB,Group,LineCh,LineVV);
+      UnLockSymb_DB(hDB,LineCh);
+   
+   }   
+
+
+   // --- get station data ---
+   
+   LockSymb_DB(hDB,StnCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   GetChanVV_DB(hDB,Group,StnCh,StnVV);
+   UnLockSymb_DB(hDB,StnCh);
+   iRdgs = iLength_VV(StnVV);
+      
+
+   // --- get data ---
+
+   LockSymb_DB(hDB,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   GetChanVV_DB(hDB,Group,InCh,AvgVV);
+   UnLockSymb_DB(hDB,InCh);
+
+
+   // --- average repeats ---
+
+   ProgName_SYS(_("Average repeats"),1);
+   if (LineCh == NULLSYMB)
+      AverageRepeatEx_VVU(StnVV,AvgVV,iMode);
+   else   
+      AverageRepeat2Ex_VVU(LineVV,StnVV,AvgVV,iMode);
+
+
+   // --- put output VV into output channel ---
+
+   LockSymb_DB(hDB,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   PutChanVV_DB(hDB,Group,OutCh,AvgVV);
+   UnLockSymb_DB(hDB,OutCh);
+
+
+   // --- read data again ---
+
+   LockSymb_DB(hDB,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   GetChanVV_DB(hDB,Group,InCh,DataVV);
+   UnLockSymb_DB(hDB,InCh);
+
+
+   // --- Generate difference channel ---
+
+   iRepStn = 0;
+   iReps = 0;
+
+	if (LineCh == NULLSYMB)		// if lines are not used, make them all the same.
+		SetStringN_VV(LineVV, 0, iRdgs, _n("Line"));
+   
+   GetString_VV(StnVV,0,sStnLast);
+   TrimSpace_STR(sStnLast,STR_TRIMBOTH);
+
+	GetString_VV(LineVV,0,sLineLast);
+   TrimSpace_STR(sLineLast,STR_TRIMBOTH);
+
+	SetLen_VV(DiffVV, iRdgs);
+	FillReal_VV(DiffVV, rDUMMY);
+
+	iRepStn = 0;			// Number of stations that repeat
+	iReps = 0;				// total number of repeated data rows
+	iNumRepeats = 0;		// number of repeats in current group
+	iStart = 0;				// start index of current group
+   
+   for (i=1;i<iRdgs;i++) 
+	{
+		// --- Does this item repeat the previous one? ---
+
+		GetString_VV(StnVV,i,sStnNext);
+      TrimSpace_STR(sStnNext,STR_TRIMBOTH);
+
+		GetString_VV(LineVV,i,sLineNext);
+      TrimSpace_STR(sLineNext,STR_TRIMBOTH);
+
+      iRepeat = (iStrcmp_STR(sStnLast,sStnNext,STR_CASE_SENSITIVE)==0 &&
+					  iStrcmp_STR(sLineLast,sLineNext,STR_CASE_SENSITIVE)==0);
+
+		if(iRepeat) 
+		{
+			if(iNumRepeats == 0)
+				iStart = i-1;
+			
+			iNumRepeats++;
+			iReps++;
+		}
+
+
+		// --- Process current set? ---
+
+		if(iNumRepeats && (iRepeat == 0 || i==iRdgs-1))
+		{			
+			// --- Find the statistic value (the one not dummy) ---
+
+			rAvg = rDUMMY;
+			for(j=0; j<=iNumRepeats; j++)
+			{
+				k = iStart+j;
+				rData = rGetReal_VV(AvgVV, k);
+				if(rData != rDUMMY)
+				{
+					rAvg = rData;
+					break;
+				}
+			}
+
+			// --- Calculate the differences ---
+
+			if(rAvg != rDUMMY)
+			{
+				for(j=0; j<=iNumRepeats; j++)
+				{
+					k = iStart+j;
+					rData = rGetReal_VV(DataVV, k);
+					if(rData != rDUMMY)
+						SetReal_VV(DiffVV, k, rAbs_MATH(rData-rAvg));
+				}
+				iRepStn++;
+			}
+			
+
+			// --- Reset for next group ---
+
+			iNumRepeats = 0;
+		}
+
+
+		// --- Copy current to previous ---
+
+		Strcpy_STR(sStnLast, sStnNext);
+		Strcpy_STR(sLineLast, sLineNext);
+	}
+   
+
+   // --- write the difference channel ---
+
+   LockSymb_DB(hDB,DiffCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   PutChanVV_DB(hDB,Group,DiffCh,DiffVV);
+   UnLockSymb_DB(hDB,DiffCh);
+   
+   UnLock_EDB(eDB);
+   
+
+	// --- Restore original order if not sorting ---
+
+	if (iSort == 0)
+	{	
+      // --- sort by Fid Channel ---
+      
+      SetString_SYS("SORTALL","CHANNEL",sFidChan);
+      SetString_SYS("SORTALL","ORDER","ASCENDING");
+      SetString_SYS("SORTALL","READONLY","YES");
+
+      if (iRunGX_SYS("sortal") != 0)
+         Abort_SYS(_("Sort failed."));
+
+		hDB = Lock_EDB(eDB);
+		FidCh = FindChan_DB(hDB, sFidChan);
+		LockSymb_DB(hDB, FidCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+		DeleteSymb_DB(hDB, FidCh);
+   }
+
+
+   // --- report difference statistics ---
+   
+   if (iInteractive_SYS()) {
+   
+   
+      hST = Create_ST();
+      Statistics_VV(hST,DiffVV);
+      
+      hDGW = Create_DGW("GRREPST");
+      
+      // --- number of stations ---
+      
+      iStn = iRdgs-iReps;
+      FormatI_STR(iStn,sStn,sizeof(sStn)-1);
+      SetInfo_DGW(hDGW,_GRREPST_0,DGW_TEXT,sStn);
+      
+      // --- number of repeated stations ---
+      
+      FormatI_STR(iRepStn,sRepStn,sizeof(sRepStn)-1);
+      SetInfo_DGW(hDGW,_GRREPST_1,DGW_TEXT,sRepStn);
+      
+      // --- % repeated stations ---
+      
+      FormatR2_STR(100.0*(real)iRepStn/(real)iStn,sPrcStn,sizeof(sPrcStn)-1,1);
+      SetInfo_DGW(hDGW,_GRREPST_2,DGW_TEXT,sPrcStn);
+      
+      // --- number of readings ---
+      
+      FormatI_STR(iRdgs,sRdgs,sizeof(sRdgs)-1);
+      SetInfo_DGW(hDGW,_GRREPST_3,DGW_TEXT,sRdgs);
+      
+      // --- number of repeated readings ---
+      
+      FormatI_STR(iReps,sRepRdgs,sizeof(sRepRdgs)-1);
+      SetInfo_DGW(hDGW,_GRREPST_4,DGW_TEXT,sRepRdgs);
+      
+      // --- % repeated readings ---
+      
+      FormatR2_STR(100.0*(real)iReps/(real)iRdgs,sPrcRdgs,sizeof(sPrcRdgs)-1,1);
+      SetInfo_DGW(hDGW,_GRREPST_5,DGW_TEXT,sPrcRdgs);
+      
+      
+      // --- maximum error ---
+      
+      FormatR2_STR(rGetInfo_ST(hST,ST_MAX),sMaxErr,sizeof(sMaxErr)-1,4);
+      SetInfo_DGW(hDGW,_GRREPST_6,DGW_TEXT,sMaxErr);
+      
+      // --- mean error ---
+      
+      FormatR2_STR(rGetInfo_ST(hST,ST_MEAN),sMeanErr,sizeof(sMeanErr)-1,4);
+      SetInfo_DGW(hDGW,_GRREPST_7,DGW_TEXT,sMeanErr);
+      
+      // --- RMS error ---
+      
+      if (iReps > 0)
+         FormatR2_STR(rSqrt_MATH(rGetInfo_ST(hST,ST_SUM2)/(real)iReps),sRMS,sizeof(sRMS)-1,4);
+      else   
+         Strcpy_STR(sRMS,"0.0");
+      SetInfo_DGW(hDGW,_GRREPST_8,DGW_TEXT,sRMS);
+         
+      iRep = iRunDialogue_DGW(hDGW);
+      Destroy_DGW(hDGW);
+      
+   }
+   
+   
+   // --- create a report file ---
+   
+   if (iRep == 1) {
+   
+      hWA = Create_WA(REPORT,WA_NEW);
+      
+      Get_REG(hREG,"GRAVRED.COMPANY"   ,sTemp,sizeof(sTemp)); LINE(sTemp)
+      Get_REG(hREG,"GRAVRED.PROJECT"   ,sTemp,sizeof(sTemp)); LINE(sTemp)
+      Get_REG(hREG,"GRAVRED.DESCR"     ,sTemp,sizeof(sTemp)); LINE(sTemp)
+      NewLine_WA(hWA);
+      
+      Puts_WA(hWA,_n("Project date                : "));
+      Get_REG(hREG,"GRAVRED.DATE"      ,sTemp,sizeof(sTemp)); LINE(sTemp)
+      Puts_WA(hWA,_n("Project geoscientist        : "));
+      Get_REG(hREG,"GRAVRED.SCIENTIST" ,sTemp,sizeof(sTemp)); LINE(sTemp)
+      Puts_WA(hWA,_n("Total number of stations    : "));  LINE(sStn)
+      Puts_WA(hWA,_n("Number of repeated stations : "));  LINE(sRepStn)
+      Puts_WA(hWA,_n("% stations repeated         : "));  LINE(sPrcStn)
+      Puts_WA(hWA,_n("Total number of readings    : "));  LINE(sRdgs)
+      Puts_WA(hWA,_n("Number of repeat readings   : "));  LINE(sRepRdgs)
+      Puts_WA(hWA,_n("% readings repeated         : "));  LINE(sPrcRdgs)
+      Puts_WA(hWA,_n("Maximum repeat error        : "));  LINE(sMaxErr)
+      Puts_WA(hWA,_n("Mean repeat error           : "));  LINE(sMeanErr)
+      Puts_WA(hWA,_n("RMS error                   : "));  LINE(sRMS)
+      
+      Destroy_SYS(hWA);   
+      
+      
+      // --- edit file ---
+   
+      SetString_SYS("EDIT","FILE",REPORT);
+      SetString_SYS("EDIT","WAIT","NoWait");
+      SetString_SYS("EDIT","CHILD","Yes");
+      iRunGX_SYS("edit");
+      
+   }
+   
+
+   // --- done ---
+
+   Destroy_VV(StnVV);
+   Destroy_VV(LineVV);
+   Destroy_VV(DataVV);
+   Destroy_VV(AvgVV);
+   
+   
+   // --- update the workspace REG ---
+   
+   
+   Set_REG(hREG,"GRAVRED.GRAVITY",sOutCh);
+   SetWorkspaceREG_SYS(hREG);
+   Destroy_SYS(hREG);
+
+   Progress_SYS(0);
+
+}

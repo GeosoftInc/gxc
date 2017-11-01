@@ -1,0 +1,176 @@
+//===========================================================================
+NAME          = "Set profile colours for an array channel"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Set profile colours for an array channel.
+
+Parameters: 
+
+   VACOLOR.CHAN     VA channel profile to colour
+          .FILE     Colour zone file. 
+        
+   A linear ITR from 0 to 1 is created on the colour zones to map to individual
+   channel indices (expressed as a fraction as shown below).
+
+   value = (column index starting at 0) / (# of columns - 1)
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Array Channels"
+
+// Revision History:
+// v5.1.5: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "vacolor.gr"
+#include "vacolor.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     Ch;               // Channel Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+
+int i;
+
+string(STR_DB_SYMBOL) sCh;
+string(STR_DEFAULT) sMsg;
+string(STR_FILE) sFile, sPath;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   
+   GetCurChan_EDB(EData,sCh);
+   Ch = GetCurChanSymb_EDB(EData);      
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- If current channel exists and is an array channel, set channel default. ---
+
+      if(iStrlen_STR(sCh)) {
+
+         LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+         if(iGetColVA_DB(Data, Ch) > 1) {
+
+            GetVAProfColorFile_DB(Data, Ch, sFile);
+                 
+            SetString_SYS("VACOLOR","CHAN",sCh);
+				if(iStrlen_STR(sFile) > 0)
+					SetString_SYS("VACOLOR","FILE",sFile);
+         }
+   
+         UnLockSymb_DB(Data, Ch);
+      }
+
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("VACOLOR");
+
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_VACOLOR_0);
+      ArrayLST_DB(Data,List);
+      Sort_LST(List,0,0);
+     
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_VACOLOR_0,DGW_TEXT,    "VACOLOR","CHAN");
+      SetInfoSYS_DGW(Diag,_VACOLOR_1,DGW_FILEPATH,"VACOLOR","FILE");
+     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_VACOLOR_0,DGW_TEXT,    "VACOLOR","CHAN");
+      GetInfoSYS_DGW(Diag,_VACOLOR_1,DGW_FILEPATH,"VACOLOR","FILE");
+     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+     
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VACOLOR","CHAN",sCh);
+   GetString_SYS("VACOLOR","FILE",sFile);
+
+   if(!iStrlen_STR(sCh))
+      Abort_SYS(_("VA channel not defined."));
+         
+
+   // --- Does the input channel exist ? ---
+
+   Ch = FindChan_DB(Data, sCh);
+   if(Ch==NULLSYMB)
+      Abort_SYS(_("channel does not exist."));
+
+
+   // --- Is it an array channel? ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   if(iGetColVA_DB(Data, Ch)<2) {
+      Printf_STR(sMsg, sizeof(sMsg), _("%s is not an array channel."), sCh);
+      Abort_SYS(sMsg);
+   }
+
+   
+   // --- Does the colour zone file exist? ---
+
+   if(iStrlen_STR(sFile)) {
+
+      if(iFindPathNameEx_SYS(sFile, FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_TBL, sPath))
+         Abort_SYS(_("Colour zone file not found."));
+   }
+
+
+   // --- Set the profile colours ---
+
+   SetVAProfColorFile_DB(Data, Ch, sFile);
+
+
+   // --- Unlock ---
+
+   UnLockSymb_DB(Data, Ch);
+   UnLock_EDB(EData);
+
+}

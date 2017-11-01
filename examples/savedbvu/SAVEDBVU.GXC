@@ -1,0 +1,350 @@
+//===========================================================================
+NAME          = "Save current database editor view"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+This GX interrogates the database editor for the list of channels currently
+displayed in the spreadsheet and profile view and saves that list to a user-specified
+file.
+
+PARAMETERS:
+    SAVEDBVU.FILE - Name of the output view file
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database"
+
+// Revision History
+// v6.4.1: Fix numbering bug on window splits introduced in 6.4.0.
+//         Added saving of SAMERANGE option.
+// v6.4.0: Improved profile split handling.
+// v5.1.5: Using DisplayChanLST_DB instead of DisplayChanList_DB to avoid
+//         extra lock on databse.
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "savedbvu.gr"
+#include   "savedbvu.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+string(STR_FILE)          sList;               // List file name
+string(STR_DB_SYMBOL)     sChan;               // Channel name
+string(STR_DB_SYMBOL)     sLine;               // Line name
+string(STR_DB_SYMBOL)     sCurLine;            // Current Line name
+string(STR_DEFAULT_LONG)  sItemValue, sVal, sParam;
+string(STR_DB_SYMBOL)     sLineNumber;         // Alpha-numeric line number
+
+EDB         EData;               // Edited database
+DB          Data;                // Database
+DGW         Diag;                // Dialogue handle
+VV          hVV;                 // Data storage object
+DB_SYMB     Chan;                // Channel handle
+DB_SYMB     Line;                // Line handle
+LST         List, ChList;        // List handle
+VV          SplitVV;             // Profile split values
+
+int         i;                   // utility
+int         iNumChans;           // Number of displayed channels
+int         iWindow,iProf,iProfs,iScl,iDec,iSize;
+int         iLineStyle,iLineWeight,iSymbolStyle,iSymbolWeight,iColor,iWrap,iBreakOnDummy;
+int         iGridLine,iLog,iSameRange,iSameScale,iSourceLine,iScaleOption;
+real        rMinX,rMaxX,rMinY,rMaxY,rGridLineInt,rLog,rRangeX,rRangeY;
+int         iLineType,iLineVersion;
+
+int         iLineCategory;
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+   // --- This GX is not scriptable ---
+   
+   if (iScript_SYS()) 
+      Abort_SYS(_("The SAVEDBVU GX cannot be run in Scripting mode (OMS)."));
+      
+      
+   // --- Check for an active database an abort if not present ---
+
+   if (iHaveCurrent_EDB() == 0)
+      Abort_SYS(_("This GX requires an active database."));
+      
+      
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SAVEDBVU");
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_SAVEDBVU_0,DGW_FILEPATH,"SAVEDBVU","FILE");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1)   Cancel_SYS();
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_SAVEDBVU_0,DGW_FILEPATH,"SAVEDBVU","FILE");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("SAVEDBVU","FILE",sList);
+
+   // --- Get the current editted database ---
+
+   EData = Current_EDB();
+
+   // --- Create a VV to hold channel symbols ---
+
+   hVV = Create_VV(INT,0);
+
+   // --- Create a LST object to hold the channel names ---
+
+   ChList = Create_LST(2*STR_DB_SYMBOL);
+   List = Create_LST(80);
+   iSize = 15;
+   iDec  = 8;
+
+   // --- Get a LST of channel symbols of the currently loaded channels ---
+
+   iNumChans = iDispChanLST_EDB(EData,ChList);
+
+
+   // --- create the output list of channel names ---
+
+   for (i = 0; i < iNumChans; i++) {
+
+      // --- Get the name ---
+
+      GetItem_LST(ChList,0,i,sChan);
+
+      // --- Add the name to the list object ---
+
+      AddItem_LST(List,"EDB_CELL_CHANNEL",sChan);
+   }
+
+   
+   // --- Add the profile view settings to the list
+
+   AddItem_LST(List,"EDB_PROF_BEGINLIST","*");
+
+
+   // --- Spreadsheet/profile window split ---
+
+   FormatR_STR(rGetSplit_EDB(EData),sItemValue,iSize,iDec);
+   AddItem_LST(List,"EDB_PROF_SPLIT",sItemValue);
+
+
+   // --- Individual profile splits ---
+   
+   SplitVV = Create_VV(REAL, MAX_PROF_WND);
+   GetProfileSplitVV_EDB(EData,SplitVV);  // individual profile splits
+
+   for(i=1;i<=MAX_PROF_WND;i++)
+   {
+      FormatR_STR(rGetReal_VV(SplitVV, i-1),sItemValue,iSize,iDec);
+      Strcpy_STR(sParam, "EDB_PROF_SPLIT");
+      FormatI_STR(i,sVal,3);
+      Strcat_STR(sParam, sVal);
+      AddItem_LST(List,sParam,sItemValue);
+   }
+
+   Line = GetCurLineSymb_EDB(EData);
+   GetCurLine_EDB( EData, sCurLine );
+
+   Data = Lock_EDB(EData);
+   LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+   iLineCategory = iLineCategory_DB(Data,Line);
+   if( DB_CATEGORY_LINE_FLIGHT == iLineCategory ) {
+  
+      // Line Category is FLIGHT....      
+
+      LineNumber2_DB(Data,Line,sLineNumber);
+
+      iLineType = iLineType_DB(Data,Line);
+
+      iLineVersion = iLineVersion_DB(Data,Line);
+
+      SetLineName2_DB( sLineNumber, iLineType, iLineVersion, sLine );
+   
+   } else {
+      
+      // Line Category is GROUP....
+                      
+      Strcpy_STR( sLine, sCurLine );
+   }
+
+   UnLockSymb_DB(Data,Line);
+   UnLock_EDB(EData);
+
+   AddItem_LST( List,"EDB_PROF_LINE",sLine );
+
+   // --- get profile window Xmin, Xmax, Xchan ---
+
+   iProfs = 0;
+   for (iWindow=0; iWindow<=2; iWindow++) {
+      
+      iProfs = iWindowProfiles_EDB(EData,iWindow);
+      
+      if (iProfs > 0) {
+         rMinX = rMaxX = 0.0;
+         Chan = NULLSYMB;
+         GetProfileRangeX_EDB(EData,rMinX,rMaxX,Chan);
+         rRangeX = rMaxX - rMinX;
+         if (rRangeX <= 0.0) Abort_SYS(_("X range is 0."));
+         
+         FormatR_STR(rMinX,sItemValue,iSize,iDec);
+         AddItem_LST(List,"EDB_PROF_XMIN",sItemValue);
+         FormatR_STR(rMaxX,sItemValue,iSize,iDec);
+         AddItem_LST(List,"EDB_PROF_XMAX",sItemValue);
+         Strcpy_STR(sChan,"*");
+         if(Chan!=NULLSYMB) {
+            Data = Lock_EDB(EData);
+            GetChanName_DB(Data,Chan,sChan);
+            
+            UnLock_EDB(EData);
+         }
+         AddItem_LST(List,"EDB_PROF_XCHAN",sChan);
+         break;
+      }   
+   }
+      
+   // --- get profiles from each window ---
+
+   for (iWindow=0; iWindow<MAX_PROF_WND; iWindow++) {
+    
+      iProfs = iWindowProfiles_EDB(EData,iWindow);
+      if (iProfs <= 0) continue;
+
+      FormatI_STR(iWindow,sItemValue,iSize);
+      AddItem_LST(List,"EDB_PROF_WINDOW#",sItemValue);
+         
+      for (iProf=0;iProf<iProfs;iProf++) {
+         
+         FormatI_STR(iProf,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_WNDPROF#",sItemValue);
+
+         Chan = (DB_SYMB)iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_CHANNEL);
+         Data = Lock_EDB(EData);
+         GetChanName_DB(Data,Chan,sChan);
+         UnLock_EDB(EData);
+         AddItem_LST(List,"EDB_PROF_CHANNEL",sChan);
+         
+         rMinY = rMaxY = 0.0;
+         iScl = 0;
+         GetProfileRangeY_EDB(EData,iWindow,iProf,rMinY,rMaxY,iScl);
+         rRangeY = rMaxY - rMinY;
+         if (rRangeY <= 0.0) Abort_SYS(_("Y range is 0."));
+         FormatR_STR(rMinY,sItemValue,iSize,iDec);
+         AddItem_LST(List,"EDB_PROF_YMIN",sItemValue);
+         FormatR_STR(rMaxY,sItemValue,iSize,iDec);
+         AddItem_LST(List,"EDB_PROF_YMAX",sItemValue);
+         FormatI_STR(iScl,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_SCAL",sItemValue);
+         
+         iLineStyle = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_LINE_STYLE);
+         FormatI_STR(iLineStyle,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_LINE_STYLE",sItemValue);
+         
+         if (iLineStyle > 0) {
+            iLineWeight = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_LINE_WEIGHT);
+            FormatI_STR(iLineWeight,sItemValue,iSize);
+            AddItem_LST(List,"EDB_PROF_I_LINE_WEIGHT",sItemValue);
+         }
+         
+         iSymbolStyle = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_SYMBOL);
+         FormatI_STR(iSymbolStyle,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_SYMBOL",sItemValue);
+         
+         if (iSymbolStyle > 0) {
+            iSymbolWeight = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_SYMBOL_WEIGHT);
+            FormatI_STR(iSymbolWeight,sItemValue,iSize);
+            AddItem_LST(List,"EDB_PROF_I_SYMBOL_WEIGHT",sItemValue);
+          }
+         
+         iColor = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_COLOR);
+         FormatI_STR(iColor,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_COLOR",sItemValue);
+         
+         iWrap  = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_WRAP);
+         FormatI_STR(iWrap,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_WRAP",sItemValue);
+         
+         iBreakOnDummy = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_BREAK_ON_DUMMY);
+         FormatI_STR(iBreakOnDummy,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_BREAK_ON_DUMMY",sItemValue);
+         
+         iGridLine = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_GRID_LINE);
+         FormatI_STR(iGridLine,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_GRID_LINE",sItemValue);
+         if (iGridLine != 0)   {
+            rGridLineInt = rGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_R_GRID_LINE_INTERVAL);
+            FormatR_STR(rGridLineInt,sItemValue,iSize,iDec);
+            AddItem_LST(List,"EDB_PROF_R_GRID_LINE_INTERVAL",sItemValue);
+         }   
+         
+         iLog = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_LOG);
+         FormatI_STR(iLog,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_LOG",sItemValue);
+         if (iLog != 0)   {
+            rLog = rGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_R_LOG_MINIMUM);
+            FormatR_STR(rLog,sItemValue,iSize,iDec);
+            AddItem_LST(List,"EDB_PROF_R_LOG_MINIMUM",sItemValue);
+         }   
+         
+         iSameRange = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_SAMERANGE);
+         FormatI_STR(iSameRange,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_SAMERANGE",sItemValue);
+
+         iSameScale = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_SAMESCALE);
+         FormatI_STR(iSameScale,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_SAMESCALE",sItemValue);
+
+         iSourceLine = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_SOURCELINE);
+         FormatI_STR(iSourceLine,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_SOURCELINE",sItemValue);
+
+         iScaleOption = iGetProfileParm_EDB(EData,iWindow,iProf,EDB_PROF_I_SCALEOPTION);
+         FormatI_STR(iScaleOption,sItemValue,iSize);
+         AddItem_LST(List,"EDB_PROF_I_SCALEOPTION",sItemValue);
+
+
+      }
+   }
+   AddItem_LST(List,"EDB_PROF_ENDLIST","*");
+
+
+   // --- Serialize the list ---
+
+   SaveFile_LST(List,sList);
+
+   // --- Destroy the list ---
+
+   Destroy_LST(List);
+   Destroy_LST(ChList);
+
+   // --- Destroy the VV ---
+
+   Destroy_VV(hVV);
+}

@@ -1,0 +1,125 @@
+//===========================================================================
+
+NAME          = "Geochemistry Preferences"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+    CHPREFERENCES.MASK            - Default mask channel
+    CHPREFERENCES.DEFMASK         - (0 or 1) Force use of default in all GXs
+    CHPREFERENCES.BOX_WHISK_RANGE - Range for box in box whisker plot.
+
+"
+// Revision History
+// v6.3.0: Changed title, GRC, to remove reference to "CHIMERA".
+//===========================================================================
+
+RESOURCE = "CHPREFERENCES.gr"
+#include "CHPREFERENCES.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB EData;
+DB  Data;
+LST List;
+DGW Diag;
+string(256) sTemp;
+int i, iCurrent;
+
+//===========================================================================
+//                             MAP CODE
+//===========================================================================
+
+{
+
+   iCurrent = iHaveCurrent_EDB();
+   if(iCurrent) {
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+   }
+
+   // --- set current defaults ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sTemp) == 0) {
+      SetString_SYS("CHPREFERENCES","MASK",sTemp);
+   }
+   else
+      SetString_SYS("CHPREFERENCES","MASK","ChemMask");
+
+   if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+      SetString_SYS("CHPREFERENCES","DEFMASK",sTemp);
+   }
+   else
+      SetString_SYS("CHPREFERENCES","DEFMASK","1");
+
+   if (iGlobal_SYS("CHIMERA.BOX_WHISK_RANGE",sTemp) == 0) {
+      SetString_SYS("CHPREFERENCES","BOX_WHISK_RANGE",sTemp);
+   }
+   else
+      SetString_SYS("CHPREFERENCES","BOX_WHISK_RANGE","20");
+
+   if (iGlobal_SYS("CHIMERA.OFFSIZE",sTemp) == 0) {
+      SetString_SYS("CHPREFERENCES","OFFSIZE",sTemp);
+   }
+   else
+      SetString_SYS("CHPREFERENCES","OFFSIZE","0.5");
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      Diag = Create_DGW("CHPREFERENCES");
+
+      // --- Set up mask channel list ---
+
+      if(iCurrent) {
+         List = GetList_DGW(Diag,_CHPREFERENCES_0);
+         MaskChanLST_CHIMERA(Data,List);
+         Sort_LST(List,0,0);
+      }
+
+      SetInfoSYS_DGW(Diag,_CHPREFERENCES_0,DGW_TEXT ,     "CHPREFERENCES","MASK");
+      SetInfoSYS_DGW(Diag,_CHPREFERENCES_1,DGW_LISTALIAS ,"CHPREFERENCES","DEFMASK");
+      SetInfoSYS_DGW(Diag,_CHPREFERENCES_2,DGW_LISTALIAS ,"CHPREFERENCES","BOX_WHISK_RANGE");
+      SetInfoSYS_DGW(Diag,_CHPREFERENCES_3,DGW_TEXT,      "CHPREFERENCES","OFFSIZE");
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_CHPREFERENCES_0,DGW_TEXT ,     "CHPREFERENCES","MASK");
+      GetInfoSYS_DGW(Diag,_CHPREFERENCES_1,DGW_LISTALIAS ,"CHPREFERENCES","DEFMASK");
+      GetInfoSYS_DGW(Diag,_CHPREFERENCES_2,DGW_LISTALIAS ,"CHPREFERENCES","BOX_WHISK_RANGE");
+      GetInfoSYS_DGW(Diag,_CHPREFERENCES_3,DGW_TEXT,      "CHPREFERENCES","OFFSIZE");
+   }
+
+   // --- get/set parameters ---
+   
+   GetString_SYS("CHPREFERENCES","MASK",sTemp);
+   GlobalSet_SYS("CHIMERA.MASK",sTemp);
+
+   GetString_SYS("CHPREFERENCES","DEFMASK",sTemp);
+   GlobalSet_SYS("CHIMERA.DEFMASK",sTemp);
+
+   GetString_SYS("CHPREFERENCES","BOX_WHISK_RANGE",sTemp);
+   GlobalSet_SYS("CHIMERA.BOX_WHISK_RANGE",sTemp);
+
+   GetString_SYS("CHPREFERENCES","OFFSIZE",sTemp);
+   GlobalSet_SYS("CHIMERA.OFFSIZE",sTemp);
+
+   GlobalWrite_SYS("");            
+
+   if(iCurrent)
+      UnLock_EDB(EData);
+
+}

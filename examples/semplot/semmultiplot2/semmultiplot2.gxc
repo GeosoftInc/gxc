@@ -1,0 +1,235 @@
+//===========================================================================
+NAME          = "Plot multple plots"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+   
+      Plot all templates matching a selection mask.
+   
+         SEMMULTIPLOT2.TEMPLATE   Template Mask
+         SEMPLOT.LEGEND           Plot symbol legend?
+         SEMPLOT.MASK             Mask channel to use. 
+"
+// Revision History
+// v6.4+ : Verified if its not in script mode before getting a list of loaded maps
+// v6.3.0: Clear only SEMPLOT maps before plotting.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+//         Added  USE_LEGEND_PREFERENCE parameter to control legend plotting.
+//         Locked DB should have been unlocked in interactive mode.
+// v5.1.7: New for the SEMPLOT upgrade.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "SEMMULTIPLOT2.gr"
+#include "SEMMULTIPLOT2.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+#define PLOT_TEMPLATE(A, B)   \
+   if(iPlots>=A) {   \
+      Strcpy_STR(sMsg, _("Plotting "));   \
+      Strcat_STR(sMsg, B);  \
+      ProgName_SYS(sMsg,0);   \
+      ProgUpdateL_SYS(iPlot, iPlots);   \
+      iPlot++; \
+      SetString_SYS("SEMPLOT","TEMPLATE",B);   \
+      SetInt_SYS("SEMPLOT", "USE_LEGEND_PREFERENCE", iGlobalLegend); \
+      if(iRunGX_SYS("semplot")) Cancel_SYS(); \
+   }
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+EDB         EData;
+DB          Data;        
+LST         hLST, List;
+EMAP        EMap;
+MAP         Map;
+REG         Reg;
+
+
+int         iRet;                // Utility 
+
+int i, iMaps, iPlots, iPlot, iN, iLegend, iGlobalLegend, iSemplot, iInteractive;
+
+string(STR_FILE) sTemplate, sTemplateMask;
+string(STR_FILE) sMap;
+string(STR_DEFAULT) sTemp;
+string(STR_DEFAULT_LONG) sMsg;
+string(STR_DB_SYMBOL) sMaskCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if (iInteractive) {
+   
+           
+      // --- Get Template name or create/edit template ---
+            
+      Diag = Create_DGW("SEMMULTIPLOT2");
+
+
+      // --- Get current database and the mask channel list ---
+
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+
+      List = GetList_DGW(Diag,_SEMMULTIPLOT2_1);
+      ClassChanLST_DB(Data, List, _("Mask"));
+      Sort_LST(List,0,0);
+
+      UnLock_EDB(EData);
+
+
+      // --- Use Global setting for legend ---
+
+      if (iGlobal_SYS("SEMPLOT.SYMBLEGEND",sTemp)==0) {
+         iLegend = iScanI_STR(sTemp);
+         if(iLegend!=0) iLegend=1;
+         SetInt_SYS("SEMPLOT","LEGEND",iLegend);
+      }               
+
+      SetInfoSYS_DGW(Diag,_SEMMULTIPLOT2_0,DGW_TEXT,"SEMMULTIPLOT2","TEMPLATE");
+      SetInfoSYS_DGW(Diag,_SEMMULTIPLOT2_1,DGW_TEXT,"SEMPLOT","MASK");
+      SetInfoSYS_DGW(Diag,_SEMMULTIPLOT2_2,DGW_LISTALIAS,"SEMPLOT","LEGEND");
+               
+      iRet = iRunDialogue_DGW(Diag);
+      if (iRet == -1) Cancel_SYS();
+               
+      GetInfoSYS_DGW(Diag,_SEMMULTIPLOT2_0,DGW_TEXT,"SEMMULTIPLOT2","TEMPLATE");
+      GetInfoSYS_DGW(Diag,_SEMMULTIPLOT2_1,DGW_TEXT,"SEMPLOT","MASK");
+      GetInfoSYS_DGW(Diag,_SEMMULTIPLOT2_2,DGW_LISTALIAS,"SEMPLOT","LEGEND");
+                             
+      Destroy_DGW(Diag);
+
+   }
+   
+   
+   // --- get parameters ---
+   
+   GetString_SYS("SEMMULTIPLOT2","TEMPLATE",sTemplateMask);
+   GetString_SYS("SEMPLOT","MASK",sMaskCh);
+
+
+   // --- Use global legend setting in SEMPLOT.GX? ---
+
+   iGlobalLegend = iGetInt_SYS("SEMPLOT", "USE_LEGEND_PREFERENCE");
+   SetInt_SYS("SEMPLOT", "USE_LEGEND_PREFERENCE", 0);  // must reset each time
+
+   if(iGlobalLegend!=1) iGlobalLegend = 0;
+
+
+   // --- Validate ---
+
+   if(!iStrlen_STR(sTemplateMask))
+      Abort_SYS(_("No template mask string specified."));
+
+   if(!iStrlen_STR(sMaskCh))
+      Abort_SYS(_("No mask channel specified."));
+
+
+   // --- Make a list of the available templates ---
+
+   List = Create_LST(128);
+   TemplateLST_SEMPLOT(List, SEMPLOT_PLOT_ALL);
+
+
+   // --- Remove those items not matching the input template mask ---
+
+   iN = iSize_LST(List);
+   for(i=iN-1;i>=0;i--) {
+
+      GetItem_LST(List, 0, i, sTemplate);
+
+      if(!iStriMask_STR(sTemplateMask, sTemplate))
+         DelItem_LST(List, i);
+   }
+
+
+   // --- Any left? ---
+
+   iPlots = iSize_LST(List);
+   if(iPlots==0) {
+      Printf_STR(sMsg, sizeof(sMsg), _("There are no plot templates matching the input selection mask %s."), sTemplate);
+      Abort_SYS(sMsg);
+   }
+
+
+   // --- Close all open maps --- 
+   if (!iScript_SYS()) {
+      hLST = Create_LST(128);
+      iMaps = iGetMapsLST_EMAP(hLST, EMAP_PATH_FULL);
+      for(i=0;i<iMaps;i++) 
+      {
+         GetItem_LST(hLST,0,i,sMap);
+       
+         EMap = Load_EMAP(sMap);
+         Map = Lock_EMAP(EMap);
+         
+         Reg = GetREG_MAP(Map);
+         GetInt_REG(Reg, "SEMPLOT_MAP", iSemplot);
+         Destroy_REG(Reg);
+         UnLock_EMAP(EMap);
+         
+         if(iSemplot==1)
+            UnLoad_EMAP(sMap);
+      }
+   }
+
+   // --- Plot the templates ---
+
+
+   SetInteractive_SYS(0);
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Plotting"),1);
+
+   iPlot = 0;
+   for(i=0;i<iN;i++) {
+
+      GetItem_LST(List, 0, i, sTemplate);
+      PLOT_TEMPLATE(i+1, sTemplate)
+   }
+
+
+   if(!iScript_SYS())
+   {
+
+      // --- Tile the maps ---
+
+      TileWindows_SEMPLOT();
+
+   
+      // --- Now, resize all the maps ---
+
+      iMaps = iGetMapsLST_EMAP(hLST, EMAP_PATH_FULL);
+      for(i=0;i<iMaps;i++) {
+         GetItem_LST(hLST,0,i,sMap);
+         EMap = Load_EMAP(sMap);
+         MakeCurrent_EMAP(EMap);
+         DoCommand_SYS("[ID] ID_MEDIT_FULLMAP");
+      }
+   }
+
+   Destroy_LST(hLST);
+
+   SetInteractive_SYS(iInteractive);
+
+}

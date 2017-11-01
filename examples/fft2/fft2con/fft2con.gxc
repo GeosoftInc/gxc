@@ -1,0 +1,2399 @@
+//===========================================================================
+NAME          = "MAGMAP CONTROL FILE GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP/Step-By-Step Filtering"
+
+DESCRIPTION   = "\
+
+Writes a control file for MAGMAP 2D-FFT processing
+"
+// Revision History:
+// v7.3.0: Added new filters.
+// v7.1:   QA 14791 - User should be able to exactly specify path to control file.
+// v6.3.0: Added Gravity Earth Filter
+// v6.0.1: Remove dialog for integration telling user there are
+//         no user parameters.
+// v5.1.5: 1. Added a parameter "Amplitude correction inclination" in REDE
+//            to reduce North-South feature noises.
+//         2. Added some filter prameter value validation checks.
+// v5.1.4: Using the direction angle in space domain (geological strike) 
+//         in DCOS and DPAS filters now.
+//         Added setting parameter values for fft2 gxes
+// v5.1.8: Modified to support fractional horizontal derivatives.
+
+//===========================================================================
+
+RESOURCE = "fft2con.gr"
+#include "fft2con.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+  
+DGW             Filediag;       // handle to file name dialogue
+DGW             Filtdiag;       // handle to filter type dialogue
+DGW             bpasdiag, btwrdiag, cndndiag, cnupdiag, cosndiag, dcosdiag;
+DGW             densdiag, dpasdiag, drvxdiag, drvydiag, drvzdiag, gausdiag;
+DGW             hpasdiag, lpasdiag, optmdiag, redediag, redpdiag, trfpdiag;
+DGW             suscdiag, txyzdiag, gnrldiag, gpsddiag, gfiltdiag;
+DGW             notchdiag, btwrndiag, btwrbdiag, cosnbdiag, drtpdiag;
+					 // handles to filter-specific dialogues
+int             iRtn;
+
+string(STR_FILE)     sConFile;       // name of control file
+
+RA              RA_con;         // RA for pre-existing control file
+int             iOldFile;       // flag saying if old control file exists
+
+WA              WA_con;         // WA for output control file
+VM              VM_con;         // VM holds parameters for new control file
+
+VM              VM_ShortNames;  // VM holds all filter names (short version)
+VM              VM_LongNames;   // VM holds all filter names (full version)
+VM              VM_UseNames;    // VM holds filters used in control file
+VM              VM_UseLines;    // VM holds file line numbers for filters 
+
+int             i,j,j0;            // utility integers
+int             iName;             // index to VM_UseNames, VM_UseLines
+
+string(STR_DEFAULT_LONG) sText;          // line of text from file as tokenized string
+string(STR_DEFAULT_LONG) sToken;         // token in sText
+string(STR_DEFAULT_LONG) sListName;      // name from VM_ShortNames or VM_LongNames
+string(STR_DEFAULT_LONG) sUseName;       // name of filter used in control file
+int                      iUseLine;       // line # in old file where filter is named
+string(STR_DEFAULT_LONG) sParm1,sParm2,sParm3,sParm4,sParm5,sParm6;
+													  // filter-specific parameters
+string(STR_DEFAULT_LONG) sTitle,sNumFilter;
+
+string(STR_DEFAULT_LONG) sMode;          // flag for GX run mode (magmap or on its own)
+
+string(STR_FILE) sGnrlFile;              // Gnrl filter file name
+string(5)        sBuff;
+string(512)      sErrMsg;
+RA               RA_Gnrl;                // RA for Gnrl filter file
+real             rValue;
+
+IGRF        hIGRF;                   // Contains IGRF model data
+IMG         hInIMG;                  // Grid images 
+IPJ         hIPJ;                    // Grid projection objects
+SBF         hSBF;
+BF          hBF;
+PJ          hPJ;
+VV          hVVx,hVVy,hVVelev,hVVtf,hVVinc,hVVdec;
+DB          Data; 
+DB_SYMB     Line,ChanX,ChanY,ChanLong,ChanLat,ChanInc,ChanDec;
+string(STR_FILE)         sInGrd, sDatabase;
+string(STR_DEFAULT_LONG) sTemp, sDate, sIncGrd, sDecGrd, sCS, sXY;
+string(STR_DB_SYMBOL)    sChanLong, sChanLat, sChanInc, sChanDec;
+real  rDate;
+int   iLen,iInteract;
+int   iType,iX,iY,iKX;
+real  rXsep,rYsep,rXoff,rYoff,rRot,rBase,rMult;
+int   iType0,iX0,iY0,iKX0;
+real  rXsep0,rYsep0,rXoff0,rYoff0,rRot0,rBase0,rMult0;
+
+ 
+//===========================================================================
+//                           E3PREP CODE
+//===========================================================================
+
+
+{
+
+// --- This GX runs only in interactive mode ---
+
+if (iInteractive_SYS()==0)
+	Abort_SYS(_("Error: This GX can only run interactively"));
+
+
+//-----------------------------------------------------------------------
+// STEP 1: GET CONTROL FILE NAME    
+//-----------------------------------------------------------------------
+	
+	// --- See if GX is running from magmap or on its own ---
+
+	GetString_SYS("FFT2CON","MODE",sMode);
+
+	// --- If running alone, ask for control file name ---
+	// --- If running from magmap, use file name given there ---
+
+	if (iStrcmp_STR(sMode,_n("magmap"),STR_CASE_TOLERANT)!=0)
+	{
+		// --- Create file name dialogue ---
+		Filediag = Create_DGW("FILEDIAG");
+
+		// --- Set last file name from INI ---
+		SetInfoSYS_DGW(Filediag,_FILEDIAG_0,DGW_FILEPATH,"FFT2CON","CONFILE");
+
+		// --- Run file name dialogue ---
+		iRtn = iRunDialogue_DGW(Filediag);
+		if(iRtn==-1) Cancel_SYS(); 
+
+		// --- Put current file name back in INI ---
+		GetInfoSYS_DGW(Filediag,_FILEDIAG_0,DGW_FILEPATH,"FFT2CON","CONFILE");
+
+		Destroy_DGW(Filediag);
+	}
+
+	// --- Reset mode flag ---
+	SetString_SYS("FFT2CON","MODE","");
+	  
+	// --- Get file name as string ---
+	GetString_SYS("FFT2CON","CONFILE",sConFile);
+
+	
+//-----------------------------------------------------------------------
+// STEP 2: CHOOSE TYPES OF FILTER TO APPLY    
+//-----------------------------------------------------------------------
+	
+	// --- Create filter type dialogue ---
+	Filtdiag = Create_DGW("FILTDIAG");
+
+	//------------------------------------------------------------------
+	// Create four VMs to manipulate lists of filter types.            
+	// VM_ShortNames contains the abbreviated filter names used in     
+	// control files.  VM_LongNames contains the full names used in the
+	// filter type dialog box.  VM_UseNames will contain the names of  
+	// the filters used in this particular control file.  VM_UseLines  
+	// will contain the line numbers on which filters are named in a   
+	// pre-existing control file (default is -1, meaning this filter   
+	// type was not used previously.)
+	//------------------------------------------------------------------
+	
+	VM_UseNames=Create_VM(-100,6);
+
+	VM_UseLines=Create_VM(INT,6);
+	SetInt_VM(VM_UseLines,0,-1);
+	SetInt_VM(VM_UseLines,1,-1);
+	SetInt_VM(VM_UseLines,2,-1);
+	SetInt_VM(VM_UseLines,3,-1);
+	SetInt_VM(VM_UseLines,4,-1);
+	SetInt_VM(VM_UseLines,5,-1);
+
+
+	VM_ShortNames=Create_VM(-100,31);
+	SetString_VM(VM_ShortNames, 0,"BPAS");
+	SetString_VM(VM_ShortNames, 1,"BTWR");
+	SetString_VM(VM_ShortNames, 2,"CNDN");
+	SetString_VM(VM_ShortNames, 3,"CNUP");
+	SetString_VM(VM_ShortNames, 4,"COSN");
+	SetString_VM(VM_ShortNames, 5,"DCOS");
+	SetString_VM(VM_ShortNames, 6,"DENS");
+	SetString_VM(VM_ShortNames, 7,"DPAS");
+	SetString_VM(VM_ShortNames, 8,"DRTP");
+	SetString_VM(VM_ShortNames, 9,"DRVX");
+	SetString_VM(VM_ShortNames,10,"DRVY");
+	SetString_VM(VM_ShortNames,11,"DRVZ");
+	SetString_VM(VM_ShortNames,12,"GAUS");
+	SetString_VM(VM_ShortNames,13,"GPSD");
+	SetString_VM(VM_ShortNames,14,"HPAS");
+	SetString_VM(VM_ShortNames,15,"INTG");
+	SetString_VM(VM_ShortNames,16,"LPAS");
+	SetString_VM(VM_ShortNames,17,"OPTM");
+	SetString_VM(VM_ShortNames,18,"REDE");
+	SetString_VM(VM_ShortNames,19,"REDP");
+	SetString_VM(VM_ShortNames,20,"SUSC");
+	SetString_VM(VM_ShortNames,21,"TRFP");
+	SetString_VM(VM_ShortNames,22,"TXYZ");
+	SetString_VM(VM_ShortNames,23,"BTWRB");
+	SetString_VM(VM_ShortNames,24,"BTWRN");
+	SetString_VM(VM_ShortNames,25,"COSNB");
+	SetString_VM(VM_ShortNames,26,"GFILT");
+	SetString_VM(VM_ShortNames,27,"NOTCH");
+	SetString_VM(VM_ShortNames,28,"INTGX");
+	SetString_VM(VM_ShortNames,29,"INTGY");
+	SetString_VM(VM_ShortNames,30,"GNRL");
+
+	VM_LongNames=Create_VM(-100,31);
+	SetString_VM(VM_LongNames, 0, _("Bandpass Filter"));
+	SetString_VM(VM_LongNames, 1, _("Butterworth Filter"));
+	SetString_VM(VM_LongNames, 2, _("Downward Continuation"));
+	SetString_VM(VM_LongNames, 3, _("Upward Continuation"));
+	SetString_VM(VM_LongNames, 4, _("Cosine Roll-off Filter"));
+	SetString_VM(VM_LongNames, 5, _("Directional Cosine Filter"));
+	SetString_VM(VM_LongNames, 6, _("Apparent Density Calculation"));
+	SetString_VM(VM_LongNames, 7, _("Directional Pass/Reject Filter"));
+	SetString_VM(VM_LongNames, 8, _("Differential Reduction to Magnetic Pole"));
+	SetString_VM(VM_LongNames, 9, _("Derivative in X-direction"));
+	SetString_VM(VM_LongNames,10, _("Derivative in Y-direction"));
+	SetString_VM(VM_LongNames,11, _("Derivative in Z-direction"));
+	SetString_VM(VM_LongNames,12, _("Gaussian Regional/Residual Filter"));
+	SetString_VM(VM_LongNames,13, _("Pseudo-Gravity Filter"));
+	SetString_VM(VM_LongNames,14, _("High-Pass Filter"));
+	SetString_VM(VM_LongNames,15, _("Integration in Z-direction"));
+	SetString_VM(VM_LongNames,16, _("Low-Pass Filter"));
+	SetString_VM(VM_LongNames,17, _("Weiner Optimum Filter"));
+	SetString_VM(VM_LongNames,18, _("Reduce to Magnetic Equator"));
+	SetString_VM(VM_LongNames,19, _("Reduce to Magnetic Pole"));
+	SetString_VM(VM_LongNames,20, _("Apparent Susceptibility Calculation"));
+    SetString_VM(VM_LongNames,21, _("Transform from Magnetic Pole"));
+	SetString_VM(VM_LongNames,22, _("Conversion between Field Components"));
+	SetString_VM(VM_LongNames,23, _("Butterworth BandPass Filter"));
+	SetString_VM(VM_LongNames,24, _("Butterworth Notch Filter"));
+	SetString_VM(VM_LongNames,25, _("Cosine Roll-off Bandpass Filter"));
+	SetString_VM(VM_LongNames,26, _("Gravity Earth Filter"));
+	SetString_VM(VM_LongNames,27, _("Notch Filter"));
+	SetString_VM(VM_LongNames,28, _("Integration in X-direction"));
+	SetString_VM(VM_LongNames,29, _("Integration in Y-direction"));
+	SetString_VM(VM_LongNames,30, _("General Radially Symmetric Filter"));
+
+				  
+	//--------------------------------------------------------------------
+	// Find out if control file already exists; if so, get filter types, 
+	// load to dialog.  Read each line of the control file; if first token 
+	// has a match in the list of short filter names, put long filter name 
+	// in dialog.   
+	//--------------------------------------------------------------------
+
+	
+	if (iFileExist_SYS(sConFile) == 1)
+		iOldFile = 1;
+	else 
+		iOldFile=0;
+
+	if (iOldFile) // if old file exists
+	{
+		RA_con=Create_RA(sConFile);  // open old file
+		i=0;
+		iName=0;
+		while((i<iLen_RA(RA_con))&&(iName<6))  
+					// read each line, find up to 6 filters
+		{
+			iSeek_RA(RA_con,i);
+			iGets_RA(RA_con,sText);   // read i'th line
+			iTokens_STR(sText," ");
+			GetToken_STR(sToken,sText,0);  // get first token
+
+			//----------------------------------------------
+			// Look for match in short filter name list.
+			// If match, replace short name with equivalent 
+			// long name and store in VM_UseNames:
+			//----------------------------------------------
+			
+			j=0;
+			while(j<iLength_VM(VM_ShortNames)) 
+			{   
+				GetString_VM(VM_ShortNames,j,sListName);
+				if (iStrcmp_STR(sToken,sListName,STR_CASE_TOLERANT)==0)
+				{
+					GetString_VM(VM_LongNames,j,sUseName);
+					SetString_VM(VM_UseNames,iName,sUseName);
+					iName++;
+				}
+				j++;
+			}
+			i++; 
+		}        
+	}
+
+
+	// --- Get old filter types from VM_UseNames, load to dialog ---
+
+	GetString_VM(VM_UseNames,0,sUseName);
+	SetInfo_DGW(Filtdiag,_FILTDIAG_0,DGW_TEXT,sUseName);
+	GetString_VM(VM_UseNames,1,sUseName);
+	SetInfo_DGW(Filtdiag,_FILTDIAG_1,DGW_TEXT,sUseName);
+	GetString_VM(VM_UseNames,2,sUseName);
+	SetInfo_DGW(Filtdiag,_FILTDIAG_2,DGW_TEXT,sUseName);
+	GetString_VM(VM_UseNames,3,sUseName);
+	SetInfo_DGW(Filtdiag,_FILTDIAG_3,DGW_TEXT,sUseName);
+	GetString_VM(VM_UseNames,4,sUseName);
+	SetInfo_DGW(Filtdiag,_FILTDIAG_4,DGW_TEXT,sUseName);
+	GetString_VM(VM_UseNames,5,sUseName);
+	SetInfo_DGW(Filtdiag,_FILTDIAG_5,DGW_TEXT,sUseName);
+
+
+	// --- Run filter type dialogue ---
+
+	iRtn = iRunDialogue_DGW(Filtdiag);
+	if(iRtn==-1) Cancel_SYS(); 
+
+
+	// --- Get filter types from dialog, load to VM_UseNames ---
+
+	GetInfo_DGW(Filtdiag,_FILTDIAG_0,DGW_TEXT,sUseName);
+	SetString_VM(VM_UseNames,0,sUseName);
+	GetInfo_DGW(Filtdiag,_FILTDIAG_1,DGW_TEXT,sUseName);
+	SetString_VM(VM_UseNames,1,sUseName);
+	GetInfo_DGW(Filtdiag,_FILTDIAG_2,DGW_TEXT,sUseName);
+	SetString_VM(VM_UseNames,2,sUseName);
+	GetInfo_DGW(Filtdiag,_FILTDIAG_3,DGW_TEXT,sUseName);
+	SetString_VM(VM_UseNames,3,sUseName);
+	GetInfo_DGW(Filtdiag,_FILTDIAG_4,DGW_TEXT,sUseName);
+	SetString_VM(VM_UseNames,4,sUseName);
+	GetInfo_DGW(Filtdiag,_FILTDIAG_5,DGW_TEXT,sUseName);
+	SetString_VM(VM_UseNames,5,sUseName);
+
+
+	Destroy_DGW(Filtdiag);
+
+
+	// --- Replace long names with short names in VM_UseNames ---
+
+	iName=0;
+	while(iName<6)  // for up to six filters...
+	{
+		GetString_VM(VM_UseNames,iName,sUseName); // get long name
+		j=0;
+		while(j<iLength_VM(VM_LongNames))         // search list of long names
+		{   
+			GetString_VM(VM_LongNames,j,sListName);
+			if (iStrcmp_STR(sUseName,sListName,STR_CASE_TOLERANT)==0)
+			// if there is a match, 
+			// change to short name
+			{
+				GetString_VM(VM_ShortNames,j,sUseName);
+				SetString_VM(VM_UseNames,iName,sUseName);
+			}
+			j++;
+		}
+		iName++; 
+	}        
+
+	//---------------------------------------------------------------------
+	// If there is a pre-existing control file, check which of the  
+	// current filters were used before and find the line numbers on which 
+	// they occur, so that the old parameters can be used as defaults. 
+	//---------------------------------------------------------------------
+
+	if (iOldFile)  // if old file exists
+	{
+		j0=0;
+		i=0;
+		iName=0;
+		while(i<iLen_RA(RA_con))          // for each line in file...
+		{
+			iSeek_RA(RA_con,i);
+			iGets_RA(RA_con,sText);        // read i'th line
+			iTokens_STR(sText," ");
+			GetToken_STR(sToken,sText,0);  // get first token
+			if(iStrlen_STR(sToken)>0) {
+				j=j0;
+				while(j<6)                     // for each name in VM_UseNames...
+				{   
+					GetString_VM(VM_UseNames,j,sUseName);  // get j'th filter name 
+					
+					//--------------------------------------------
+					// If j'th filter is used on i'th line of the 
+					// control file, then set VM_UseLines(j)=i.
+					//--------------------------------------------
+					if (iStrcmp_STR(sToken,sUseName,STR_CASE_TOLERANT)==0)
+					{
+						SetInt_VM(VM_UseLines,j,i);
+						j0++;
+						break;
+					}
+					j++;
+				}
+			}
+			i++; 
+		}        
+	}
+  
+
+//-----------------------------------------------------------------------
+// STEP 3: GET FILTER-SPECIFIC PARAMETERS FOR EACH FILTER USED    
+//-----------------------------------------------------------------------
+
+	// --- Create VM_con as image of new control file ---
+	VM_con=Create_VM(-256,11);
+	
+	//-------------------------------------------------------------------
+	// The first five lines of the control file are not filter-specific,
+	// so if old control file exists, copy first five lines to VM_con.  
+	//-------------------------------------------------------------------
+	if (iOldFile)
+	{
+		i=0;
+		while(i<5)
+		{
+			iSeek_RA(RA_con,i);
+			iGets_RA(RA_con,sText);
+			SetString_VM(VM_con,i,sText);
+			i++;
+		}
+	}
+
+	//-------------------------------------------------------------------
+	// Start main loop.  Run through each of the filters named in 
+	// VM_UseNames and call up the appropriate dialog box to get the   
+	// parameters for that filter.  If that filter was used in a pre-
+	// existing control file, then read the line in that file where it 
+	// appeared, get the previous parameter values, and load them as 
+	// default values in the dialog box.  Get user parameters back from 
+	// dialog, then write the filter name and parameters as an item in 
+	// VM_con, which will later be written as a line in the output 
+	// control file.
+	//-------------------------------------------------------------------
+
+	iName=0;
+	while(iName<6)
+	{
+		// --- Initialise/reset filter-specific parameters ---
+		Strcpy_STR(sParm1,"");
+		Strcpy_STR(sParm2,"");
+		Strcpy_STR(sParm3,"");
+		Strcpy_STR(sParm4,"");
+		Strcpy_STR(sParm5,"");
+		Strcpy_STR(sParm6,"");
+
+		// --- Get name of filter from VM_UseNames ---
+		GetString_VM(VM_UseNames,iName,sUseName);
+
+		// --- Get line in old file where this filter appears ---
+		iUseLine=iGetInt_VM(VM_UseLines,iName);
+
+		// --- Set Filter Diag Title ---
+		FormatI_STR(iName+1,sNumFilter,2);
+		j=0;
+		while(j<iLength_VM(VM_ShortNames)) 
+		{   
+			GetString_VM(VM_ShortNames,j,sListName);
+			if (iStrcmp_STR(sUseName,sListName,STR_CASE_TOLERANT)==0)
+			{
+				GetString_VM(VM_LongNames,j,sTitle);
+				break;
+			}
+			j++;
+		}
+		Strcat_STR(sTitle,_("  (Filter "));
+		Strcat_STR(sTitle,sNumFilter);
+		Strcat_STR(sTitle,_n(")"));
+		
+		
+		//-----------------------------------
+		// Filter-Specific Procedures...       
+		//-----------------------------------
+
+
+		if (iStrcmp_STR(sUseName,"BPAS",0)==0)    
+		{
+			if (iUseLine>=0)                       // if used in old file...
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);             // get line from old file
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);       // get parameters
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				rValue = rScanR_STR(sParm2);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+				else   FormatR_STR(1.0/rValue,sParm2,12,12);
+				GetToken_STR(sParm3,sText,3);
+				//-----------------------------------------------------------
+				// 3rd parameter = 1 or 0, meaning pass or reject.  
+				// Substitute word for number in dialog.  If this field is 
+				// blank in the control file, use default = pass.
+				//-----------------------------------------------------------
+				if (iStrcmp_STR(sParm3,"0",0)==0)   
+					Strcpy_STR(sParm3,_("Reject"));
+				else
+					Strcpy_STR(sParm3,_("Pass"));
+			}
+			bpasdiag=Create_DGW("BPASDIAG");                   // create dialog
+			SetTitle_DGW(bpasdiag,sTitle);
+			SetInfo_DGW(bpasdiag,_BPASDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(bpasdiag,_BPASDIAG_1,DGW_TEXT,sParm2); // set parameters
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(bpasdiag,_BPASDIAG_2,DGW_TEXT,sParm3);
+			iRtn = iRunDialogue_DGW(bpasdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(bpasdiag,_BPASDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(bpasdiag,_BPASDIAG_1,DGW_TEXT,sParm2); // get parameters
+			GetInfo_DGW(bpasdiag,_BPASDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(bpasdiag);                             // destroy dialog
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Long wavelength value is invalid - must be > 0.0"));
+			
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Short wavelength value is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			if (iStrcmp_STR(sParm3,_("Pass"),0)==0)
+				Strcpy_STR(sParm3,"1");              // change pass/reject to 1/0           
+			if (iStrcmp_STR(sParm3,_("Reject"),0)==0)
+				Strcpy_STR(sParm3,"0");
+			Strcpy_STR(sText,"BPAS "); // write sText = line in new control file
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			rValue = rScanR_STR(sParm2);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+			else   FormatR_STR(1.0/rValue,sParm2,12,12);
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);  // store sText in VM_con
+		}
+
+		
+		if (iStrcmp_STR(sUseName,"BTWR",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				GetToken_STR(sParm3,sText,3);
+				if (iStrcmp_STR(sParm3,"0",0)==0)
+					Strcpy_STR(sParm3,_("High-Pass"));
+				else
+					Strcpy_STR(sParm3,_("Low-Pass"));
+			}
+			btwrdiag=Create_DGW("BTWRDIAG");
+			SetTitle_DGW(btwrdiag,sTitle);
+			SetInfo_DGW(btwrdiag,_BTWRDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0)  {                     // if used in old file...
+				SetInfo_DGW(btwrdiag,_BTWRDIAG_1,DGW_TEXT,sParm2);
+				SetInfo_DGW(btwrdiag,_BTWRDIAG_2,DGW_TEXT,sParm3);
+			}
+			iRtn = iRunDialogue_DGW(btwrdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(btwrdiag,_BTWRDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(btwrdiag,_BTWRDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(btwrdiag,_BTWRDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(btwrdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Centre wavelength value is invalid - must be > 0.0"));
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Filter degree value is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			if (iStrcmp_STR(sParm3,_("High-Pass"),0)==0)
+				Strcpy_STR(sParm3,"0");
+			if (iStrcmp_STR(sParm3,_("Low-Pass"),0)==0)
+				Strcpy_STR(sParm3,"1");
+			Strcpy_STR(sText,"BTWR ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+		
+
+		if (iStrcmp_STR(sUseName,"CNDN",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+			}
+			cndndiag=Create_DGW("CNDNDIAG");
+			SetTitle_DGW(cndndiag,sTitle);
+			SetInfo_DGW(cndndiag,_CNDNDIAG_0,DGW_TEXT,sParm1);
+			iRtn = iRunDialogue_DGW(cndndiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(cndndiag,_CNDNDIAG_0,DGW_TEXT,sParm1);
+			Destroy_DGW(cndndiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Distance to downward continuation is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"CNDN ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+		
+
+		if (iStrcmp_STR(sUseName,"CNUP",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+			}
+			cnupdiag=Create_DGW("CNUPDIAG");
+			SetTitle_DGW(cnupdiag,sTitle);
+			SetInfo_DGW(cnupdiag,_CNUPDIAG_0,DGW_TEXT,sParm1);
+			iRtn = iRunDialogue_DGW(cnupdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(cnupdiag,_CNUPDIAG_0,DGW_TEXT,sParm1);
+			Destroy_DGW(cnupdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Distance to upward continuation is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"CNUP ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"COSN",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				rValue = rScanR_STR(sParm2);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+				else   FormatR_STR(1.0/rValue,sParm2,12,12);
+				GetToken_STR(sParm3,sText,3);
+				if (iCharComp_STR(sParm3,"/"))
+					Strcpy_STR(sParm3,"");
+				GetToken_STR(sParm4,sText,4);
+				if (iStrcmp_STR(sParm4,"0",0)==0)
+					Strcpy_STR(sParm4,_("High-Pass"));
+				else
+					Strcpy_STR(sParm4,_("Low-Pass"));
+			}
+			cosndiag=Create_DGW("COSNDIAG");
+			SetTitle_DGW(cosndiag,sTitle);
+			SetInfo_DGW(cosndiag,_COSNDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(cosndiag,_COSNDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0)                       // if used in old file...
+			{
+				SetInfo_DGW(cosndiag,_COSNDIAG_2,DGW_TEXT,sParm3);
+				SetInfo_DGW(cosndiag,_COSNDIAG_3,DGW_TEXT,sParm4);
+			}
+			iRtn = iRunDialogue_DGW(cosndiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(cosndiag,_COSNDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(cosndiag,_COSNDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(cosndiag,_COSNDIAG_2,DGW_TEXT,sParm3);
+			GetInfo_DGW(cosndiag,_COSNDIAG_3,DGW_TEXT,sParm4);
+			Destroy_DGW(cosndiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Long wavelength value is invalid - must be > 0.0"));
+			
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Short wavelength value is invalid - must be >= 0.0"));
+
+			if (rScanR_STR(sParm3) < 0.0)
+				Abort_SYS(_("Degree of the cosine fuction value is invalid - must be >= 0.0"));
+			
+			if (rScanR_STR(sParm1) == rScanR_STR(sParm2))
+				Abort_SYS(_("Long and short wavelength values in COSN must not be the same!"));
+			
+			// --- set parameters ---
+			
+			if (iStrcmp_STR(sParm4,_("High-Pass"),0)==0)
+				Strcpy_STR(sParm4,"0");
+			if (iStrcmp_STR(sParm4,_("Low-Pass"),0)==0)
+				Strcpy_STR(sParm4,"1");
+			Strcpy_STR(sText,"COSN ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			rValue = rScanR_STR(sParm2);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+			else   FormatR_STR(1.0/rValue,sParm2,12,12);
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm4);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"DCOS",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY)   Strcpy_STR(sParm1,"");
+				else  {
+					if(rValue<90.0)   rValue += 360.0;
+					FormatR_STR(rValue-90.0,sParm1,12,12);
+				}
+				GetToken_STR(sParm2,sText,2);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				GetToken_STR(sParm3,sText,3);
+				if (iStrcmp_STR(sParm3,"1",0)==0)
+					Strcpy_STR(sParm3,_("Pass"));
+				else
+					Strcpy_STR(sParm3,_("Reject"));
+			}
+			dcosdiag=Create_DGW("DCOSDIAG");
+			SetTitle_DGW(dcosdiag,sTitle);
+			SetInfo_DGW(dcosdiag,_DCOSDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0)                       // if used in old file...
+			{
+				SetInfo_DGW(dcosdiag,_DCOSDIAG_1,DGW_TEXT,sParm2);
+				SetInfo_DGW(dcosdiag,_DCOSDIAG_2,DGW_TEXT,sParm3);
+			}
+			iRtn = iRunDialogue_DGW(dcosdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(dcosdiag,_DCOSDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(dcosdiag,_DCOSDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(dcosdiag,_DCOSDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(dcosdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Degree of the cosine fuction value is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			if (iStrcmp_STR(sParm3,_("Pass"),0)==0)
+				Strcpy_STR(sParm3,"1");
+			if (iStrcmp_STR(sParm3,_("Reject"),0)==0)
+				Strcpy_STR(sParm3,"0");
+			Strcpy_STR(sText,"DCOS ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY)   Strcpy_STR(sParm1,"");
+			else  {
+				if(rValue>=270.0)   rValue -= 360.0;
+				FormatR_STR(rValue+90.0,sParm1,12,12);
+			}
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+	 
+
+		if (iStrcmp_STR(sUseName,"DENS",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				GetToken_STR(sParm2,sText,2);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"0");
+			}
+			densdiag=Create_DGW("DENSDIAG");
+			SetTitle_DGW(densdiag,sTitle);
+			SetInfo_DGW(densdiag,_DENSDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(densdiag,_DENSDIAG_1,DGW_TEXT,sParm2);
+			iRtn = iRunDialogue_DGW(densdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(densdiag,_DENSDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(densdiag,_DENSDIAG_1,DGW_TEXT,sParm2);
+			Destroy_DGW(densdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Thickness value in DENS is invalid - must be > 0.0"));
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Background density value in DENS is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"DENS ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"DPAS",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(rValue-90.0,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				rValue = rScanR_STR(sParm2);
+				if(rValue == rDUMMY)   Strcpy_STR(sParm2,"");
+				else   FormatR_STR(rValue-90.0,sParm2,12,12);
+				GetToken_STR(sParm3,sText,3);
+				if (iStrcmp_STR(sParm3,"0",0)==0)
+					Strcpy_STR(sParm3,_("Reject"));
+				else
+					Strcpy_STR(sParm3,_("Pass"));
+			}
+			dpasdiag=Create_DGW("DPASDIAG");
+			SetTitle_DGW(dpasdiag,sTitle);
+			SetInfo_DGW(dpasdiag,_DPASDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(dpasdiag,_DPASDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(dpasdiag,_DPASDIAG_2,DGW_TEXT,sParm3);
+			iRtn = iRunDialogue_DGW(dpasdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(dpasdiag,_DPASDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(dpasdiag,_DPASDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(dpasdiag,_DPASDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(dpasdiag);
+			
+			// --- set parameters ---
+			
+			if (iStrcmp_STR(sParm3,_("Pass"),0)==0)
+				Strcpy_STR(sParm3,"1");
+			if (iStrcmp_STR(sParm3,_("Reject"),0)==0)
+				Strcpy_STR(sParm3,"0");
+			Strcpy_STR(sText,"DPAS ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(rValue+90.0,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			rValue = rScanR_STR(sParm2);
+			if(rValue == rDUMMY)   Strcpy_STR(sParm2,"");
+			else   FormatR_STR(rValue+90.0,sParm2,12,12);
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+	 
+
+		if (iStrcmp_STR(sUseName,"DRTP",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,2);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,0);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"");
+				iSeek_RA(RA_con,3);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm2,sText,0);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm3,sText,1);
+				if (iCharComp_STR(sParm3,"/")) {
+					Strcpy_STR(sParm3,"");
+					Strcpy_STR(sParm4,"");
+					Strcpy_STR(sParm5,"");
+               Strcpy_STR(sParm6,"");
+				} else {
+					GetToken_STR(sParm4,sText,2);
+					if (iCharComp_STR(sParm4,"/")) {
+						Strcpy_STR(sParm4,"");
+						Strcpy_STR(sParm5,"");
+                  Strcpy_STR(sParm6,"");
+					} else {
+						GetToken_STR(sParm5,sText,3);
+                  if (iCharComp_STR(sParm5,"/")) {
+							Strcpy_STR(sParm5,"");
+                     Strcpy_STR(sParm6,"");
+                  } else {
+                     GetToken_STR(sParm6,sText,4);
+                     if (iCharComp_STR(sParm6,"/"))
+                        Strcpy_STR(sParm6,"");
+                  }
+					}
+				}
+			}
+			drtpdiag=Create_DGW("DRTPDIAG");
+			SetTitle_DGW(drtpdiag,sTitle);
+			SetInfo_DGW(drtpdiag,_DRTPDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(drtpdiag,_DRTPDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0) {                      // if used in old file...
+				SetInfo_DGW(drtpdiag,_DRTPDIAG_2,DGW_TEXT,sParm3);
+			}
+         SetInfoSYS_DGW(drtpdiag,_DRTPDIAG_3,DGW_LISTALIAS,"DRTP","GEOMAGOPTN");
+			iRtn = iRunDialogue_DGW(drtpdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(drtpdiag,_DRTPDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(drtpdiag,_DRTPDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(drtpdiag,_DRTPDIAG_2,DGW_TEXT,sParm3);
+			GetInfoSYS_DGW(drtpdiag,_DRTPDIAG_3,DGW_LISTALIAS,"DRTP","GEOMAGOPTN");
+			Destroy_DGW(drtpdiag);
+			
+			i = iGetInt_SYS("DRTP","GEOMAGOPTN");
+			 
+			 if(i==1) {
+				
+				SetString_SYS("DRTP","INCGRD",sParm4);
+				SetString_SYS("DRTP","DECGRD",sParm5);
+            SetString_SYS("DRTP","INGRD",sParm6);
+				drtpdiag = Create_DGW("DRTP1DIAG");
+            SetInfoSYS_DGW(drtpdiag,_DRTP1DIAG_0,DGW_FILEPATH,"DRTP","INGRD");
+            SetInfoSYS_DGW(drtpdiag,_DRTP1DIAG_1,DGW_FILEPATH,"DRTP","INCGRD");
+            SetInfoSYS_DGW(drtpdiag,_DRTP1DIAG_2,DGW_FILEPATH,"DRTP","DECGRD");
+				
+				iRtn = iRunDialogue_DGW(drtpdiag);
+				if(iRtn==-1) Cancel_SYS(); 
+
+            GetInfoSYS_DGW(drtpdiag,_DRTP1DIAG_0,DGW_FILEPATH,"DRTP","INGRD");
+            GetInfoSYS_DGW(drtpdiag,_DRTP1DIAG_1,DGW_FILEPATH,"DRTP","INCGRD");
+            GetInfoSYS_DGW(drtpdiag,_DRTP1DIAG_2,DGW_FILEPATH,"DRTP","DECGRD");
+
+				Destroy_DGW(drtpdiag);
+				GetString_SYS("DRTP","INCGRD",sParm4);
+				GetString_SYS("DRTP","DECGRD",sParm5);
+            GetString_SYS("DRTP","INGRD",sParm6);
+			 
+            GridStat_IMU(sParm6,iType0,iX0,iY0,rXsep0,rYsep0,iKX0,rXoff0,rYoff0,rRot0,rBase0,rMult0);
+            GridStat_IMU(sParm4,iType,iX,iY,rXsep,rYsep,iKX,rXoff,rYoff,rRot,rBase,rMult);
+            if (rXsep0!=rYsep0)    Abort_SYS(_("Abort: cannot process grid with unequal x and y cell size"));
+            if (iX0!=iX || iY0!=iY || rXsep0!=rXsep || rYsep0!=rYsep || rXoff0!=rXoff || rYoff0!=rYoff)    
+               Abort_SYS(_("Abort: The inclination grid and the input grid should be in the same area"));
+            GridStat_IMU(sParm5,iType,iX,iY,rXsep,rYsep,iKX,rXoff,rYoff,rRot,rBase,rMult);
+            if (iX0!=iX || iY0!=iY || rXsep0!=rXsep || rYsep0!=rYsep || rXoff0!=rXoff || rYoff0!=rYoff)    
+               Abort_SYS(_("Abort: The declination grid and the input grid should be in the same area"));
+			} else {
+
+				drtpdiag = Create_DGW("DRTP2DIAG");
+				SetInfoSYS_DGW(drtpdiag,_DRTP2DIAG_0,DGW_FILEPATH,"DRTP","INGRD");
+				SetInfoSYS_DGW(drtpdiag,_DRTP2DIAG_1,DGW_TEXT,"DRTP","DATE");
+				
+				iRtn = iRunDialogue_DGW(drtpdiag);
+				if(iRtn==-1) Cancel_SYS(); 
+
+				GetInfoSYS_DGW(drtpdiag,_DRTP2DIAG_0,DGW_FILEPATH,"DRTP","INGRD");
+				GetInfoSYS_DGW(drtpdiag,_DRTP2DIAG_1,DGW_TEXT,"DRTP","DATE");
+
+				Destroy_DGW(drtpdiag);
+				GetString_SYS("DRTP","INGRD",sInGrd);
+				GetString_SYS("DRTP","DATE",sDate);
+				if (iStrlen_STR(sDate)) 
+				{
+					rDate = rScanDate_STR(sDate,DATE_FORMAT_YYYYMMDD);
+			
+					// --- if it failed, try other formats ---
+					if (rDate == rDUMMY)
+						rDate = rScanDate_STR(sDate,DATE_FORMAT_DDMMYYYY);
+					if (rDate == rDUMMY)
+						rDate = rScanDate_STR(sDate,DATE_FORMAT_MMDDYYYY);
+					if (rDate == rDUMMY)
+						Abort_SYS(_("Invalid date"));
+				} else 
+					Abort_SYS(_("Input error: survey date is required")); 
+
+				// --- Get input grid projection ---
+				hInIMG = CreateFile_IMG(GS_FLOAT,sInGrd,IMG_FILE_READWRITE);
+				hIPJ = Create_IPJ();
+				GetIPJ_IMG(hInIMG,hIPJ);
+				
+				// --- serialize IPJ to _ipjset.ipj ---
+				hSBF = hGetSYS_SBF();
+				hBF = CreateSBF_BF(hSBF,"_ipjset.ipj",BF_READWRITE_NEW);
+				Serial_IPJ(hIPJ,hBF);
+				Destroy_BF(hBF,BF_KEEP);
+				
+				// --- If grid projection is not defined, define it now ---
+				while (iSourceType_IPJ(hIPJ) != IPJ_TYPE_PCS) 
+				{
+					if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_GCS)
+						Abort_SYS(_("Cannot process a grid in geographic projection")); 
+					DisplayMessage_SYS("",_("The input grid requires a projected coordinate system. Please define the grid projection."));
+				
+					// --- call ipjset to define grid projection ---
+					SetString_SYS("IPJSET","LABEL","Grid name");
+					SetString_SYS("IPJSET","SOURCE",sInGrd);
+					SetInt_SYS("IPJSET", "NOGEOGRAPHIC", 1);
+					if(iRunGX_SYS("ipjset")) Cancel_SYS();
+				
+					// --- set new projection ---
+					hSBF = hGetSYS_SBF();
+					hBF = CreateSBF_BF(hSBF,"_ipjset.ipj",BF_READ);
+					Destroy_IPJ(hIPJ);
+					hIPJ = CreateS_IPJ(hBF);
+					Destroy_BF(hBF,BF_KEEP);
+					SetIPJ_IMG(hInIMG,hIPJ);
+				}
+				Destroy_IMG(hInIMG);
+				
+				// --- Create a temp database from Input grid ---
+				iInteract = iInteractive_SYS();
+				SetInteractive_SYS(0);
+				ProgName_SYS(_n("GridGdb"),1);
+				Strcpy_STR(sDatabase,"_");
+				FileNamePart_STR(sInGrd,sTemp,STR_FILE_PART_NAME);
+				Strcat_STR(sDatabase,sTemp);
+				FileExt_STR(sDatabase,"gdb",sDatabase,FILE_EXT_FORCE);
+				SetString_SYS("GRIDGDB","GRD",sInGrd);
+				SetString_SYS("GRIDGDB","GDB",sDatabase);
+				SetString_SYS("GRIDGDB","XDEC","1");
+				SetString_SYS("GRIDGDB","YDEC","1");
+				SetString_SYS("GRIDGDB","TRIMDUM","Trim all dummies");
+				SetString_SYS("GRIDGDB","INDEXCH","No");
+				SetString_SYS("GRIDGDB","LOAD_EXTERNAL_GDB","1");
+
+				if (iRunGX_SYS("gridgdb.gx")) Cancel_SYS();
+
+				SetString_SYS("GRIDGDB","XDEC","");
+				SetString_SYS("GRIDGDB","YDEC","");
+				SetString_SYS("GRIDGDB","TRIMDUM","");
+				SetString_SYS("GRIDGDB","INDEXCH","");
+			  
+				// --- Make inc/dec channels 
+				hIGRF = Create_IGRF(rDate,iDUMMY,"igrf.dat");
+				// NOTE: The DGRF model requires bracketing models of the reference field because 
+				// it contains no secular variation terms. The latest year available is 2000, 
+				// so no dates after 2000 can be calculated using it. The 2005 igrf model becomes 
+				// available in December 2004, so the DGRF may be available then as well.
+				// In order to use data sets after 2000, use the igrf.dat instead.
+				hPJ = CreateIPJ_PJ(hIPJ,(IPJ)0);
+				hVVx = Create_VV(REAL,0);
+				hVVy = Create_VV(REAL,0);
+				hVVelev = Create_VV(REAL,0);
+				hVVtf = Create_VV(REAL,0);
+				hVVinc = Create_VV(REAL,0);
+				hVVdec = Create_VV(REAL,0);
+				
+				iRemoveDocument_PROJ(sDatabase);
+
+				// --- Do NOT load the database into the project ---
+
+				Data = Open_DB(sDatabase, "SUPER", "");
+				ChanX = GetXYZChanSymb_DB(Data,DB_CHAN_X);
+				ChanY = GetXYZChanSymb_DB(Data,DB_CHAN_Y);
+				Strcpy_STR(sChanLong,"_Long");
+				Strcpy_STR(sChanLat ,"_Lat");
+				Strcpy_STR(sChanInc ,"_Inc");
+				Strcpy_STR(sChanDec ,"_Dec");
+				ChanLong = CreateSymb_DB(Data, sChanLong, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+				ChanLat  = CreateSymb_DB(Data, sChanLat, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+				ChanInc = CreateSymb_DB(Data, sChanInc, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+				ChanDec = CreateSymb_DB(Data, sChanDec, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+				LockSymb_DB(Data, ChanX, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+				LockSymb_DB(Data, ChanY, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+				LockSymb_DB(Data, ChanLong, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+				LockSymb_DB(Data, ChanLat, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+				LockSymb_DB(Data, ChanInc, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+				LockSymb_DB(Data, ChanDec, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+				SetChanWidth_DB(Data, ChanLong,	10);
+				SetChanWidth_DB(Data, ChanLat,	10);
+				SetChanWidth_DB(Data, ChanInc,	10);
+				SetChanWidth_DB(Data, ChanDec,	10);
+				SetChanDecimal_DB(Data, ChanLong, 5);
+				SetChanDecimal_DB(Data, ChanLat, 5);
+				SetChanDecimal_DB(Data, ChanInc, 5);
+				SetChanDecimal_DB(Data, ChanDec, 5);
+
+				Line = FirstSelLine_DB(Data);
+				while (Line != NULLSYMB)
+				{
+					LockSymb_DB(Data, Line, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+					GetChanVV_DB(Data, Line, ChanX, hVVx);
+					GetChanVV_DB(Data, Line, ChanY, hVVy);
+					Project_VV(hPJ,hVVx,hVVy);
+					PutChanVV_DB(Data, Line, ChanLong, hVVx);
+					PutChanVV_DB(Data, Line, ChanLat, hVVy);
+					iLen = iLength_VV(hVVx);
+					SetLen_VV(hVVelev,iLen);
+					SetLen_VV(hVVtf,iLen);
+					SetLen_VV(hVVinc,iLen);
+					SetLen_VV(hVVdec,iLen);
+					FillReal_VV(hVVelev,0.0);
+					CalcVV_IGRF(hIGRF,hVVelev,hVVx,hVVy,hVVtf,hVVinc,hVVdec);
+					PutChanVV_DB(Data, Line, ChanInc, hVVinc);
+					PutChanVV_DB(Data, Line, ChanDec, hVVdec);
+					UnLockSymb_DB(Data, Line);
+					Line = NextSelLine_DB(Data, Line);
+				}
+				UnLockAllSymb_DB(Data);
+				Destroy_DB(Data);
+				Destroy_IGRF(hIGRF);
+				Destroy_IPJ(hIPJ);
+				Destroy_PJ(hPJ);
+				Destroy_VV(hVVx);
+				Destroy_VV(hVVy);
+				Destroy_VV(hVVelev);
+				Destroy_VV(hVVtf);
+				Destroy_VV(hVVinc);
+				Destroy_VV(hVVdec);
+
+				// --- Run Rangrid to make Inc/Dec grids 
+				ProgName_SYS(_n("Rangrid"),1);
+				GridStat_IMU(sInGrd,iType,iX,iY,rXsep,rYsep,iKX,rXoff,rYoff,rRot,rBase,rMult);
+				if (rXsep!=rYsep)    Abort_SYS(_("Abort: cannot process grid with unequal x and y cell size"));
+				FormatR_STR(rXsep,sCS,20,15);
+				FormatR_STR(rXoff,sTemp,20,15);
+				Strcpy_STR(sXY,sTemp);
+				FormatR_STR(rYoff,sTemp,20,15);
+				Strcat_STR(sXY,",");
+				Strcat_STR(sXY,sTemp);
+				rValue = rXoff + rXsep*(real)(iX-1);
+				FormatR_STR(rValue,sTemp,20,15);
+				Strcat_STR(sXY,",");
+				Strcat_STR(sXY,sTemp);
+				rValue = rYoff + rYsep*(real)(iY-1);
+				FormatR_STR(rValue,sTemp,20,15);
+				Strcat_STR(sXY,",");
+				Strcat_STR(sXY,sTemp);
+
+				FileNamePart_STR(sInGrd,sTemp,STR_FILE_PART_NAME);
+				Strcpy_STR(sIncGrd,_n("_Inc_"));
+				Strcat_STR(sIncGrd,sTemp);
+				FileExt_STR(sIncGrd,"grd",sIncGrd,FILE_EXT_FORCE);
+
+				SetString_SYS("RANGRID", "CHAN", sChanInc);
+				SetString_SYS("RANGRID", "GRID", sIncGrd);
+				SetString_SYS("RANGRID", "CS", sCS);
+				SetString_SYS("RANGRID", "XY", sXY);
+				SetString_SYS("RANGRID", "EDGCLP", "0");
+				SetInt_SYS("RANGRID","LOCKED", 2);	// specify the database
+				SetString_SYS("RANGRID", "DATABASE", sDatabase);
+
+				if (iRunGX_SYS("Rangrid.gx")) Cancel_SYS();
+
+				Strcpy_STR(sDecGrd,"_Dec_");
+				Strcat_STR(sDecGrd,sTemp);
+				FileExt_STR(sDecGrd,"grd",sDecGrd,FILE_EXT_FORCE);
+				SetString_SYS("RANGRID", "CHAN", sChanDec);
+				SetString_SYS("RANGRID", "GRID", sDecGrd);
+				SetString_SYS("RANGRID", "CS", sCS);
+				SetString_SYS("RANGRID", "XY", sXY);
+				SetInt_SYS("RANGRID","LOCKED", 2);	// specify the database
+				SetString_SYS("RANGRID", "DATABASE", sDatabase);
+
+				if (iRunGX_SYS("Rangrid.gx")) Cancel_SYS();
+
+				SetString_SYS("RANGRID", "CHAN", "");
+				SetString_SYS("RANGRID", "GRID", "");
+				SetString_SYS("RANGRID", "CS", "");
+				SetString_SYS("RANGRID", "XY", "");
+				SetString_SYS("RANGRID", "EDGCLP", "");
+				
+				// --- Delete the temp database ---
+
+				iDeleteFile_SYS(sDatabase);
+
+				SetInteractive_SYS(iInteract);
+			
+				Strcpy_STR(sParm4,sIncGrd);
+				Strcpy_STR(sParm5,sDecGrd);
+            Strcpy_STR(sParm6,sInGrd);
+			}
+
+
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+				
+			if (iStrlen_STR(sParm3) && ((rScanR_STR(sParm3) < -90.0) || (rScanR_STR(sParm3) > 90.0)) )
+				Abort_SYS(_("Amplitude correction inclination is invalid - must be between -90 to 90 degree"));
+         if (iStrlen_STR(sParm3)==0)
+            Strcpy_STR(sParm3,"20");
+			
+			// --- set parameters ---
+			
+			Strcat_STR(sParm1,_n(" /geomagnetic inclination"));
+			SetString_VM(VM_con,2,sParm1);
+			Strcat_STR(sParm2,_n(" /geomagnetic declination"));
+			SetString_VM(VM_con,3,sParm2);
+			Strcpy_STR(sText,"DRTP ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," \"");
+			Strcat_STR(sText,sParm4);
+			Strcat_STR(sText,"\" \"");
+			Strcat_STR(sText,sParm5);
+         Strcat_STR(sText,"\" \"");
+         Strcat_STR(sText,sParm6);
+			Strcat_STR(sText,"\" ");
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+		if (iStrcmp_STR(sUseName,"DRVX",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"1");
+			}
+			drvxdiag=Create_DGW("DRVXDIAG");
+			SetTitle_DGW(drvxdiag,sTitle);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(drvxdiag,_DRVXDIAG_0,DGW_TEXT,sParm1);
+			iRtn = iRunDialogue_DGW(drvxdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(drvxdiag,_DRVXDIAG_0,DGW_TEXT,sParm1);
+			Destroy_DGW(drvxdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Differention order is invalid - must be >= 0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"DRVX ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"DRVY",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"1");
+			}
+			drvydiag=Create_DGW("DRVYDIAG");
+			SetTitle_DGW(drvydiag,sTitle);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(drvydiag,_DRVYDIAG_0,DGW_TEXT,sParm1);
+			iRtn = iRunDialogue_DGW(drvydiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(drvydiag,_DRVYDIAG_0,DGW_TEXT,sParm1);
+			Destroy_DGW(drvydiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Differention order is invalid - must be >= 0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"DRVY ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"DRVZ",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"1");
+			}
+			drvzdiag=Create_DGW("DRVZDIAG");
+			SetTitle_DGW(drvzdiag,sTitle);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(drvzdiag,_DRVZDIAG_0,DGW_TEXT,sParm1);
+			iRtn = iRunDialogue_DGW(drvzdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(drvzdiag,_DRVZDIAG_0,DGW_TEXT,sParm1);
+			Destroy_DGW(drvzdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Differention order is invalid - must be >= 0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"DRVZ ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"GAUS",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				if (iStrcmp_STR(sParm2,"0",0)==0)
+					Strcpy_STR(sParm2,_("High-Pass"));
+				else
+					Strcpy_STR(sParm2,_("Low-Pass"));
+			}
+			gausdiag=Create_DGW("GAUSDIAG");
+			SetTitle_DGW(gausdiag,sTitle);
+			SetInfo_DGW(gausdiag,_GAUSDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(gausdiag,_GAUSDIAG_1,DGW_TEXT,sParm2);
+			iRtn = iRunDialogue_DGW(gausdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(gausdiag,_GAUSDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(gausdiag,_GAUSDIAG_1,DGW_TEXT,sParm2);
+			Destroy_DGW(gausdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_(" Standard deviation wavelength is invalid - must be > 0.0"));
+			
+			// --- set parameters ---
+			
+			if (iStrcmp_STR(sParm2,_("High-Pass"),0)==0)
+				Strcpy_STR(sParm2,"0");
+			if (iStrcmp_STR(sParm2,_("Low-Pass"),0)==0)
+				Strcpy_STR(sParm2,"1");
+			Strcpy_STR(sText,"GAUS ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"GPSD",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,2);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,0);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"");
+				iSeek_RA(RA_con,3);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm2,sText,0);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				i=iTokens_STR(sText," ");
+				if(i>1) {
+					GetToken_STR(sParm3,sText,1);
+					if (iCharComp_STR(sParm3,"/"))
+						Strcpy_STR(sParm3,"");
+				}   
+				if(i>2) {
+					GetToken_STR(sParm4,sText,2);
+					if (iCharComp_STR(sParm4,"/"))
+						Strcpy_STR(sParm4,"");
+				}   
+				if(i>3) {
+					GetToken_STR(sParm5,sText,3);
+					if (iCharComp_STR(sParm5,"/"))
+						Strcpy_STR(sParm5,"");
+				}   
+			}
+			gpsddiag=Create_DGW("GPSDDIAG");
+			SetTitle_DGW(gpsddiag,sTitle);
+			SetInfo_DGW(gpsddiag,_GPSDDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(gpsddiag,_GPSDDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0)                       // if used in old file...
+			{   
+				SetInfo_DGW(gpsddiag,_GPSDDIAG_2,DGW_TEXT,sParm3);
+				SetInfo_DGW(gpsddiag,_GPSDDIAG_3,DGW_TEXT,sParm4);
+				SetInfo_DGW(gpsddiag,_GPSDDIAG_4,DGW_TEXT,sParm5);
+			}
+			iRtn = iRunDialogue_DGW(gpsddiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(gpsddiag,_GPSDDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(gpsddiag,_GPSDDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(gpsddiag,_GPSDDIAG_2,DGW_TEXT,sParm3);
+			GetInfo_DGW(gpsddiag,_GPSDDIAG_3,DGW_TEXT,sParm4);
+			GetInfo_DGW(gpsddiag,_GPSDDIAG_4,DGW_TEXT,sParm5);
+			Destroy_DGW(gpsddiag);
+			
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+			if (rScanR_STR(sParm3) < 0.0)
+				Abort_SYS(_("Density contrast is invalid - must be >= 0.0"));
+			if (rScanR_STR(sParm4) < 0.0)
+				Abort_SYS(_("Magnetization is invalid - must be >= 0.0"));
+			if (iStrlen_STR(sParm5) && ((rScanR_STR(sParm5) < -90.0) || (rScanR_STR(sParm5) > 90.0)) )
+				Abort_SYS(_("Amplitude correction inclination is invalid - must be between -90 to 90 degree"));
+			
+			// --- set parameters ---
+			
+			Strcat_STR(sParm1,_n(" /geomagnetic inclination"));
+			SetString_VM(VM_con,2,sParm1);
+			Strcat_STR(sParm2,_n(" /geomagnetic declination"));
+			SetString_VM(VM_con,3,sParm2);
+			Strcpy_STR(sText,"GPSD ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm4);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm5);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"HPAS",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			}
+			hpasdiag=Create_DGW("HPASDIAG");
+			SetTitle_DGW(hpasdiag,sTitle);
+			SetInfo_DGW(hpasdiag,_HPASDIAG_0,DGW_TEXT,sParm1);
+			iRtn = iRunDialogue_DGW(hpasdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(hpasdiag,_HPASDIAG_0,DGW_TEXT,sParm1);
+			Destroy_DGW(hpasdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Cutoff wavelength is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"HPAS ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		// --- No user parameter dialog required for the integration ---
+		
+		if (iStrcmp_STR(sUseName,"INTG",0)==0)
+		{
+			SetString_VM(VM_con,iName+5,_n("INTG /"));
+		}
+
+		if (iStrcmp_STR(sUseName,"INTGX",0)==0)
+		{
+			SetString_VM(VM_con,iName+5,_n("INTGX /"));
+		}
+		  
+		if (iStrcmp_STR(sUseName,"INTGY",0)==0)
+		{
+			SetString_VM(VM_con,iName+5,_n("INTGY /"));
+		}		  
+ 
+		  
+		if (iStrcmp_STR(sUseName,"LPAS",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			}
+			lpasdiag=Create_DGW("LPASDIAG");
+			SetTitle_DGW(lpasdiag,sTitle);
+			SetInfo_DGW(lpasdiag,_LPASDIAG_0,DGW_TEXT,sParm1);
+			iRtn = iRunDialogue_DGW(lpasdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(lpasdiag,_LPASDIAG_0,DGW_TEXT,sParm1);
+			Destroy_DGW(lpasdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Cutoff wavelength is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"LPAS ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"OPTM",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,2);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,0);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"");
+				iSeek_RA(RA_con,3);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm2,sText,0);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				i = iTokens_STR(sText," ");
+				if (i>1) {
+					GetToken_STR(sParm3,sText,1);
+					if (iCharComp_STR(sParm3,"/"))
+						Strcpy_STR(sParm3,"");
+				}
+				if (i>2) {
+					GetToken_STR(sParm4,sText,2);
+					rValue = rScanR_STR(sParm4);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm4,"");
+					else   FormatR_STR(1.0/rValue,sParm4,12,12);
+					if (iCharComp_STR(sParm4,"/"))
+						Strcpy_STR(sParm4,"");
+				}
+				if (i>3) {
+					GetToken_STR(sParm5,sText,3);
+					rValue = rScanR_STR(sParm5);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm5,"");
+					else   FormatR_STR(1.0/rValue,sParm5,12,12);
+					if (iCharComp_STR(sParm5,"/"))
+						Strcpy_STR(sParm5,"");
+				}
+				if (i>4) {
+					GetToken_STR(sParm6,sText,4);
+					if (iCharComp_STR(sParm6,"/"))
+						Strcpy_STR(sParm6,"");
+				}
+			}
+			optmdiag=Create_DGW("OPTMDIAG");
+			SetTitle_DGW(optmdiag,sTitle);
+			SetInfo_DGW(optmdiag,_OPTMDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(optmdiag,_OPTMDIAG_1,DGW_TEXT,sParm2);
+			SetInfo_DGW(optmdiag,_OPTMDIAG_2,DGW_TEXT,sParm3);
+			SetInfo_DGW(optmdiag,_OPTMDIAG_3,DGW_TEXT,sParm4);
+			SetInfo_DGW(optmdiag,_OPTMDIAG_4,DGW_TEXT,sParm5);
+			SetInfo_DGW(optmdiag,_OPTMDIAG_5,DGW_TEXT,sParm6);
+			iRtn = iRunDialogue_DGW(optmdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(optmdiag,_OPTMDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(optmdiag,_OPTMDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(optmdiag,_OPTMDIAG_2,DGW_TEXT,sParm3);
+			GetInfo_DGW(optmdiag,_OPTMDIAG_3,DGW_TEXT,sParm4);
+			GetInfo_DGW(optmdiag,_OPTMDIAG_4,DGW_TEXT,sParm5);
+			GetInfo_DGW(optmdiag,_OPTMDIAG_5,DGW_TEXT,sParm6);
+			Destroy_DGW(optmdiag);
+			
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+			
+			if (rScanR_STR(sParm3) < 0.0)
+				Abort_SYS(_("Depth is invalid - must be >= 0.0"));
+			
+			if (iStrlen_STR(sParm4) && (rScanR_STR(sParm4) < 0.0))
+				Abort_SYS(_("Start wavelength is invalid - must be >= 0.0"));
+			
+			if (iStrlen_STR(sParm5) && (rScanR_STR(sParm5) < 0.0))
+				Abort_SYS(_("End wavelength is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcat_STR(sParm1,_n(" /geomagnetic inclination"));
+			SetString_VM(VM_con,2,sParm1);
+			Strcat_STR(sParm2,_n(" /geomagnetic declination"));
+			SetString_VM(VM_con,3,sParm2);
+			Strcpy_STR(sText,"OPTM ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," ");
+			rValue = rScanR_STR(sParm4);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm4,"");
+			else   FormatR_STR(1.0/rValue,sParm4,12,12);
+			Strcat_STR(sText,sParm4);
+			Strcat_STR(sText," ");
+			rValue = rScanR_STR(sParm5);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm5,"");
+			else   FormatR_STR(1.0/rValue,sParm5,12,12);
+			Strcat_STR(sText,sParm5);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm6);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"REDE",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,2);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,0);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"");
+				iSeek_RA(RA_con,3);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm2,sText,0);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm3,sText,1);
+				if (iCharComp_STR(sParm3,"/"))
+					Strcpy_STR(sParm3,"");
+			}
+			redediag=Create_DGW("REDEDIAG");
+			SetTitle_DGW(redediag,sTitle);
+			SetInfo_DGW(redediag,_REDEDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(redediag,_REDEDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(redediag,_REDEDIAG_2,DGW_TEXT,sParm3);
+			iRtn = iRunDialogue_DGW(redediag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(redediag,_REDEDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(redediag,_REDEDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(redediag,_REDEDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(redediag);
+			
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+			
+			if (iStrlen_STR(sParm3) && ((rScanR_STR(sParm3) < -90.0) || (rScanR_STR(sParm3) > 90.0)) )
+				Abort_SYS(_("Amplitude correction inclination is invalid - must be between -90 to 90 degree"));
+			
+			// --- set parameters ---
+			
+			Strcat_STR(sParm1,_n(" /geomagnetic inclination"));
+			SetString_VM(VM_con,2,sParm1);
+			Strcat_STR(sParm2,_n(" /geomagnetic declination"));
+			SetString_VM(VM_con,3,sParm2);
+			//SetString_VM(VM_con,iName+5,"REDE /");
+			Strcpy_STR(sText,"REDE ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"REDP",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,2);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,0);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"");
+				iSeek_RA(RA_con,3);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm2,sText,0);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm3,sText,1);
+				if (iCharComp_STR(sParm3,"/"))
+					Strcpy_STR(sParm3,"");
+			}
+			redpdiag=Create_DGW("REDPDIAG");
+			SetTitle_DGW(redpdiag,sTitle);
+			SetInfo_DGW(redpdiag,_REDPDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(redpdiag,_REDPDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(redpdiag,_REDPDIAG_2,DGW_TEXT,sParm3);
+			iRtn = iRunDialogue_DGW(redpdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(redpdiag,_REDPDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(redpdiag,_REDPDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(redpdiag,_REDPDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(redpdiag);
+			
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+				
+			if (iStrlen_STR(sParm3) && ((rScanR_STR(sParm3) < -90.0) || (rScanR_STR(sParm3) > 90.0)) )
+				Abort_SYS(_("Amplitude correction inclination is invalid - must be between -90 to 90 degree"));
+			
+			// --- set parameters ---
+			
+			Strcat_STR(sParm1,_n(" /geomagnetic inclination"));
+			SetString_VM(VM_con,2,sParm1);
+			Strcat_STR(sParm2,_n(" /geomagnetic declination"));
+			SetString_VM(VM_con,3,sParm2);
+			Strcpy_STR(sText,"REDP ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+     
+
+		if (iStrcmp_STR(sUseName,"SUSC",0)==0)
+		{
+			if (iUseLine>=0)
+			{                    
+				iSeek_RA(RA_con,2);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,0);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"");
+				iSeek_RA(RA_con,3);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm2,sText,0);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				iSeek_RA(RA_con,4);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm3,sText,0);
+				if (iCharComp_STR(sParm3,"/"))
+					Strcpy_STR(sParm3,"");
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm4,sText,1);
+				if (iCharComp_STR(sParm4,"/"))
+				{
+					Strcpy_STR(sParm4,"");
+					Strcpy_STR(sParm5,"");
+				}
+				else
+				{
+					GetToken_STR(sParm5,sText,2);
+					if (iCharComp_STR(sParm5,"/"))
+				 Strcpy_STR(sParm5,"");
+				}
+			}
+			suscdiag=Create_DGW("SUSCDIAG");
+			SetTitle_DGW(suscdiag,sTitle);
+			SetInfo_DGW(suscdiag,_SUSCDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(suscdiag,_SUSCDIAG_1,DGW_TEXT,sParm2);
+			SetInfo_DGW(suscdiag,_SUSCDIAG_2,DGW_TEXT,sParm3);
+			SetInfo_DGW(suscdiag,_SUSCDIAG_3,DGW_TEXT,sParm4);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(suscdiag,_SUSCDIAG_4,DGW_TEXT,sParm5);
+			iRtn = iRunDialogue_DGW(suscdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(suscdiag,_SUSCDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(suscdiag,_SUSCDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(suscdiag,_SUSCDIAG_2,DGW_TEXT,sParm3);
+			GetInfo_DGW(suscdiag,_SUSCDIAG_3,DGW_TEXT,sParm4);
+			GetInfo_DGW(suscdiag,_SUSCDIAG_4,DGW_TEXT,sParm5);
+			Destroy_DGW(suscdiag);
+			
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+			
+			if (rScanR_STR(sParm3) <= 0.0)
+				Abort_SYS(_("Total meomagnetic field is invalid - must be > 0.0"));
+			
+			if (rScanR_STR(sParm4) < 0.0)
+				Abort_SYS(_("Depth is invalid - must be >= 0.0"));
+			
+			if (iStrlen_STR(sParm5) && ((rScanR_STR(sParm5) < -90.0) || (rScanR_STR(sParm5) > 90.0)) )
+				Abort_SYS(_("Amplitude correction inclination is invalid - must be between -90 to 90 degree"));
+			
+			// --- set parameters ---
+			
+			Strcat_STR(sParm1,_n(" /geomagnetic inclination"));
+			SetString_VM(VM_con,2,sParm1);
+			Strcat_STR(sParm2,_n(" /geomagnetic declination"));
+			SetString_VM(VM_con,3,sParm2);
+			Strcat_STR(sParm3,_n(" /total field strength"));
+			SetString_VM(VM_con,4,sParm3);
+			Strcpy_STR(sText,"SUSC ");
+			Strcat_STR(sText,sParm4);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm5);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"TRFP",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				i = iTokens_STR(sText," ");
+				if (i>1) {
+					GetToken_STR(sParm1,sText,1);
+					rValue = rScanR_STR(sParm1);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+					else   FormatR_STR(rValue,sParm1,12,12);
+					if (iCharComp_STR(sParm1,"/"))
+						Strcpy_STR(sParm1,"");
+				}
+				if (i>2) {
+					GetToken_STR(sParm2,sText,2);
+					rValue = rScanR_STR(sParm2);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+					else   FormatR_STR(rValue,sParm2,12,12);
+					if (iCharComp_STR(sParm2,"/"))
+						Strcpy_STR(sParm2,"");
+				}
+				if (i>3) {
+					GetToken_STR(sParm3,sText,3);
+					rValue = rScanR_STR(sParm3);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm3,"");
+					else   FormatR_STR(rValue,sParm3,12,12);
+					if (iCharComp_STR(sParm3,"/"))
+						Strcpy_STR(sParm3,"");
+				}
+			}
+			trfpdiag=Create_DGW("TRFPDIAG");
+			SetTitle_DGW(trfpdiag,sTitle);
+			SetInfo_DGW(trfpdiag,_TRFPDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0) {                      // if used in old file...
+				SetInfo_DGW(trfpdiag,_TRFPDIAG_1,DGW_TEXT,sParm2);
+				SetInfo_DGW(trfpdiag,_TRFPDIAG_2,DGW_TEXT,sParm3);
+			}
+			iRtn = iRunDialogue_DGW(trfpdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(trfpdiag,_TRFPDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(trfpdiag,_TRFPDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(trfpdiag,_TRFPDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(trfpdiag);
+			
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+				
+			if (iStrlen_STR(sParm3) && ((rScanR_STR(sParm3) < -90.0) || (rScanR_STR(sParm3) > 90.0)))
+				Abort_SYS(_("Amplitude correction inclination is invalid - must be between -90 to 90 degree"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"TRFP ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+	  
+
+		if (iStrcmp_STR(sUseName,"TXYZ",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,2);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,0);
+				if (iCharComp_STR(sParm1,"/"))
+					Strcpy_STR(sParm1,"");
+				iSeek_RA(RA_con,3);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm2,sText,0);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm3,sText,1);
+				if (iStrcmp_STR(sParm3,"0",0)==0)
+					Strcpy_STR(sParm3,"Total_Field");
+				if (iStrcmp_STR(sParm3,"1",0)==0)
+					Strcpy_STR(sParm3,"X_Component");
+				if (iStrcmp_STR(sParm3,"2",0)==0)
+					Strcpy_STR(sParm3,"Y_Component");
+				if (iStrcmp_STR(sParm3,"3",0)==0)
+					Strcpy_STR(sParm3,"Z_Component");
+				GetToken_STR(sParm4,sText,2);
+				if (iStrcmp_STR(sParm4,"0",0)==0)
+					Strcpy_STR(sParm4,"Total_Field");
+				if (iStrcmp_STR(sParm4,"1",0)==0)
+					Strcpy_STR(sParm4,"X_Component");
+				if (iStrcmp_STR(sParm4,"2",0)==0)
+					Strcpy_STR(sParm4,"Y_Component");
+				if (iStrcmp_STR(sParm4,"3",0)==0)
+					Strcpy_STR(sParm4,"Z_Component");
+			}
+			txyzdiag=Create_DGW("TXYZDIAG");
+			SetTitle_DGW(txyzdiag,sTitle);
+			SetInfo_DGW(txyzdiag,_TXYZDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(txyzdiag,_TXYZDIAG_1,DGW_TEXT,sParm2);
+			SetInfo_DGW(txyzdiag,_TXYZDIAG_2,DGW_TEXT,sParm3);
+			SetInfo_DGW(txyzdiag,_TXYZDIAG_3,DGW_TEXT,sParm4);
+			iRtn = iRunDialogue_DGW(txyzdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(txyzdiag,_TXYZDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(txyzdiag,_TXYZDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(txyzdiag,_TXYZDIAG_2,DGW_TEXT,sParm3);
+			GetInfo_DGW(txyzdiag,_TXYZDIAG_3,DGW_TEXT,sParm4);
+			Destroy_DGW(txyzdiag);
+			
+			// --- validation parameters ---
+			
+			if ((rScanR_STR(sParm1) < -90.0) || (rScanR_STR(sParm1) > 90.0))
+				Abort_SYS(_("Geomagnetic inclination is invalid - must be between -90 to 90 degree"));
+			
+			// --- set parameters ---
+			
+			if (iStrcmp_STR(sParm3,"Total_Field",0)==0)
+				Strcpy_STR(sParm3,"0");
+			if (iStrcmp_STR(sParm3,"X_Component",0)==0)
+				Strcpy_STR(sParm3,"1");
+			if (iStrcmp_STR(sParm3,"Y_Component",0)==0)
+				Strcpy_STR(sParm3,"2");
+			if (iStrcmp_STR(sParm3,"Z_Component",0)==0)
+				Strcpy_STR(sParm3,"3");
+			if (iStrcmp_STR(sParm4,"Total_Field",0)==0)
+				Strcpy_STR(sParm4,"0");
+			if (iStrcmp_STR(sParm4,"X_Component",0)==0)
+				Strcpy_STR(sParm4,"1");
+			if (iStrcmp_STR(sParm4,"Y_Component",0)==0)
+				Strcpy_STR(sParm4,"2");
+			if (iStrcmp_STR(sParm4,"Z_Component",0)==0)
+				Strcpy_STR(sParm4,"3");
+			Strcat_STR(sParm1,_n(" /geomagnetic inclination"));
+			SetString_VM(VM_con,2,sParm1);
+			Strcat_STR(sParm2,_n(" /geomagnetic declination"));
+			SetString_VM(VM_con,3,sParm2);
+			Strcpy_STR(sText,"TXYZ ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm4);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+		
+		if (iStrcmp_STR(sUseName,"BTWRB",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				rValue = rScanR_STR(sParm2);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+				else   FormatR_STR(1.0/rValue,sParm2,12,12);
+				GetToken_STR(sParm3,sText,3);
+				if (iCharComp_STR(sParm3,"/"))
+					Strcpy_STR(sParm3,"");
+			}
+			btwrbdiag=Create_DGW("BTWRBDIAG");
+			SetTitle_DGW(btwrbdiag,sTitle);
+			SetInfo_DGW(btwrbdiag,_BTWRBDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(btwrbdiag,_BTWRBDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0)  {                     // if used in old file...
+				SetInfo_DGW(btwrbdiag,_BTWRBDIAG_2,DGW_TEXT,sParm3);
+			}
+			iRtn = iRunDialogue_DGW(btwrbdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(btwrbdiag,_BTWRBDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(btwrbdiag,_BTWRBDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(btwrbdiag,_BTWRBDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(btwrbdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Long wavelength value is invalid - must be > 0.0"));
+			
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Short wavelength value is invalid - must be >= 0.0"));
+			
+			if (rScanR_STR(sParm3) < 0.0)
+				Abort_SYS(_("Filter degree value is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"BTWRB ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			rValue = rScanR_STR(sParm2);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+			else   FormatR_STR(1.0/rValue,sParm2,12,12);
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		if (iStrcmp_STR(sUseName,"BTWRN",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"");
+			}
+			btwrndiag=Create_DGW("BTWRNDIAG");
+			SetTitle_DGW(btwrndiag,sTitle);
+			SetInfo_DGW(btwrndiag,_BTWRNDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0)  {                     // if used in old file...
+				SetInfo_DGW(btwrndiag,_BTWRNDIAG_1,DGW_TEXT,sParm2);
+			}
+			iRtn = iRunDialogue_DGW(btwrndiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(btwrndiag,_BTWRNDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(btwrndiag,_BTWRNDIAG_1,DGW_TEXT,sParm2);
+			Destroy_DGW(btwrndiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Centre wavelength value is invalid - must be > 0.0"));
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Filter degree value is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"BTWRN ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+		if (iStrcmp_STR(sUseName,"COSNB",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				rValue = rScanR_STR(sParm1);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+				else   FormatR_STR(1.0/rValue,sParm1,12,12);
+				GetToken_STR(sParm2,sText,2);
+				rValue = rScanR_STR(sParm2);
+				if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+				else   FormatR_STR(1.0/rValue,sParm2,12,12);
+				GetToken_STR(sParm3,sText,3);
+				if (iCharComp_STR(sParm3,"/"))
+					Strcpy_STR(sParm3,"");
+			}
+			cosnbdiag=Create_DGW("COSNBDIAG");
+			SetTitle_DGW(cosnbdiag,sTitle);
+			SetInfo_DGW(cosnbdiag,_COSNBDIAG_0,DGW_TEXT,sParm1);
+			SetInfo_DGW(cosnbdiag,_COSNBDIAG_1,DGW_TEXT,sParm2);
+			if (iUseLine>=0)                       // if used in old file...
+			{
+				SetInfo_DGW(cosnbdiag,_COSNBDIAG_2,DGW_TEXT,sParm3);
+			}
+			iRtn = iRunDialogue_DGW(cosnbdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(cosnbdiag,_COSNBDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(cosnbdiag,_COSNBDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(cosnbdiag,_COSNBDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(cosnbdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Long wavelength value is invalid - must be > 0.0"));
+			
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Short wavelength value is invalid - must be >= 0.0"));
+
+			if (rScanR_STR(sParm3) < 0.0)
+				Abort_SYS(_("Degree of the cosine fuction value is invalid - must be >= 0.0"));
+			
+			if (rScanR_STR(sParm1) == rScanR_STR(sParm2))
+				Abort_SYS(_("Long and short wavelength values in COSNB must not be the same!"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"COSNB ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			rValue = rScanR_STR(sParm2);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+			else   FormatR_STR(1.0/rValue,sParm2,12,12);
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+		if (iStrcmp_STR(sUseName,"GFILT",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				iTokens_STR(sText," ");
+				GetToken_STR(sParm1,sText,1);
+				GetToken_STR(sParm2,sText,2);
+				if (iCharComp_STR(sParm2,"/"))
+					Strcpy_STR(sParm2,"0");
+			}
+			gfiltdiag=Create_DGW("GFILTDIAG");
+			SetTitle_DGW(gfiltdiag,sTitle);
+			SetInfo_DGW(gfiltdiag,_DENSDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0)                       // if used in old file...
+				SetInfo_DGW(gfiltdiag,_DENSDIAG_1,DGW_TEXT,sParm2);
+			iRtn = iRunDialogue_DGW(gfiltdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(gfiltdiag,_DENSDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(gfiltdiag,_DENSDIAG_1,DGW_TEXT,sParm2);
+			Destroy_DGW(gfiltdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) < 0.0)
+				Abort_SYS(_("Depth to top of layer is invalid - must be >= 0.0"));
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Depth to bottom of layer is invalid - must be >= 0.0"));
+			if (rScanR_STR(sParm2) < rScanR_STR(sParm1))
+				Abort_SYS(_("Depth to bottom of layer must be greater than the top depth"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"GFILT ");
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+		
+		if (iStrcmp_STR(sUseName,"NOTCH",0)==0)
+		{
+			if (iUseLine>=0)
+			{
+				iSeek_RA(RA_con,iUseLine);
+				iGets_RA(RA_con,sText);
+				i = iTokens_STR(sText," ");
+				if (i>1) {
+					GetToken_STR(sParm1,sText,1);
+					rValue = rScanR_STR(sParm1);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+					else   FormatR_STR(1.0/rValue,sParm1,12,12);
+					if (iCharComp_STR(sParm1,"/"))
+						Strcpy_STR(sParm2,"");
+				}
+				if (i>2) {
+					GetToken_STR(sParm2,sText,2);
+					rValue = rScanR_STR(sParm2);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm2,"");
+					else   FormatR_STR(rValue,sParm2,12,12);
+					if (iCharComp_STR(sParm2,"/"))
+						Strcpy_STR(sParm2,"");
+				}
+				if (i>3) {
+					GetToken_STR(sParm3,sText,3);
+					rValue = rScanR_STR(sParm3);
+					if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm3,"");
+					else   FormatR_STR(rValue,sParm3,12,12);
+					if (iCharComp_STR(sParm3,"/"))
+						Strcpy_STR(sParm3,"");
+				}
+			}
+			notchdiag=Create_DGW("NOTCHDIAG");
+			SetTitle_DGW(notchdiag,sTitle);
+			SetInfo_DGW(notchdiag,_NOTCHDIAG_0,DGW_TEXT,sParm1);
+			if (iUseLine>=0)                       // if used in old file...
+			{   
+				SetInfo_DGW(notchdiag,_NOTCHDIAG_1,DGW_TEXT,sParm2);
+				SetInfo_DGW(notchdiag,_NOTCHDIAG_2,DGW_TEXT,sParm3);
+			}
+			iRtn = iRunDialogue_DGW(notchdiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(notchdiag,_NOTCHDIAG_0,DGW_TEXT,sParm1);
+			GetInfo_DGW(notchdiag,_NOTCHDIAG_1,DGW_TEXT,sParm2);
+			GetInfo_DGW(notchdiag,_NOTCHDIAG_2,DGW_TEXT,sParm3);
+			Destroy_DGW(notchdiag);
+			
+			// --- validation parameters ---
+			
+			if (rScanR_STR(sParm1) <= 0.0)
+				Abort_SYS(_("Centre wavelength value is invalid - must be > 0.0"));
+			if (rScanR_STR(sParm2) < 0.0)
+				Abort_SYS(_("Power factor value is invalid - must be >= 0.0"));
+			if (rScanR_STR(sParm3) < 0.0)
+				Abort_SYS(_("Depth factor value is invalid - must be >= 0.0"));
+			
+			// --- set parameters ---
+			
+			Strcpy_STR(sText,"NOTCH ");
+			rValue = rScanR_STR(sParm1);
+			if(rValue == rDUMMY || rValue <= 0.0)   Strcpy_STR(sParm1,"");
+			else   FormatR_STR(1.0/rValue,sParm1,12,12);
+			Strcat_STR(sText,sParm1);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm2);
+			Strcat_STR(sText," ");
+			Strcat_STR(sText,sParm3);
+			Strcat_STR(sText," /");
+			SetString_VM(VM_con,iName+5,sText);
+		}
+		
+		if (iStrcmp_STR(sUseName,"GNRL",0)==0)
+		{
+			gnrldiag=Create_DGW("GNRLDIAG");
+			SetTitle_DGW(gnrldiag,sTitle);
+			iRtn = iRunDialogue_DGW(gnrldiag);
+			if(iRtn==-1) Cancel_SYS(); 
+			GetInfo_DGW(gnrldiag,_GNRLDIAG_0,DGW_FILEPATH,sGnrlFile);
+			Destroy_DGW(gnrldiag);
+			if (!iStrlen_STR(sGnrlFile))
+				Abort_SYS(_("General filter file Name not specified"));   
+
+			RA_Gnrl=Create_RA(sGnrlFile);     // open Gnrl filter file
+			iGets_RA(RA_Gnrl,sText);
+
+			Strcpy_STR(sBuff,sText);      // Get the first 4 letters
+			if(iStrcmp_STR(sBuff,"GNRL",0)) {
+				Strcpy_STR(sErrMsg,_("Error in General_Filter definition. "));
+				Strcat_STR(sErrMsg,_("It must begin with \"GNRL\" on its first line, with the filter coefficients following."));
+				Abort_SYS(sErrMsg);
+			}
+			SetString_VM(VM_con,iName+5,sText);
+		}
+
+
+		iName++;
+	}
+
+
+	 
+//--------------------------------------------------------------------
+// Step 4: WRITE OUT NEW CONTROL FILE
+//--------------------------------------------------------------------
+
+	if (iOldFile)                     // if old file exists
+		Destroy_RA(RA_con);            // close old control file
+
+	WA_con=Create_WA(sConFile,0);     // create new control file with same name
+
+	i=0;
+	while(i<=10)                      // write lines in VM_con to WA_con
+	{
+		GetString_VM(VM_con,i,sText);
+		if ((iStrcmp_STR(sText,"",0)!=0)||(i<5))
+					  // skip blank lines in filter-specific 
+					  // part of the control file
+		{
+			Puts_WA(WA_con,sText);
+			NewLine_WA(WA_con);
+		}
+		i++;
+	}
+	Destroy_VM(VM_UseNames);          // close various program objects
+	Destroy_VM(VM_ShortNames);
+	Destroy_VM(VM_LongNames);
+	Destroy_VM(VM_con);
+	Destroy_WA(WA_con);
+
+
+	// --- set control file name in fft2flt ---
+
+	SetString_SYS("FFT2FLT","CON",sConFile);
+	SetString_SYS("FFT2SPCFLT","CONFILE",sConFile);
+
+}

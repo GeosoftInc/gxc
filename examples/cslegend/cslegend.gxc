@@ -1,0 +1,299 @@
+//===========================================================================
+
+NAME          = "CSLEGEND"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map/Legend"
+
+DESCRIPTION   = "
+
+      CSLEGEND
+            .TITLE       Title for the legend
+            .X           X location of bottom left corner of legend
+            .Y           Y location of bottom left corner of legend
+            .FONTSIZE    Font Size in mm.
+            .FILE        Agg, ITR or Zon file name
+            .SYMBOL      symbol number
+            .SYMBWT      symbol weight
+            .EDGECOL     symbol edge color
+"
+// Revision History:
+// v7.0.0: Symbol font weight fix-up.
+// v6.0.0: Map should not have been locked before interactive session.
+// v5.1.7: Should not have set units to "%" if CUM_PERCENT set in channel REG.
+//         Even in that case the ITR stores values, not percentages.
+// v5.1.5: Changed map group name to CSLEG_Title
+//         When reading an ITR file, set Subtitle only if not already set.
+//===========================================================================
+
+RESOURCE="cslegend.gr"
+#include "cslegend.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+int         iSymb,iSymbWeight;
+string(STR_DEFAULT_SHORT) sColor, sTitle, sSubTitle;
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT) sUnits;
+string(4)   sHints;
+real        rFontSize, rX1, rY1;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+BF  Bf;
+ITR Itr;
+REG Reg;
+
+int  i, iType, iLen;
+string(STR_FILE) sFile;
+string(STR_DEFAULT_LONG) sFont,sText;
+string(STR_DEFAULT_SHORT) sExt;
+real rSymbScale;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- check for base view ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   if (!iExistView_MAP(Map,"*Base"))
+      Abort_SYS(_("A base view is required to use this GX."));
+   UnLock_EMAP(EMap);   
+   
+
+   // --- set the base view ---
+
+   iSetCurrentView_EMAP(EMap,"*Base");
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- If the "FILE" parameter is set, look in the REG for the
+      //     channel and units, and put them in the title and subtitle
+      //
+            
+      GetString_SYS("CSLEGEND","FILE",sFile);
+
+      iLen = iStrlen_STR(sFile);
+      if(iLen>0) {   // --- If filename found... ---
+
+         // --- If it is an ITR file ... ---
+         
+         Substr_STR(sExt,sFile,iLen-3,3);
+
+         if(!iStrcmp_STR(sExt,"itr",STR_CASE_TOLERANT)) {
+
+            // --- Get the REG from the ITR ---
+
+            Bf = Create_BF(sFile, BF_READ);
+            Itr = CreateS_ITR(Bf);
+            Reg = GetREG_ITR(Itr);
+
+            // --- Read the channel ---
+
+            Get_REG(Reg, "Channel", sText, sizeof(sText));
+            if(iStrlen_STR(sText)) {
+               SetString_SYS("CSLEGEND","TITLE",sText);
+            }
+
+            // --- Read the units ---
+
+            Get_REG(Reg, "Units", sText, sizeof(sText));
+            if(iStrlen_STR(sText)) {
+               Strcpy_STR(sUnits, "(");
+               Strcat_STR(sUnits, sText);
+               Strcat_STR(sUnits, ")");
+               SetString_SYS("CSLEGEND","SUBTITLE",sUnits);
+            }
+
+
+            // --- Use ppm if the SUBTITLE parameter
+            //     has not already been set. ---
+            
+            GetString_SYS("CSLEGEND","SUBTITLE",sSubTitle);
+            if(!iStrlen_STR(sSubTitle))
+               SetString_SYS("CSLEGEND","SUBTITLE","(ppm)");
+
+
+            // --- Destroy the REG resource (The REG itself is not destroyed) ---
+
+            Destroy_REG(Reg);
+
+            // --- Destroy the other resources ---
+ 
+            DestroyEx_BF(Bf);
+            Destroy_ITR(Itr);
+         }
+      }
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CSLEGEND");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CSLEGEND_0,DGW_TEXT,"CSLEGEND","TITLE");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_1,DGW_TEXT,"CSLEGEND","SUBTITLE");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_2,DGW_TEXT,"CSLEGEND","X");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_3,DGW_TEXT,"CSLEGEND","Y");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_4,DGW_FILEPATH, "CSLEGEND","FILE");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_5,DGW_TEXT,"CSLEGEND","FONTSIZE");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_6,DGW_LISTALIAS,"CSLEGEND","SYMBOL");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_7,DGW_LISTALIAS,"CSLEGEND","SYMBWT");
+      SetInfoSYS_DGW(Diag,_CSLEGEND_8,DGW_TEXT,"CSLEGEND","EDGECOL");
+
+      // --- Run the Dialogue ---
+
+      do {
+         i = iRunDialogue_DGW(Diag);
+         if(i==-1)   Cancel_SYS(); 
+         if(i==2)    {
+            
+            // --- Get the coordinates of a user selected box ---
+
+            if (HINTS)    
+               DisplayMessage_SYS(_("Locate Legend"),_("Locate the Legend Lower Left Corner"));
+
+            if (iGetPoint_EMAP(EMap,_("Locate Legend..."),rX1,rY1))  Cancel_SYS(); 
+
+            SetReal_SYS("CSLEGEND","X",rX1);
+            SetReal_SYS("CSLEGEND","Y",rY1);
+
+            SetInfoSYS_DGW(Diag,_CSLEGEND_2,DGW_TEXT,"CSLEGEND","X");
+            SetInfoSYS_DGW(Diag,_CSLEGEND_3,DGW_TEXT,"CSLEGEND","Y");
+
+         }
+      } while (i!=0);
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CSLEGEND_0,DGW_TEXT,"CSLEGEND","TITLE");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_1,DGW_TEXT,"CSLEGEND","SUBTITLE");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_2,DGW_TEXT,"CSLEGEND","X");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_3,DGW_TEXT,"CSLEGEND","Y");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_4,DGW_FILEPATH, "CSLEGEND","FILE");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_5,DGW_TEXT,"CSLEGEND","FONTSIZE");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_6,DGW_LISTALIAS,"CSLEGEND","SYMBOL");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_7,DGW_LISTALIAS,"CSLEGEND","SYMBWT");
+      GetInfoSYS_DGW(Diag,_CSLEGEND_8,DGW_TEXT,"CSLEGEND","EDGECOL");
+
+      // --- Get the coordinates of a user selected box ---
+
+   }
+
+   // --- Get Parameters ---
+
+   rX1  = rGetReal_SYS("CSLEGEND","X");
+   rY1  = rGetReal_SYS("CSLEGEND","Y");
+
+   GetString_SYS("CSLEGEND","TITLE",sTitle);
+   GetString_SYS("CSLEGEND","SUBTITLE",sSubTitle);
+
+   // --- Get the Name of the AGG, ITR or ZON file ---    
+
+   GetString_SYS("CSLEGEND","FILE",sFile);
+   iLen = iStrlen_STR(sFile);
+   if(iLen==0) {
+      Abort_SYS(_("No AGG, ITR or ZON file specified"));
+   }
+   
+   Substr_STR(sExt,sFile,iLen-3,3);
+   iType = -1;
+   if(!iStrcmp_STR(sExt,"itr",STR_CASE_TOLERANT))
+      iType = 0;
+   else if(!iStrcmp_STR(sExt,"agg",STR_CASE_TOLERANT))
+      iType = 1;
+   else if(!iStrcmp_STR(sExt,"zon",STR_CASE_TOLERANT))
+      iType = 2;
+
+   if(iType == -1) {
+      Abort_SYS(_("The Colour Mapping file must be one of the following types: ITR, AGG, or ZON"));      
+   }
+
+   rFontSize = rGetReal_SYS("CSLEGEND","FONTSIZE");
+   if(rFontSize<=0.0) {
+      Abort_SYS(_("The font size in mm must be > 0.0"));
+   }
+
+   iSymb = iGetInt_SYS("CSLEGEND","SYMBOL");    
+   iSymbWeight = iGetInt_SYS("CSLEGEND","SYMBWT");    
+   GetString_SYS("CSLEGEND","EDGECOL",sColor);
+
+	if(iSymbWeight==iDUMMY) iSymbWeight = MVIEW_FONT_WEIGHT_MEDIUM;
+
+
+   // --- get the map ---
+
+   Map  = Lock_EMAP(EMap);
+
+
+   // --- Create a view ---
+
+   View = Create_MVIEW(Map,"base",MVIEW_WRITEOLD);
+   
+
+   // --- Set a title group ---
+
+   GenGroupName_STR("CSLEG",sTitle,"",sGroup);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   
+
+   // --- add the maker ---
+
+   Maker_MVIEW(View,0,1,"CSLEGEND",MAKER_GX,_("CSymbol Legend..."),"CSLEGEND;");
+
+   // --- set default font characteristics --- 
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Arial"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,C_BLACK);
+
+   // --- Set symbol ---
+   // --- If the REG in an ITR file contains all the symbol information,
+   //     the following values will be superceded. ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("symbols"));
+   SymbFont_MVIEW(View,sFont,TRUE,iSymbWeight,FALSE);
+   SymbNumber_MVIEW(View,iSymb);
+   SymbColor_MVIEW(View,iColor_MVIEW(sColor));
+   SymbAngle_MVIEW(View,0.0);
+
+   // --- The following scale variable will only be used if the symbol
+   //     info is contained an ITR REG. ---
+
+   rSymbScale = 1.0;
+
+   // --- Draw the legend ---
+
+   CSymbLegend_MVU(View, rX1, rY1, rFontSize, rSymbScale,
+                   sFile, sTitle, sSubTitle);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+
+   // --- Release the map ---
+
+   UnLock_EMAP(EMap);
+
+}

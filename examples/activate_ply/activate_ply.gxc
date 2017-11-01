@@ -1,0 +1,168 @@
+//===========================================================================
+NAME          = "Activate a PLY from a meta"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Polygon"
+
+DESCRIPTION   = "Activate a PLY from a meta."
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+PLY      hPLY;
+SBF      hSBF;
+BF       hBF;
+IPJ      hIPJ;
+EMAP     eMAP;
+MAP      hMAP;
+MVIEW    View;
+
+string(STR_FILE) sPLY,sMap,sGrpName;
+int iNew,i;
+real rMinX,rMaxX,rMinY,rMaxY,rScale;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- get PLY ---
+
+   hSBF = hGetSYS_SBF();
+   if (iExistFile_SBF(hSBF,"_activate_ply.pply")) {
+
+      // --- get PLY from file ---
+   
+      hBF = CreateSBF_BF(hSBF,"_activate_ply.pply",BF_READ);
+      hPLY = CreateS_PLY(hBF);
+      DestroyEx_BF(hBF);
+
+   } else {
+    
+      Abort_SYS(_("No PLY to activate."));
+      
+   }      
+
+   // --- get the polygon description ---
+         
+   GetDescription_PLY(hPLY,sPLY);
+   if (iStrlen_STR(sPLY) == 0)
+      Strcpy_STR(sPLY,_n("polygons"));
+   
+
+   // --- if have a current map, draw it there ---
+   
+   if (iHaveCurrent_EMAP()) {
+   
+      if (iInteractive_SYS())
+      {
+         // --- Ask Question ---
+
+         i = iDisplayQuestionWithCancel_SYS(_("Draw polygon(s)"),_("Draw polygon(s) on current map?  Select [No] to display polygons on a new map."));
+
+         // --- Was it cancel ? ---
+
+         if (i==2) Cancel_SYS();
+
+
+         // --- Was it new ? ---
+
+         if (i==0)
+            iNew = TRUE;
+         else 
+            iNew = FALSE;
+
+      } else
+         iNew = FALSE;   
+         
+   } else
+      iNew = TRUE;
+      
+      
+   // --- create a new map ---
+   
+   if (iNew) {
+   
+      // --- create a new map to hold the data ---
+
+      Extent_PLY(hPLY,rMinX,rMinY,rMaxX,rMaxY);
+      SetReal_SYS("XYRANGE","MIN_X",rMinX);
+      SetReal_SYS("XYRANGE","MIN_Y",rMinY);
+      SetReal_SYS("XYRANGE","MAX_X",rMaxX);
+      SetReal_SYS("XYRANGE","MAX_Y",rMaxY);
+      
+      hIPJ = Create_IPJ();
+      GetIPJ_PLY(hPLY,hIPJ);
+      hSBF = hGetSYS_SBF();
+      hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READWRITE_NEW);
+      Serial_IPJ(hIPJ,hBF);
+      DestroyEx_BF(hBF);
+      Destroy_SBF(hSBF);
+      
+      
+      // --- create a unique map name ---
+            
+      Strcpy_STR(sMap,"_");
+      Strcat_STR(sMap,sPLY);
+      if (iValidFileName_SYS(sMap) == FALSE)
+         Strcpy_STR(sMap,_n("_polygons"));
+      FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);         
+         
+         
+      // --- delete existing map ---
+      
+      if (iFileExist_SYS(sMap))
+         iDeleteFile_SYS(sMap);       
+         
+            
+      // --- run DEFMAP ---
+      
+      SetString_SYS("DEFMAP","MAP",sMap);
+      if (iRunGX_SYS("defmap.gx")) Cancel_SYS();
+      
+   }
+   
+
+   // --- get the map ---
+      
+   eMAP = Current_EMAP();
+   hMAP = Lock_EMAP(eMAP);
+   
+   
+   // --- start a group ---
+   
+   View = Create_MVIEW(hMAP,"*data",MVIEW_WRITEOLD);
+   GenGroupName_STR("PLY",sPLY,"",sGrpName);
+   StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+
+
+	// --- set drawing attributes ---
+
+   rScale = rScaleMM_MVIEW(View);
+   LineStyle_MVIEW(View,0,0.0);
+   LineThick_MVIEW(View,0.25*rScale);
+   LineColor_MVIEW(View,iColor_MVIEW("K"));
+   FillColor_MVIEW(View,iColor_MVIEW("C128"));
+   SetGroupTransparency_MVIEW(View,sGrpName,0.5);
+
+
+   // --- draw polygon ---
+   
+   PolygonPLY_MVIEW(View,hPLY);
+
+
+   // --- done ---
+      
+   Destroy_SYS(View);
+   UnLock_EMAP(eMAP);
+   Redraw_EMAP(eMAP);
+   
+}

@@ -1,0 +1,166 @@
+//===========================================================================
+NAME          = "Calculate the polygonal area of a group"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+     GROUPAREA.GROUP    - Group name
+"
+// Revision History
+// 6.0.0: Upgraded to work with oriented sections.
+// 5.1.6: Using (correct) GX function for polygon area.
+//===========================================================================
+
+RESOURCE = "grouparea.gr"
+#include "grouparea.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_VIEW_GROUP) sViewGroup;
+string(STR_VIEW) sView;
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT) sMsg,sArea;
+
+DGW         hDGW;
+PLY         hPLY;
+EMAP        EMap;
+MAP   		hMAP;
+MVIEW 		View;
+LST         hLST; 
+IPJ         hIPJ, hUserIPJ;
+int         i, iOrient;   
+
+//===========================================================================
+//                           DIGITS CODE
+//===========================================================================
+
+{
+
+   if (!iInteractive_SYS())
+      Abort_SYS(_("This GX must be run interactively"));
+      
+	// --- get current map ---
+
+   EMap  = Current_EMAP();
+   hMAP = Lock_EMAP(EMap);
+
+
+   // --- Create the Dialogue ---
+
+   hDGW = Create_DGW("GROUPAREA");
+
+   hLST = GetList_DGW(hDGW,_GROUPAREA_0);
+   GroupList_MAP(hMAP,hLST);
+   Sort_LST(hLST,0,0);
+
+
+   // --- Set any Defaults from INI ---
+
+   SetInfoSYS_DGW(hDGW,_GROUPAREA_0,DGW_TEXT,"GROUPAREA","GROUP");     
+
+
+   // --- Run the Dialogue ---
+
+   i = iRunDialogue_DGW(hDGW);
+   if (i == -1) Cancel_SYS(); 
+
+   GetInfoSYS_DGW(hDGW,_GROUPAREA_0,DGW_TEXT,"GROUPAREA","GROUP");     
+
+   Destroy_DGW(hDGW);
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GROUPAREA","GROUP",sViewGroup);
+
+
+   // --- Create the Polygon ---
+
+   hPLY = Create_PLY();
+
+
+   // --- view and group name setting ---
+
+   i = iTokens_STR(sViewGroup,"\\");
+   GetToken_STR(sView,sViewGroup,0);
+   GetToken_STR(sGroup,sViewGroup,1);
+   
+
+   // --- get view and polygons ---
+
+   View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+   
+   
+   // --- get the various projections ---
+   
+   hIPJ = Create_IPJ();
+   hUserIPJ = Create_IPJ();
+   
+   GetIPJ_MVIEW(View,hIPJ);
+   GetUserIPJ_MVIEW(View,hUserIPJ);
+
+   Destroy_SYS(View);
+   
+   
+   // --- If this is an oriented section, you must use the native view
+   //     projection, otherwise, one dimension ("Z") is lost because only the
+   //     true "X" and "Y" values are recovered from UserIPJ. This means the
+   //     PLY would collapse to a line.  ---
+   
+   iOrient = iGetOrientation_IPJ(hIPJ);
+   if(iOrient == IPJ_ORIENT_SECTION) {   
+   
+      // --- Must clear the orientation first ---
+      
+      ClearOrientation_IPJ(hIPJ);
+        
+      View = Create_MVIEW(hMAP,sView,MVIEW_WRITEOLD);
+      SetUserIPJ_MVIEW(View, hIPJ);
+      Destroy_MVIEW(View);
+   }   
+   
+   View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+   GroupToPLY_MVIEW(View,sGroup,hPLY);
+   Destroy_SYS(View);
+   
+   
+   // --- Reset everything ---
+   
+   if(iOrient == IPJ_ORIENT_SECTION) {
+      View = Create_MVIEW(hMAP,"*Data",MVIEW_WRITEOLD);
+      SetUserIPJ_MVIEW(View, hUserIPJ);
+      Destroy_MVIEW(View);
+   }      
+   
+   
+
+   //--- display the group area ---
+
+   FormatReal_STR(rArea_PLY(hPLY),sArea,FORMAT_SIG_DIG,13,8);
+   
+   Printf_STR(sMsg, sizeof(sMsg), _("<%s> group area is: %s"), sGroup, sArea);
+   DisplayMessage_SYS(_("Group polygonal area"),sMsg);
+
+
+   // --- done ---
+
+   Destroy_PLY(hPLY);
+   Destroy_IPJ(hIPJ);
+   Destroy_IPJ(hUserIPJ);
+   
+
+   // --- Release the map ---
+
+   UnLock_EMAP(EMap);
+   
+}

@@ -1,0 +1,130 @@
+//===========================================================================
+NAME          = "Import ODDF Express data"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Import ODDF Express Binary Format data.
+
+     IMPODDF.DATA  : Input data file name
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/USGS"
+
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "impoddf.gr"
+#include "impoddf.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+
+int         i;                // Utility 
+
+string(STR_FILE) sData;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IMPODDFForm");
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IMPODDFFORM_0,DGW_FILEPATH,"IMPODDF","DATA");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IMPODDFFORM_0,DGW_FILEPATH,"IMPODDF","DATA");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+   
+   // --- get the database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IMPODDF","DATA",sData);
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import ODDF File"),1);
+   
+
+   // --- import ---
+
+   ImportODDF_DU(Data,sData);
+   
+
+   // --- get current X, Y channels ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+   
+   // --- unlock ---
+
+   UnLock_EDB(EData);
+   
+   
+   // --- delete line 0 ---
+
+   DelLine0_EDB(EData);
+   LoadChan_EDB(EData,"ID");
+   LoadChan_EDB(EData,sXCh);
+   LoadChan_EDB(EData,sYCh);
+   LoadAllChans_EDB(EData);
+   
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+   
+}

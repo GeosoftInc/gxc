@@ -1,0 +1,180 @@
+//===========================================================================
+NAME          = "Select/Deselect lines by type"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Select or de-select all lines of a given type.
+
+   SELTYPE.LINE      Line Type
+          .OPTION    \"Select\" 
+                     \"Deselect\"
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Line/Selections"
+
+// Revision History
+// v5.1.5 New GX
+//===========================================================================
+
+RESOURCE = "SELTYPE.gr"
+#include "SELTYPE.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DGW         Diag;
+LST         List, LineLST;
+DB_SYMB     Line, DisplayedLine;
+
+string(STR_DEFAULT_SHORT) sOpt, sType;
+int i, iN, iType, iFirstType;
+int(7) iLineTypes;
+
+//===========================================================================
+//                             XLEVEL CODE
+//===========================================================================
+
+{
+
+   // --- get current line and database ---
+      
+   EData = Current_EDB();
+
+	if(iInteractive_SYS() == 1)
+		DisplayedLine = GetCurLineSymb_EDB(EData);
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SELTYPE");
+
+
+		// --- Add line types ---
+
+		List = GetList_DGW(Diag,_SELTYPE_0);
+		LineLST = Create_LST(128);
+		LineLST_DB(Data, LineLST);
+
+		for(i=0; i<6; i++)
+			iLineTypes[i] = 0;
+
+		iFirstType = -1;
+		iN = iSize_LST(LineLST);
+		for(i=0; i<iN; i++)
+		{
+			Line = (DB_SYMB)iGetInt_LST(LineLST, LST_ITEM_VALUE, i);
+			LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+			if(iLineCategory_DB(Data, Line) == DB_CATEGORY_LINE_FLIGHT)
+			{
+				iType = iLineType_DB(Data, Line);
+				iLineTypes[iType] = 1;
+
+				if (Line == DisplayedLine)
+					iFirstType = iType;
+			}
+			UnLockSymb_DB(Data, Line);
+		}
+
+		if (iLineTypes[0] == 1)
+			AddItem_LST(List, _("L: Normal"), _n("L"));
+		if (iLineTypes[1] == 1)
+			AddItem_LST(List, _("B: Base"), _n("B"));
+		if (iLineTypes[2] == 1)
+			AddItem_LST(List, _("T: Tie"), _n("T"));
+		if (iLineTypes[3] == 1)
+			AddItem_LST(List, _("S: Test"), _n("S"));
+		if (iLineTypes[4] == 1)
+			AddItem_LST(List, _("R: Trend"), _n("R"));
+		if (iLineTypes[5] == 1)
+			AddItem_LST(List, _("P: Special"), _n("P"));
+		if (iLineTypes[6] == 1)
+			AddItem_LST(List, _("D: Random"), _n("D"));
+
+
+		// --- If there is just one type, select it ---
+
+		if (iSize_LST(List) == 1)
+		{
+			GetItem_LST(List, LST_ITEM_VALUE, 0, sType);
+			SetString_SYS("SELTYPE","TYPE",sType);
+		}
+		else
+		{
+			// --- Set to the selected line's type ---
+
+			if (iFirstType != -1)
+			{
+				if (iFirstType == 0)
+					Strcpy_STR(sType,_n("L"));
+				else if (iFirstType == 1)
+					Strcpy_STR(sType,_n("B"));
+				else if (iFirstType == 2)
+					Strcpy_STR(sType,_n("T"));
+				else if (iFirstType == 3)
+					Strcpy_STR(sType,_n("S"));
+				else if (iFirstType == 4)
+					Strcpy_STR(sType,_n("R"));
+				else if (iFirstType == 5)
+					Strcpy_STR(sType,_n("P"));
+				else if (iFirstType == 6)
+					Strcpy_STR(sType,_n("D"));		
+					
+				SetString_SYS("SELTYPE", "TYPE", sType);		
+			}
+		}
+      
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_SELTYPE_0,DGW_LISTALIAS,"SELTYPE","TYPE");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 0)
+         SetString_SYS("SELTYPE","OPTION","Select");
+      else if (i == 1)
+         SetString_SYS("SELTYPE","OPTION","Deselect");
+      else   
+         Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_SELTYPE_0,DGW_LISTALIAS,"SELTYPE","TYPE");
+   }
+
+
+   // --- get parameters ---
+
+   GetString_SYS("SELTYPE","TYPE",sType);
+   GetString_SYS("SELTYPE","OPTION",sOpt);
+   
+   ToUpper_STR(sOpt);
+
+   if (iCharComp_STR(sOpt,"D"))
+      Select_DB(Data,sType,DB_LINE_SELECT_EXCLUDE);
+   else
+      Select_DB(Data,sType,DB_LINE_SELECT_INCLUDE);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

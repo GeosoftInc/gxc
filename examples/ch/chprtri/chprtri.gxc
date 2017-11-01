@@ -1,0 +1,596 @@
+//===========================================================================
+NAME          = "Print Triplot on Map"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+          
+           Interactive/Batch Parameters:
+             
+       CHPRTRI.TITLE       TriPlot Title
+              .WIDTH       Triangle side length (mm)
+              .X           X location of bottom left corner of boxes
+              .Y           Y location of bottom left corner of boxes
+
+           Additional Batch parameters: 
+
+              .DB          Database
+
+              .XCHAN       X Channel/Expression
+              .YCHAN       Y Channel/Expression
+              .ZCHAN       Z Channel/Expression
+              .MCHAN       Channel to use as mask for data selection
+              .CCHAN       Channel to use for colour reference (numeric)
+              .SCHAN       Channel to use for classified symbols (string)
+              .ITR         Colour zone file
+
+              .COLTYPE     0: Use SYMCOL value for symbol colour
+                           1: Use ITR and CCHAN values for symbol colour
+                           2: Use CLASSCHAN values for classified symbols
+              
+				  .SYMFONT     Symbol font (Default: GFN Symbols Medium)
+				  .SYMBNUMBER  Symbol number (Default 4 - square in GFN Symbols)
+              .SYMSIZE     Size of plotted symbols in mm.
+              .SYMANGLE    Symbol rotation angle degrees CCW.
+              .SYMCOL      Colour of the fixed colour symbols.
+              .SYMFILL     Fill Colour of the fixed colour symbols.
+              .MASKCOL     Colour of the mask channel symbols.
+
+              .GRID        Plot lines (1) or tics (0).
+              .GRIDINC     Grid/Tic increment
+              
+              .OVERLAY     Name of plot overlay (\"\" for none)
+              .TEMPLATE    Name of plot template (must be set each time).
+              
+				  .FIXZONEEDGECOLOR  Maintain the edge colour, just vary the fill for zone-coloured symbols
+				  .CLASS_FILE  Symbol class (thematic pattern) CSV file.
+              
+              .NEWMAP  : 0: Plot to current map 1: Plot to new map
+              .XPOS    : Bottom left corner
+              .YPOS    : Bottom left corner           
+                 
+"
+// Revision History:
+// v8.1.0: Added symbol font, number and angle as non-interactive parameters
+// v8.1.0: Classified symbols now use a class file.
+// v6.4.2: Fixed bug with bad characters in view names.
+// v6.4.0: Upgraded to accept channel expressions.
+// v6.3.0: Now creates its own view with user warp to give true X,Y values.
+//         Plots to a new or current map.
+//         Passes in Line-Fid info for linking.
+//         Added ITR colouring, plot overlay, classified symbols
+//         Removed range variables and plotting.
+// v6.0.0: Make map current active object.
+//         Fix locking problems with locate function.
+// v5.1.6: Mask channel colour option added.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE="chprtri.gr"
+#include "chprtri.grh"
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EMAP      EMap;
+MAP       Map;
+MVIEW     View;
+EDB       EData;
+DGW       Diag;       // Dialogue handle
+DB        Data;        // Database handle
+DB_SYMB   MCh, CCh, SCh, Line;
+VV        hX_VV, hY_VV, hZ_VV, hMask_VV, hColor_VV, hClass_VV;
+VV        hTmpX_VV, hTmpY_VV, hTmpZ_VV, hTmpM_VV, hTmpC_VV, hTmpS_VV;
+VV        hLine_VV, hFid_VV, hVVt;
+ITR       hITR;
+IPJ       hIPJ;
+
+string(STR_DB_SYMBOL) sXExp, sYExp, sZExp, sMChan, sCChan, sSChan;
+string(STR_DEFAULT) sTitle, sOverlay, sTemplate, sStage;
+string(STR_FILE) sDB, sMap;
+string(STR_DEFAULT_LONG) sLabel,sTemp,sMsg;
+string(STR_FILE) sITR, sSymFont, sClassFile;
+string(STR_VIEW) sViewName;
+string(STR_VIEW_GROUP) sGrpName;
+real      rX1, rY1, rWidth, rHeight, rGridInc, rTic, rFidStart, rFidIncr;
+real      rSymbolSize, rSymbolAngle, rBoxH, rBoxW;
+real      rScaleXMM, rScaleYMM, rX, rY, rXPos, rYPos;
+int       i, iMaskChan, iLine, iTotLines, iN, iN2, iGrid, iNewMap;
+int       iMaskCol, iSymbCol, iSymbFill, iSymNum, iColType;
+int       iUseClassFile, iFixZoneEdgeColor;
+
+//===========================================================================
+//                            TRIPLOT UTIL CODE
+//===========================================================================
+
+{
+   // --- Get Database ---
+
+   GetString_SYS("CHPRTRI","DB",sDB);
+   EData = Load_EDB(sDB);
+   Data = Lock_EDB(EData);
+   
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHPRTRI");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CHPRTRI_0,DGW_TEXT,"CHPRTRI","TITLE");
+      SetInfoSYS_DGW(Diag,_CHPRTRI_1,DGW_TEXT,"CHPRTRI","WIDTH");
+      SetInfoSYS_DGW(Diag,_CHPRTRI_2,DGW_TEXT,"CHPRTRI","SYMSIZE");
+      SetInfoSYS_DGW(Diag,_CHPRTRI_3,DGW_LISTALIAS,"CHPRTRI","NEWMAP");
+
+      i = iRunDialogue_DGW(Diag);
+      if(i==-1)   Cancel_SYS(); 
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CHPRTRI_0,DGW_TEXT,"CHPRTRI","TITLE");
+      GetInfoSYS_DGW(Diag,_CHPRTRI_1,DGW_TEXT,"CHPRTRI","WIDTH");
+      GetInfoSYS_DGW(Diag,_CHPRTRI_2,DGW_TEXT,"CHPRTRI","SYMSIZE");
+      GetInfoSYS_DGW(Diag,_CHPRTRI_3,DGW_LISTALIAS,"CHPRTRI","NEWMAP");
+
+   }
+
+   // --- Get Dialog Parameters ---
+
+   GetString_SYS("CHPRTRI","TITLE",sTitle);
+
+   rWidth   = rGetReal_SYS("CHPRTRI","WIDTH");
+   rHeight = rWidth;
+   rX1  = 0.0;
+   rY1  = 0.0;
+   rSymbolSize = rGetReal_SYS("CHPRTRI","SYMSIZE");
+   iNewMap = iGetInt_SYS("CHPRTRI", "NEWMAP");
+   if(iNewMap!=1) iNewMap = 0;
+
+
+   // --- Validate parameters ---
+
+   if (rWidth <= 0.0)
+      Abort_SYS(_("Triplot plot size (width and height) must be greater than 0.0"));
+   if(rSymbolSize<=0.0)
+      rSymbolSize = 2.0;
+
+
+   // --- Get Non-Dialog Parameters ---
+
+   GetString_SYS("CHPRTRI","XCHAN",sXExp);
+   GetString_SYS("CHPRTRI","YCHAN",sYExp);
+   GetString_SYS("CHPRTRI","ZCHAN",sZExp);
+   GetString_SYS("CHPRTRI","MCHAN",sMChan);
+   GetString_SYS("CHPRTRI","CCHAN",sCChan);
+   GetString_SYS("CHPRTRI","SCHAN",sSChan);
+   
+   GetString_SYS("CHPRTRI","ITR",sITR);
+   iMaskCol = iGetInt_SYS("CHPRTRI","MASKCOL");
+   if(iMaskCol==iDUMMY) iMaskCol = iColor_MVIEW("R191G191B191");  // default gray
+   iSymbCol = iGetInt_SYS("CHPRTRI","SYMCOL");
+   if(iSymbCol==iDUMMY) iSymbCol = iColor_MVIEW("R");  // default red
+
+   iColType = iGetInt_SYS("CHPRTRI","COLTYPE");
+   
+   iGrid = iGetInt_SYS("CHPRTRI","GRID");
+   rTic  = rGetReal_SYS("CHPRTRI","TIC");
+   rGridInc = rGetReal_SYS("CHPRTRI","GRIDINC");
+
+   GetString_SYS("CHPRTRI","OVERLAY",sOverlay);
+   
+	iUseClassFile = 0;
+   GetString_SYS("CHPRTRI","CLASSFILE",sClassFile);
+	if(iStrlen_STR(sClassFile) && iFileExist_SYS(sClassFile)==1)
+		iUseClassFile = 1;
+	SetString_SYS("CHPRTRI","CLASSFILE", "");	// force setting every time
+
+	iFixZoneEdgeColor = iGetInt_SYS("CHPRTRI", "FIXZONEEDGECOLOR");
+	if(iFixZoneEdgeColor != 0)
+		iFixZoneEdgeColor = 1;
+
+
+	// --- Non-interactive symbol parameters - must define each time ---
+
+	GetString_SYS("CHPRTRI", "SYMFONT", sSymFont);
+	SetString_SYS("CHPRTRI", "SYMFONT", "");
+
+	iSymNum = iGetInt_SYS("CHPRTRI","SYMNUMBER");
+	if(iSymNum == iDUMMY) iSymNum = 4;
+	SetInt_SYS("CHPRTRI","SYMNUMBER", 4);
+
+	rSymbolAngle = rGetReal_SYS("CHPRTRI","SYMANGLE");
+	if(rSymbolAngle == rDUMMY) rSymbolAngle = 0.0;
+	SetReal_SYS("CHPRTRI","SYMANGLE", 0.0);
+
+   iSymbFill = iGetInt_SYS("CHPRTRI","SYMFILL");
+   if(iSymbFill==iDUMMY) iSymbFill = iSymbCol;  // default same as the symbol colour
+	SetInt_SYS("CHPRTRI","SYMFILL", iDUMMY);
+
+
+   // --- Get template name, if defined ---
+   
+   GetString_SYS("CHPRTRI", "TEMPLATE", sTemplate);
+   SetString_SYS("CHPRTRI", "TEMPLATE", "");      // must set every time
+
+
+   // -- Data stage is "Raw Data" for now ---
+   
+   Strcpy_STR(sStage, _n("Raw Data Stage"));
+   
+
+   // --- Lock the channels ---
+   
+   if (iStrcmp_STR(sMChan,_("None"),STR_CASE_TOLERANT) == 0)
+      
+      iMaskChan = 0;  // no mask channel
+   else   
+      iMaskChan = 1;    // use a mask channel
+
+   if(iMaskChan) {
+      if (!iExistChan_DB(Data,sMChan))  
+         Abort_SYS(_("Input Mask channel does not exist."));
+      MCh = FindChan_DB(Data,sMChan);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
+
+
+   if(iColType==1)
+   {
+      if(!iStrlen_STR(sCChan))
+         Abort_SYS(_("Zone channel not defined."));
+      if(!iStrlen_STR(sITR))
+         Abort_SYS(_("Zone file not defined."));
+
+      if (!iExistChan_DB(Data,sCChan))  
+         Abort_SYS(_("Input Color reference channel does not exist."));
+      CCh = FindChan_DB(Data,sCChan);
+      LockSymb_DB(Data,CCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);      
+         
+      hITR = CreateFile_ITR(sITR);
+   }
+   else if(iColType==2)
+   {
+      if(!iStrlen_STR(sSChan))
+         Abort_SYS(_("Classification channel not defined."));   
+         
+      SCh = FindChan_DB(Data,sSChan);
+      LockSymb_DB(Data,SCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);               
+   }
+
+
+   // --- Plotting to current map? Get plot location ---
+   
+   if(iNewMap==0)
+   {   
+      // --- Get the current map ---
+      
+      EMap = Current_EMAP();
+   
+      if(iInteractive_SYS())
+      {
+         i = 1;
+         while(i!=0)
+         {
+            
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("CHPRTRI2");
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(Diag,_CHPRTRI2_0,DGW_TEXT,"CHPRTRI","XPOS");
+            SetInfoSYS_DGW(Diag,_CHPRTRI2_1,DGW_TEXT,"CHPRTRI","YPOS");
+
+            i = iRunDialogue_DGW(Diag);
+            if(i==-1)   Cancel_SYS(); 
+
+            // --- Put values back in INI ---
+
+            GetInfoSYS_DGW(Diag,_CHPRTRI2_0,DGW_TEXT,"CHPRTRI","XPOS");
+            GetInfoSYS_DGW(Diag,_CHPRTRI2_1,DGW_TEXT,"CHPRTRI","YPOS");
+            
+            Destroy_DGW(Diag);
+            
+            if(i==1)
+            {
+               iSetCurrentView_EMAP(EMap, "*Base");
+               if(iGetPoint_EMAP(EMap, _("Select location of bottom left corner for plot legend"), rXPos, rYPos)) Cancel_SYS();
+               
+               SetReal_SYS("CHPRTRI","XPOS", rXPos);  
+               SetReal_SYS("CHPRTRI","YPOS", rYPos);
+            }
+         }
+      }
+      
+      rX1 = rGetReal_SYS("CHPRTRI","XPOS");
+      rY1 = rGetReal_SYS("CHPRTRI","YPOS");
+      if(rX1==rDUMMY) rX1 = 10.0;
+      if(rY1==rDUMMY) rY1 = 10.0;
+   }
+
+
+   // --- Prepare to do the work ---
+
+   hX_VV  = Create_VV(REAL,0);
+   hY_VV  = Create_VV(REAL,0);
+   hZ_VV  = Create_VV(REAL,0);
+   hMask_VV  = Create_VV(INT,0);
+   hColor_VV = Create_VV(REAL,0);
+   hClass_VV = Create_VV(-64,0);
+   hTmpX_VV  = Create_VV(REAL,0);
+   hTmpY_VV  = Create_VV(REAL,0);
+   hTmpZ_VV  = Create_VV(REAL,0);
+   hTmpM_VV  = Create_VV(REAL,0);
+   hTmpC_VV  = Create_VV(REAL,0);
+   hTmpS_VV  = Create_VV(-64,0);
+   hLine_VV = Create_VV(INT, 0);
+   hFid_VV = Create_VV(REAL, 0);
+   hVVt = Create_VV(REAL, 2);
+
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS(_("Reading Data"),1);
+   iLine = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Reading data on line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+
+      // --- get data ---
+
+      GetExpressionDataVV_CHIMERA(Data,Line,sStage,sXExp,sTemplate,hTmpX_VV);
+      GetExpressionDataVV_CHIMERA(Data,Line,sStage,sYExp,sTemplate,hTmpY_VV);
+      GetExpressionDataVV_CHIMERA(Data,Line,sStage,sZExp,sTemplate,hTmpZ_VV);
+      ReFidVV_VV(hTmpY_VV,hTmpX_VV);
+      ReFidVV_VV(hTmpZ_VV,hTmpX_VV);
+
+      iN = iLength_VV(hX_VV);
+      iN2 = iLength_VV(hTmpX_VV);
+
+      Append_VV(hX_VV, hTmpX_VV);
+      Append_VV(hY_VV, hTmpY_VV);
+      Append_VV(hZ_VV, hTmpZ_VV);
+
+      if(iMaskChan) {
+         GetChanVV_DB(Data,Line,MCh,hTmpM_VV);
+         ReFidVV_VV(hTmpM_VV,hTmpX_VV);
+         Append_VV(hMask_VV, hTmpM_VV);
+      }
+
+      if(iColType==1) {
+         GetChanVV_DB(Data,Line,CCh,hTmpC_VV);
+         ReFidVV_VV(hTmpC_VV,hTmpX_VV);
+         Append_VV(hColor_VV, hTmpC_VV);
+      }
+      else if(iColType==2) {
+         GetChanVV_DB(Data,Line,SCh,hTmpS_VV);
+         ReFidVV_VV(hTmpS_VV,hTmpX_VV);
+         Append_VV(hClass_VV, hTmpS_VV);      
+      }
+      
+
+      // --- Update the Line and Fid info ---
+      
+      SetLen_VV(hLine_VV, iN+iN2);
+      SetIntN_VV(hLine_VV, iN, iN2, (int)Line);
+
+      rFidStart = rGetFidStart_VV(hTmpX_VV);
+      rFidIncr = rGetFidIncr_VV(hTmpX_VV);
+
+
+		if(rFidStart == rDUMMY) rFidStart = 0.0;
+		if(rFidIncr == rDUMMY) rFidIncr = 1.0;
+		
+		SetReal_VV(hVVt, 0, rFidStart);      
+      SetReal_VV(hVVt, 1, rFidIncr);      
+      PolyFill_VVU(hTmpX_VV, 1, hVVt);
+      Append_VV(hFid_VV, hTmpX_VV);
+      
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   ProgUpdate_SYS(100);
+
+   // --- If there is no mask channel, fill the mask VV with 1.0 --
+   
+   iN = iLength_VV(hX_VV);
+   if(!iMaskChan) {
+      SetRealN_VV(hMask_VV, 0, iLength_VV(hX_VV), 1.0);      
+   }
+
+
+   // --- Set the symbol number ---
+
+   iSymNum = 4;      // box
+
+
+   // --- Create a new map ---
+   
+   if(iNewMap==1)
+   {   
+      if(iStrlen_STR(sTemplate))
+      {
+         Strcpy_STR(sMap, sTemplate);
+         FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);
+      }
+      else
+      {
+         Strcpy_STR(sMap, "Triplot_");
+         Strcat_STR(sMap, sXExp);
+         Strcat_STR(sMap, "_");
+         Strcat_STR(sMap, sYExp);
+         Strcat_STR(sMap, "_");
+         Strcat_STR(sMap, sZExp);
+         Strcat_STR(sMap, ".map");
+         ReplaceChar_STR(sMap, "/", "_");
+         ReplaceChar_STR(sMap, "+", "_");
+         ReplaceChar_STR(sMap, "*", "_");         
+      }
+      
+      if(iFileExist_SYS(sMap))
+      {
+         if(iLoaded_EMAP(sMap))
+            UnLoad_EMAP(sMap);
+         if(iDeleteFile_SYS(sMap))
+         {
+            Printf_STR(sMsg, sizeof(sMsg), _("Unable to delete existing file %s."), sMap);
+            Abort_SYS(sMsg);
+         }
+      }
+      Map = Create_MAP(sMap, MAP_WRITENEW);
+   }
+   else
+      Map = Lock_EMAP(EMap);
+         
+   
+   // --- Create a new data view ---
+  
+   if(iStrlen_STR(sTemplate))
+   {
+      Strcpy_STR(sViewName, sTemplate);
+   }
+   else
+   {
+      Strcpy_STR(sViewName, "Triplot_");
+      Strcat_STR(sViewName, sXExp);
+      Strcat_STR(sViewName, "_");
+      Strcat_STR(sViewName, sYExp);
+      Strcat_STR(sViewName, "_");
+      Strcat_STR(sViewName, sZExp);
+      ReplaceChar_STR(sViewName, "/", "_");
+      ReplaceChar_STR(sViewName, "+", "_");
+      ReplaceChar_STR(sViewName, "*", "_");         
+   }
+   
+   View = Create_MVIEW(Map,sViewName,MVIEW_WRITENEW);
+
+
+   // --- Draw TriPlot ---
+
+   Strcpy_STR(sSymFont, "");  // use the default
+
+	if(iColType==0)
+	{
+	   FixedSymbolTriPlot_CHIMERA(View, sTitle, rX1, rY1, rWidth,      
+               hX_VV, hY_VV, hZ_VV, hMask_VV, iMaskCol,
+					sSymFont, iSymNum, rSymbolSize, rSymbolAngle, iSymbCol, iSymbFill, 
+               Data, hLine_VV, hFid_VV,     
+               sXExp, sYExp, sZExp,
+               iGrid, rTic, rGridInc, sOverlay); 		}
+	else if(iColType == 1)
+	{
+	   ZoneColouredTriPlot_CHIMERA(View, sTitle, rX1, rY1, rWidth,      
+               hX_VV, hY_VV, hZ_VV, hMask_VV, iMaskCol,
+					hColor_VV, sITR,
+					sSymFont, iSymNum, rSymbolSize, rSymbolAngle, iSymbCol, iSymbFill, iFixZoneEdgeColor,
+               Data, hLine_VV, hFid_VV,     
+               sXExp, sYExp, sZExp,
+               iGrid, rTic, rGridInc, sOverlay); 	
+	}
+	else
+	{
+	   StringClassifiedTriPlot_CHIMERA(View, sTitle, rX1, rY1, rWidth,      
+               hX_VV, hY_VV, hZ_VV, hMask_VV, iMaskCol,
+               hClass_VV, sClassFile, rSymbolSize,
+               Data, hLine_VV, hFid_VV,     
+               sXExp, sYExp, sZExp,
+               iGrid, rTic, rGridInc, sOverlay); 	
+	}
+
+
+   // --- Draw colour bar ---
+   
+   rScaleXMM = rScaleMM_MVIEW(View);
+   rScaleYMM = rScaleYMM_MVIEW(View);
+   if(iColType==1) 
+   {
+      
+      // --- Clear the User IPJ ---
+      
+      hIPJ = Create_IPJ();
+      SetWorkingIPJ_MVIEW(View, hIPJ);
+      
+      GenGroupName_STR("COLORBAR",sCChan,"",sGrpName);
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+      
+      rBoxH = rWidth*rScaleYMM / (real)(iGetSize_ITR(hITR));
+      rBoxW = 5.0*rScaleXMM;
+      rX = 100.0 + 15.0*rScaleXMM;
+      rY = 0.0;
+         
+      ColorBar_MVU(View, hITR, 1, 2.0*rScaleXMM, rBoxH, rBoxW, rX, rY);
+      TextRef_MVIEW(View, TEXT_REF_TOP_CENTER);
+      Text_MVIEW(View, sCChan, rX + 0.5*rBoxW, rY - 1.0*rScaleYMM);
+   }
+   else if(iColType==2)
+   {
+      // --- Plot the classified symbol legend ---
+      
+      GenGroupName_STR("SYMBLEG",sSChan,"",sGrpName);
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+      
+      rX = rX1 + rWidth + 5.0;   // in mm
+      
+      SymbSize_MVIEW(View, rSymbolSize*rScaleXMM);
+
+		PlotStringClassifiedSymbolsLegendFromClassFile_CHIMERA(View, sSChan, rX, rY1, rY1+rHeight, sClassFile, hClass_VV);   
+   }
+   
+   // --- add the maker ---
+
+   Maker_MVIEW(View,0,1,"CHPRTRI",MAKER_GX,_("TriPlot..."),"CHPRTRI;");
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   if(iMaskChan) UnLockSymb_DB(Data,MCh);
+   if(iColType==1) 
+      UnLockSymb_DB(Data,CCh);
+   else if(iColType==2)
+      UnLockSymb_DB(Data,SCh);
+
+   Destroy_MVIEW(View);
+   
+   
+   // --- Commit changes to the map ---
+   
+   if(iNewMap==1)   
+   {
+      Destroy_MAP(Map);
+      EMap = Load_EMAP(sMap);
+   }
+   else
+      UnLock_EMAP(EMap);
+
+
+   // --- Set the current view to the new view ---
+   
+   MakeCurrent_EMAP(EMap);
+   iChangeCurrentView_EMAP(EMap, sViewName);
+
+   
+   // --- Resize ---
+      
+   DoCommand_SYS("[ID] ID_MEDIT_FULLMAP");
+   
+}

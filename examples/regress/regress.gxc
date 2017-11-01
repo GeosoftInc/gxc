@@ -1,0 +1,196 @@
+//===========================================================================
+NAME          = "Linear regression"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "
+   Calculate and display linear regression through
+   selected data.
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "regress.gr"
+#include "regress.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) 
+            sChX,sChY;
+string(STR_DEFAULT_SHORT) sTemp;            
+
+EDB         EData;
+DB          Data;
+DB_SYMB     ChX, ChY; 
+DB_SYMB     Line;
+DGW         Diag;
+VV          VVx,VVy;
+LST         List;                  // list handle
+int         iLen;
+real        rStart,rEnd,rInc,rSlope,rIntercept,rMin,rMax;
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+
+      // --- Get the Database ---
+
+      EData = Current_EDB();
+      
+      
+      // --- get mark info ---
+
+      rStart = rEnd = rInc = 0.0;      
+      if (iGetCurMark_EDB(EData,rStart,rEnd,rInc)) Abort_SYS(_("No data is marked."));
+      iLen = (int)((rEnd-rStart)/rInc + 1.5);
+      
+   
+      // --- get current line ---
+      
+      Line = GetCurLineSymb_EDB(EData);
+      
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("REGRESS");
+
+
+      // --- Set up input and output lists ---
+
+      Data = Lock_EDB(EData);
+      List = GetList_DGW(Diag,_REGRESS_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_REGRESS_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      UnLock_EDB(EData);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_REGRESS_0,DGW_TEXT,"REGRESS","IN");
+      
+      ChY = GetCurChanSymb_EDB(EData);
+      if (ChY == NULLSYMB) Abort_SYS(_("No data is marked."));
+      
+      Data = Lock_EDB(EData);
+      GetChanName_DB(Data,ChY,sChY);
+      UnLock_EDB(EData);
+      SetInfo_DGW(Diag,_REGRESS_1,DGW_TEXT,sChY);
+      
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_REGRESS_0,DGW_TEXT,"REGRESS","IN");     
+      GetInfoSYS_DGW(Diag,_REGRESS_1,DGW_TEXT,"REGRESS","OUT");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+
+      // --- Get Parameters ---
+
+      GetString_SYS("REGRESS","IN",sChX);
+      GetString_SYS("REGRESS","OUT",sChY);
+
+
+      // --- Do the Channels Exist ? ---
+
+      Data = Lock_EDB(EData);
+      
+      if (!iExistSymb_DB(Data,sChX,DB_SYMB_CHAN)) 
+         Abort_SYS(_("X channel does not exist."));
+      ChX = FindSymb_DB(Data,sChX,DB_SYMB_CHAN);
+
+      if (!iExistSymb_DB(Data,sChY,DB_SYMB_CHAN)) 
+         Abort_SYS(_("Y channel does not exist."));
+      ChY = FindSymb_DB(Data,sChY,DB_SYMB_CHAN);
+
+            
+      // --- Lock the channel symbols ---
+
+      if (ChX != ChY) LockSymb_DB(Data,ChX,DB_LOCK_READONLY,DB_WAIT_NONE);
+      LockSymb_DB(Data,ChY,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+
+      // --- get data ---
+      
+      VVx = Create_VV(REAL,0);
+      GetChanVV_DB(Data,Line,ChX,VVx);
+      
+      VVy = Create_VV(REAL,0);
+      GetChanVV_DB(Data,Line,ChY,VVy);
+      
+      // --- Unlock the symbols ---
+
+      if (ChX != ChY) UnLockSymb_DB(Data,ChX);
+      UnLockSymb_DB(Data,ChY);
+      
+      UnLock_EDB(EData);
+      
+      
+      
+      // --- refid to mark ---
+      
+      ReFid_VV(VVx,rStart,rInc,iLen);      
+      ReFid_VV(VVy,rStart,rInc,iLen);
+      
+      
+      // --- Check for single-valued X ---
+      
+      RangeDouble_VV(VVx, rMin, rMax);
+      if(rMin==rMax)
+			Abort_SYS(_("Unable to calculate linear regression: the X-data is single-valued."));       
+			
+
+      // --- Calculate regression ---
+
+      rSlope = rIntercept = 0.0;
+      Regress_VVU(VVx,VVy,rSlope,rIntercept);
+      
+      
+      // --- display results ---
+      
+      Diag = Create_DGW("RESULT");
+
+      FormatR_STR(rSlope,sTemp,16,13);
+      SetInfo_DGW(Diag,_RESULT_0,DGW_TEXT,sTemp);
+      FormatR_STR(rIntercept,sTemp,16,13);
+      SetInfo_DGW(Diag,_RESULT_1,DGW_TEXT,sTemp);
+      
+      iRunDialogue_DGW(Diag);
+      Destroy_DGW(Diag);
+      Destroy_VV(VVx);
+      Destroy_VV(VVy);
+
+   }      
+
+}

@@ -1,0 +1,83 @@
+//===========================================================================
+NAME          = "Remove channel colours"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/PopupSelChan/List"
+
+DESCRIPTION   = "
+
+   Remove channel ITR colours.
+                 
+   If ITR colours are set for a channel, removes them.
+"
+// Revision History:
+// v6.4+ : Added parameter CHCHANITRNONE.SELCHAN to specify the channel selected in 
+//           non-interactive mode
+// v5.1.7: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;                     // database handle
+DB          Data;
+
+DB_SYMB     Ch;                  // DB Symbol Handles
+string(STR_DEFAULT) sChan,sTemp;       // used to specify channel in non-interactive mode
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+
+   
+   // --- Get and lock the current channel ---
+   if (iInteractive_SYS()) {
+      Ch = GetCurChanSymb_EDB(EData); 
+      if(Ch==NULLSYMB) Abort_SYS(_("There is no channel currently selected."));     
+      Data = Lock_EDB(EData);
+
+   }
+   else {
+      GetString_SYS("CHCHANITRNONE","SELCHAN",sChan); 
+      Data = Lock_EDB(EData);
+      if(!iStrlen_STR(sChan)) 
+         Abort_SYS(_("CHCHANITRNONE.SELCHAN must specifiy the selected channel in non-interactive mode"));
+
+      if (!iExistChan_DB(Data,sChan)) { 
+         Printf_STR(sTemp, sizeof(sTemp), _("%s channel does not exist."), sChan);
+         Abort_SYS(sTemp);
+      }
+      Ch = FindChan_DB(Data,sChan);
+   }
+   
+   
+   
+   // --- Lock the channel ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   
+
+   // --- Set the resulting ITR into the channel ---
+
+   SetITR_DB(Data, Ch, ITR_NULL);
+
+   
+   // --- Done ---
+
+   UnLockSymb_DB(Data,Ch);
+   UnLock_EDB(EData);
+   
+}

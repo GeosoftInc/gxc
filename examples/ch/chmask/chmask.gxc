@@ -1,0 +1,145 @@
+//===========================================================================
+NAME          = "CHMASK GX"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+   Create a mask channel, initialize it to 1.
+
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.0.0: Allow setting of current DB; fix bug in unlocking mask chan if
+//         it already exists.
+// v5.1.3: Set new mask channel class to "MASK"
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DB          Data;
+EDB         EData;
+DB_SYMB     Line;
+DB_SYMB     MaskCh, LithCh;
+VV          MaskVV;
+
+string(STR_DB_SYMBOL) sMaskCh,sLithCh;
+string(STR_FILE) sDB;
+
+int         iLen;
+int         iLines;
+int         iTotLines;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Set current DB to begin? Must set every time ---
+   
+   GetString_SYS("CHMASK", "CURRENTDB", sDB);
+   SetString_SYS("CHMASK", "CURRENTDB", "");
+   
+   
+   // --- Get the database ---
+
+   if(iStrlen_STR(sDB))
+      EData = Load_EDB(sDB);
+   else
+      EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHMASK","MASKCH",sMaskCh);
+   if(!iStrlen_STR(sMaskCh))
+      Strcpy_STR(sMaskCh, _n("Mask"));
+
+   GetString_SYS("CHMASK","LITHCH",sLithCh);
+   LithCh = NULLSYMB;
+
+   // --- Get mask channel ---
+      
+   if (!iExistChan_DB(Data,sMaskCh)) {
+      
+      MaskCh = CreateSymb_DB(Data,sMaskCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+     
+      // --- Set the mask channel class to "MASK" ---
+
+      SetRegSymbSetting_DB(Data, MaskCh, "CLASS", "MASK");
+
+
+      if(iStrlen_STR(sLithCh)) {
+         LithCh = FindChan_DB(Data,sLithCh);
+         if(LithCh != NULLSYMB)
+            LockSymb_DB(Data,LithCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      }
+
+      MaskVV = CreateExt_VV(GS_LONG,0);
+
+      // --- turn on progress ---
+
+      Progress_SYS(1);
+      ProgName_SYS(_("Creating mask channel"),1);
+
+
+      // --- Go through all selected Lines ---
+
+
+      iTotLines = iCountSelLines_DB(Data);
+      iLines = 0;
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+         ProgUpdateL_SYS(iLines,iTotLines);
+
+         if(LithCh != NULLSYMB)
+         {
+            iLen = iGetChannelLength_DB(Data,Line,LithCh);
+
+            SetLen_VV(MaskVV,iLen);
+         
+            SetIntN_VV(MaskVV, 0, iLen, 1);
+
+            PutChanVV_DB(Data,Line,MaskCh,MaskVV);
+         }
+
+         // --- Advance to Next Line ---
+
+         Line = NextSelLine_DB(Data, Line);
+         iLines++;
+
+      }
+   
+      // --- Destroy VV ---
+
+      Destroy_VV(MaskVV);
+      
+      
+      // --- clean up ---
+
+      UnLockSymb_DB(Data,MaskCh);
+      if(LithCh != NULLSYMB)
+         UnLockSymb_DB(Data,LithCh);
+   }
+      
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   UnLock_EDB(EData);
+
+}

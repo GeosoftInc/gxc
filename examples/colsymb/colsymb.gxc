@@ -1,0 +1,496 @@
+//===========================================================================
+NAME          = "Color Symbol Plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Plot Solution Symbols"
+
+DESCRIPTION   = "
+
+ COLSYMB.CHANNEL      - channel name
+        .MASK         - optional mask channel
+        .ZONE         - ZON, ITR, AGG, or TBL file name
+        .SYMBOL       - symbol number
+        .SIZEPREF     - sizing preference (fixed=1; proportioned=0)
+        .SIZE         - size of fixed symbols in mm
+        .BASE         - base Z value to subtract from proportioned symbols
+        .SCALE        - scale to divide proporitioned symbols by        
+        .FIXFILL      - 0 for variable fill colour, 1 to fix fill colour
+        .FILLCOLOUR   - colour of symbol fill
+        .FIXEDGE      - 0 for variable colour edge, 1 to fix edge colour
+        .EDGECOLOUR   - colour of symbol edge
+        .WEIGHT       - symbol edge font weight
+"
+// Revision History:
+// v7.0.0: Symbol scaling fixed for Lat/Long maps.
+// v5.1.6: If no MASK class channels are located, fill mask channel list with all of them.
+// v5.1.5: Added optional mask channel for selection of symbols
+//         Changed map group name to format CSYMB_Database_Chan
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "colsymb.gr"
+#include "colsymb.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sEcolour,sFcolour,sFont;
+string(STR_DB_SYMBOL) sChan,sLine,sMask;
+string(STR_FILE) sZone, sFileName;
+string(STR_VIEW_GROUP) sViewGroup;
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT_LONG) sLabel;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,ZCh,DataCh,MCh; // Channel handles
+DB_SYMB    Line;        // Line handle
+IPJ        DataIPJ, ViewIPJ;
+PJ         hPJ;
+PJ         Pj;
+MAP   Map;
+EMAP  EMap;
+MVIEW View;
+DGW   Diag;
+LST   List;
+VV    VVx,VVy,VVz,VVdata,VVm;
+int   iSizePref,iFixFill,iFixEdge,iMask,iChimera;
+int   iSymb,iLines,iTotLines,iWeight;
+int	iOrientation, iHasOrientation;
+real  rBase,rScale;
+real  rSize,rScaleMM;
+real  rMinX,rMinY,rMaxX,rMaxY;
+real  rMinXmm,rMinYmm,rMaxXmm,rMaxYmm;
+real  rY;
+
+CSYMB  CSymb;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   // --- Get current database and map ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Is it CHIMERA? ---
+
+   iChimera = iGetInt_SYS("COLSYMB","CHIMERA");
+   SetInt_SYS("COLSYMB","CHIMERA",0);  // Must set every time.
+
+
+   // --- Set defaults ---
+   
+   DefaultInt_SYS("COLSYMB","SYMBOL",20);
+   DefaultInt_SYS("COLSYMB","SIZEPREF",1);
+   DefaultInt_SYS("COLSYMB","FIXFILL",0);
+   DefaultInt_SYS("COLSYMB","FIXEDGE",1);
+   DefaultReal_SYS("COLSYMB","BASE",0.0);
+   DefaultReal_SYS("COLSYMB","SCALE",1.0);
+   DefaultReal_SYS("COLSYMB","SIZE",1.0);
+   DefaultString_SYS("COLSYMB","EDGECOLOUR","K");
+   DefaultString_SYS("COLSYMB","FILLCOLOUR","N");   
+   DefaultInt_SYS("COLSYMB","WEIGHT",1);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("colsymb");
+
+      
+      // --- Set up channel list ---
+
+      List = GetList_DGW(Diag,_COLSYMB_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_COLSYMB_1);
+      if(iChimera==1)
+         MaskChanLST_DB(Data,List);
+      else {
+         ClassChanLST_DB (Data,List,"MASK");
+         Sort_LST(List,0,0);
+      }
+
+      if(iSize_LST(List)==0)
+         SymbLST_DB(Data, List, DB_SYMB_CHAN);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_COLSYMB_0,DGW_TEXT,     "COLSYMB","CHANNEL");
+      SetInfoSYS_DGW(Diag,_COLSYMB_1,DGW_TEXT,     "COLSYMB","MASK");
+      SetInfoSYS_DGW(Diag,_COLSYMB_2,DGW_FILEPATH, "COLSYMB","ZONE");
+      SetInfoSYS_DGW(Diag,_COLSYMB_3,DGW_LISTALIAS,"COLSYMB","SYMBOL");
+      SetInfoSYS_DGW(Diag,_COLSYMB_4,DGW_LISTALIAS,"COLSYMB","SIZEPREF");
+      SetInfoSYS_DGW(Diag,_COLSYMB_5,DGW_TEXT,     "COLSYMB","SIZE");
+      SetInfoSYS_DGW(Diag,_COLSYMB_6,DGW_TEXT,     "COLSYMB","BASE");
+      SetInfoSYS_DGW(Diag,_COLSYMB_7,DGW_TEXT,     "COLSYMB","SCALE");         
+      SetInfoSYS_DGW(Diag,_COLSYMB_8,DGW_LISTALIAS,"COLSYMB","FIXFILL");     
+      SetInfoSYS_DGW(Diag,_COLSYMB_9,DGW_TEXT,     "COLSYMB","FILLCOLOUR");
+      SetInfoSYS_DGW(Diag,_COLSYMB_10,DGW_LISTALIAS,"COLSYMB","FIXEDGE");     
+      SetInfoSYS_DGW(Diag,_COLSYMB_11,DGW_TEXT,    "COLSYMB","EDGECOLOUR");
+      SetInfoSYS_DGW(Diag,_COLSYMB_12,DGW_LISTALIAS,"COLSYMB","WEIGHT");     
+     
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_COLSYMB_0,DGW_TEXT,     "COLSYMB","CHANNEL");
+      GetInfoSYS_DGW(Diag,_COLSYMB_1,DGW_TEXT,     "COLSYMB","MASK");
+      GetInfoSYS_DGW(Diag,_COLSYMB_2,DGW_FILEPATH, "COLSYMB","ZONE");
+      GetInfoSYS_DGW(Diag,_COLSYMB_3,DGW_LISTALIAS,"COLSYMB","SYMBOL");
+      GetInfoSYS_DGW(Diag,_COLSYMB_4,DGW_LISTALIAS,"COLSYMB","SIZEPREF");
+      GetInfoSYS_DGW(Diag,_COLSYMB_5,DGW_TEXT,     "COLSYMB","SIZE");
+      GetInfoSYS_DGW(Diag,_COLSYMB_6,DGW_TEXT,     "COLSYMB","BASE");
+      GetInfoSYS_DGW(Diag,_COLSYMB_7,DGW_TEXT,     "COLSYMB","SCALE");         
+      GetInfoSYS_DGW(Diag,_COLSYMB_8,DGW_LISTALIAS,"COLSYMB","FIXFILL");     
+      GetInfoSYS_DGW(Diag,_COLSYMB_9,DGW_TEXT,     "COLSYMB","FILLCOLOUR");
+      GetInfoSYS_DGW(Diag,_COLSYMB_10,DGW_LISTALIAS,"COLSYMB","FIXEDGE");     
+      GetInfoSYS_DGW(Diag,_COLSYMB_11,DGW_TEXT,    "COLSYMB","EDGECOLOUR");
+      GetInfoSYS_DGW(Diag,_COLSYMB_12,DGW_LISTALIAS,"COLSYMB","WEIGHT");     
+    }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("COLSYMB","CHANNEL",sChan);    
+   GetString_SYS("COLSYMB","MASK",sMask);    
+   GetString_SYS("COLSYMB","ZONE",sZone);
+   iSymb = iGetInt_SYS("COLSYMB","SYMBOL");     
+   iSizePref = iGetInt_SYS("COLSYMB","SIZEPREF");
+   iFixFill = iGetInt_SYS("COLSYMB","FIXFILL");
+   iFixEdge = iGetInt_SYS("COLSYMB","FIXEDGE");
+
+
+   // --- Fixed or proportioned ? ---
+
+   if (iSizePref == 0)
+   {      
+      rBase = rGetReal_SYS("COLSYMB","BASE");
+      rScale = rGetReal_SYS("COLSYMB","SCALE");
+   }
+   else
+      rSize = rGetReal_SYS("COLSYMB","SIZE");     
+
+
+   GetString_SYS("COLSYMB","EDGECOLOUR",sEcolour);
+   GetString_SYS("COLSYMB","FILLCOLOUR",sFcolour);   
+   iWeight = iGetInt_SYS("COLSYMB","WEIGHT");
+
+   // --- Test parameters ---
+
+   if (!iStrlen_STR(sZone))
+      Abort_SYS(_("Zone file was not specified."));
+   if (!iStrlen_STR(sEcolour))
+      Abort_SYS(_("Symbol edge colour was not specified."));
+   if (!iStrlen_STR(sFcolour))
+      Abort_SYS(_("Symbol fill colour was not specified."));
+   if ((iSymb < 1) || (iSymb > 255))
+      Abort_SYS(_("Symbol number value was invalid (must be 1-255)."));
+
+   if ((iSizePref != 0) && (iSizePref != 1))
+      Abort_SYS(_("Symbol sizing preference was invalid (must be 0 or 1)."));
+
+   if ((iSizePref == 0) && (rScale <= 0.0))
+         Abort_SYS(_("Scaling for proportioned symbols was invalid (must be > 0.0)."));
+   if ((iSizePref == 0) && (rBase == rDUMMY))
+         Abort_SYS(_("Base for proportioned symbols was invalid (must not be dummy)."));
+   else if ((iSizePref == 1) &&  (rSize <= 0.0))
+         Abort_SYS(_("Size of fixed symbols was invalid (must be > 0.0)."));
+
+   if ((iWeight < 0) || (iWeight > 5))
+      Abort_SYS(_("Symbol edge font weight value was invalid (must be 0-5)."));
+
+   // --- channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+   if (!iExistChan_DB(Data,sChan))
+      Abort_SYS(_("Data channel does not exist."));
+   DataCh = FindChan_DB(Data,sChan);
+
+
+   // --- Apply mask? ---
+
+   iMask = 0;
+   if(iStrlen_STR(sMask)) {
+      MCh = FindChan_DB(Data,sMask);
+      if (MCh==NULLSYMB)  
+         Abort_SYS(_("Mask channel does not exist."));
+      iMask = 1;
+   }
+
+
+   // --- get current map ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   ViewIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   GetIPJ_MVIEW(View, ViewIPJ);
+
+	iHasOrientation = 0;
+
+	iOrientation = iGetOrientation_IPJ(ViewIPJ);
+	if(iOrientation != IPJ_ORIENT_DEFAULT && iOrientation != IPJ_ORIENT_PLAN)
+	{
+		iHasOrientation = 1;
+
+		ZCh = GetXYZChanSymb_DB(Data, DB_CHAN_Z);
+		if (ZCh==NULLSYMB)
+			Abort_SYS(_("A current Z channel is required to correctly locate symbols on an oriented view"));
+	}
+
+	if(iHasOrientation == 1)
+		  Pj = CreateIPJ_PJ(DataIPJ, ViewIPJ);
+	else
+		  SetWorkingIPJ_MVIEW(View,DataIPJ);
+	 
+
+	// --- Set the group clip mode ---
+   
+   GroupClipMode_MVIEW(View, CLIP_ON);
+
+
+   SetThinRes_MVIEW(View,0.02);
+   rScaleMM = rScaleMM_MVIEW(View);
+   Assert_SYS(rScaleMM > 0.0);
+
+	
+
+
+	// --- The CSYMB class expects scaling in terms of the XY channels' IPJ, but
+	//     rScaleMM always returns values in the data view's native units.
+	//     This works for projected CSs, but not Lat-Long channels.
+	//     (See QA 11082) ---
+	
+	if(iSourceType_IPJ(DataIPJ)==IPJ_TYPE_GCS)
+	{
+	   // --- Get scaling in degrees/mm for the CSYMB function ---
+	   
+	   Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
+	   hPJ = CreateIPJ_PJ(ViewIPJ, DataIPJ);
+
+	   rY = rMinY;
+		ConvertXY_PJ(hPJ, rMinX, rY);
+	   rY = rMinY;
+		ConvertXY_PJ(hPJ, rMaxX, rY);
+	   
+	   Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_MM, rMinXmm, rMinYmm, rMaxXmm, rMaxYmm);	   
+	   if(rMinX!=rDUMMY && rMaxX!=rDUMMY)
+	   {
+			rScaleMM = (rMaxX-rMinX)/(rMaxXmm-rMinXmm);
+		}	
+	}
+	
+   
+
+   // --- Create polysymbol ---
+
+   CSymb = Create_CSYMB(sZone);
+
+
+   // --- set parameters ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("symbols"));
+   SetFont_CSYMB(CSymb,sFont,TRUE,iWeight,FALSE);
+   SetNumber_CSYMB(CSymb,iSymb);
+   SetAngle_CSYMB(CSymb,0.0);
+   SetFixed_CSYMB(CSymb,iSizePref);
+
+   // --- set fill and edge colours (variable or static) ---
+
+   if(iFixEdge)
+      SetStaticCol_CSYMB(CSymb,iColor_MVIEW(sEcolour),CSYMB_COLOR_EDGE);
+
+   if (iFixFill)
+      SetStaticCol_CSYMB(CSymb,iColor_MVIEW(sFcolour),CSYMB_COLOR_FILL);
+
+   if (iSizePref == 0)
+   {
+      // --- Proportioned symbols - get scale factor to convert Data to mm on map ---
+
+      rScale = rScaleMM/rScale;
+      SetBase_CSYMB(CSymb,rBase);
+      SetScale_CSYMB(CSymb,rScale);
+   }
+   else
+      // --- Fixed size symbols ---
+
+      SetScale_CSYMB(CSymb,rSize*rScaleMM);
+
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+	if(iHasOrientation == 1)
+		  VVz = Create_VV(REAL,0);
+	VVdata = Create_VV(REAL,0);
+   if(iMask) VVm = Create_VV(INT,0);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+	if(iHasOrientation == 1)
+		  LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+	LockSymb_DB(Data,DataCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   if(iMask) LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+
+   // --- process lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+		if(iHasOrientation == 1)
+		  GetChanVV_DB(Data,Line,ZCh,VVz);
+		GetChanVV_DB(Data,Line,DataCh,VVdata);
+      ReFidVV_VV(VVx,VVdata);
+      ReFidVV_VV(VVy,VVdata);
+		if(iHasOrientation == 1)
+		  ReFidVV_VV(VVz,VVdata);
+
+
+      // --- mask? ---
+
+      if(iMask) {
+
+         GetChanVV_DB(Data,Line,MCh,VVm);
+         ReFidVV_VV(VVm,VVx);
+         Mask_VVU(VVx,VVm);
+      }
+
+    
+      // --- Draw ---
+
+		if(iHasOrientation == 1)
+		  ConvertVV3_PJ(Pj, VVx, VVy, VVz);  
+
+      AddData_CSYMB(CSymb,VVx,VVy,VVdata);  
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+   
+   // --- Start a group. Use the format:
+   //     CSYMB_Database_Channel ---
+
+   GetName_DB(Data,DB_NAME_FILE,sFileName);
+   FileNamePart_STR(sFileName,sFileName,STR_FILE_PART_NAME);
+   GenGroupName_STR("CSYMB",sFileName,sChan,sGroup); 
+
+   ColSymbol_MVIEW(View,sGroup,CSymb);
+   
+
+   // --- Add maker. Set special switches here for saving by the makers ---
+   
+   SetInt_SYS("COLSYMB","CHIMERA",iChimera);
+   Maker_MVIEW(View,1,1,"colsymb",MAKER_GX,_("Color zone symbols..."),"COLSYMB;");
+   SetInt_SYS("COLSYMB","CHIMERA",0);  // reset to default
+   
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+	if(iHasOrientation == 1)
+		 UnLockSymb_DB(Data,ZCh);
+   UnLockSymb_DB(Data,DataCh);
+   if(iMask) UnLockSymb_DB(Data,MCh);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+   
+   Progress_SYS(0);
+   
+   
+   if (iInteractive_SYS() && !(iFixFill && iFixEdge)) {
+   
+      // --- Create viewgroup name and activats it ---
+
+      Strcpy_STR(sViewGroup,"Data\\");
+      Strcat_STR(sViewGroup,sGroup);
+      
+      Redraw_EMAP(EMap);
+      ActivateGroup_EMAP(EMap,sViewGroup);
+      
+   }
+}

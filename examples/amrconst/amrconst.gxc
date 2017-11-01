@@ -1,0 +1,122 @@
+//===========================================================================
+NAME          = "View and print AMIRA constant declarations"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Use this GX to view and print AMIRA (TEM) constant declarations 
+   saved within the database.
+   
+   No interactive parameters and no GX help file available for this GX.
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/Amira"
+
+// Revision History:
+// v5.1.5: New GX.
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+SBF         hSBF;
+DB          Data;
+EDB         EData;
+string(128) sFile,sDefEdit,sDefEditType;
+string(16)  sWait;
+
+int         i;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Set temp file name ---
+   
+   Strcpy_STR(sFile,"_Constants");
+                            
+
+   // --- Get sum file from DB ---
+
+   if (iExistDir_SBF(hGetDB_SBF (Data), "TEM")) {
+      hSBF = Create_SBF(hGetDB_SBF (Data), "TEM", SBF_READ);
+      
+      if (iExistFile_SBF(hSBF, "Constants")) 
+         SaveLog_SBF(hGetDB_SBF (Data), "TEM", "Constants", sFile,  0);
+      else
+         Abort_SYS(_("The current database does not have TEM related constant declarations."));
+   } else
+      Abort_SYS(_("The current database does not have TEM related constant declarations."));
+
+   UnLock_EDB(EData);
+
+
+   // --- Display file ---
+   
+   if (iInteractive_SYS())
+   {
+      // --- get editor name ---
+
+      if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit))
+         iRunGX_SYS("newedit");
+      iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit);
+   
+   
+      // --- get windows wait ---
+   
+      GetString_SYS("EDIT","WAIT",sWait);
+      if (iCharComp_STR(sWait,"W"))
+         i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_WAIT;
+      else   
+         i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_NOWAIT;
+   
+      
+      // --- reset to default no wait ---
+            
+      SetString_SYS("EDIT","WAIT","NOWAIT");
+   
+
+      // --- check if DOS editor ---
+
+      if (!iGlobal_SYS("MONTAJ.DEFAULT_EDITOR_TYPE",sDefEditType)) {
+
+         ToUpper_STR(sDefEditType);
+         if (iCharComp_STR(sDefEditType,"D"))
+            i = SYS_RUN_TYPE_DOS;
+      }
+
+
+      // --- edit ---
+
+      if (iRun_SYS(sDefEdit,sFile,i)) {
+
+         Strcpy_STR(sFile,_("Unable to run "));
+         Strcat_STR(sFile,sDefEdit);
+         Abort_SYS(sFile);
+
+      }
+   }
+   
+   
+   // --- Delete temp file ---
+   
+//   iDeleteFile_SYS(sFile);
+
+}

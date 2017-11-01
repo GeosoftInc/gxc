@@ -1,0 +1,624 @@
+//===========================================================================
+NAME          = "Display QC results in a map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/QC Utility"
+
+DESCRIPTION   = "
+
+Use of this GX to display QC results in a map
+
+Parameters: 
+
+    QCDEVMAP.MAP     -  Current map (0) or a new map (1)
+            .RESULT  -  Flag channel name 
+            .OFFSET  -  Offset to plot 
+            .THICK   -  Thickness (size) in mm of the line to show QC results
+            .COLOR   -  Color to plot                         
+            .NOMDIR  -  Optional nominal azimuth for lines.
+            .LEGEND  -  Set to 0 to NOT plot a legend.
+"    
+// Revision History:
+// v7.1:   QA 13870: Don't just plot line path in legend on a new map.
+// v7.0.1: QA 13867: Allow calling GXs to turn off legend plotting.
+// v7.0.0: QA 11032: Ensure initial location for legend is defined.
+// v6.4.2: Fixed more map locking bugs.
+// v6.0:   Fixed a bug of using EMAP while it is locked.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "QCDEVMAP.gr"
+#include "QCDEVMAP.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define  QCDEVMAP_BACK  999
+ 
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        EMap;
+MAP         Map;
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     XCh,YCh,FCh;
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+MVIEW       View;
+VV          VVx,VVy,VVf;
+IPJ         DataIPJ;
+LST         List;              // dialog list handle
+
+
+string(STR_FILE)       sFont,sName, sMap;
+string(STR_DB_SYMBOL) sLine,sGroup,sFlag,sFlag2,sItem;
+string(STR_DEFAULT_SHORT) sColor;
+string(STR_DEFAULT_LONG) sMsg;
+string(STR_DEFAULT) sLabel;
+string(STR_GROUP) sGrpName;
+
+int         i,k;
+int         iMap;
+int         iLines,iTotLines;
+int         iTok;              // number of tokens
+real        rThick,rOffset,rScale;
+real        rMinX,rMinY,rMaxX,rMaxY;
+real        rScaleMM,rXo,rYo,rTxtSize;
+real        rNomDir, rLineDir, rXOff, rYOff;
+real        rXCoord, rYCoord;
+
+int         iInteract, iLegend;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   iInteract = iInteractive_SYS();    
+
+   rMinX = rMinY = rMaxX = rMaxY =rDUMMY;
+
+   // --- Get database ---
+   
+   EData = Current_EDB();   
+   
+   
+   // --- Plot a legend? By default, yes, but can turn off by
+   //     setting QCDEVMAP.LEGEND to 0. This must be reset
+   //     every time.
+   
+   iLegend = iGetInt_SYS("QCDEVMAP", "LEGEND");
+   if(iLegend != 0) iLegend = 1;
+   SetInt_SYS("QCDEVMAP", "LEGEND", 1);
+   
+
+   // --- Are we running interactively ? ---
+
+   i = QCDEVMAP_BACK;
+   while (iInteractive_SYS() && (i == QCDEVMAP_BACK))
+   {
+      Diag = Create_DGW("QCDEVMAP");
+      
+      List = GetList_DGW(Diag,_QCDEVMAP_1);
+      
+      Data = Lock_EDB(EData);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      UnLock_EDB(EData);   
+      
+      Sort_LST(List,0,0);
+
+  
+      SetInfoSYS_DGW(Diag,_QCDEVMAP_0,DGW_LISTALIAS,"QCDEVMAP","MAP");     
+      SetInfoSYS_DGW(Diag,_QCDEVMAP_1,DGW_TEXT,     "QCDEVMAP","RESULT");     
+      SetInfoSYS_DGW(Diag,_QCDEVMAP_2,DGW_TEXT,     "QCDEVMAP","THICK");     
+      SetInfoSYS_DGW(Diag,_QCDEVMAP_3,DGW_TEXT,     "QCDEVMAP","COLOR");     
+      SetInfoSYS_DGW(Diag,_QCDEVMAP_4,DGW_TEXT,     "QCDEVMAP","OFFSET");     
+  
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS(); 
+  
+      GetInfoSYS_DGW(Diag,_QCDEVMAP_0,DGW_LISTALIAS,"QCDEVMAP","MAP");     
+      GetInfoSYS_DGW(Diag,_QCDEVMAP_1,DGW_TEXT,     "QCDEVMAP","RESULT");     
+      GetInfoSYS_DGW(Diag,_QCDEVMAP_2,DGW_TEXT,     "QCDEVMAP","THICK");     
+      GetInfoSYS_DGW(Diag,_QCDEVMAP_3,DGW_TEXT,     "QCDEVMAP","COLOR");     
+      GetInfoSYS_DGW(Diag,_QCDEVMAP_4,DGW_TEXT,     "QCDEVMAP","OFFSET");     
+  
+      Destroy_DGW(Diag);
+
+
+
+      // --- Run 2nd dialog ---
+      
+      iMap    = iGetInt_SYS("QCDEVMAP","MAP");
+
+      if (iMap) {
+         
+         // --- Run NEWMAP wizard ---
+
+         iMap = iRunGX_SYS("newmap.gx");
+         if (iMap == -1)        i = 2;
+         else if (iMap == 1)    Cancel_SYS();
+      }        
+   }
+   if (!iInteractive_SYS()) {
+      iMap    = iGetInt_SYS("QCDEVMAP","MAP");
+      
+      if (iMap) {
+         
+         // --- Run NEWMAP wizard ---
+         iRunGX_SYS("newmap.gx");
+         GetString_SYS("NEWMAP","MAP",sMap);
+         Load_EMAP(sMap);
+         
+      }
+      
+   }
+
+   
+
+   // --- Get Parameters ---
+   
+   iMap    = iGetInt_SYS("QCDEVMAP","MAP");
+   GetString_SYS("QCDEVMAP","RESULT",sFlag);
+   rThick  = rGetReal_SYS("QCDEVMAP","THICK");     
+   rOffset = rGetReal_SYS("QCDEVMAP","OFFSET");     
+   GetString_SYS("QCDEVMAP","COLOR",sColor);
+   rNomDir = rGetReal_SYS("QCDEVMAP","NOMDIR");     
+
+   rXCoord = rGetReal_SYS("QCDEVMAP","XCOORD");     
+   rYCoord = rGetReal_SYS("QCDEVMAP","YCOORD");  
+
+
+   // --- reset nominal line direction back to dummy for future GX calls ---
+
+   SetString_SYS("QCDEVMAP","NOMDIR","");
+
+   // --- Get the map ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   
+   
+   // --- Lock Database ---
+   
+   Data = Lock_EDB(EData);
+   
+
+   // --- Do the reference channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+
+   FCh = FindSymb_DB(Data,sFlag,DB_SYMB_CHAN);
+   if (FCh==NULLSYMB) {
+      Printf_STR(sMsg, sizeof(sMsg), _("Flag channel '%s' does not exist in the current database."), sFlag);
+      Abort_SYS(sMsg);
+   }   
+
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   SetWorkingIPJ_MVIEW(View,DataIPJ);
+   
+   
+   // --- set thining and local scale ---
+   
+   SetThinRes_MVIEW(View,0.0);
+   rScale = rScaleMM_MVIEW(View);
+
+
+   // --- start a group ---
+
+   Strcpy_STR(sFlag2,sFlag);
+   iTok = iTokens_STR(sFlag2,"_");
+   if (iTok >= 1)   GetToken_STR(sItem, sFlag2, 1);
+   else             GetToken_STR(sItem, sFlag2, 0);
+
+   GetName_DB(Data,DB_NAME_FILE,sName);
+   FileNamePart_STR(sName,sName,STR_FILE_PART_NAME);
+   GenGroupName_STR("QC",sName,sItem,sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- maker ---
+
+   EasyMaker_MVIEW(View, _("Quality control map..."),"QCDEVMAP;");
+
+
+   // --- Create link to database ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+
+   // --- set parameters ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("symbols"));
+   SymbFont_MVIEW(View,sFont,TRUE,MVIEW_FONT_WEIGHT_MEDIUM,FALSE);
+   SymbColor_MVIEW(View,iColor_MVIEW(sColor));
+   SymbFillColor_MVIEW(View,iColor_MVIEW(sColor));
+   SymbNumber_MVIEW(View,20);  // dot
+   SymbSize_MVIEW(View,rThick*rScale);
+   SymbAngle_MVIEW(View,0.0);
+
+
+   // --- Convert offset from mm to view unit ---
+   
+   rOffset *= rScale;
+
+
+   // --- Get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   VVf = Create_VV(INT,0);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,FCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   // --- Get the average line direction if a nominal direction is not defined.
+   
+   if(rNomDir==rDUMMY) {
+   
+      AvgAzimuth_DU(Data, 1.0, rNomDir);
+   }   
+
+   // --- Draw lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+      // --- update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Drawing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get X and Y ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+      GetChanVV_DB(Data,Line,FCh,VVf);
+      ReFidVV_VV(VVx,VVy);
+      ReFidVV_VV(VVf,VVy);
+
+
+      // --- add line link ---
+
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine);
+
+      // --- Get the current line direction (azimuth) ---
+
+      rLineDir = rDirection_DU(Data, Line, XCh, YCh);
+
+      // --- If the current line direction is not within 90 degrees
+      //     of the nominal line direction, add 180. ---
+
+      if(rCos_MATH((rLineDir - rNomDir)/57.29577951)< 0.0) 
+         rLineDir += 180.0;
+
+      // --- Calculate the offsets in X and Y ---
+
+      rXOff = rOffset * rCos_MATH(rLineDir/57.29577951);
+      rYOff = -rOffset * rSin_MATH(rLineDir/57.29577951);
+
+      SymbOff_MVU(View,VVx,VVy,VVf,rXOff, rYOff);
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,FCh);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   Progress_SYS(0);
+
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+
+
+   // --------------------------
+   // --- Plot other objects ---
+
+   if  (iInteractive_SYS()) {
+   
+
+      // --- Plot line path and flag ---
+      
+      SetString_SYS("PATH","LINE_THICKNESS","0.15");
+      SetString_SYS("PATH","LINE_COLOR","k");
+      SetString_SYS("PATH","TICKFLAG","0");
+      SetString_SYS("PATH","LABEL_FORMAT","TL");
+      SetString_SYS("PATH","LABEL_LOCATION","1");
+      SetString_SYS("PATH","LABEL_SIZE","2.5");
+      SetString_SYS("PATH","LABEL_COLOR","k");
+      SetString_SYS("PATH","LABEL_WEIGHT","0");
+      SetString_SYS("PATH","H_OFFSET","2.0");
+      SetString_SYS("PATH","V_OFFSET","0");
+      SetString_SYS("PATH","GAP","0");
+   //   SetString_SYS("PATH","TICK_SIZE","");
+   //   SetString_SYS("PATH","TICK_STATION","");
+   //   SetString_SYS("PATH","TICK_MOD","");
+   //   SetString_SYS("PATH","TICK_MTMOD","");
+   //   SetString_SYS("PATH","TICK_MTSIZE","");
+
+      if (iInteract)
+         SetInteractive_SYS(0);
+      if (iRunGX_SYS("path.gx"))     Cancel_SYS(); 
+      if (iInteract)
+         SetInteractive_SYS(1);   
+
+      
+
+		if(iLegend!=0)
+		{
+
+			// ---------------------------------------
+			// --- Plot legend ---
+	      
+			// --- check for base view ---
+
+			EMap = Current_EMAP();
+			Map = Lock_EMAP(EMap);
+			if (!iExistView_MAP(Map,"*Base"))
+				  Abort_SYS(_("Legend cannot be drawn because a base view does not exist in this map."));
+			UnLock_EMAP(EMap);   
+
+			iSetCurrentView_EMAP(EMap,"*Base");
+			Map = Lock_EMAP(EMap);
+			View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+	    
+			// --- Where to plot ---
+	    
+			rXo = rYo = rDUMMY;
+			if (iInteractive_SYS()) {
+
+				// --- Get the coordinates of a user selected box ---
+
+				DisplayMessage_SYS(_("Locate legend"),_("Locate the lower left corner of the legend..."));
+
+				UnLock_EMAP(EMap);   
+				EMap = Current_EMAP();
+				iSetCurrentView_EMAP(EMap,"*Base");
+	         
+				if (iGetPoint_EMAP(EMap,_("Locate legend..."),rXo,rYo)) Cancel_SYS(); 
+
+				Map = Lock_EMAP(EMap);
+				View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+			} else {
+
+				// --- Get box area ---
+
+				Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
+				rXo = 0.2*rMinX + 0.8*rMaxX;
+				rYo = 0.2*rMinY + 0.8*rMaxY;
+			}
+
+
+			// --- Scale parameters ---
+
+			rScaleMM = rScaleMM_MVIEW(View);
+			rTxtSize = rScaleMM*2.5;
+			rXo *= rScaleMM;
+			rYo *= rScaleMM;
+
+
+			// --- Start a group ---
+
+	//      Strcat_STR(sGroup,"_Legend");
+			GenGroupName_STR("LEGEND",sGroup,"",sGrpName);
+			Strcpy_STR(sGroup,sGrpName);
+			StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+			if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+				Strcpy_STR(sFont,_n("default"));
+			TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+			TextSize_MVIEW(View,rTxtSize);
+			TextAngle_MVIEW(View,0.0);
+
+      
+			// --- Line path ---
+
+			TextColor_MVIEW(View,iColor_MVIEW("k"));
+			LineThick_MVIEW(View,0.15*rScaleMM);
+			LineStyle_MVIEW(View,0,0.0);
+			LineColor_MVIEW(View,iColor_MVIEW("k"));
+       
+			Text_MVIEW(View,_("Line path"),rXo+15.0*rScaleMM,rYo);
+			Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
+			rYo += 5.0*rScaleMM;  
+
+
+			// --- QC results ---
+	      
+			TextColor_MVIEW(View,iColor_MVIEW(sColor));
+			Text_MVIEW(View,sFlag,rXo+15.0*rScaleMM,rYo);
+
+			if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+				Strcpy_STR(sFont,_n("symbols"));
+			SymbFont_MVIEW(View,sFont,TRUE,MVIEW_FONT_WEIGHT_MEDIUM,FALSE);
+			SymbColor_MVIEW(View,iColor_MVIEW(sColor));
+			SymbFillColor_MVIEW(View,iColor_MVIEW(sColor));
+			SymbNumber_MVIEW(View,20);  // solid circle
+			SymbSize_MVIEW(View,rThick*rScaleMM);
+			SymbAngle_MVIEW(View,0.0);
+
+			k = (int)(30.0/rThick) + 1;
+			for (i = 0; i < k; i++)
+				Symbol_MVIEW(View, rXo + 0.33*(real)i*rThick*rScaleMM, rYo + 1.25*rScaleMM);
+
+			// --- Done with legend ---
+
+			Destroy_MVIEW(View);
+			UnLock_EMAP(EMap);
+		}
+   }
+   else if (rXCoord != 0.0 && rYCoord != 0.0 && !iInteractive_SYS()) 
+   {
+      // --------------------------
+
+      // --- Plot other objects ---
+
+      // --- Plot line path and flag ---
+      
+      SetString_SYS("PATH","LINE_THICKNESS","0.15");
+      SetString_SYS("PATH","LINE_COLOR","k");
+      SetString_SYS("PATH","TICKFLAG","0");
+      SetString_SYS("PATH","LABEL_FORMAT","TL");
+      SetString_SYS("PATH","LABEL_LOCATION","1");
+      SetString_SYS("PATH","LABEL_SIZE","2.5");
+      SetString_SYS("PATH","LABEL_COLOR","k");
+      SetString_SYS("PATH","LABEL_WEIGHT","0");
+      SetString_SYS("PATH","H_OFFSET","2.0");
+      SetString_SYS("PATH","V_OFFSET","0");
+      SetString_SYS("PATH","GAP","0");
+
+      if (iRunGX_SYS("path.gx"))     Cancel_SYS(); 
+
+
+		if (iLegend != 0)
+		{
+
+			// ---------------------------------------
+			// --- Plot legend ---
+	      
+			// --- check for base view ---
+
+			EMap = Current_EMAP();
+			Map = Lock_EMAP(EMap);
+			if (!iExistView_MAP(Map,"*Base"))
+				  Abort_SYS(_("Legend cannot be drawn because a base view does not exist in this map."));
+			UnLock_EMAP(EMap);   
+
+			Map = Lock_EMAP(EMap);
+			View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+	    
+			// --- Where to plot ---
+
+			if(rXCoord==rDUMMY || rYCoord==rDUMMY)
+			{    
+				Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
+				rXCoord = 0.2*rMinX + 0.8*rMaxX;
+				rYCoord = 0.2*rMinY + 0.8*rMaxY;
+			}
+	    
+			rXo = rXCoord;
+			rYo = rYCoord;
+
+			// --- Scale parameters ---
+
+			rScaleMM = rScaleMM_MVIEW(View);
+			rTxtSize = rScaleMM*2.5;
+			rXo *= rScaleMM;
+			rYo *= rScaleMM;
+
+
+			// --- Start a group ---
+
+			GenGroupName_STR("LEGEND",sGroup,"",sGrpName);
+			Strcpy_STR(sGroup,sGrpName);
+			StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+			if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+				Strcpy_STR(sFont,_n("default"));
+			TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+			TextSize_MVIEW(View,rTxtSize);
+			TextAngle_MVIEW(View,0.0);
+
+			if (iMap) {
+	      
+				// --- Line path ---
+
+				TextColor_MVIEW(View,iColor_MVIEW("k"));
+				LineThick_MVIEW(View,0.15*rScaleMM);
+				LineStyle_MVIEW(View,0,0.0);
+				LineColor_MVIEW(View,iColor_MVIEW("k"));
+	       
+				Text_MVIEW(View,_("Line path"),rXo+15.0*rScaleMM,rYo);
+				Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
+				rYo += 5.0*rScaleMM;  
+			}
+
+			// --- QC results ---
+	      
+			TextColor_MVIEW(View,iColor_MVIEW(sColor));
+			Text_MVIEW(View,sFlag,rXo+15.0*rScaleMM,rYo);
+
+			if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
+				Strcpy_STR(sFont,_n("symbols"));
+			SymbFont_MVIEW(View,sFont,TRUE,MVIEW_FONT_WEIGHT_MEDIUM,FALSE);
+			SymbColor_MVIEW(View,iColor_MVIEW(sColor));
+			SymbFillColor_MVIEW(View,iColor_MVIEW(sColor));
+			SymbNumber_MVIEW(View,20);  // solid circle
+			SymbSize_MVIEW(View,rThick*rScaleMM);
+			SymbAngle_MVIEW(View,0.0);
+
+			k = (int)(30.0/rThick) + 1;
+			for (i = 0; i < k; i++)
+				Symbol_MVIEW(View, rXo + 0.33*(real)i*rThick*rScaleMM, rYo + 1.25*rScaleMM);
+
+			// --- Done with legend ---
+
+			Destroy_MVIEW(View);
+			UnLock_EMAP(EMap);
+		}
+   }
+   
+   // --- Reset to current map ---
+   
+   SetString_SYS("QCDEVMAP","MAP","0");
+
+}

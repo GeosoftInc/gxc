@@ -1,0 +1,205 @@
+//===========================================================================
+NAME          = "Create a data view from the current database."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+
+   Applies one of the geochemical processing \"view\" calculations
+   to the current database, and creates a new database with the
+   results.
+	
+   SEMVIEW.VIEW    Processed view to export.
+          .MASK       Name of mask channel          
+          .MINERAL    Mineral to use (\"\" or \"All Minerals\" for all)
+          .LINE   \"D\" for the displayed anomaly (line) only.
+                  \"S\" for selected anomaly (lines).
+                  \"A\" for all anomalies (lines)
+          .DECIMALS   Decimal places for created oxide/cation/ratio channels
+          .CHAN       Channel selection (0:All, 1: no extra)
+"
+
+// Revision History
+// v8.0.0: Added channel selection option.
+// v6.3.0: Added support for multiple mineral channels
+// v5.1.7: GX replace for SEMPLOT version 2.
+//===========================================================================
+
+RESOURCE = "SEMVIEW.gr"
+#include "SEMVIEW.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData, ENewData;
+DB          Data, NewData; 
+DGW         Diag;          
+LST         List, LineLST;
+
+string(STR_FILE) sDB;
+string(STR_DB_SYMBOL) sCurLine, sMask, sMineralCh;
+string(STR_DEFAULT_SHORT) sLine, sMineral, sVal, sDec;
+
+int i, iLine, iView, iChan;
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+
+   // -- Lock the database ---
+
+   Data = Lock_EDB(EData);
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SEMVIEW");
+
+
+      // --- Set up the lists ---
+
+      List = GetList_DGW(Diag,_SEMVIEW_1);
+      ClassChanLST_DB(Data,List,"MASK");
+      InsertItem_LST(List, 0, _("None"), _("None"));
+
+      List = GetList_DGW(Diag,_SEMVIEW_2);
+      GetFullMineralLST_SEMPLOT(List);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_SEMVIEW_0,DGW_LISTALIAS,"SEMVIEW","VIEW");    
+      SetInfoSYS_DGW(Diag,_SEMVIEW_1,DGW_TEXT,"SEMVIEW","MASK");     
+      SetInfoSYS_DGW(Diag,_SEMVIEW_2,DGW_LISTALIAS,"SEMVIEW","MINERAL");    
+      SetInfoSYS_DGW(Diag,_SEMVIEW_3,DGW_LISTALIAS,"SEMVIEW","LINE");     
+      SetInfoSYS_DGW(Diag,_SEMVIEW_4,DGW_TEXT,"SEMVIEW","DECIMALS");     
+      SetInfoSYS_DGW(Diag,_SEMVIEW_5,DGW_LISTALIAS,"SEMVIEW","CHAN");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_SEMVIEW_0,DGW_LISTALIAS,"SEMVIEW","VIEW");    
+      GetInfoSYS_DGW(Diag,_SEMVIEW_1,DGW_TEXT,"SEMVIEW","MASK");     
+      GetInfoSYS_DGW(Diag,_SEMVIEW_2,DGW_LISTALIAS,"SEMVIEW","MINERAL");    
+      GetInfoSYS_DGW(Diag,_SEMVIEW_3,DGW_LISTALIAS,"SEMVIEW","LINE");     
+      GetInfoSYS_DGW(Diag,_SEMVIEW_4,DGW_TEXT,"SEMVIEW","DECIMALS");     
+      GetInfoSYS_DGW(Diag,_SEMVIEW_5,DGW_LISTALIAS,"SEMVIEW","CHAN");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   iView = iGetInt_SYS("SEMVIEW","VIEW");
+   GetString_SYS("SEMVIEW","LINE",sLine);
+   GetString_SYS("SEMVIEW","MASK",sMask);
+   GetString_SYS("SEMVIEW","MINERAL",sMineral); 
+   GetString_SYS("SEMVIEW","DECIMALS",sDec); 
+   iChan = iGetInt_SYS("SEMVIEW","CHAN");
+     
+   
+   if(iStrcmp_STR(sMask, _("None"), STR_CASE_TOLERANT)==0)
+      Strcpy_STR(sMask, "");
+      
+	if(iChan!=SEMPLOT_EXPORT_NORMAL &&
+	   iChan!=SEMPLOT_EXPORT_NOEXTRA)
+	   iChan = SEMPLOT_EXPORT_NORMAL;      
+
+
+   // --- Get the mineral channel ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+   
+
+   // --- Create the new database and lock it ---
+
+   SetString_SYS("CREATE","CURDB", sDB);
+   if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")==-1) Cancel_SYS();
+   GetString_SYS("CREATE","NAME", sDB);   // Get the name of the database actually created.
+
+   ENewData = Load_EDB(sDB);
+   NewData = Lock_EDB(ENewData);
+
+
+   // --- Set number of decimal places for channels ---
+
+   if(iView == 0 ||
+      iView == 1 ||
+      iView == 2) {
+
+      GlobalSet_SYS("SEMPLOT.DEC_OXIDES",sDec);      
+   }
+   else if(iView == 3 ||
+           iView == 4) {
+      GlobalSet_SYS("SEMPLOT.DEC_CATIONS",sDec);      
+   }
+   else
+      GlobalSet_SYS("SEMPLOT.DEC_RATIOS",sDec);     
+       
+
+   // --- Make list of lines to export ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+
+   if (iChar_STR(sLine) == iChar_STR("D")) {
+
+      iLine = (int)FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+      FormatI_STR(iLine,sVal,10);
+
+      AddItem_LST(LineLST, sCurLine, sVal);
+   }
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      SelectedLineLST_DB(Data, LineLST);
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+
+   // --- Call the view creation function ---
+
+   Progress_SYS(1);
+   ExportView2_SEMPLOT(Data, LineLST, NewData, iView, sMask, sMineralCh, sMineral, iChan);
+   Progress_SYS(0);
+
+   UnLock_EDB(EData);
+   UnLock_EDB(ENewData);
+
+   MakeCurrent_EDB(ENewData);
+//   LoadAllChans_EDB(ENewData);
+   DelLine0_EDB(ENewData);
+}

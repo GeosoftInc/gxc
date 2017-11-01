@@ -1,0 +1,155 @@
+//===========================================================================
+
+NAME          = "Print Multiple Maps"
+#include <version.gxh>
+DESCRIPTION   = "
+
+      MAPPRINT.Maps
+               ScaleToFit
+               ScaleFactor
+               AllPages
+               FirstPage
+               LastPage
+               Centre
+               OffsetX
+               OffsetY
+               OverlapSize
+               PrintToFile
+               FileName
+               Copies
+"
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/File"
+
+//===========================================================================
+
+RESOURCE="MAPPRINT.gr"
+#include "MAPPRINT.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+DGW   Diag;
+
+string(STR_FILE)   sMap;
+string(STR_MULTI_FILE) sMaps;
+int  iMaps;
+int  iEntireMap;
+int  iScaleToFit;
+real rScaleFactor;
+int  iAllPages;
+int  iFirstPage;
+int  iLastPage;
+int  iCentre;
+int  iOffsetX;
+int  iOffsetY;
+int  iOverlapSize;
+int  iPrintToFile;
+int  iCopies;
+string(STR_FILE) sFileName;
+int  i,iLoaded;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("MAPPRINT");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_MAPPRINT_0, DGW_FILEPATH,"MAPPRINT","Maps");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_1, DGW_LISTALIAS,"MAPPRINT","ScaleToFit");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_2, DGW_TEXT,"MAPPRINT","ScaleFactor");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_3, DGW_LISTALIAS,"MAPPRINT","AllPages");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_4, DGW_TEXT,"MAPPRINT","FirstPage");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_5, DGW_TEXT,"MAPPRINT","LastPage");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_6, DGW_LISTALIAS,"MAPPRINT","Centre");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_7, DGW_TEXT,"MAPPRINT","OffsetX");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_8, DGW_TEXT,"MAPPRINT","OffsetY");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_9, DGW_TEXT,"MAPPRINT","OverlapSize");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_10,DGW_LISTALIAS,"MAPPRINT","PrintToFile");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_11,DGW_FILEPATH,"MAPPRINT","FileName");
+      SetInfoSYS_DGW(Diag,_MAPPRINT_12,DGW_TEXT,"MAPPRINT","Copies");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if(i==-1)   Cancel_SYS(); 
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_MAPPRINT_0, DGW_FILEPATH,"MAPPRINT","Maps");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_1, DGW_LISTALIAS,"MAPPRINT","ScaleToFit");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_2, DGW_TEXT,"MAPPRINT","ScaleFactor");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_3, DGW_LISTALIAS,"MAPPRINT","AllPages");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_4, DGW_TEXT,"MAPPRINT","FirstPage");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_5, DGW_TEXT,"MAPPRINT","LastPage");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_6, DGW_LISTALIAS,"MAPPRINT","Centre");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_7, DGW_TEXT,"MAPPRINT","OffsetX");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_8, DGW_TEXT,"MAPPRINT","OffsetY");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_9, DGW_TEXT,"MAPPRINT","OverlapSize");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_10,DGW_LISTALIAS,"MAPPRINT","PrintToFile");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_11,DGW_FILEPATH,"MAPPRINT","FileName");
+      GetInfoSYS_DGW(Diag,_MAPPRINT_12,DGW_TEXT,"MAPPRINT","Copies");
+   }
+
+   GetString_SYS("MAPPRINT","Maps",sMaps);
+   iEntireMap   = 1;
+   iScaleToFit  = iGetInt_SYS("MAPPRINT","ScaleToFit");
+   if (iExistReal_SYS("MAPPRINT","ScaleFactor"))
+      rScaleFactor = rGetReal_SYS("MAPPRINT","ScaleFactor");
+   else   
+      rScaleFactor = 1.0;
+   iAllPages    = iGetInt_SYS("MAPPRINT","AllPages");
+   iFirstPage   = iGetInt_SYS("MAPPRINT","FirstPage");
+   iLastPage    = iGetInt_SYS("MAPPRINT","LastPage");
+   iCentre      = iGetInt_SYS("MAPPRINT","Centre");
+   iOffsetX     = iGetInt_SYS("MAPPRINT","OffsetX");
+   iOffsetY     = iGetInt_SYS("MAPPRINT","OffsetY");
+   iOverlapSize = iGetInt_SYS("MAPPRINT","OverlapSize");
+   iPrintToFile = iGetInt_SYS("MAPPRINT","PrintToFile");
+   iCopies      = iGetInt_SYS("MAPPRINT","Copies");
+   GetString_SYS("MAPPRINT","FileName",sFileName);
+   if(iPrintToFile && iStrlen_STR(sFileName)==0)  
+      Abort_SYS(_("Output File Name Is Required."));
+
+
+   // --- Get Path ---
+   
+   iMaps = iCountTokens_STR(sMaps,"|");
+   
+   for(i=0; i<iMaps; i++)  {
+      FormatI_STR(i,sMap,8);
+      FileExt_STR(sFileName,sMap,sFileName,FILE_EXT_FORCE);
+      GetMFile_STR(sMaps,sMap,i);  
+   
+      // --- Get Map ---
+
+      iLoaded = iLoaded_EMAP(sMap);
+      EMap = Load_EMAP(sMap);
+
+      // --- Print ---
+      
+      Print_EMAP(EMap,iEntireMap,iScaleToFit,iPrintToFile,iAllPages,iCentre,iCopies,
+                 iFirstPage,iLastPage,rScaleFactor,iOverlapSize,iOffsetX,iOffsetY,sFileName);
+                 
+      if(!iLoaded) 
+         UnLoad_EMAP(sMap);           
+   }
+}

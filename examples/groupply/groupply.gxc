@@ -1,0 +1,174 @@
+//===========================================================================
+NAME          = "Create polygon file from group"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+
+      GROUPPLY.PLY       - output ply file name
+              .GROUP     - Group name
+              .APPEND    - Group name
+"
+
+//===========================================================================
+
+RESOURCE = "groupply.gr"
+#include "groupply.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sPoly,sName;
+string(STR_VIEW_GROUP) sViewGroup;
+string(STR_VIEW) sView;
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT)	sTitle;
+
+DGW         hDGW;
+int         i,iEx,iNum;
+PLY         hPLY,hOldPLY;
+EMAP        EMap;
+MAP   		hMAP;
+MVIEW 		View;
+LST         hLST;
+VV          hVVx,hVVy;
+
+    
+
+//===========================================================================
+//                           DIGITS CODE
+//===========================================================================
+
+{
+	// --- get current map ---
+
+   EMap  = Current_EMAP();
+   hMAP = Lock_EMAP(EMap);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+      i = -1;
+      while (i == -1) {
+
+
+         // --- Create the Dialogue ---
+
+         hDGW = Create_DGW("GROUPPLY");
+
+         hLST = GetList_DGW(hDGW,_GROUPPLY_0);
+         GroupList_MAP(hMAP,hLST);
+         Sort_LST(hLST,0,0);
+
+      
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(hDGW,_GROUPPLY_0,DGW_TEXT,"GROUPPLY","GROUP");     
+         SetInfoSYS_DGW(hDGW,_GROUPPLY_1,DGW_FILEPATH,"GROUPPLY","PLY");
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(hDGW);
+         if (i == -1) Cancel_SYS(); 
+
+         GetInfoSYS_DGW(hDGW,_GROUPPLY_0,DGW_TEXT,"GROUPPLY","GROUP");     
+         GetInfoSYS_DGW(hDGW,_GROUPPLY_1,DGW_FILEPATH,"GROUPPLY","PLY");
+
+         Destroy_DGW(hDGW);
+      
+      
+         // --- get file name and check if it exists ---
+      
+         GetString_SYS("GROUPPLY","PLY",sPoly);
+         if (iFileExist_SYS(sPoly)) {
+         
+            hDGW = Create_DGW("GROUPPLY1");
+            FileNamePart_STR(sPoly,sName,STR_FILE_PART_NAME_EXTENSION);
+            
+            Printf_STR(sTitle, sizeof(sTitle), _("%s exists!"), sName);
+            SetTitle_DGW(hDGW,sTitle);
+            i = iRunDialogue_DGW(hDGW);
+            Destroy_DGW(hDGW);
+            if (i == 1)
+               SetString_SYS("GROUPPLY","APPEND","Yes");
+            else
+               SetString_SYS("GROUPPLY","APPEND","No");
+         }     
+      }         
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GROUPPLY","PLY",sPoly);
+   GetString_SYS("GROUPPLY","GROUP",sViewGroup);
+
+
+   // --- Create the Polygon ---
+
+   hPLY = Create_PLY();
+
+
+   // --- view and group name setting ---
+
+   i = iTokens_STR(sViewGroup,"\\");
+   GetToken_STR(sView,sViewGroup,0);
+   GetToken_STR(sGroup,sViewGroup,1);
+
+   // --- get view and polygons ---
+
+   View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+   GroupToPLY_MVIEW(View,sGroup,hPLY);
+   Destroy_SYS(View);
+
+
+   // --- Save the Data ---
+
+   if (iFileExist_SYS(sPoly) && iGetYesNo_SYS("GROUPPLY","APPEND")) {
+   
+      // --- read existing file first ---
+      
+      hOldPLY = Create_PLY();
+      LoadTable_PLY(hOldPLY,sPoly);
+      
+      // --- add new polygons to old ---
+      
+      hVVx = Create_VV(REAL,0);
+      hVVy = Create_VV(REAL,0);
+      
+      iNum = iNumPoly_PLY(hPLY);
+      for (i=0;i<iNum;i++) {
+         GetPolygonEx_PLY(hPLY,hVVx,hVVy,i,iEx);
+         AddPolygonEx_PLY(hOldPLY,hVVx,hVVy,iEx);
+      }
+      
+      SaveTable_PLY(hOldPLY,sPoly);
+      
+      Destroy_VV(hVVx);
+      Destroy_VV(hVVy);
+      Destroy_PLY(hOldPLY);
+      
+   } else   
+      SaveTable_PLY(hPLY,sPoly);
+
+
+   // --- done ---
+
+   Destroy_PLY(hPLY);
+
+   // --- Release the map ---
+
+   UnLock_EMAP(EMap);
+   
+}

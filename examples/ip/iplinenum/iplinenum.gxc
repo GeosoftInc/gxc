@@ -1,0 +1,134 @@
+//===========================================================================
+NAME          = "Display and Modify Current Line Location"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+         Display and Edit IP line location of the currently displayed line.
+         The \"X\" coordinate (for N-S lines), or the \"Y\" coordinate
+         (for E-W lines) is calculated from this internally stored
+         parameter which is set at import. If the import has an error,
+         this GX is able alter this value.
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPLINENUM.gr"
+#include "IPLINENUM.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+REG         Reg;               
+DB_SYMB     Line;
+
+int i, iArray;
+real rLineNum;
+
+string(STR_DB_SYMBOL) sCurLine;
+string(STR_DEFAULT_SHORT) sLineNum;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if(!iInteractive_SYS())
+      Abort_SYS(_("This GX must be run interactively"));
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   Data = Lock_EDB(EData);
+   Line = FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+
+   // --- Get the REG from the line ---
+
+   Reg = Create_REG(50);   
+   GetRegSymb_DB(Data, Line, Reg);
+
+   // --- Ensure this is an IP line ---
+
+   iArray = 0;       // prevent compiler warning
+   GetInt_REG(Reg, "IP_ARRAY", iArray);
+   if(iArray==iDUMMY)
+      Abort_SYS(_("The current line does not appear to be a valid IP data line."));
+
+   // --- Get the line number ---
+   
+   Get_REG(Reg, "LINENUM", sLineNum, sizeof(sLineNum));
+
+   // --- Create the dialog and set the parameters ---
+
+   Diag = Create_DGW("IPLINENUM");
+
+   while (1) {
+
+      SetInfo_DGW(Diag,_IPLINENUM_0,DGW_TEXT,sCurLine);
+      SetInfo_DGW(Diag,_IPLINENUM_1,DGW_TEXT,sLineNum);
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    // cancel
+
+      // --- Get the parameters back ---
+
+      GetInfo_DGW(Diag,_IPLINENUM_1,DGW_TEXT,sLineNum);
+
+
+      // --- Validate the number ---
+
+      rLineNum = rScanR_STR(sLineNum);
+      if(rLineNum == rDUMMY) {
+         DisplayMessage_SYS(_("Edit Line Number"), _("You must enter a valid line number."));
+         continue;
+      }
+      else {
+
+         // --- Put values back into the REG ---
+
+         Set_REG(Reg, "LINENUM", sLineNum);   
+
+         // --- Set the REG back into the line ---
+
+         SetRegSymb_DB(Data, Line, Reg);
+
+         break;
+
+      }
+
+   }
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   // Destroy objects
+
+   Destroy_REG(Reg);
+
+
+   // --- Recalculate the IP derived values ---
+
+   iRunGX_SYS("iprecalc.gx");
+}

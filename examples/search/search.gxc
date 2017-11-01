@@ -1,0 +1,271 @@
+//===========================================================================
+NAME          = "Seard and replace values"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   SEARCH.CHANNEL      channel name
+                .TYPE         \"text\" or \"numeric\" (script only)
+                .VALUE        value to replace
+                .REPLACEMENT  replacement
+                
+   Comparisons are made in the format of the channel display.
+   
+"
+
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+
+// Revision History
+// v6.0.0: Allow for channel widths so small they give "**".
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "SEARCH.gr"
+#include "SEARCH.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+#define TEXT      0
+#define NUMERIC   1
+
+EDB         EData;         // Database handle
+DB          Data;         // Database handle
+DB_SYMB     Line,Ch,CurLine;
+DGW         Diag;
+VV          VVd, VVline;
+
+string(STR_DB_SYMBOL) sCurChan, sCurLine;
+string(STR_DB_SYMBOL) sLine;
+string(STR_DEFAULT_LONG) sVal;
+real rFidStart, rFidIncr,rFidEnd;
+int i,iDone,iRet,iTotLines,iCurLine,iNewLine;
+int iCurIndex,iNewIndex,iLastLine;
+int iCase,iMatch,iDir;
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if(!iInteractive_SYS())
+      Abort_SYS(_("This GX must be run interactively."));
+
+
+   // --- get data ---
+   
+   EData = Current_EDB();
+   Ch = GetCurChanSymb_EDB(EData);
+   if(Ch==NULLSYMB)
+      Abort_SYS(_("No channel is currently selected"));
+   GetCurChan_EDB(EData,sCurChan);
+
+   GetCurLine_EDB(EData, sCurLine);
+   CurLine = GetCurLineSymb_EDB(EData);
+   iCurLine = -1;    // index into line list to be set later.
+
+
+   // --- Get the current line list and data ---
+
+   Data = Lock_EDB(EData);
+
+   VVline = Create_VV(INT, 0);
+   iTotLines = iSymbList_DB(Data, VVline, DB_SYMB_LINE);
+
+   iCurLine = -1;
+   for(i=0;i<iTotLines;i++) {
+
+      Line = (DB_SYMB)iGetInt_VV(VVline, i);
+
+      // --- Look for index of current line ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);      
+      GetSymbName_DB(Data,Line,sLine);
+      if(0==iStrcmp_STR(sLine, sCurLine, STR_CASE_TOLERANT)) iCurLine = i;      
+      UnLockSymb_DB(Data,Line);
+
+      if(iCurLine!=-1) break;
+   }
+   
+   if(iCurLine==-1)
+      Abort_SYS(_("Error - current line index not found"));
+
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   VVd = CreateExt_VV(-(iGetChanWidth_DB(Data, Ch)+1), 0);
+
+   GetChanVV_DB(Data,CurLine,Ch,VVd);
+   
+   
+   // --- If the channel width is too small for the data, it will be displayed as "**" ---
+   // --- In that case create a standard size large enough for "real" numbers ---
+   
+   if(iGetChanType_DB(Data,Ch)>=0) {
+   
+      if(iSearchText_VVU(VVd, "**", VVU_CASE_TOLERANT, VVU_MATCH_FULL_STRINGS, -1, 1)!=-1) {
+      
+         Destroy_VV(VVd);
+         
+         VVd = CreateExt_VV(-20, 0);
+         GetChanVV_DB(Data,CurLine,Ch,VVd);         
+      }   
+   } 
+  
+   UnLockSymb_DB(Data,Ch);
+
+   UnLock_EDB(EData);
+
+
+   // --- Get the current mark ---
+
+   if(iGetCurMark_EDB(EData, rFidStart, rFidEnd, rFidIncr)) {
+      iCurIndex = -1;
+   }
+   else {
+
+      // --- Get the index of the selected value ---
+
+      Data = Lock_EDB(EData);
+      LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      iCurIndex = (int)((rFidStart - rGetFidStart_DB(Data, CurLine, Ch)) / rFidIncr);
+      UnLockSymb_DB(Data,Ch);
+      UnLock_EDB(EData);
+
+   }
+
+
+   // --- Create the dialog ---
+
+   Diag = Create_DGW("SEARCH");
+
+
+   GetString_SYS("SEARCH","VALUE",sVal);
+   if(!iStrlen_STR(sVal)) {
+      GetCurFidString_EDB(EData,sVal);
+      SetString_SYS("SEARCH","VALUE",sVal);
+   }
+
+
+   iDone = 0;
+   iLastLine = -1;
+   while(!iDone) {
+
+      SetInfoSYS_DGW(Diag,_SEARCH_0,DGW_TEXT,"SEARCH","VALUE");         
+      SetInfoSYS_DGW(Diag,_SEARCH_1,DGW_LISTALIAS,"SEARCH","MATCH");
+      SetInfoSYS_DGW(Diag,_SEARCH_2,DGW_LISTALIAS,"SEARCH","CASE");
+
+      
+      // --- Run the Dialogue ---
+
+      iRet = iRunDialogue_DGW(Diag);
+
+      if(iRet<=0) {
+         iDone = 1;
+         break;
+      }
+
+      GetInfoSYS_DGW(Diag,_SEARCH_0,DGW_TEXT,"SEARCH","VALUE");         
+      GetInfoSYS_DGW(Diag,_SEARCH_1,DGW_LISTALIAS,"SEARCH","MATCH");
+      GetInfoSYS_DGW(Diag,_SEARCH_2,DGW_LISTALIAS,"SEARCH","CASE");
+
+      
+      // --- Get values ---
+
+      GetString_SYS("SEARCH","VALUE",sVal);
+      iMatch = iGetInt_SYS("SEARCH","MATCH");
+      iCase = iGetInt_SYS("SEARCH","CASE");
+
+      
+      // --- Find the strings ---
+
+      if(iRet==1) iDir = -1;
+      if(iRet==2) iDir =  1;
+      iNewIndex = iCurIndex;
+      iNewLine = iCurLine;
+
+      Data = Lock_EDB(EData);
+
+      while(TRUE) {
+
+         iNewIndex = iSearchText_VVU(VVd, sVal, iCase, iMatch, iNewIndex + iDir, iDir);
+         if(iNewIndex!=-1) break;
+
+         // --- Search next line ---
+
+         if(iDir==-1) {
+            if(iNewLine==0) break;     // no more lines to search
+            iNewLine--;
+         }
+         else {
+            if(iNewLine+1==iTotLines) break;     // no more lines to search
+            iNewLine++;
+         }
+
+         Line = (DB_SYMB)iGetInt_VV(VVline, iNewLine);
+
+         LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         GetChanVV_DB(Data,Line,Ch,VVd);
+         UnLockSymb_DB(Data,Line);
+         UnLockSymb_DB(Data,Ch);
+
+         iNewIndex = -1;
+      }
+      
+      UnLock_EDB(EData);
+
+
+      if(iNewIndex == -1) {
+
+         DisplayMessage_SYS(_("Search"), _("Match not found"));
+
+
+         // --- Reload current line data ---
+
+         if(iNewLine != iCurLine) {
+            
+            Line = (DB_SYMB)iGetInt_VV(VVline, iCurLine);
+
+            Data = Lock_EDB(EData);
+
+            LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+            LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+            GetChanVV_DB(Data,Line,Ch,VVd);
+            UnLockSymb_DB(Data,Line);
+            UnLockSymb_DB(Data,Ch);
+
+            UnLock_EDB(EData);
+         }
+
+      }
+      else {
+
+         iCurIndex = iNewIndex;
+
+         if(iCurLine != iNewLine) {
+            GotoLine_EDB(EData, Line);
+            iCurLine = iNewLine;
+            GetCurLine_EDB(EData, sCurLine);
+         }
+         GotoElem_EDB(EData, iCurIndex);
+
+      }
+   }
+
+   Destroy_VV(VVd);
+   Destroy_VV(VVline);
+   
+}

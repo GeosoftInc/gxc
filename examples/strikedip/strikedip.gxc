@@ -1,0 +1,719 @@
+//===========================================================================
+NAME          = "STRIKEDIP GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map Tools"
+
+DESCRIPTION   = "
+Use this GX to plot geological dip symbols.
+Dip direction channel has control of the fiducial start and increment
+for X, Y and dip angle channels.
+
+Parameters:
+
+STRIKEDIP.STRIKE    : Name of channel to define the strike
+         .DIP       : Name of channel to define dip
+         .SYMS      : Symbol size in mm
+         .SYMC      : Symbol color
+         .SYML      : Thickness of lines in mm which form the dip symbol
+         .TXTS      : Text size in mm
+         .TXTC      : Text color
+         .ORIENT    : Text oriention: 0: Horizontal 1: Rotated with the
+                      dip direction. Default option is 0.
+"
+// Revision History:
+// v6.0.0: Fixed map locking problem in call to iGetPoint_EMAP
+//===========================================================================
+
+RESOURCE = "STRIKEDIP.gr"
+#include "STRIKEDIP.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,StrikeCh,DipCh;      // Channel handles
+DB_SYMB    Line;                   // Line handle
+EMAP       EMap;
+MAP        Map;
+MVIEW      View;
+DGW        Diag;
+LST        List;
+VV         XVV,YVV,StrikeVV,DipVV;
+IPJ        DataIPJ;
+
+string(255) sFont;
+string(STR_GROUP)  sStrikeCh,sDipCh;
+string(STR_GROUP) sLabel,sLine,sGroup;
+string(124) sTemp;
+string(STR_GROUP)  sSymClr,sTxtClr;
+string(STR_GROUP)  sGrpName;
+string(STR_DEFAULT_LONG) sMsg;
+
+int   iLines;
+int   i, j;
+int   iLenVV;
+int   iOrient;
+int   iDecimals, iLastRef, iRef;
+int   iGeneral, iVertical, iOutOfRange;
+
+real  rTxtSize,rScaleMM;
+real  rXVV,rYVV,rStrike,rDip;
+real  rSymSize, rLineThk;
+real  rX,rY,rX1,rY1,rX2,rY2,rX3,rY3;
+real  Xmin,Ymin,Xmax,Ymax;
+real  rXo, rYo, rXOff;
+real  rConst, rAngle;
+real  rSin, rCos, rSize, rDSize, rTSize;
+
+int         i3D;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   // --- Get current database and map ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- check for base view ---
+
+   EMap = Current_EMAP();
+   i3D = 0;
+   if (iInteractive_SYS()) 
+      i3D = iIs3DView_EMAP(EMap);
+   if(!i3D && !iScript_SYS())
+      iSetCurrentView_EMAP(EMap,"*Base");
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) 
+   {
+
+      while(1)
+      {
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("STRIKEDIP");
+
+         
+         // --- Set up lists ---
+
+         List = GetList_DGW(Diag,_STRIKEDIP_0);
+         SymbLST_DB(Data,List,DB_SYMB_CHAN);
+         Sort_LST(List,0,0);
+         List = GetList_DGW(Diag,_STRIKEDIP_1);
+         SymbLST_DB(Data,List,DB_SYMB_CHAN);
+         Sort_LST(List,0,0);
+
+
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_0,DGW_TEXT,"STRIKEDIP","DIP");
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_1,DGW_TEXT,"STRIKEDIP","STRIKE");
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_2,DGW_TEXT,"STRIKEDIP","SYMS");     
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_3,DGW_TEXT,"STRIKEDIP","SYMC");     
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_4,DGW_TEXT,"STRIKEDIP","SYML");     
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_5,DGW_TEXT,"STRIKEDIP","TXTS");     
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_6,DGW_TEXT,"STRIKEDIP","TXTC");     
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_7,DGW_LISTALIAS,"STRIKEDIP","ORIENT");     
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_8,DGW_TEXT,"STRIKEDIP","X");     
+         SetInfoSYS_DGW(Diag,_STRIKEDIP_9,DGW_TEXT,"STRIKEDIP","Y");     
+
+         // --- Hide Locate button in 3D ---
+
+		 if (i3D)
+            SetInfo_DGW(Diag,_STRIKEDIP_11,DGW_HIDE, "1");
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if(i==-1) Cancel_SYS();    
+
+         
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_0,DGW_TEXT,"STRIKEDIP","DIP");
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_1,DGW_TEXT,"STRIKEDIP","STRIKE");
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_2,DGW_TEXT,"STRIKEDIP","SYMS");     
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_3,DGW_TEXT,"STRIKEDIP","SYMC");     
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_4,DGW_TEXT,"STRIKEDIP","SYML");     
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_5,DGW_TEXT,"STRIKEDIP","TXTS");     
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_6,DGW_TEXT,"STRIKEDIP","TXTC");     
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_7,DGW_LISTALIAS,"STRIKEDIP","ORIENT");     
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_8,DGW_TEXT,"STRIKEDIP","X");     
+         GetInfoSYS_DGW(Diag,_STRIKEDIP_9,DGW_TEXT,"STRIKEDIP","Y");     
+
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+         
+         
+         // --- Locate legend ---
+         
+         if(i==1)
+         {
+            iSetCurrentView_EMAP(EMap, "*Base");
+
+            if(!iGetPoint_EMAP(EMap, _("Select location of bottom left corner for plot legend"), rX, rY)) 
+            {
+
+               // --- Round to 0.1 mm ---
+               
+               rX = rFloor_MATH(10.0*rX)/10.0;
+               rY = rFloor_MATH(10.0*rY)/10.0;
+               
+               SetReal_SYS("STRIKEDIP","X",rX);
+               SetReal_SYS("STRIKEDIP","Y",rY);
+            }           
+            continue;             
+         }
+         break;
+      }
+   }
+
+
+   // --- Get some VV's ---
+
+   XVV = Create_VV(REAL,0);
+   YVV = Create_VV(REAL,0);
+   StrikeVV = Create_VV(REAL,0);
+   DipVV = Create_VV(REAL,0);
+
+
+   // --- Get channels ---
+
+   GetString_SYS("STRIKEDIP","STRIKE",sStrikeCh);
+   GetString_SYS("STRIKEDIP","DIP",sDipCh);
+   if(!iStrlen_STR(sStrikeCh))
+      Abort_SYS(_("The strike channel is not defined."));
+   if(!iStrlen_STR(sDipCh))
+      Abort_SYS(_("The dip channel is not defined."));
+
+   if (!iExistSymb_DB(Data,sStrikeCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Strike channel does not exist."));
+   StrikeCh = FindSymb_DB(Data,sStrikeCh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sDipCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Dip angle channel does not exist."));
+   DipCh = FindSymb_DB(Data,sDipCh,DB_SYMB_CHAN);
+
+
+   // --- Get X and Y channels ---
+
+   if (!iExistSymb_DB(Data,"X",DB_SYMB_CHAN))
+      Abort_SYS(_("Current X channel does not exist."));
+   XCh = FindSymb_DB(Data,"X",DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,"Y",DB_SYMB_CHAN))
+      Abort_SYS(_("Current Y channel does not exist."));
+   YCh = FindSymb_DB(Data,"Y",DB_SYMB_CHAN);
+
+
+   // --- Get the symbol size, line thickness, color ---
+
+   rSymSize = rGetReal_SYS("STRIKEDIP","SYMS");
+   rLineThk = rGetReal_SYS("STRIKEDIP","SYML");
+   GetString_SYS("STRIKEDIP","SYMC",sSymClr);
+
+   
+   // --- Get text size and color ---
+
+   rTxtSize = rGetReal_SYS("STRIKEDIP","TXTS");
+   GetString_SYS("STRIKEDIP","TXTC",sTxtClr);
+
+   
+   // --- Get text oriention ---
+
+   iOrient = iGetInt_SYS("STRIKEDIP","ORIENT");
+
+
+   // --- Open the data view ---
+
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   SetThinRes_MVIEW(View,0.02);
+                                          
+
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   SetWorkingIPJ_MVIEW(View,DataIPJ);
+
+
+   // --- Scale parameters ---
+
+   rScaleMM = rScaleMM_MVIEW(View);
+   rTxtSize *= rScaleMM;
+   rLineThk *= rScaleMM;
+   rSymSize *= rScaleMM;
+
+
+   // --- Set the group clip mode ---
+   
+   GroupClipMode_MVIEW(View, CLIP_ON);
+
+
+   // --- Start a group ---
+
+   GetName_DB(Data,DB_NAME_FILE,sGroup);
+   FileNamePart_STR(sGroup,sGroup,STR_FILE_PART_NAME);
+   GenGroupName_STR("DIPSYMBOL",sGroup,sStrikeCh,sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- Add maker ---
+
+   EasyMaker_MVIEW(View,_("Geological dip symbols"),"STRIKEDIP;");
+
+
+   // --- Link ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+ 
+
+   // --- Set text parameters ---
+ 
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextSize_MVIEW(View,rTxtSize);
+   TextColor_MVIEW(View,iColor_MVIEW(sTxtClr));
+   TextAngle_MVIEW(View,0.0);
+   iLastRef = 1;
+   TextRef_MVIEW(View,iLastRef);
+   
+
+   // --- Set line parameters ---
+
+   LineStyle_MVIEW(View, 1, 0.0);
+   LineThick_MVIEW(View, rLineThk);
+   LineColor_MVIEW(View, iColor_MVIEW(sSymClr));
+
+
+   // --- Lock the channels --
+
+   LOCK_R(Data,XCh);
+   LOCK_R(Data,YCh);
+   LOCK_R(Data,StrikeCh);
+   LOCK_R(Data,DipCh);
+
+
+   // --- Decimal places, if not set in a script, use the dip channel ---
+   
+   iDecimals = iGetInt_SYS("STRIKEDIP","DECIMALS");
+   if(iDecimals==iDUMMY)
+      iDecimals = iGetChanDecimal_DB(Data, DipCh);
+   SetInt_SYS("STRIKEDIP","DECIMALS", iDUMMY);     // must set each time
+   
+
+   // --- Initialize ---
+
+   iGeneral = 0;
+   iVertical = 0;
+   rConst = rArcCos_MATH(-1.0)/180.0;    // convert from degrees to radians
+   rSize = 0.5*rSymSize;     // half of the strike line
+   rDSize = rSymSize/3.0;    // dip line
+   rTSize = 1.2*rDSize+0.5;  // text offset
+   iOutOfRange = 0;
+
+
+   // --- Do the work ---
+
+   iLines = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Dip symbols: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      Progress_SYS(1);
+
+
+      // --- add line link ---
+
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine);
+
+
+      // --- Get data and re-fid ---
+
+      GetChanVV_DB(Data,Line,XCh,XVV);
+      GetChanVV_DB(Data,Line,YCh,YVV);
+      GetChanVV_DB(Data,Line,StrikeCh,StrikeVV);
+      GetChanVV_DB(Data,Line,DipCh,DipVV);
+      ReFidVV_VV(StrikeVV,XVV);
+      ReFidVV_VV(StrikeVV,YVV);
+      ReFidVV_VV(StrikeVV,DipVV);
+
+
+      // --- Go through the loop ---
+
+      iLenVV = iLength_VV(XVV);
+      for (j=0; j < iLenVV; j++)
+      {
+         // --- Update the Progress Bar ---
+
+         ProgUpdate_SYS( (int) ((real) j / (real) iLenVV * 100.0) );
+
+
+         // --- Get (X Y) location ---
+
+         rXVV = rGetReal_VV(XVV, j);
+         rYVV = rGetReal_VV(YVV, j);
+         rStrike = rGetReal_VV(StrikeVV, j);
+         rDip = rGetReal_VV(DipVV, j);
+
+
+         // --- Do the work if not dummies ---
+
+         if ((rXVV != rDUMMY) && (rYVV != rDUMMY) &&
+             (rStrike != rDUMMY) && (rDip != rDUMMY))
+         {
+
+            // --- Count bad dip values, but plot them anyway ---
+            
+            if(rDip<0.0 || rDip>90.0)
+               iOutOfRange++;
+               
+               
+            // --- Convert to dip direction, measured as the angle CCW from East (NOT azimuth,
+            //     this is simply for computational ease, since angles are measured CCW from positive X for
+            //     the MVIEW class). ---
+            
+            rAngle = - rStrike;
+
+
+            // --- Define X and Y locations for ends of lines ---
+            
+            rCos = rCos_MATH(rAngle*rConst);
+            rSin = rSin_MATH(rAngle*rConst);
+
+            rX1 = - rSize * rSin;    // half of strike line
+            rY1 = + rSize * rCos;   
+
+            rX2 = + rDSize * rCos;    // dip-direction line
+            rY2 = + rDSize * rSin;
+
+            rX3 = + rTSize * rCos;    // text offset
+            rY3 = + rTSize * rSin;
+
+
+            // --- Display lines ---
+
+            Line_MVIEW(View,rXVV + rX1, rYVV + rY1, rXVV - rX1, rYVV - rY1);
+            Line_MVIEW(View,rXVV, rYVV, rXVV + rX2, rYVV + rY2);
+                       
+
+            // --- Display dip angle ---
+
+            if (rDip != 90.0)
+            {               
+               // --- Plot general symbol ---
+
+               iGeneral = 1;
+
+               if (iOrient == 1)   // rotate text
+               {
+                  iRef = 1;
+                  TextAngle_MVIEW(View,rAngle-90.0);
+               }
+               else                // upright text
+               {
+                  while (rAngle >= 360.0) rAngle -= 360.0;
+                  while (rAngle < 0.0)    rAngle += 360.0;
+
+                  if ((rAngle >= 22.5) && (rAngle < 77.5))
+                     iRef = 0;      // text above-right
+                  else if ((rAngle >= 77.5) && (rAngle < 112.5))
+                     iRef = 1;      // text above
+                  else if ((rAngle >= 112.5) && (rAngle < 157.5))
+                     iRef = 2;      // text above-left
+                  else if ((rAngle >= 157.5) && (rAngle < 202.5))
+                     iRef = 5;      // text left
+                  else if ((rAngle >= 202.5) && (rAngle < 247.5))
+                     iRef = 8;      // text below-left
+                  else if ((rAngle >= 247.5) && (rAngle < 292.5))
+                     iRef = 7;      // text below
+                  else if ((rAngle >= 292.5) && (rAngle < 337.5))
+                     iRef = 6;      // text below-right
+                  else   // within 337.5 and 360, 0 and 22.5 ranges
+                     iRef = 3;      // text right
+               }
+               
+               if(iRef!=iLastRef)
+               {
+                  TextRef_MVIEW(View, iRef);
+                  iLastRef = iRef;
+               }
+
+               FormatR2_STR(rDip, sTemp, 10, iDecimals);
+               Text_MVIEW(View,sTemp, rXVV + rX3, rYVV + rY3);
+
+            } else
+            {
+               // --- 90 dip angle ---
+
+               Line_MVIEW(View,rXVV - rX2, rYVV - rY2, rXVV + rX2, rYVV + rY2);
+               
+               
+               // --- Plot vertical symbol ---
+               
+               iVertical = 1;
+            }
+         }
+      }
+      Progress_SYS(0);
+
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,StrikeCh);
+   UnLockSymb_DB(Data,DipCh);
+
+   
+   // --- Clean up ---
+
+   Destroy_VV(XVV);
+   Destroy_VV(YVV);
+   Destroy_VV(StrikeVV);
+   Destroy_VV(DipVV);
+   Destroy_MVIEW(View);
+
+   
+   // --- Unlock ---
+
+   UnLock_EMAP(EMap);
+
+   
+   // --- Reset ---
+
+   rTxtSize /= rScaleMM;
+   rLineThk /= rScaleMM;
+   rSymSize /= rScaleMM;
+   rSize /= rScaleMM;
+   rDSize /= rScaleMM;
+   rTSize /= rScaleMM;
+   
+                        
+   // ----------------------------------------------------------- //
+   // ------------ Code for creating a legend ------------------- //
+   // ----------------------------------------------------------- //
+
+
+   // --- Where to plot ---
+
+   rXo = rGetReal_SYS("STRIKEDIP","X");
+   rYo = rGetReal_SYS("STRIKEDIP","Y");
+   if(rXo==rDUMMY) rXo = 10.0;
+   if(rYo==rDUMMY) rYo = 10.0;
+      
+
+   // --- Get some VV's ---
+
+   XVV = Create_VV(REAL,0);
+   YVV = Create_VV(REAL,0);
+
+
+   // --- Create the base view ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+   SetThinRes_MVIEW(View,0.02);
+
+
+   // --- Start a group ---
+
+//   Strcat_STR(sGroup,"_lgd");
+   GenGroupName_STR("LGD",sGroup,"",sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   if (!iInteractive_SYS())
+   {
+      // --- Get box area ---
+
+      Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, Xmin, Ymin, Xmax, Ymax);
+      rXo = 0.2*Xmin + 0.8*Xmax;
+      rYo = 0.2*Ymin + 0.8*Ymax;      
+   }
+
+
+   // --- Add maker ---
+
+   EasyMaker_MVIEW(View,_("Geological dip symbols"),"STRIKEDIP;");
+
+
+   // --- Set text parameters ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+         Strcpy_STR(sFont,_n("default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextSize_MVIEW(View,rTxtSize);
+   TextColor_MVIEW(View,iColor_MVIEW(sTxtClr));
+   TextRef_MVIEW(View,4);
+
+   // --- Set line style and color for areas occupied ---
+
+   LineStyle_MVIEW(View,1,0.0);
+   LineThick_MVIEW(View,rLineThk);
+   LineColor_MVIEW(View,iColor_MVIEW(sSymClr));
+   Strcpy_STR(sTemp,"");
+
+
+   // --- Draw legend: Use 45 degree dip dir and 30 degree dip as examples ---   
+
+   rAngle = 45.0;
+   rDip = 30.0;
+
+            
+   // --- Define X and Y ---
+   
+   rCos = rCos_MATH(rAngle*rConst);
+   rSin = rSin_MATH(rAngle*rConst);
+
+   
+   // --- Define X and Y locations for ends of lines ---
+   
+   rCos = rCos_MATH(rAngle*rConst);
+   rSin = rSin_MATH(rAngle*rConst);
+
+   rX1 = - rSize * rSin;    // half of strike line
+   rY1 = + rSize * rCos;   
+
+   rX2 = + rDSize * rCos;    // dip-direction line
+   rY2 = + rDSize * rSin;
+
+   rX3 = + rTSize * rCos;    // text offset
+   rY3 = + rTSize * rSin;
+
+   rXOff = 2.0*rTxtSize + 0.4*rSymSize;
+   if (iOrient == 0)
+      rXOff += 1.5*rTxtSize;
+   
+
+   // --- General dip symbol ---
+   
+   if (iGeneral)
+   {
+      // --- Text ---
+
+      TextColor_MVIEW(View,iColor_MVIEW("K"));
+      TextRef_MVIEW(View,3);
+      TextAngle_MVIEW(View,0.0);
+      Text_MVIEW(View,_("Dip direction and dip (in degrees)"),rXo + rXOff, rYo);
+
+
+      // --- Display lines ---
+
+      Line_MVIEW(View,rXo + rX1, rYo + rY1, rXo - rX1, rYo - rY1);
+      Line_MVIEW(View,rXo, rYo, rXo + rX2, rYo + rY2);
+
+      if (iOrient == 0)
+      {
+         TextRef_MVIEW(View,0);
+         TextAngle_MVIEW(View,0.0);
+      }
+      else
+      {
+         TextRef_MVIEW(View,1);
+         TextAngle_MVIEW(View,rAngle-90.0);
+      }
+      FormatR2_STR(rDip, sTemp, 10, iDecimals);
+      TextColor_MVIEW(View,iColor_MVIEW(sTxtClr));
+      Text_MVIEW(View,sTemp, rXo + rX3, rYo + rY3);  
+      
+      rYo += 2.0*rSymSize;   
+   }
+
+
+   // --- Draw vertical dip symbol ---
+
+   if (iVertical)
+   {
+      // --- Text ---
+
+      TextRef_MVIEW(View,3);
+      TextAngle_MVIEW(View,0.0);
+      TextColor_MVIEW(View,iColor_MVIEW("K"));
+      Text_MVIEW(View,_("Dip direction and vertical dip"),rXo + rXOff, rYo);
+
+      
+      // --- Display lines ---
+
+      Line_MVIEW(View,rXo + rX1, rYo + rY1, rXo - rX1, rYo - rY1);
+      Line_MVIEW(View,rXo - rX2, rYo - rY2, rXo + rX2, rYo + rY2);
+   }
+
+
+   // --- Done with legend ---
+
+   Destroy_MVIEW(View);
+   
+  
+
+   // --- Unlock EMAP ---
+
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+
+
+   // --- Reset back to the data view
+   
+   if(!iScript_SYS())
+      iSetCurrentView_EMAP(EMap, "*Data");
+   
+   
+   // --- Plot out-of-range dips message ---
+   
+   if(iInteractive_SYS() && iOutOfRange>0)
+   {
+      if(iOutOfRange==1)
+         DisplayMessage_SYS(_("Invalid Dip Data"), _("One dip value was out of the valid range 0-90 degrees."));
+      else
+      {
+         Printf_STR(sMsg, sizeof(sMsg), _("%d values were not found with dips outside the valid range of 0-90 degrees."), iOutOfRange);
+         DisplayMessage_SYS(_("Invalid Dip Data"), sMsg);
+      }      
+   }
+}

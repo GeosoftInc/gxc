@@ -1,0 +1,263 @@
+//===========================================================================
+NAME          = "Sample a grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "
+
+   Sample a grid at specified X, Y locations and create a new
+   channel that contains the sampled grid data.
+
+    GRIDSAMP.X    : X channel
+            .Y    : Y channel
+            .Z    : output sampled grid channel
+            .GRID : grid file
+"
+// Revision History:
+// 8.3      Improve progress. Call faster internal method to do all selected lines at once.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "gridsamp.gr"
+#include "gridsamp.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sX,sY,sZ,sIMG;      // Channel Names, grid name
+
+EDB        EData;
+DB         Data;              // Database handle
+DB_SYMB    X,Y,Z;             // Channel Handles
+IMG        hIMG;              // Grid handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+LST        LineLST;           // Selected lines
+IPJ        hIPJxy,hIPJgrd;    // 
+int        i;                 // Utility int
+int        iProgState;
+int        iLoadExternalDB;
+
+string(STR_FILE) sGDB;
+
+//===========================================================================
+//                                  CODE
+//===========================================================================
+
+{
+
+	// --- Load new GDB as external DB instead of loading and locking it as the current EDB? ---
+
+	iLoadExternalDB = iGetInt_SYS("GRIDSAMP","LOAD_EXTERNAL_GDB");
+	if(iLoadExternalDB == 1)
+	{
+		GetString_SYS("GRIDSAMP", "EXTERNAL_GDB", sGDB);
+		if(iStrlen_STR(sGDB) == 0)
+			Abort_SYS(_("No database defined for external loading"));
+		SetString_SYS("GRIDSAMP", "LOAD_EXTERNAL_GDB", "");   // set every time
+	}
+
+	if(iLoadExternalDB!=1) iLoadExternalDB = 0;
+
+
+   // --- Get database ---
+
+	if(iLoadExternalDB)
+		Data = Open_DB(sGDB, "SUPER", "");
+	else
+	{
+	   EData = Current_EDB();
+		Data = Lock_EDB(EData);
+	}
+   
+   
+   // --- Set default new X, Y channels to the existing current X, Y ---
+   
+   GetString_SYS("GRIDSAMP", "X", sX);
+   if(!iStrlen_STR(sX) || !iExistChan_DB(Data, sX))
+   {
+      GetXYZChan_DB(Data, DB_CHAN_X, sX);
+      SetString_SYS("GRIDSAMP", "X", sX);
+   }
+
+   GetString_SYS("GRIDSAMP", "Y", sY);
+   if(!iStrlen_STR(sY) || !iExistChan_DB(Data, sY))
+   {
+      GetXYZChan_DB(Data, DB_CHAN_Y, sY);
+      SetString_SYS("GRIDSAMP", "Y", sY);
+   }
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("GRIDSAMPForm");
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_GRIDSAMPFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_GRIDSAMPFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_GRIDSAMPFORM_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_GRIDSAMPFORM_0,DGW_TEXT,"GRIDSAMP","X");     
+     SetInfoSYS_DGW(Diag,_GRIDSAMPFORM_1,DGW_TEXT,"GRIDSAMP","Y");     
+     SetInfoSYS_DGW(Diag,_GRIDSAMPFORM_2,DGW_TEXT,"GRIDSAMP","Z");    
+     SetInfoSYS_DGW(Diag,_GRIDSAMPFORM_3,DGW_FILEPATH,"GRIDSAMP","GRID");    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_GRIDSAMPFORM_0,DGW_TEXT,"GRIDSAMP","X");     
+     GetInfoSYS_DGW(Diag,_GRIDSAMPFORM_1,DGW_TEXT,"GRIDSAMP","Y");     
+     GetInfoSYS_DGW(Diag,_GRIDSAMPFORM_2,DGW_TEXT,"GRIDSAMP","Z");    
+     GetInfoSYS_DGW(Diag,_GRIDSAMPFORM_3,DGW_FILEPATH,"GRIDSAMP","GRID");    
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDSAMP","X",sX);
+   GetString_SYS("GRIDSAMP","Y",sY);
+   GetString_SYS("GRIDSAMP","Z",sZ);
+   GetString_SYS("GRIDSAMP","GRID",sIMG);
+
+
+   // --- sX and sY should not be the same ---
+
+   if(iStrcmp_STR(sX,sY,STR_CASE_TOLERANT)==0)
+      Abort_SYS(_("Input X and Y channels should be different!"));
+
+
+   // --- Do the Input Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sX))  
+      Abort_SYS(_("Input X channel does not exist."));
+   X = FindChan_DB(Data,sX);
+   if (!iExistChan_DB(Data,sY))  
+      Abort_SYS(_("Input Y channel does not exist."));
+   Y = FindChan_DB(Data,sY);
+   
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistChan_DB(Data,sZ)) 
+      DupSymbNoLock_DB(Data,X,sZ); // Create it 
+   Z = FindChan_DB(Data,sZ);
+
+
+   // --- get the projection ---
+
+   LockSymb_DB(Data,X,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   hIPJxy = Create_IPJ();
+   GetIPJ_DB(Data,X,hIPJxy);
+   UnLockSymb_DB(Data,X);
+   
+               
+   // --- Create a grid handle ---
+
+   hIMG = CreateFile_IMG(GS_DOUBLE,sIMG,IMG_FILE_READONLY);
+   
+   
+   // --- get the grid IPJ and pass on to ---
+   
+   hIPJgrd = Create_IPJ();
+   GetIPJ_IMG(hIMG,hIPJgrd);
+   if ((iSourceType_IPJ(hIPJgrd) != IPJ_TYPE_NONE) && 
+       (iSourceType_IPJ(hIPJxy) == IPJ_TYPE_NONE)) {
+      
+      // --- grid has an IPJ, but database XY does not - pass it on ---
+      
+      LockSymb_DB(Data,X,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(Data,Y,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetIPJ_DB(Data,X,Y,hIPJgrd);
+      UnLockSymb_DB(Data,X);
+      UnLockSymb_DB(Data,Y);      
+   }         
+   
+
+   // --- Prepare to do the work ---
+
+	LineLST = Create_LST(STR_DB_SYMBOL+20);
+	SelectedLineLST_DB(Data, LineLST);
+
+	iProgState = iProgState_SYS();
+	if(iProgState != 1)
+		Progress_SYS(1);
+
+
+   // --- lock the channels ---
+
+   LockSymb_DB(Data,X,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,Y,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,Z,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   if (iSize_LST(LineLST) > 2)
+      LoadIntoPager_IMG(hIMG);
+
+	
+	// --- Process ---
+
+	SampleIMGLineLST_DU(Data,LineLST,X,Y,Z,hIMG);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,Z,_("Grid sample"),"GRIDSAMP;");
+
+
+   // --- unlock the channels ---
+
+   UnLockSymb_DB(Data,X);
+   UnLockSymb_DB(Data,Y);
+   UnLockSymb_DB(Data,Z);
+
+   Destroy_IMG(hIMG);
+
+	if (iProgState != iProgState_SYS())
+		Progress_SYS(iProgState);
+
+
+   // --- Release the Database ---
+
+	if(iLoadExternalDB)
+		Commit_DB(Data);
+	else
+		UnLock_EDB(EData);
+   
+   // --- load the new channel ---
+   
+   if (iInteractive_SYS() && !iLoadExternalDB)
+      LoadChan_EDB(EData,sZ);   
+}

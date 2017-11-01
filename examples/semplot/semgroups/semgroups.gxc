@@ -1,0 +1,85 @@
+//===========================================================================
+NAME          = "Create Groups"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+"
+// Revision History
+// v6.3.0: If mask channel not defined or found, create one.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+LST         MaskLST;
+
+string(STR_DB_SYMBOL) sMaskCh;
+int iInteractive;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get current mask channel ---
+
+   GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+   
+   
+   // --- If mask channel is not defined, see if any other is present. ---
+   
+   if(!iStrlen_STR(sMaskCh))
+   {
+      MaskLST = Create_LST(2*STR_DB_SYMBOL);
+      ClassChanLST_DB(Data, MaskLST, "MASK");
+      if(iSize_LST(MaskLST)>0)
+         GetItem_LST(MaskLST, 0, 0, sMaskCh);
+      else         
+         Strcpy_STR(sMaskCh, _("Mask"));     // Default mask channel name (same as in SEMMASK GX).
+   }
+
+   
+   // --- If the mask channel does not exist, create it. ---
+  
+   if(!iExistChan_DB(Data, sMaskCh))
+   {
+      iInteractive = iInteractive_SYS();
+      SetInteractive_SYS(0);
+      
+      UnLock_EDB(EData);
+      iRunGX_SYS("semmask.gx");
+      LoadChan_EDB(EData, sMaskCh);
+      Data = Lock_EDB(EData);
+      
+      SetInteractive_SYS(iInteractive);      
+   }
+   
+
+   // --- Plot ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating Groups"),1);
+   
+   CreateGroups_SEMPLOT(Data, sMaskCh);
+
+   Progress_SYS(0);
+
+   
+   UnLock_EDB(EData);
+
+}

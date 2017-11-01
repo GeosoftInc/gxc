@@ -1,0 +1,563 @@
+//===========================================================================
+NAME          = "Import a Maxwell Plate file to a 3D view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/3D"
+
+DESCRIPTION   = "
+   Import a Maxwell Plate file to a 3D view.
+
+    IMPMAXPLATE.FILE     : Input data file name
+               .FILL     : 0: as wire frame, 1: with solid fill
+               .USED     : 0: All, 1: Used only
+               .VIEW     : name of 3D view to plot to  (defaults to 3D)
+
+"
+// Revision History:
+// v7.1.0: Change how 3D imports are handled (only from within 3D viewer, but supports scripting with name)
+// v7.0.1: Adjust for new "Flat Top" item; plunge can be negative, up to magnitude
+//         of the dip angle.
+// v6.3.0: Call GetDisplayAreaRaw_EMAP only in interactive mode.
+//         Improved import to accept "Thick Plate" parameters, different header line.
+//         Fixed bugs when creating new map.
+//         3D Controls now only in script mode.
+//         Plotting to existing 3D views improved.
+// v6.1.0: Corrected location to top of plate, using EMIT formula.
+// v6.0.0: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "impmaxplate.gr"
+#include "impmaxplate.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define READ(A) \
+   iLine = iLine_RA(Ra);   \
+   FormatI_STR(iLine, sLine, 3);\
+   iRet = iGets_RA(Ra,sBuff); \
+   if(iRet) {   \
+      Printf_STR(sMsg, sizeof(sMsg), _("Unexpected end of file at line %s."), sLine);  \
+      Abort_SYS(sMsg);  \
+   }
+
+#define READ_TOKEN(A) \
+   iLine = iLine_RA(Ra);   \
+   FormatI_STR(iLine, sLine, 3);\
+   iRet = iGets_RA(Ra,A); \
+   if(iRet) {   \
+      Printf_STR(sMsg, sizeof(sMsg), _("Unexpected end of file at line %s."), sLine);  \
+      Abort_SYS(sMsg);  \
+   }  \
+   Strcpy_STR(sTemp, A);   \
+   iToks = iTokenize_STR(A, "", ":", "", "");  \
+   if(iToks!=2) { \
+      Printf_STR(sMsg, sizeof(sMsg), _("Error parsing file at line %s.\r\nLine = \r\n\r\n%s"), sLine, sTemp); \
+      Abort_SYS(sMsg);  \
+   } \
+   GetToken_STR(sToken,sBuff,0);\
+   TrimSpace_STR(sToken, STR_TRIMBOTH);
+
+#define READ_TO_TOKEN(A, B) \
+   iRet = 0;   \
+   while(iRet==0) {  \
+      iLine = iLine_RA(Ra);   \
+      FormatI_STR(iLine, sLine, 3);\
+      iRet = iGets_RA(Ra,A); \
+      TrimSpace_STR(A, STR_TRIMBOTH);\
+      if(iStrncmp_STR(A, B, iStrlen_STR(B), STR_CASE_TOLERANT)==0) break;   \
+   }  \
+   if(iRet) {   \
+      Printf_STR(sMsg, sizeof(sMsg), _("Unexpected end of file searching for the \"%s\" token."), B);  \
+      Abort_SYS(sMsg);  \
+   }  \
+   Strcpy_STR(sTemp, A);   \
+   iToks = iTokenize_STR(A, "", ":", "", "");  \
+   if(iToks!=2) { \
+      Printf_STR(sMsg, sizeof(sMsg), _("Error parsing file at line %s.\r\nLine = \r\n\r\n%s"), sLine, sTemp); \
+      Abort_SYS(sMsg);  \
+   } \
+   GetToken_STR(sToken,sBuff,0);\
+   TrimSpace_STR(sToken, STR_TRIMBOTH);
+
+#define SCANI(A)  \
+   GetToken_STR(sVal,sBuff,1);   \
+   TrimSpace_STR(sVal, STR_TRIMBOTH);\
+   A = iScanI_STR(sVal); \
+   if(A==iDUMMY) {   \
+      Printf_STR(sMsg, sizeof(sMsg), _("Error reading integer value at line %s: %s"), sLine, sTemp); \
+      Abort_SYS(sMsg);  \
+   }
+
+#define SCANR(A)  \
+   GetToken_STR(sVal,sBuff,1);   \
+   TrimSpace_STR(sVal, STR_TRIMBOTH);\
+   A = rScanR_STR(sVal); \
+   if(A==rDUMMY) {   \
+      Printf_STR(sMsg, sizeof(sMsg), _("Error reading real value at line %s: %s"), sLine, sTemp); \
+      Abort_SYS(sMsg);  \
+   }
+
+#define SCANS(A)  \
+   GetToken_STR(A,sBuff,1);
+
+#define GETR(a,b,c,d) if (iExistReal_SYS(b,c)) a=rGetReal_SYS(b,c); else a = d;
+#define GETI(a,b,c,d) if (iExistInt_SYS(b,c)) a=iGetInt_SYS(b,c); else a = d;
+#define GETB(a,b,c,d) if (iExistInt_SYS(b,c)) a=iGetYesNo_SYS(b,c); else a = d;
+
+#define MAXP 128
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+DGW   Diag;
+MVIEW View;
+RA    Ra;
+VV    VVx, VVy, VVn;
+
+int i, iLine, iNP, iRet, iToks, iUsed, iVal, iFill, iLabel;
+
+real(MAXP) rX, rY, rZ, rDip, rDipDir, rPlunge, rL, rH, rXH, rYH, rZH, rXL, rYL, rZL, rCT;
+real(MAXP) rXN, rYN, rZN;
+real rXMn, rXMx, rYMn, rYMx, rZMn, rZMx;
+real rX1, rX2, rX3, rX4, rY1, rY2, rY3, rY4, rZ1, rZ2, rZ3, rZ4;
+real rVal, rSX, rSY, rSize, rConductivity, rThickness;
+
+int(MAXP) iR, iG, iB, iU;
+
+string(STR_MAX_PATH) sFile, sName, sTemp;
+string(STR_VIEW) s3DView,sGroup;
+string(STR_DEFAULT_LONG) sBuff;
+string(STR_DEFAULT) sCol, sVal, sLine, sToken;
+string(1024) sMsg;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IMPMAXPLATE");
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IMPMAXPLATE_0,DGW_FILEPATH,"IMPMAXPLATE","FILE");
+      SetInfoSYS_DGW(Diag,_IMPMAXPLATE_1,DGW_LISTALIAS,"IMPMAXPLATE","USED");
+      SetInfoSYS_DGW(Diag,_IMPMAXPLATE_2,DGW_LISTALIAS,"IMPMAXPLATE","FILL");
+      SetInfoSYS_DGW(Diag,_IMPMAXPLATE_3,DGW_LISTALIAS,"IMPMAXPLATE","LABEL");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==-1) Cancel_SYS(); 
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IMPMAXPLATE_0,DGW_FILEPATH,"IMPMAXPLATE","FILE");
+      GetInfoSYS_DGW(Diag,_IMPMAXPLATE_1,DGW_LISTALIAS,"IMPMAXPLATE","USED");
+      GetInfoSYS_DGW(Diag,_IMPMAXPLATE_2,DGW_LISTALIAS,"IMPMAXPLATE","FILL");
+      GetInfoSYS_DGW(Diag,_IMPMAXPLATE_3,DGW_LISTALIAS,"IMPMAXPLATE","LABEL");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   } 
+      
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IMPMAXPLATE","FILE",sFile);
+   GETI(iUsed, "IMPMAXPLATE", "USED", 0)
+   GETI(iFill, "IMPMAXPLATE", "FILL", 0)
+   GETI(iLabel, "IMPMAXPLATE", "LABEL", 1)
+
+
+   // --- Validate ---
+
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("Input file not specified."));   
+   
+
+   // --- Read in the file ---
+
+   Ra = Create_RA(sFile);
+   VVn = Create_VV(-32, MAXP);
+
+
+   READ(sBuff)
+   if(iStrncmp_STR(sBuff, _n("MAXWELL PLATE FILE"), iStrlen_STR(_n("MAXWELL PLATE FILE")), STR_CASE_TOLERANT)) 
+      Abort_SYS(_("This does not appear to be a maxwell plate file; \r\nexpected \"MAXWELL PLATE FILE\" on the first line."));
+
+   READ_TOKEN(sBuff)    // TOTAL PLATES  : 6
+   SCANI(iNP)
+
+   if(iNP>128) {
+
+      iVal = (int)MAXP;
+      FormatI_STR(iVal, sVal, 3);
+      Printf_STR(sMsg, sizeof(sMsg), _("This GX is currently limited to reading %s plates."), sVal);
+
+      DisplayMessage_SYS(_("Maxwell Plate Import"), sMsg);
+      iNP = 128;
+   }
+   
+
+   for(i=0;i<iNP;i++) {
+
+      READ(sBuff)          // ****************************
+      READ(sBuff)          // PLATE         : 1
+      
+      
+      // --- Plate Name ---
+      
+      READ_TOKEN(sBuff)    // Name          : 1
+      SCANS(sName)
+      TrimSpace_STR(sName, STR_TRIMBOTH);
+      SetString_VV(VVn, i, sName);
+
+
+      // --- "Use" flag ---
+
+      READ_TOKEN(sBuff)    // Use           : YES
+      SCANS(sVal)
+      TrimSpace_STR(sVal, STR_TRIMBOTH);
+      iU[i] = 1;
+      if(!iStrcmp_STR(sVal, "NO", STR_CASE_TOLERANT)) iU[i] = 0;
+
+
+      // --- Skip "Thick Plate" or "Flat Top" ---
+
+      READ_TOKEN(sBuff)       
+      while(!iStrcmp_STR(sToken, _n("Thick Plate"), STR_CASE_TOLERANT) ||
+				!iStrcmp_STR(sToken, _n("Flat Top"), STR_CASE_TOLERANT))
+      {
+         READ_TOKEN(sBuff)
+      }         
+
+
+      // --- X, Y and Z ---
+
+      READ_TOKEN(sBuff)    // x             : 4754.0000
+      SCANR(rVal)
+      rX[i] = rVal;
+
+      READ_TOKEN(sBuff)    // y             : 9277.0000
+      SCANR(rVal)
+      rY[i] = rVal;
+
+      READ_TOKEN(sBuff)    // z             : 1330.0000
+      SCANR(rVal)
+      rZ[i] = rVal;
+
+
+      // --- Dip, Dip Direction and Plunge ---
+
+      READ_TOKEN(sBuff)    // Dip           : -25.0000
+      SCANR(rVal)
+      rDip[i] = rVal;
+
+      READ_TOKEN(sBuff)    // Dip Direction : 90.0000
+      SCANR(rVal)
+      rDipDir[i] = rVal;
+
+      READ_TOKEN(sBuff)    // Plunge        : 0.0000
+      SCANR(rVal)
+      rPlunge[i] = rVal;
+
+
+      
+      // --- Length and Depth extent ---
+
+      READ_TOKEN(sBuff)    // Length        : 100.0000
+      SCANR(rVal)
+      rL[i] = rVal;
+
+      if(rL[i] < 0.0) {
+         Printf_STR(sMsg, sizeof(sMsg), _("Invalid length for plate %s \r\nThe length must be >= 0.0"), sName);
+         Abort_SYS(sMsg);
+      }
+
+      READ_TOKEN(sBuff)    // Depth Extent  : 50.0000
+      SCANR(rVal)
+      rH[i] = rVal;
+
+      if(rH[i] < 0.0) {
+         Printf_STR(sMsg, sizeof(sMsg), _("Invalid width for plate %s \r\nThe width must be >= 0.0"), sName);
+         Abort_SYS(sMsg);
+      }
+
+
+      // --- Conductivity-thickness product ---
+
+      READ_TOKEN(sBuff)    // c-t           : 1500.0000      
+      SCANR(rVal)
+      rCT[i] = rVal;
+
+      
+      // --- Conductivity and Thickness? ---
+      
+      READ_TOKEN(sBuff)    // "Conductivity  : 2.0000" or "Skew          : 1.0000"
+      if(!iStrcmp_STR(sToken, _n("Conductivity"), STR_CASE_TOLERANT))
+      {         
+         SCANR(rVal)
+         rConductivity = rVal;
+         
+         READ_TOKEN(sBuff)    // "Thickness     : 50.0000"
+         SCANR(rVal)
+         rThickness = rVal;
+
+         READ(sBuff)          // Skew          : 1.0000
+      }
+
+
+      READ(sBuff)          // Ribbons       : 20
+
+
+      // --- Colours. Skip all lines up to that point ---
+      
+      READ_TO_TOKEN(sBuff, _n("Colour Red"))
+      SCANI(iVal)
+      iR[i] = iVal;
+
+      READ_TOKEN(sBuff)    // Colour Green  : 0
+      SCANI(iVal)
+      iG[i] = iVal;
+
+      READ_TOKEN(sBuff)    // Colour Blue   : 0
+      SCANI(iVal)
+      iB[i] = iVal;
+   }
+   Destroy_RA(Ra);
+
+   
+   // --- Determine extents in X, Y and Z ---
+   
+   rXMn = rMAX;
+   rXMx = rMIN;
+   rYMn = rMAX;
+   rYMx = rMIN;
+   rZMn = rMAX;
+   rZMx = rMIN;
+   for(i=0;i<iNP;i++) {
+
+
+      // --- Skip non-used plates ---
+
+      if(iUsed == 1 && !iU[i]) continue;
+
+      
+      // --- Get the corners of the plate ---
+      
+      MaxwellPlateCorners_GU(rX[i], rY[i], rZ[i], rDip[i], rDipDir[i], rPlunge[i],
+                             rL[i], rH[i], rX1, rY1, rZ1, rX2, rY2, rZ2,
+                             rX3, rY3, rZ3, rX4, rY4, rZ4);
+                             
+      
+      // --- Get the normalized direction vectors, across and down the plates ---
+
+      rXL[i] = (rX2 - rX1)/rL[i];
+      rYL[i] = (rY2 - rY1)/rL[i];
+      rZL[i] = (rZ2 - rZ1)/rL[i];
+
+      rXH[i] = (rX4 - rX1)/rH[i];
+      rYH[i] = (rY4 - rY1)/rH[i];
+      rZH[i] = (rZ4 - rZ1)/rH[i];
+
+
+      // --- Get the plate normal vector. ---
+
+      CrossProduct_MATH(rXL[i], rYL[i], rZL[i], rXH[i], rYH[i], rZH[i], rXN[i], rYN[i], rZN[i]);
+
+
+      // --- Get extents ---
+
+      if(rX1 < rXMn) rXMn = rX1;
+      if(rX1 > rXMx) rXMx = rX1;
+      if(rY1 < rYMn) rYMn = rY1;
+      if(rY1 > rYMx) rYMx = rY1;
+      if(rZ1 < rZMn) rZMn = rZ1;
+      if(rZ1 > rZMx) rZMx = rZ1;
+
+      if(rX2 < rXMn) rXMn = rX2;
+      if(rX2 > rXMx) rXMx = rX2;
+      if(rY2 < rYMn) rYMn = rY2;
+      if(rY2 > rYMx) rYMx = rY2;
+      if(rZ2 < rZMn) rZMn = rZ2;
+      if(rZ2 > rZMx) rZMx = rZ2;
+
+      if(rX3 < rXMn) rXMn = rX3;
+      if(rX3 > rXMx) rXMx = rX3;
+      if(rY3 < rYMn) rYMn = rY3;
+      if(rY3 > rYMx) rYMx = rY3;
+      if(rZ3 < rZMn) rZMn = rZ3;
+      if(rZ3 > rZMx) rZMx = rZ3;
+
+      if(rX4 < rXMn) rXMn = rX4;
+      if(rX4 > rXMx) rXMx = rX4;
+      if(rY4 < rYMn) rYMn = rY4;
+      if(rY4 > rYMx) rYMx = rY4;
+      if(rZ4 < rZMn) rZMn = rZ4;
+      if(rZ4 > rZMx) rZMx = rZ4;
+   
+   }   
+
+	EMap = Current_EMAP();
+   Map  = Lock_EMAP(EMap);
+
+	// --- Handle interactive/scripting ---
+
+	if (iInteractive_SYS())
+	{
+		Get3DViewName_EMAP(EMap, s3DView);
+		SetString_SYS("IMPMAXPLATE", "VIEW", s3DView);
+	}
+	else
+	{
+		GetString_SYS("IMPMAXPLATE", "VIEW", s3DView);
+		if (iStrlen_STR(s3DView) == 0)
+			Strcpy_STR(s3DView, "3D");
+	}
+
+
+   // --- Create the view ---
+
+   View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD); 
+
+	if (!iIsView3D_MVIEW(View))
+	{
+      Printf_STR(sTemp, sizeof(sTemp), _("Importing to 3D View '%s' but it is not a 3D View"), s3DView);
+      Abort_SYS(sTemp);
+	} 
+
+   // --- Start the group, based on the file name ---   
+
+   FileNamePart_STR(sFile,sName,STR_FILE_PART_NAME);
+   ToLower_STR(sName);
+
+   GenGroupName_STR("PLATE", sName, "", sGroup);
+
+   StartGroup_MVIEW(View, sGroup, MVIEW_GROUP_NEW);
+
+
+   // --- Set text parameters ---
+
+   rSX = rXMx - rXMn;
+   rSY = rYMx - rYMn;
+   rSize = rSX;
+   if(rSY>rSX) rSize = rSY;
+
+   rSize *= 0.02;
+
+   TextSize_MVIEW(View, rSize);
+   TextColor_MVIEW(View, C_BLACK);
+   TextRef_MVIEW(View, TEXT_REF_MIDDLE_CENTER);
+   TextAngle_MVIEW(View, 180.0);    // need to flip, because local reference points downward
+   LineThick_MVIEW(View, rSize);
+
+//   PatNumber_MVIEW(View, 205);       // Cross-hatch
+//   PatSize_MVIEW(View, rSize);
+//   PatThick_MVIEW(View, 0.20);
+
+
+   // --- Create a view plane for each plate and draw the plate on it ---
+
+   VVx = Create_VV(REAL, 5);
+   VVy = Create_VV(REAL, 5);
+
+   for(i=0;i<iNP;i++) {
+
+
+      // --- Skip non-used plates ---
+
+      if(iUsed == 1 && !iU[i]) continue;
+
+
+      // --- Set the plane equation ---
+
+      DefinePlane3D_MVIEW(View, rX[i], rY[i], rZ[i],        // Origin point
+                                rXL[i], rYL[i], rZL[i],     // "X" axis
+                                rXH[i], rYH[i], rZH[i]);    // "Y" axis
+
+      
+      // --- Set the colour ---
+
+      FormatI_STR(iR[i], sVal, 3);
+      Strcpy_STR(sCol, "R");
+      Strcat_STR(sCol, sVal);
+      FormatI_STR(iG[i], sVal, 3);
+      Strcat_STR(sCol, "G");
+      Strcat_STR(sCol, sVal);
+      FormatI_STR(iB[i], sVal, 3);
+      Strcat_STR(sCol, "B");
+      Strcat_STR(sCol, sVal);
+
+      LineColor_MVIEW(View, iColor_MVIEW(sCol));
+      if(iFill)
+         FillColor_MVIEW(View, iColor_MVIEW(sCol));
+      else
+         FillColor_MVIEW(View, C_TRANSPARENT);
+
+
+      // --- Draw the plate ---
+
+      SetReal_VV(VVx, 0, -0.5*rL[i]);
+      SetReal_VV(VVy, 0, 0.0);
+      SetReal_VV(VVx, 1, 0.5*rL[i]);
+      SetReal_VV(VVy, 1, 0.0);
+      SetReal_VV(VVx, 2, 0.5*rL[i]);
+      SetReal_VV(VVy, 2, rH[i]);
+      SetReal_VV(VVx, 3, -0.5*rL[i]);
+      SetReal_VV(VVy, 3, rH[i]);
+      SetReal_VV(VVx, 4, -0.5*rL[i]);
+      SetReal_VV(VVy, 4, 0.0);
+      PolyLine_MVIEW(View, MVIEW_DRAW_POLYGON, VVx, VVy);
+
+
+      if(iLabel) {
+
+         // --- Label with plate number and CT product. Move the location a bit
+         //     above the plate so the label is always visible ---
+
+         DefinePlane3D_MVIEW(View, rX[i]+0.1*rSize*rXN[i], 
+                                   rY[i]+0.1*rSize*rYN[i],
+                                   rZ[i]+0.1*rSize*rZN[i],        // Origin point
+                                   rXL[i], rYL[i], rZL[i],     // "X" axis
+                                   rXH[i], rYH[i], rZH[i]);    // "Y" axis
+
+         GetString_VV(VVn, i, sVal);
+         Strcpy_STR(sBuff, sVal);
+         Strcat_STR(sBuff, ": ");
+         rVal = rCT[i];
+         FormatR_STR(rVal, sVal, 10, 5);
+         Strcat_STR(sBuff, sVal);
+      
+         Text_MVIEW(View, sBuff, 0.0, 0.5*rH[i]);
+         TextAngle_MVIEW(View, 180.0);
+      }
+
+   }
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+}

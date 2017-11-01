@@ -1,0 +1,226 @@
+//===========================================================================
+NAME          = "Backup current XY coodinate channels"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Save current \"X\" and \"Y\" in \"__X\" and \"__Y\".
+
+   If the current X and Y channels are not \"X\" and \"Y\", then the
+   backup channels are the same as the originals, but begin with
+   double underscore \"_\" characters.
+         
+	Set XYSAVE.SAVE_Z = 1 to save the current Z channel.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
+
+// Revision History:
+// v8.1:   Allow backup of Z channel though GX parameter setting.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//         Backups are now saved to "__OldChan" instead of "_OldChan"
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     XCh,YCh,ZCh;    // Channel Handle
+DB_SYMB     BackXCh,BackYCh,BackZCh;    // Channel Handle
+DB_SYMB     Line;             // Line Handle
+IPJ         hIPJ;
+DB_SELECT   Select;
+
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+int         iSaveZ;
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sXCh, sXBackCh, sYCh, sYBackCh, sZCh, sZBackCh;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	// --- Save Z? ---
+
+	iSaveZ = iGetInt_SYS("XYSAVE", "SAVE_Z");
+	if(iSaveZ == 1)
+		SetString_SYS("XYSAVE", "SAVE_Z", "");  // Force reset each time
+	if(iSaveZ != 1)
+	   iSaveZ = 0;
+
+
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Get channel names ---
+   
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   Strcpy_STR(sXBackCh, "__");
+   Strcat_STR(sXBackCh, sXCh);
+   Strcpy_STR(sYBackCh, "__");
+   Strcat_STR(sYBackCh, sYCh);
+	
+	if(iSaveZ)
+	{
+	   GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+	   Strcpy_STR(sZBackCh, "__");
+		Strcat_STR(sZBackCh, sZCh);
+	}
+
+
+   // --- Do the X and Y Channels Exist ? ---
+
+   XCh = FindChan_DB(Data,sXCh);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   YCh = FindChan_DB(Data,sYCh);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+	if(iSaveZ)
+	{
+	   ZCh = FindChan_DB(Data,sZCh);
+		if (ZCh==NULLSYMB)
+			iSaveZ = 0;
+		else
+			LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+	}
+
+      
+   // --- Delete backup channels if they exist ---      
+
+   BackXCh = FindChan_DB(Data,sXBackCh);
+   if (BackXCh!=NULLSYMB) {
+      LockSymb_DB(Data,BackXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(Data,BackXCh,DB_CHAN_UNPROTECTED);
+      DeleteSymb_DB(Data,BackXCh);      
+   }
+   
+   BackYCh = FindChan_DB(Data,sYBackCh);
+   if (BackYCh!=NULLSYMB) {
+      LockSymb_DB(Data,BackYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(Data,BackYCh,DB_CHAN_UNPROTECTED);
+      DeleteSymb_DB(Data,BackYCh);      
+   }
+
+	if (iSaveZ)
+	{
+		BackZCh = FindChan_DB(Data,sZBackCh);
+		if (BackZCh!=NULLSYMB) {
+			LockSymb_DB(Data,BackZCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+			SetChanProtect_DB(Data,BackZCh,DB_CHAN_UNPROTECTED);
+			DeleteSymb_DB(Data,BackZCh);      
+		}
+	}
+      
+   
+   // --- create backup channels ---
+         
+   BackXCh = DupSymb_DB(Data,XCh,sXBackCh);
+   BackYCh = DupSymb_DB(Data,YCh,sYBackCh);
+	if (iSaveZ)
+	   BackZCh = DupSymb_DB(Data,ZCh,sZBackCh);
+   
+
+   // --- select all ---
+   
+   Select = GetSelect_DB(Data);
+   Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+   
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Backup line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Copy ---
+
+      Decimate_DU(Data,Line,XCh,BackXCh,1);
+      Decimate_DU(Data,Line,YCh,BackYCh,1);
+		if (iSaveZ)
+	      Decimate_DU(Data,Line,ZCh,BackZCh,1);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+   
+   
+   // --- move the IPJ ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,hIPJ);
+   SetIPJ_DB(Data,BackXCh,BackYCh,hIPJ);
+   
+
+   // --- make backups read-only ---
+   
+   SetChanProtect_DB(Data,BackXCh,DB_CHAN_PROTECTED);
+   SetChanProtect_DB(Data,BackYCh,DB_CHAN_PROTECTED);
+	if (iSaveZ)
+	   SetChanProtect_DB(Data,BackZCh,DB_CHAN_PROTECTED);
+   
+   
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,BackXCh);
+   UnLockSymb_DB(Data,BackYCh);
+	if (iSaveZ)
+	{
+		UnLockSymb_DB(Data,ZCh);
+		UnLockSymb_DB(Data,BackZCh);
+	}
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+   SetSelect_DB(Data,Select);
+   UnLock_EDB(EData);
+}

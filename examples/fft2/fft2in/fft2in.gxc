@@ -1,0 +1,162 @@
+//===========================================================================
+NAME          = "Apply an FFT2D Transform "
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP/Step-By-Step Filtering"
+
+DESCRIPTION   = "
+Apply an FFT2D Transform to a grid.
+
+Parameters: 
+
+    FFT2IN.IN       - Name of the Input grid file
+    FFT2IN.TRN      - Optional name of the output transform grid file
+"
+//===========================================================================
+// Revision History:
+//
+// v6.3.0   Added optional scriptable parameter for out TRN grid file
+//===========================================================================
+
+RESOURCE = "fft2in.gr"
+#include "fft2in.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sInGrd,sTrnGrd;      // File names
+
+DGW         Diag;              // Dialogue handle
+
+IMG         IMGi;         //
+IMG         IMGo;         //  grid images
+
+PG          PG1;
+TR          TR1; 
+IPJ         IPJ1;
+
+int         i;       
+int         iNXe,iNYe;     // grid size
+real        rDx,rDy,rRot;  // grid info
+real        rXoe,rYoe;
+
+
+//===========================================================================
+//                            FFT2IN CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFT2INForm");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFT2INFORM_0,DGW_FILEPATH,"FFT2IN","IN");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==1) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFT2INFORM_0,DGW_FILEPATH,"FFT2IN","IN");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("FFT2IN","IN", sInGrd);
+   
+   if (iExistString_SYS("FFT2IN","TRN"))
+      GetString_SYS("FFT2IN","TRN",sTrnGrd);
+   else
+   {
+      // --- create transform grid name ---
+
+      FileNamePart_STR(sInGrd,sTrnGrd,STR_FILE_PART_NAME);
+      Strcat_STR(sTrnGrd,"_trn.grd(GRD;TYPE=FLOAT)");
+   }
+
+
+   // --- Check for null input and output channel strings ---
+
+   if (!iStrlen_STR(sInGrd))
+      Abort_SYS(_("Input Grid Name not specified"));
+
+   if (!iStrlen_STR(sTrnGrd))
+      Abort_SYS(_("Output Transform Grid Name not specified"));   
+
+   rDx = 1.0;
+   rDy = 1.0;
+   rXoe = 0.0;
+   rYoe = 0.0;
+   rRot= 0.0;
+
+
+   // --- Prepare to do the work ---
+
+   Progress_SYS(1);
+
+
+   // --- Get pager(PG1) from input grid ---
+
+   IMGi = CreateFile_IMG(GS_FLOAT,sInGrd,IMG_FILE_READONLY);
+   GetInfo_IMG(IMGi,rDx,rDy,rXoe,rYoe,rRot);
+   iNXe = iNX_IMG(IMGi);
+   iNYe = iNY_IMG(IMGi);
+   TR1 = Create_TR(1);     // iTOrder
+   GetTR_IMG(IMGi,TR1);
+   PG1 = Create_PG(iNYe,iNXe,GS_FLOAT);
+   GetPG_IMG(IMGi,PG1);
+   IPJ1 = Create_IPJ();
+   GetIPJ_IMG(IMGi,IPJ1);
+   Destroy_IMG(IMGi);
+   
+   // --- FFT2 forward transform ---
+
+   ReAllocate_PG(PG1,iNYe,iNXe+2);
+   TransPG_FFT2(PG1,0);                    // FFT2_PG_FORWARD  0
+                                            
+
+   // --- Output transform grid _trn.grd ---
+   
+   IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNXe+2,iNYe,sTrnGrd);
+   SetInfo_IMG(IMGo,rDx,rDy,rXoe,rYoe,rRot);
+   SetTR_IMG(IMGo,TR1);
+   SetPG_IMG(IMGo,PG1);
+   SetIPJ_IMG(IMGo,IPJ1);
+   Destroy_IMG(IMGo);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   Destroy_PG(PG1);
+   Destroy_TR(TR1);
+   Destroy_IPJ(IPJ1);
+
+   // --- Set parameter values for fft2 gxes ---
+   
+   SetString_SYS("FFT2FLT","IN",sTrnGrd);
+   SetString_SYS("FFT2RSPC","TRN",sTrnGrd);
+   SetString_SYS("FFT2PSPC","TRN",sTrnGrd);
+
+}
+
+//-----------------------------------------------------------------------

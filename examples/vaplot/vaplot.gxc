@@ -1,0 +1,591 @@
+//===========================================================================
+NAME          = "Plot individual array curve"
+#include <version.gxh>
+DESCRIPTION   = "
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Array Channels"
+
+// Revision History:
+// v6.1:   Fixed bug of lock/unlock database channels/lines.
+// v6.0:   If Array Channel Profile Viewer called, plot array to map 
+//         from viewer, not from the selected row in database.
+// v5.1.5: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "VAPLOT.gr"
+#include "VAPLOT.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+                        
+DGW         Diag;
+MAP         Map;
+MVIEW       View;
+EDB         EData;                        
+DB          Data;
+DB_SYMB     Line,ZCh;
+DB_SELECT   Select;          // current selection mode
+VA          ZVA;
+VV          ZVV;
+DB          TmpDB;
+DB_SYMB     TmpLine,TmpZCh,TmpFidCh;
+VV          VVx,VVy;
+WA          hWA;           
+RA          hRA;
+MSTK        hMSTK;
+
+real        rFidNum,rFidStart,rFidIncr;
+real        rWidth,rHeight,rXPos,rYPos;
+real        rLineThick,rLinePitch;
+real        rMLeft,rMRight,rMBottom,rMTop;
+real        rMinX,rMinY,rMaxX,rMaxY;
+real        rTextSize;
+real        rInter;
+real        rXScale,rYScale;
+real        rXMin,rYMin,rXMax,rYMax;
+real        rXl,rYb,rXr,rYt;
+real        rBase,rRange;
+
+int         i,iVAColumn,iLenVA,iStyle,iDec,iRow,iPow;
+int         iFirst,iLast,iOK;
+
+string(GS_MAX_PATH)        sDB,sGroupName,sPar,sMap,sPrompt;
+string(DB_SYMB_NAME_SIZE)  sChan,sLine,sFid,sTitle; 
+string(64) sProfile,sMessage;
+string(STR_GROUP) sTemp,sColor,sXScale,sYScale,sLineThick;
+string(64) sXannot,sYannot;
+
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+   if (!iInteractive_SYS()) Abort_SYS(_("This GX must be run interactively."));
+
+   rMLeft   = 20.0;
+   rMRight  = 10.0;
+   rMBottom = 15.0;
+   rMTop    = 15.0;
+   rTextSize = 1.5;
+   
+   iStyle = 4;
+   rLineThick = 0.15;
+   rLinePitch = 0.15;
+   //Strcpy_STR(sColor,"R");
+
+   
+   // --- Get the current selection information
+   
+   EData = Current_EDB();
+
+   rFidNum = rDUMMY;
+   rFidNum = rGetReal_SYS("VAPLOT_GX_RUN","FIDNUM");
+   
+   if(rFidNum==rDUMMY)
+      rFidNum = rGetCurFid_EDB(EData);
+   if(rFidNum == rDUMMY)
+      Abort_SYS(_("You must select the cell to plot, not the cell header, to plot the array profile."));
+
+   SetReal_SYS("VAPLOT","FIDNUM",rFidNum);
+      
+   GetCurrentSelection_EDB(EData,sDB,sChan,sLine,sFid);
+   FileNamePart_STR(sDB,sDB,STR_FILE_PART_NAME);
+   
+   Data = Lock_EDB(EData);
+   Line = FindSymb_DB(Data,sLine,DB_SYMB_LINE);
+   LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   ZCh = FindSymb_DB(Data,sChan,DB_SYMB_CHAN);
+   LockSymb_DB(Data,ZCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   iDec = iGetChanDecimal_DB(Data, ZCh);
+   
+   iVAColumn = iGetColVA_DB(Data, ZCh);
+   if (iVAColumn <= 1)
+      Abort_SYS(_("This GX works for array channel only."));
+
+   Strcpy_STR(sGroupName,sDB);
+   Strcat_STR(sGroupName,"_");
+   Strcat_STR(sGroupName,sLine);
+   Strcat_STR(sGroupName,"_");
+   FormatI_STR((int)rFidNum,sTemp,10);
+   Strcat_STR(sGroupName,sTemp);
+
+   rBase =  rGetReal_SYS("VAPLOT_GX_RUN","BASE");
+   rRange = rGetReal_SYS("VAPLOT_GX_RUN","RANGE");
+   iFirst = iGetInt_SYS ("VAPLOT_GX_RUN","MINW");
+   iLast =  iGetInt_SYS ("VAPLOT_GX_RUN","MAXW");
+
+   //DisplayReal_SYS("rRange",rRange);
+   //DisplayInt_SYS ("iFirst",iFirst);
+
+   if(iFirst==iDUMMY || iLast==iDUMMY)  GetVAWindows_DB(Data,ZCh,iFirst,iLast);
+   if(rBase==rDUMMY || rRange==rDUMMY)  GetVAScaling_DB(Data,ZCh,rBase,rRange);
+
+   UnLockSymb_DB(Data,Line);
+   UnLockSymb_DB(Data,ZCh);
+
+
+   // --- Ready to run dialogues ---
+   
+   Diag = Create_DGW("VAPLOT");
+   
+   SetInfoSYS_DGW(Diag,_VAPLOT_0,DGW_TEXT,"VAPLOT","TITLE");
+   SetInfoSYS_DGW(Diag,_VAPLOT_1,DGW_TEXT,"VAPLOT","XANNOT");
+   SetInfoSYS_DGW(Diag,_VAPLOT_2,DGW_TEXT,"VAPLOT","YANNOT");
+   SetInfoSYS_DGW(Diag,_VAPLOT_3,DGW_TEXT,"VAPLOT","WIDTH");    
+   SetInfoSYS_DGW(Diag,_VAPLOT_4,DGW_TEXT,"VAPLOT","HEIGHT");    
+   SetInfoSYS_DGW(Diag,_VAPLOT_5,DGW_TEXT,"VAPLOT","COLOR");    
+      
+   i = iRunDialogue_DGW(Diag);
+   if (i == -1) Cancel_SYS();   // He hit cancel
+      
+   GetInfoSYS_DGW(Diag,_VAPLOT_0,DGW_TEXT,"VAPLOT","TITLE");
+   GetInfoSYS_DGW(Diag,_VAPLOT_1,DGW_TEXT,"VAPLOT","XANNOT");
+   GetInfoSYS_DGW(Diag,_VAPLOT_2,DGW_TEXT,"VAPLOT","YANNOT");
+   GetInfoSYS_DGW(Diag,_VAPLOT_3,DGW_TEXT,"VAPLOT","WIDTH");    
+   GetInfoSYS_DGW(Diag,_VAPLOT_4,DGW_TEXT,"VAPLOT","HEIGHT");    
+   GetInfoSYS_DGW(Diag,_VAPLOT_5,DGW_TEXT,"VAPLOT","COLOR");    
+        
+   Destroy_DGW(Diag);
+
+
+   // --- Get parameters ---
+   
+   GetString_SYS("VAPLOT","TITLE",sTitle);
+   GetString_SYS("VAPLOT","XANNOT",sXannot);
+   GetString_SYS("VAPLOT","YANNOT",sYannot);
+   GetString_SYS("VAPLOT","COLOR",sColor);
+   
+   rWidth  = rGetReal_SYS("VAPLOT","WIDTH");
+   rHeight = rGetReal_SYS("VAPLOT","HEIGHT");
+   
+   if (rWidth  <= 0.0)   rWidth  = 80.0;
+   if (rHeight <= 0.0)   rHeight = 30.0;
+   
+   rXPos = rMLeft;
+   rYPos = rMBottom + rHeight;
+
+
+   // --- Create a map. Use the current fid value for the profile. ---
+   
+   Strcpy_STR(sMap,sDB);
+   Strcat_STR(sMap,"_");
+   Strcat_STR(sMap,sLine);
+   Strcat_STR(sMap,"_");
+   FormatI_STR((int)rFidNum,sTemp,10);
+   Strcat_STR(sMap,sTemp);
+   Strcat_STR(sMap,".map");
+
+   iOK = FALSE;
+   while (iOK == FALSE) {
+      iOK = TRUE;   
+      if (iInteractive_SYS() && iFileExist_SYS(sMap)) {
+         Printf_STR(sPrompt, sizeof(sPrompt), _("\"%s\" exists. Overwrite?"), sMap);
+         if (iDisplayQuestion_SYS(_("Map exists"),sPrompt) == 0) {
+            if (Prompt_SYS(_("New map name"),sMap)) Cancel_SYS();
+            iOK = FALSE;
+         }
+      }
+      FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);
+   }
+
+   SetString_SYS("VAPLOT","MAPNAME",sMap);     
+   UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+      
+
+   // --- Save current selection and set to new selection ---
+
+   Select = GetSelect_DB(Data);
+   if (iStrcmp_STR(sLine,"[All]",STR_CASE_TOLERANT) != 0) {
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+      Select_DB(Data,sLine,DB_LINE_SELECT_INCLUDE);
+   }   
+   
+   
+   // --- Create temporary DB ---
+   
+   if (iLoaded_EDB("__VAPLOT__.GDB")) UnLoad_EDB("__VAPLOT__.GDB");
+   Create_DB("__VAPLOT__.GDB",2,10,20,5,5,"SUPER","");
+   TmpDB = Open_DB("__VAPLOT__.GDB","SUPER","");
+   CreateSymb_DB(TmpDB,"D0",DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_GROUP);
+   TmpFidCh = CreateSymb_DB(TmpDB,"Fid",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   TmpZCh   = CreateSymb_DB(TmpDB,"Z",  DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   LockSymb_DB(TmpDB,TmpZCh,  DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(TmpDB,TmpFidCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   SetChanDecimal_DB(TmpDB,TmpZCh,  iDec);
+   SetChanDecimal_DB(TmpDB,TmpFidCh,2);
+   UnLockSymb_DB(TmpDB,TmpZCh);
+   UnLockSymb_DB(TmpDB,TmpFidCh);
+   Destroy_DB(TmpDB);
+   
+
+   // --- Get VA data ---
+
+   ZVA = Create_VA(REAL,0,iVAColumn);
+   ZVV = Create_VV(REAL,0);
+
+   LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ZCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+   GetChanVA_DB(Data,Line,ZCh,ZVA);       
+   iLenVA = iLen_VA(ZVA);
+   rFidStart = rGetFidStart_VA(ZVA);
+   rFidIncr  = rGetFidIncr_VA(ZVA); 
+
+   iRow = (int)((rFidNum - rFidStart)/rFidIncr);
+   if (iRow < 0 || iRow > iLenVA) 
+      Abort_SYS(_("Fiducial number of the survey location to plot decay curve is outside data range."));
+
+   TmpDB = Open_DB("__VAPLOT__.GDB","super","");
+   TmpLine  = FindSymb_DB(TmpDB,"D0",DB_SYMB_LINE);
+   TmpFidCh= FindSymb_DB(TmpDB,"Fid",DB_SYMB_CHAN);
+   TmpZCh   = FindSymb_DB(TmpDB,"Z",DB_SYMB_CHAN);
+   
+   LockSymb_DB(TmpDB,TmpFidCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(TmpDB,TmpZCh,  DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   GetVV_VA (ZVA,iRow,VA_ROW,ZVV);
+   PutChanVV_DB(TmpDB,TmpLine,TmpZCh,ZVV);
+   MakeFid_DU(TmpDB,TmpLine,TmpZCh,TmpFidCh);
+   
+   
+   // --- Ready to plot ---
+   
+   rInter = rDUMMY;
+   iPow   = iDUMMY;
+
+   rXMin = rDUMMY;
+   rXMax = rDUMMY;
+   rYMin = rDUMMY;
+   rYMax = rDUMMY;
+   if(iFirst!=iDUMMY)                     rXMin = (real)iFirst;
+   if(iLast !=iDUMMY)                     rXMax = (real)iLast;
+   if(rBase !=rDUMMY)                     rYMin = rBase;
+   if(rBase !=rDUMMY && rRange!=rDUMMY)   rYMax = rRange+rBase;
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   
+
+   // --- Get data range ---
+   
+   GetChanVV_DB(TmpDB,TmpLine,TmpFidCh,VVx);
+   RangeDouble_VV(VVx,rMinX,rMaxX);
+   if (rXMin != rDUMMY)    rMinX = rXMin;
+   if (rXMax != rDUMMY)    rMaxX = rXMax;
+
+   GetChanVV_DB(TmpDB,TmpLine,TmpZCh,VVy);
+   if (rXMin != rDUMMY || rXMax != rDUMMY)
+      _Copy2_VV(VVy,0,VVy,(int)rMinX,(int)(rMaxX-rMinX+1.0));
+   RangeDouble_VV(VVy,rMinY,rMaxY);
+   if (rYMin != rDUMMY)    rMinY = rYMin;
+   if (rYMax != rDUMMY)    rMaxY = rYMax;
+
+   if (rYMin == rDUMMY || rYMax == rDUMMY)
+      NicerScale_MATH(rMinY,rMaxY,rInter,iPow);
+    
+      
+   // --- Work out scales and others ---
+   
+   rXScale = (rMaxX - rMinX)/rWidth*1000.0;
+   rYScale = (rMaxY - rMinY)/rHeight;
+   
+   FormatR_STR(rXScale,sXScale,20,16);
+   FormatR_STR(rYScale,sYScale,20,16);
+   
+   if (rLineThick == rDUMMY) 
+      Strcpy_STR(sLineThick,"");
+   else
+      FormatR_STR(rLineThick,sLineThick,20,10);
+   
+   
+   // --- Prepare INI file ----
+
+   hWA = Create_WA("_VAPLOT.INI",0);
+
+   NewLine_WA(hWA);
+   
+   Strcpy_STR(sProfile,"PROFILE_0");
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".GROUPNAME=");         
+   Puts_WA(hWA,sGroupName);                        
+   Puts_WA(hWA,"_");    
+   Puts_WA(hWA,sChan);                        NewLine_WA(hWA);
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XCHAN=Fid");                 NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YCHAN=Z");                   NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XSCALE=");
+   Puts_WA(hWA,sXScale);                      NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YSCALE=");
+   Puts_WA(hWA,sYScale);                      NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XSTART=");
+   if (rMinX == rDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatR_STR(rMinX,sPar,20,16);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XEND=");
+   if (rMaxX == rDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatR_STR(rMaxX,sPar,20,16);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YSTART=");
+   if (rMinY == rDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatR_STR(rMinY,sPar,20,16);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }   
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".LEFT=");                
+   if (rXPos == rDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatR_STR(rXPos,sPar,20,10);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".BOTTOM=");
+   if (rYPos-rHeight == rDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatR_STR((rYPos-rHeight),sPar,20,10);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".HEIGHT=");
+   if (rHeight == rDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatR_STR(rHeight,sPar,20,10);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }
+   Puts_WA(hWA,"");                           NewLine_WA(hWA);
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XTRANSTYPE=0");              NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XTRANSLOGMIN=1");            NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YTRANSTYPE=0");              NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YTRANSLOGMIN=1");            NewLine_WA(hWA);
+   Puts_WA(hWA,"");                           NewLine_WA(hWA);
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFILE=1");                 NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFLINETYPE=");
+   if (iStyle == iDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatI_STR(iStyle,sPar,10);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFLINEPITCH=");
+   if (rLinePitch == rDUMMY)  { 
+      Puts_WA(hWA,"");                        NewLine_WA(hWA);
+   } else {
+      FormatR_STR(rLinePitch,sPar,20,10);
+      Puts_WA(hWA,sPar);                      NewLine_WA(hWA);
+   }
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFLINETHICK=");
+   Puts_WA(hWA,sLineThick);                   NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFLINECOLOR=");
+   Puts_WA(hWA,sColor);                        NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFWRAP=1");                NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFCLIP=1");                NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".PROFLABEL=");                NewLine_WA(hWA);
+   Puts_WA(hWA,"");                           NewLine_WA(hWA);
+   
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XBAR=1");                    NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XBARDRAW=3");                NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XBARLINETHICK=");
+   Puts_WA(hWA,sLineThick);                   NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XBARBOTTICKSIZE=-1.0");      NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XBARTOPTICKSIZE=0.0");       NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XBARMINORTICK=1");           NewLine_WA(hWA);
+   Puts_WA(hWA,"");                           NewLine_WA(hWA);
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XLABEL=1");                  NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XLABELDRAW=1");              NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XLABELTEXTSIZE=");
+   FormatR_STR(rTextSize,sPar,20,10);
+   Puts_WA(hWA,sPar);                         NewLine_WA(hWA);
+   Puts_WA(hWA,"");                           NewLine_WA(hWA);
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YBAR=1");                    NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YBARDRAW=3");                NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YBARLINETHICK=");       
+   Puts_WA(hWA,sLineThick);                   NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YBARLEFTTICKSIZE=-1.0");     NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YBARRIGHTTICKSIZE=0.0");     NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YBARMINORTICK=1");           NewLine_WA(hWA);
+   Puts_WA(hWA,"");                           NewLine_WA(hWA);
+   
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YLABEL=1");                  NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YLABELDRAW=1");              NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YLABELTEXTSIZE=");
+   FormatR_STR(rTextSize,sPar,20,10);
+   Puts_WA(hWA,sPar);                         NewLine_WA(hWA);
+   Puts_WA(hWA,"");                           NewLine_WA(hWA);
+         
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".FIDUCIAL=0");                NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".SYMBOL=0");                  NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XBOTTITLE=");                NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".XTOPTITLE=");                NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YLEFTTITLE=");               NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".YRIGHTTITLE=");              NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".GRID=1");                    NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".GRIDCOLOR=");                    
+   Puts_WA(hWA,"K96");                        NewLine_WA(hWA);
+   Puts_WA(hWA,sProfile);         
+   Puts_WA(hWA,".GRID_1=0");                  NewLine_WA(hWA);
+
+   Destroy_WA(hWA);
+   
+   
+   // --- Plot curve ---
+   
+   hRA = Create_RA("_VAPLOT.INI");
+   hMSTK = Create_MSTK();
+   ReadINI_MSTK (hMSTK, hRA);
+
+   DrawProfile_MSTK(hMSTK,TmpDB,TmpLine,Map);
+   
+   
+   // --- Clean ---
+   
+   UnLockSymb_DB(TmpDB,TmpZCh);
+   UnLockSymb_DB(TmpDB,TmpFidCh);
+   Destroy_DB(TmpDB);
+   Destroy_VV(VVx);
+   Destroy_VV(VVy);
+   Destroy_RA(hRA);
+
+   Destroy_VA(ZVA);
+   Destroy_VV(ZVV);
+  
+   UnLockSymb_DB(Data,ZCh);
+   UnLockSymb_DB(Data,Line);
+
+   SetSelect_DB(Data,Select);    // reset starting selections
+   UnLock_EDB(EData);
+
+   View = Create_MVIEW(Map,"stack_0",MVIEW_WRITEOLD);
+   Extent_MVIEW(View,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_MM,rMinX,rMinY,rMaxX,rMaxY);
+   Destroy_MVIEW(View);
+   
+   
+   // --- draw surrounds ---
+   
+   if (iExistView_MAP(Map,"Base"))
+      View = Create_MVIEW(Map,"Base",MVIEW_WRITEOLD);
+   else   
+      View = Create_MVIEW(Map,"Base",MVIEW_WRITENEW);
+   StartGroup_MVIEW(View,"Surround",MVIEW_GROUP_NEW);
+   
+   
+   // --- box around the plot ---
+   
+   LineThick_MVIEW(View,2.0*rLineThick);
+   rXl = 0.0;
+   rYb = 0.0;
+   rXr = rWidth+rXPos+rMRight;
+   rYt = rYPos+rMTop;
+   Rectangle_MVIEW(View,rXl,rYb,rXr,rYt);
+   
+   
+   // --- title and annotations---
+   
+   TextSize_MVIEW(View,2.5*rTextSize);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_CENTER);
+   Text_MVIEW(View,sTitle,(rXl+rXr)/2.0,rYt-10.0);
+   
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_LIGHT,TRUE);
+   TextSize_MVIEW(View,1.5*rTextSize);
+   Text_MVIEW(View,sXannot,(rXl+rXr)/2.0,rYb+8.0);
+   TextRef_MVIEW(View,TEXT_REF_MIDDLE_CENTER);
+   TextAngle_MVIEW(View,90.0);
+   Text_MVIEW(View,sYannot,rXr-6.0,(rYb+rYt)/2.0);
+   TextAngle_MVIEW(View,0.0);
+
+      
+   // --- margin title ---
+   
+   FormatI_STR(iRow,sTemp,10);
+   Printf_STR(sMessage, sizeof(sMessage), _("database: %s,  line: %s,  channel: %s,  row: %s"), sDB, sLine, sChan, sTemp);
+   
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_LIGHT,TRUE);
+   TextSize_MVIEW(View,rTextSize);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   Text_MVIEW(View,sMessage,rXl+1.0,rYb+1.0);
+   
+   FormatDate_STR(rDate_SYS(),sTemp,15,DATE_FORMAT_YYYYMMDD);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   Text_MVIEW(View,sTemp,rXl+1.0,rYb+1.0+1.5*rTextSize);
+   
+   Destroy_MVIEW(View);
+   Destroy_MAP(Map);
+   Load_EMAP(sMap);
+}

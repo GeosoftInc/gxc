@@ -1,0 +1,306 @@
+//===========================================================================
+NAME          = "Merge lines"
+#include <version.gxh>
+DESCRIPTION   = "
+Merge lines into one by concatination of the channels.
+
+	MERGLINE.LINE1      : First line to merge.
+			.LINE2      : Second line to merge.
+			.LINES		: Comma separated list of 2 or more lines to merge (will ignore LINE1 and LINE2)
+			.OUT        : Output line name, may be LINE1, LINE2 or one of LINES.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Line Tools"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "mergline.gr"
+#include "mergline.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInLn1,sInLn2,sOutLn;//, sTemp; // Line Names
+string(16348)         sMultiLines;
+string(256)           sError;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InLn1,InLn2; // Input line handles
+DB_SYMB    OutLn;       // Output merged line handle
+DGW        Diag;        // Dialogue handle
+LST        List;        // List handle
+LST        LiList;      // List handle
+LST        SelLiList;   // List handle
+VV         LinesVV;		// VV list of line handles
+int        i, iRet, iLines;     // Utility int
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+	// --- Get the Database ---
+
+	EData = Current_EDB();
+	Data = Lock_EDB(EData);
+
+	LiList = Create_LST(2*STR_DB_SYMBOL);
+	SelLiList = Create_LST(2*STR_DB_SYMBOL);
+	LinesVV = Create_VV(INT,0);
+	Strcpy_STR(sMultiLines,"");
+
+	// --- Are we running interactively ? ---
+
+	if (iInteractive_SYS())
+	{
+		iRet = 3;
+		while (iRet != 0)
+		{
+			if (iRet == 3)
+			{
+				// --- Create the Dialogue ---
+
+				Diag = Create_DGW("MergLINEForm");
+
+				// --- Set up input and output lists ---
+
+				List = GetList_DGW(Diag,_MERGLINEFORM_0);
+				SymbLST_DB(Data,List,DB_SYMB_LINE);
+				
+				// --- Set any Defaults ---
+
+				SetInfoSYS_DGW(Diag,_MERGLINEFORM_0,DGW_TEXT,"MERGLINE","OUT");    
+				if (iStrlen_STR(sMultiLines))
+					SetInfoSYS_DGW(Diag,_MERGLINEFORM_1,DGW_TEXT,"MERGLINE","LINES");     
+				
+
+				// --- Run the Dialogue ---
+
+				iRet = iRunDialogue_DGW(Diag);
+				if (iRet == -1 || iRet == 1) Cancel_SYS();
+
+
+				// --- Get the Strings ---
+
+				GetInfoSYS_DGW(Diag,_MERGLINEFORM_0,DGW_TEXT,"MERGLINE","OUT");    
+				GetInfoSYS_DGW(Diag,_MERGLINEFORM_1,DGW_TEXT,"MERGLINE","LINES");     
+				
+
+				// --- Destroy the Dialogue ---
+
+				Destroy_DGW(Diag);
+				
+				if ( iRet == 0 )
+				{
+					GetString_SYS("MERGLINE","LINES",sMultiLines);
+					GetString_SYS("MERGLINE","OUT",sOutLn);
+					if (iStrlen_STR(sOutLn)<=0)
+					{
+						DisplayMessage_SYS(_("Warning!"),_("Please enter the output line name."));
+						iRet = 3;
+					}
+					else if (!iIsLineName_DB(sOutLn))
+					{
+						Printf_STR(sError, sizeof(sError), _("%s is not a valid line name. Line names must start with an alphanumeric character, \"_\" or \"-\". Subsequent letters have the same restriction but can also be periods (\".\")."), sOutLn);
+						DisplayMessage_SYS(_("Warning!"), sError);
+						iRet = 3;
+					}
+					else
+					{
+						iLines = iTokens_STR(sMultiLines,",");
+						if (iLines < 2)
+						{
+							DisplayMessage_SYS(_("Warning!"), _("Need to choose at least two lines to merge."));
+							iRet = 3;
+						}
+					}
+				}
+			}
+			else if (iRet == 2)
+			{
+				Destroy_LST(LiList);
+				
+				LiList = Create_LST(2*STR_DB_SYMBOL);
+
+				SymbLST_DB(Data,LiList,DB_SYMB_LINE);
+				iRet = iTwoPanelSelection2_GUI(LiList, SelLiList, _("Choose Lines to Merge"));
+				if (iRet == 0)
+				{
+					// --- Create a comma separated list --- 
+					
+					ConvertToCSVString_LST(SelLiList,sMultiLines);
+					SetString_SYS("MERGLINE","LINES",sMultiLines);
+					iLines = iTokens_STR(sMultiLines,",");
+					if (iLines < 2)
+						DisplayMessage_SYS(_("Warning!"), _("Need to choose at least two lines to merge."));
+				}
+				iRet = 3;
+			}
+		}
+	}
+
+
+	// --- Get Parameters ---
+
+	GetString_SYS("MERGLINE","LINE1",sInLn1);
+	GetString_SYS("MERGLINE","LINE2",sInLn2);
+	GetString_SYS("MERGLINE","LINES",sMultiLines);
+	GetString_SYS("MERGLINE","OUT",sOutLn);
+	
+
+
+	// --- Do the Input Lines Exist ? ---
+	
+	iLines = iTokens_STR(sMultiLines,",");
+	if (iStrlen_STR(sMultiLines) > 0)
+	{
+		if (iLines < 2)
+			Abort_SYS(_("Need at least two lines to merge."));
+		for (i=0; i<iLines; i++)
+		{
+			GetToken_STR(sInLn2,sMultiLines,i);	
+			if(iStrcmp_STR(sInLn2,sOutLn,STR_CASE_SENSITIVE)==0)
+			{
+				Printf_STR(sError,sizeof(sError),_("Overwrite the \"%s\" line ?"), sOutLn);
+				if(iInteractive_SYS())
+				{
+					if(iDisplayQuestion_SYS(_("Warning!"), sError)==0)
+						Cancel_SYS();
+				}
+			}
+			if (!iExistSymb_DB(Data,sInLn2,DB_SYMB_LINE))
+			{
+				Printf_STR(sError,sizeof(sError),_("Line %s does not exist."), sInLn2);
+				Abort_SYS(sError);
+			}
+			InLn2 = FindSymb_DB(Data,sInLn2,DB_SYMB_LINE);
+			SetInt_VV(LinesVV,i,InLn2);		
+		}
+		InLn1 = (DB_SYMB)iGetInt_VV(LinesVV,0); // For duplicating output channel
+	}
+	else
+	{
+		if((iStrcmp_STR(sInLn1,sOutLn,STR_CASE_SENSITIVE)==0) || (iStrcmp_STR(sInLn2,sOutLn,STR_CASE_SENSITIVE)==0))
+		{
+			Printf_STR(sError,sizeof(sError),_("Overwrite the \"%s\" line ?"), sOutLn);
+			if(iInteractive_SYS())
+			{
+				if(iDisplayQuestion_SYS(_("Warning!"), sError)==0)
+					Cancel_SYS();
+			}
+		}
+		if (!iExistSymb_DB(Data,sInLn1,DB_SYMB_LINE))
+		{
+			Printf_STR(sError,sizeof(sError),_("Line %s does not exist."), sInLn1);
+			Abort_SYS(sError);
+		}
+		InLn1 = FindSymb_DB(Data,sInLn1,DB_SYMB_LINE);
+		if (!iExistSymb_DB(Data,sInLn2,DB_SYMB_LINE))
+		{
+			Printf_STR(sError,sizeof(sError),_("Line %s does not exist."), sInLn2);
+			Abort_SYS(sError);
+		}
+		InLn2 = FindSymb_DB(Data,sInLn2,DB_SYMB_LINE);
+	}
+
+
+	// --- Does the Ouput Line Exist ? ---
+
+	if (!iExistSymb_DB(Data,sOutLn,DB_SYMB_LINE)) 
+	{
+		OutLn = DupSymb_DB(Data,InLn1,sOutLn);
+		UnLockSymb_DB(Data,OutLn);
+	}
+	else 
+		OutLn = FindSymb_DB(Data,sOutLn,DB_SYMB_LINE);
+
+
+	// --- Lock the Line symbols ---
+
+	LockSymb_DB(Data,OutLn,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+	if (iStrlen_STR(sMultiLines) > 0)
+	{
+		for (i=0; i<iLines; i++)
+		{
+			InLn2 = (DB_SYMB)iGetInt_VV(LinesVV,i);		
+			if (InLn2 != OutLn)
+				LockSymb_DB(Data,InLn2,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+		}
+	}
+	else
+	{
+		if (InLn1 != OutLn)
+			LockSymb_DB(Data,InLn1,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+		if (InLn2 != OutLn)
+			LockSymb_DB(Data,InLn2,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+	}
+	
+
+	Progress_SYS(1);
+
+	// --- Update the Progress Bar ---
+
+	ProgName_SYS(_("Merge lines "),1);
+
+	if (iStrlen_STR(sMultiLines) > 0)
+	{
+		InLn1 = (DB_SYMB)iGetInt_VV(LinesVV,0);
+		InLn2 = (DB_SYMB)iGetInt_VV(LinesVV,1);
+		MergeLine_DU(Data,InLn1,InLn2,OutLn,DU_MERGE_APPEND);
+		ProgUpdateL_SYS(1,iLines);
+		for (i=2; i<iLines; i++)
+		{
+			InLn2 = (DB_SYMB)iGetInt_VV(LinesVV,i);
+			MergeLine_DU(Data,OutLn,InLn2,OutLn,DU_MERGE_APPEND);
+			ProgUpdateL_SYS(i,iLines);
+		}
+	}
+	else
+		MergeLine_DU(Data,InLn1,InLn2,OutLn,DU_MERGE_APPEND);
+
+
+	// --- Add maker ---
+
+	EasyMakerSymb_DB(Data,OutLn,_("Merge line"),"MERGLINE;");
+
+
+	// --- Unlock the Line symbol ---
+
+	UnLockSymb_DB(Data,OutLn);
+	if (iStrlen_STR(sMultiLines) > 0)
+	{
+		for (i=0; i<iLines; i++)
+		{
+			InLn2 = (DB_SYMB)iGetInt_VV(LinesVV,i);		
+			if (InLn2 != OutLn)
+				UnLockSymb_DB(Data,InLn2);
+		}
+	}
+	else
+	{
+		if (InLn1 != OutLn)
+			UnLockSymb_DB(Data,InLn1);
+		if (InLn2 != OutLn)
+			UnLockSymb_DB(Data,InLn2);
+	}
+	
+	// --- done ---
+
+	Progress_SYS(0);
+
+	// --- Release the Database ---
+
+	UnLock_EDB(EData);
+}

@@ -1,0 +1,844 @@
+//===========================================================================
+NAME          = "CHIMERA Scatter plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+   Plot assay correlations.
+   
+   CHMSCAT.DATA      \"ASSAY\"
+                     \"DISPLAYED_ASSAY\"
+                     \"LIST\"
+                     \"ALL\"
+                     \"DISPLAYED\"
+          .SIZE      Single Graph Size in mm.
+          .MASK 	   Optional mask channel - default is \"ChemMask\"
+          .SCALING   Default (-1), Lin-Lin (0), Lin-Log (1), Log-Lin (2), Log-Log (3)
+          .TITLE     title to be plotted, default is \"Multi-Scatter Plot\"
+          .ZONECHAN  Optional zone channel
+          .ZONEFILE  Optional zone file
+"           
+// Revision History:
+// v7.2  : Use min positive value in log scales if lowest value is less than zero.
+// v7.0.0: Symbol font weight fix-up.
+// v6.4.0: Added optional colouring using a zone channel and file.
+// v5.1.8: Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+// v5.1.6: Fixed to work with string-type ASSAY channels
+//         Fixed channel locks for continue statements. 
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "chmscat.gr"
+#include "chmscat.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define SYMB_NUM 20
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+DGW        Diag;
+EDB        EData;
+DB         Data;
+EMAP       EMap;
+MAP        Map;
+MVIEW      View;
+LST        List, ChLST;
+VV         ChNameVV;
+REG        Reg;
+DB_SYMB    HCh, VCh, MCh, Line,ZoneCh;
+VV         hHorz_VV, hVert_VV, hMask_VV, hZone_VV;
+VV         hTmpH_VV, hTmpV_VV, hTmpM_VV, hTmpZone_VV;
+VV         hSymNum_VV, hSymSiz_VV, hSymCol_VV;
+ST         hST;
+ITR        hITR;
+BF         hBF;
+REG        hREG;
+
+string(STR_FILE) sMap,sDB,sDataName,sITR,sZoneFile,sMapDir,sMapName;
+string(STR_DB_SYMBOL) sCh,szHChan,szVChan,sMask,sZoneChan;
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT_LONG) sTemp,sFont,sSymFont;
+string(STR_DEFAULT_LONG) sData,sTitle;
+string(STR_DEFAULT_LONG) sLabel;
+string(STR_DEFAULT_LONG) sPrompt;
+string(STR_DEFAULT_LONG) sParm,sNum,sZoneUnits;
+string(32768) sChannels;
+real       rMinX,rMaxX,rMinY,rMaxY,rMidX,rMin,rMax;
+real       rCellSz,rTextSz,rTemp,rGap;
+real       rLMargin,rRMargin,rBMargin,rTMargin,rStep;
+
+real       rX1, rY1;
+real       rHMin, rHMax, rVMin, rVMax;
+real       rHRMin, rHRMax, rVRMin, rVRMax;
+int        iMask, iLine, iTotLines;
+int        iHRMin, iHRMax, iVRMin, iVRMax, iHLin, iVLin, iAnnotn, iVVlen;
+real       rItems;
+int        iSymbolNumber, iZone;
+real       rSymbolSize;
+
+string(STR_DEFAULT_LONG) sCompany,sName,sDescr,sGeo,sDate;
+real       rX,rY,rR;
+
+int        i,j,k;
+int        iCh,iScaling;
+int        iOK;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+
+
+   // --- Get Default Mask Channel if required, and if it exists or is "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+
+         Data = Lock_EDB(EData);
+         if(iScanI_STR(sTemp)==1 &&
+            (iExistChan_DB(Data,sMask) || 
+             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+            SetString_SYS("CHMSCAT","MASK",sMask);
+         }
+         UnLock_EDB(EData);
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      Diag = Create_DGW("CHMSCAT");
+   
+      // --- Set up channel lists ---
+
+      Data = Lock_EDB(EData);
+      List = GetList_DGW(Diag,_CHMSCAT_2);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_CHMSCAT_5);
+      ChanLST_DB(Data,List);
+      Sort_LST(List,0,0);
+
+      UnLock_EDB(EData);
+      
+
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_CHMSCAT_0,DGW_LISTALIAS,"CHMSCAT","DATA");
+      SetInfoSYS_DGW(Diag,_CHMSCAT_1,DGW_TEXT,     "CHMSCAT","SIZE");
+      SetInfoSYS_DGW(Diag,_CHMSCAT_2,DGW_TEXT,     "CHMSCAT","MASK");
+      SetInfoSYS_DGW(Diag,_CHMSCAT_3,DGW_LISTALIAS,"CHMSCAT","SCALING");
+      SetInfoSYS_DGW(Diag,_CHMSCAT_4,DGW_TEXT,     "CHMSCAT","TITLE");
+      SetInfoSYS_DGW(Diag,_CHMSCAT_5,DGW_TEXT,     "CHMSCAT","ZONECHAN");
+      SetInfoSYS_DGW(Diag,_CHMSCAT_6,DGW_FILEPATH, "CHMSCAT","ZONEFILE");
+   
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    
+
+      GetInfoSYS_DGW(Diag,_CHMSCAT_0,DGW_LISTALIAS,"CHMSCAT","DATA");
+      GetInfoSYS_DGW(Diag,_CHMSCAT_1,DGW_TEXT,     "CHMSCAT","SIZE");
+      GetInfoSYS_DGW(Diag,_CHMSCAT_2,DGW_TEXT,     "CHMSCAT","MASK");
+      GetInfoSYS_DGW(Diag,_CHMSCAT_3,DGW_LISTALIAS,"CHMSCAT","SCALING");
+      GetInfoSYS_DGW(Diag,_CHMSCAT_4,DGW_TEXT,     "CHMSCAT","TITLE");
+      GetInfoSYS_DGW(Diag,_CHMSCAT_5,DGW_TEXT,     "CHMSCAT","ZONECHAN");
+      GetInfoSYS_DGW(Diag,_CHMSCAT_6,DGW_FILEPATH, "CHMSCAT","ZONEFILE");
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get parameters ---
+  
+   GetString_SYS("CHMSCAT", "MAP_DIR", sMapDir);
+   GetString_SYS("CHMSCAT","DATA",sData);
+   rCellSz = rGetReal_SYS("CHMSCAT","SIZE");     
+   GetString_SYS("CHMSCAT","MASK",sMask);
+   iScaling = iGetInt_SYS("CHMSCAT","SCALING");
+   if(i<-1 || i>3) i = -1; // Default to default scaling from attributes.
+
+   GetString_SYS("CHMSCAT","TITLE",sTitle);
+   if(iStrMin2_STR(sTitle)==0)  
+      Strcpy_STR(sTitle,_("Assay Scatter Plots"));
+      
+   GetString_SYS("CHMSCAT","ZONECHAN",sZoneChan);
+   GetString_SYS("CHMSCAT","ZONEFILE",sZoneFile);
+   
+   
+   // --- If a zone channel or file is selected, the zone file must be as well. ---
+   
+   iZone = 0;
+   if(iStrlen_STR(sZoneChan))
+   {
+      if(!iStrlen_STR(sZoneFile))
+         Abort_SYS(_("If the zone channel is selected, a zone file must be selected as well."));
+      iZone = 1;
+   }
+         
+
+   Reg = Create_REG(128);
+   
+   
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sData);
+   SetString_SYS("CHCHANLST","GX","CHMSCAT");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+
+   // --- nothing to do ---
+
+   iCh = iSize_LST(ChLST);   
+   if (iCh <= 0) Abort_SYS(_("No channels to plot."));
+   
+
+   // --- Set chan name VV ---
+
+   ChNameVV  = Create_VV(-32,0);
+   for(i=0; i<iCh; i++) {
+      GetChanLabel_DB(Data,(DB_SYMB)iGetInt_LST(ChLST,1,i),sCh);
+      SetString_VV(ChNameVV,i,sCh);
+   }
+   
+   
+   // --- Get Zone channel ITR ---
+
+   if(iZone)   
+      hITR = CreateFile_ITR(sZoneFile);
+   
+   
+   // --- Prepare to do the work ---
+
+   hST = Create_ST();    
+   hHorz_VV  = Create_VV(REAL,0);
+   hVert_VV  = Create_VV(REAL,0);
+   hMask_VV  = Create_VV(REAL,0);
+   hTmpH_VV  = Create_VV(REAL,0);
+   hTmpV_VV  = Create_VV(REAL,0);
+   hTmpM_VV  = Create_VV(REAL,0);
+   hSymNum_VV  = Create_VV(INT,0);
+   hSymSiz_VV  = Create_VV(REAL,0);
+   hSymCol_VV  = Create_VV(INT,0);
+   hZone_VV = Create_VV(REAL, 0);
+   hTmpZone_VV  = Create_VV(REAL,0);
+   
+   GetName_DB(Data,DB_NAME_FILE,sDataName);
+   GetName_DB(Data,0,sDB);
+   FileNamePart_STR(sDB,sDB,STR_FILE_PART_NAME);
+
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Display scatter plot on map ---
+
+   ProgName_SYS(_("Displaying scatter plot..."),1);
+
+   
+	// --- Create a new map ---   
+
+   Strcpy_STR(sMapName, "Scatter_");
+   Strcat_STR(sMapName, sDB);
+
+   iOK = FALSE;
+   while (iOK == FALSE) 
+	{
+      iOK = TRUE;   
+	   FileExt_STR(sMapName,"map",sMapName,FILE_EXT_FORCE);   
+		FileCombineParts_STR("", sMapDir, sMapName, "", "", sMap);
+      if (iInteractive_SYS() && iFileExist_SYS(sMap)) {
+         Printf_STR(sPrompt, sizeof(sPrompt), _("\"%s\" exists. Overwrite?"), sMapName);
+         if (iDisplayQuestion_SYS(_("Map exists"),sPrompt) == 0) {
+            if (Prompt_SYS(_("New map name"),sMapName)) Cancel_SYS();
+            iOK = FALSE;
+         }
+      }
+   }
+   
+   // --- Create a view ---
+   
+   if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+
+   rMinX = 0.0;
+   rMinY = 0.0;
+   rMaxX = (real)(iCh+1) * rCellSz;
+   rMaxY = (real)(iCh+1) * rCellSz + 28.0;
+   
+   View = Create_MVIEW(Map,"Base",MVIEW_WRITENEW);
+   FitWindow_MVIEW (View,rMinX,rMinY,rMaxX,rMaxY,rMinX,rMinY,rMaxX,rMaxY);
+   
+   Destroy_MVIEW(View);
+   Destroy_MAP(Map);
+   Load_EMAP(sMap);
+
+
+   // --- Draw on the map ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map,"Base",MVIEW_WRITEOLD);
+   Extent_MVIEW(View,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_MM,rMinX,rMinY,rMaxX,rMaxY);
+
+   // -- Turn on progress again (gets turned off during map creation) ---
+
+   Progress_SYS(1);
+  
+   i = 0;
+   Strcpy_STR(sGroup,_n("Scatter"));
+   while(iExistGroup_MVIEW(View,sGroup))  {
+      i++;
+      Strcpy_STR(sGroup,_n("Scatter"));
+      FormatI_STR(i,sTemp,2);
+      Strcat_STR(sGroup,sTemp);
+   }
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_APPEND);
+
+   rMidX = (rMaxX-rMinX)/2.0;
+   rTemp = (rMaxX-rMinX);
+   rTextSz = rCellSz/8.0;
+   
+   rLMargin = rMinX + 0.5*rCellSz;
+   rRMargin = rLMargin + rCellSz*(real)iCh;
+   rBMargin = rMinY + 0.5*rCellSz;
+   rTMargin = rBMargin + rCellSz*(real)iCh;
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   TextAngle_MVIEW(View,0.0);
+
+   LineColor_MVIEW(View,iColor_MVIEW("K"));
+   LineStyle_MVIEW(View,1,0.0);
+   LineThick_MVIEW(View,0.2);
+
+   
+   // --- draw grid ---
+
+   for(i=0; i<=iCh; i++) {
+   
+      rStep = rCellSz*(real)i;
+      Line_MVIEW(View,rLMargin,      rBMargin+rStep,rRMargin,       rBMargin+rStep);
+      Line_MVIEW(View,rLMargin+rStep,rBMargin,      rLMargin+rStep, rTMargin);
+   }
+      
+   // --- draw headings ---
+   
+   for(i=0; i<iCh; i++) {
+   
+      rStep = rCellSz*((real)i+0.5);
+      TextSize_MVIEW(View,rTextSz);
+      TextAngle_MVIEW(View,0.0);
+      
+      GetChanLabel_DB(Data,(DB_SYMB)iGetInt_LST(ChLST,1,i),sCh);
+    
+      if (iStrlen_STR(sCh) > 8)  {
+         rTemp = rTextSz;
+         while((real)iStrlen_STR(sCh)*rTemp > rCellSz)   rTemp /= 1.1;
+         TextSize_MVIEW(View,rTemp);
+      }
+      TextRef_MVIEW(View,TEXT_REF_MIDDLE_CENTER);
+      Text_MVIEW(View,sCh,rLMargin+rStep,      rTMargin+rCellSz*0.2);
+
+      if (iStrlen_STR(sCh) > 3)  {
+         TextAngle_MVIEW(View,-90.0);
+         TextRef_MVIEW(View,TEXT_REF_MIDDLE_CENTER);
+         Text_MVIEW(View,sCh,rLMargin-rCellSz*0.2,rTMargin-rStep);
+    
+      } else {
+
+         TextRef_MVIEW(View,TEXT_REF_MIDDLE_RIGHT);
+         Text_MVIEW(View,sCh,rLMargin-rCellSz*0.1,rTMargin-rStep);
+      }
+   }
+      
+   // --- draw scatter plot ---
+   
+   iMask = 0;
+   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))  {
+      if(iExistChan_DB(Data,sMask))
+         iMask = 1;
+   }
+   Strcpy_STR(sSymFont,"symbols(gfn,GFN_FONTWEIGHT_XBOLD)");
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   FillColor_MVIEW(View,iColor_MVIEW("k100"));
+   rTextSz = 0.05*rCellSz;
+   TextSize_MVIEW(View,rTextSz);
+   TextAngle_MVIEW(View,0.0);
+   rGap = 0.02*rCellSz;
+  
+   if(iMask) {
+      MCh = FindChan_DB(Data,sMask);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
+   
+   
+   // --- If plotting colours using a zone channel, check to see if the ITR
+   //     has colour zones defined ---
+   
+   if(iZone)
+   {
+      ZoneCh = FindChan_DB(Data,sZoneChan);
+      LockSymb_DB(Data,ZoneCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetRegSymbSetting_DB(Data, ZoneCh, "UNITS", sZoneUnits, sizeof(sZoneUnits));
+      if(iGetZoneModelType_ITR(hITR)==ITR_ZONE_MODEL_NOZONE)
+      {
+         iLine = 0;
+         Line = FirstSelLine_DB(Data);
+         while (iIsLineValid_DB(Data,Line))
+         {
+            // --- get data ---
+
+            GetChanVV_DB(Data,Line,ZoneCh,hTmpZone_VV);
+            Append_VV(hZone_VV, hTmpZone_VV);
+            
+            Line = NextSelLine_DB(Data, Line);
+            iLine++;
+         }
+         
+         
+         // --- Set up histogram etc for equal-area transform ---
+         
+         RangeDouble_VV(hZone_VV, rMin, rMax);
+         if(rMin==rMAX)
+            Abort_SYS(_("There is no valid data in the zone channel."));
+
+         Histogram2_ST(hST, 1024, rMin, rMax);
+         DataVV_ST(hST, hZone_VV);
+         EqualArea_ITR(hITR, hST, GS_R8DM);
+         
+         
+         // --- Set symbol info into the ITR ---
+         
+         hREG = GetREG_ITR(hITR);
+         Set_REG(hREG, "SymbFont", "symbol");
+         SetInt_REG(hREG, "SymbWt", MVIEW_FONT_WEIGHT_MEDIUM-1);	// Convert to core weight (one less)
+         SetInt_REG(hREG, "EdgeColor", -1);  // Code to force use of fill colour as the edge colour.
+         SetInt_REG(hREG, "Symbol0", SYMB_NUM);
+         
+         
+         // --- Set channel name and units ---
+         
+         Set_REG(hREG, "Channel", sZoneChan);
+         Set_REG(hREG, "Units", sZoneUnits);
+
+         
+         // --- Output the transform to a new ITR file ---
+         
+         Strcpy_STR(sITR, "chmscat_");
+         Strcat_STR(sITR, sZoneChan);
+         Strcat_STR(sITR, ".itr");
+         hBF = Create_BF(sITR, BF_READWRITE_NEW);
+         Serial_ITR(hITR, hBF);
+         Destroy_BF(hBF, BF_KEEP);
+      }
+   }
+   
+
+   for(i=0; i<iCh; i++) {
+      HCh = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      LockSymb_DB(Data,HCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      rX1 = rLMargin + rCellSz*(real)i;
+  
+      for(j=0; j<iCh; j++) {
+         if(j==i)  continue;
+      
+         VCh = (DB_SYMB)iGetInt_LST(ChLST,1,j);
+         LockSymb_DB(Data,VCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         rY1 = rTMargin - rCellSz*(real)(j+1);
+  
+         
+         // --- Update the Progress Bar ---
+
+         GetString_VV(ChNameVV,i,szHChan);
+         GetString_VV(ChNameVV,j,szVChan);
+         
+         Printf_STR(sLabel, sizeof(sLabel), _("Scatter plot on %s-%s"), szHChan, szVChan);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(i*iCh+j,iCh*iCh);
+         if(iCheckStop_SYS()) {
+            Exit_SYS();
+         }
+
+         // --- Go through all selected Lines ---
+
+         SetLen_VV(hHorz_VV,0);
+         SetLen_VV(hVert_VV,0);
+         SetLen_VV(hMask_VV,0);
+         SetLen_VV(hZone_VV,0);
+         
+         iLine = 0;
+         Line = FirstSelLine_DB(Data);
+         while (iIsLineValid_DB(Data,Line))
+         {
+            // --- get data ---
+
+            GetChanVV_DB(Data,Line,HCh,hTmpH_VV);
+            GetChanVV_DB(Data,Line,VCh,hTmpV_VV);
+            ReFidVV_VV(hTmpV_VV,hTmpH_VV);
+
+            if(iMask) {
+               GetChanVV_DB(Data,Line,MCh,hTmpM_VV);
+               ReFidVV_VV(hTmpM_VV,hTmpH_VV);
+            }
+            
+            if(iZone) {
+               GetChanVV_DB(Data,Line,ZoneCh,hTmpZone_VV);
+               ReFidVV_VV(hTmpM_VV,hTmpZone_VV);
+            }
+
+            Append_VV(hHorz_VV, hTmpH_VV);
+            Append_VV(hVert_VV, hTmpV_VV);
+            if(iMask)
+               Append_VV(hMask_VV, hTmpM_VV);
+            if(iZone)
+               Append_VV(hZone_VV, hTmpZone_VV);
+            
+            Line = NextSelLine_DB(Data, Line);
+            iLine++;
+         }
+
+         if(!iMask) {
+            SetRealN_VV(hMask_VV, 0, iLength_VV(hHorz_VV), 1.0);      
+         }
+
+         // --- Set Scatter Plot Parameters ---
+
+         iHLin=0;    iVLin=0;      iAnnotn=1;      // default LOG scaling
+
+
+         // --- Set Default Scaling ---
+         
+         if(iScaling==-1) {
+            GetRegSymbSetting_DB(Data,HCh,"LOG",sTemp,sizeof(sTemp));
+            if (iStrcmp_STR(sTemp,"YES",STR_CASE_TOLERANT))  iHLin = 1;
+            GetRegSymbSetting_DB(Data,VCh,"LOG",sTemp,sizeof(sTemp));
+            if (iStrcmp_STR(sTemp,"YES",STR_CASE_TOLERANT))  iVLin = 1;
+         }
+         else {
+            if(iScaling==0 || iScaling==2)   // set to linear
+               iHLin = 1;  
+            if(iScaling==0 || iScaling==1) 
+               iVLin = 1;
+         }
+         
+         Reset_ST(hST);
+         Statistics_VV(hST,hHorz_VV);
+         rItems = rGetInfo_ST(hST,ST_ITEMS);
+         if(rItems==0.0)  {
+            UnLockSymb_DB(Data,VCh);
+            continue;
+         }
+         
+         rHMin = rGetInfo_ST(hST,ST_MIN);
+         rHMax = rGetInfo_ST(hST,ST_MAX);
+         if(iHLin==0) {
+            if(rHMax<=0.0)  {
+               UnLockSymb_DB(Data,VCh);         
+               continue;
+            }
+            if(rHMin<=0.0)  
+					rHMin = rGetInfo_ST(hST,ST_MINPOS);
+					
+            rHMin = 0.9*rHMin;
+            rHMax = 1.1*rHMax;
+         }
+         else {
+            rR = (rHMax - rHMin)/10.0;
+            if(rR==0.0) {
+               if(rHMax==0.0)
+                  rR = 1.0;
+               else
+                  rR = rAbs_MATH(rHMax)/10.0;
+            }
+            rHMin -= rR;
+            rHMax += rR;
+         }
+         
+         Reset_ST(hST);
+         Statistics_VV(hST,hVert_VV);
+         rItems = rGetInfo_ST(hST,ST_ITEMS);
+         if(rItems==0.0)  {
+            UnLockSymb_DB(Data,VCh);
+            continue;
+         }
+         
+         rVMin = rGetInfo_ST(hST,ST_MIN);
+         rVMax = rGetInfo_ST(hST,ST_MAX);
+         if(iVLin==0) {
+            if(rVMax<=0.0)  {
+               UnLockSymb_DB(Data,VCh);
+               continue;
+            }
+            if(rVMin<=0.0)  
+					rVMin = rGetInfo_ST(hST,ST_MINPOS);
+            rVMin = 0.9*rVMin;
+            rVMax = 1.1*rVMax;
+         }
+         else {
+            rR = (rVMax - rVMin)/10.0;
+            if(rR==0.0) {
+               if(rVMax==0.0)
+                  rR = 1.0;
+               else
+                  rR = rAbs_MATH(rVMax)/10.0;
+            }
+            rVMin -= rR;
+            rVMax += rR;
+         }
+
+         iHRMin=0;     iHRMax=0;     iVRMin=0;     iVRMax=0; 
+         rHRMin=0.1;   rHRMax=1.0;   rVRMin=0.1;   rVRMax=1.0;        
+               
+         iVVlen = iLength_VV(hHorz_VV);
+         SetLen_VV(hSymNum_VV,iVVlen);
+         SetLen_VV(hSymSiz_VV,iVVlen);
+         SetLen_VV(hSymCol_VV,iVVlen);
+         iSymbolNumber = SYMB_NUM;   
+         rSymbolSize = rCellSz/100.0;
+         FillInt_VV(hSymNum_VV,iSymbolNumber);
+         FillReal_VV(hSymSiz_VV,rSymbolSize);
+         
+         if(iZone)
+            ColorVV_ITR(hITR, hZone_VV, hSymCol_VV);
+         else
+            SetIntN_VV(hSymCol_VV, 0, iLength_VV(hHorz_VV), iColor_MVIEW("R"));      
+         
+         if(iMask) 
+         {
+            for(k=0; k<iVVlen; k++) 
+            {
+               rTemp = rGetReal_VV(hMask_VV, k); 
+               if(rTemp==rDUMMY)     
+                  SetInt_VV(hSymCol_VV, k, iColor_MVIEW("R191G191B191"));      
+            }   
+         }
+
+         
+         // --- Draw Scatter Plot ---
+            
+         Scatter2_CHIMERA(View, "", rX1, rY1, rCellSz, rCellSz,      
+                      hHorz_VV, hVert_VV, sSymFont, hSymNum_VV, hSymSiz_VV, hSymCol_VV,
+                      iAnnotn, szHChan, szVChan, "", "",
+                      rHMin, rHMax, rVMin, rVMax, rHRMin, rHRMax, rVRMin, rVRMax,
+                      iHRMin, iHRMax, iVRMin, iVRMax, iHLin, iVLin); 
+
+         // --- Draw Min/Max Limits on the right side and bottom ---
+            
+         if(i==iCh-1 || (i==iCh-2 && j==iCh-1)) {
+            TextRef_MVIEW(View,TEXT_REF_MIDDLE_LEFT);
+            FormatR_STR(rVMin,sTemp,8,3);
+            Text_MVIEW(View,sTemp,rRMargin+rGap,rY1+0.05*rCellSz);
+            FormatR_STR(rVMax,sTemp,8,3);
+            Text_MVIEW(View,sTemp,rRMargin+rGap,rY1+0.95*rCellSz);
+         }
+         if(j==iCh-1 || (j==iCh-2 && i==iCh-1)) {
+            TextRef_MVIEW(View,TEXT_REF_MIDDLE_LEFT);
+            FormatR_STR(rHMin,sTemp,8,3);
+            Text_MVIEW(View,sTemp,rX1+0.05*rCellSz,rBMargin-rTextSz-rGap);
+            TextRef_MVIEW(View,TEXT_REF_MIDDLE_RIGHT);
+            FormatR_STR(rHMax,sTemp,8,3);
+            Text_MVIEW(View,sTemp,rX1+0.95*rCellSz,rBMargin-rTextSz-rGap);
+         }
+         UnLockSymb_DB(Data,VCh);
+      }
+      
+
+      // --- Save Transform, min and max values for CHMSCPICK ---
+      
+      Strcpy_STR(sParm,"MIN");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);      
+      SetReal_SYS("CHMSCPICK",sParm,rHMin);
+      
+      Strcpy_STR(sParm,"MAX");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);      
+      SetReal_SYS("CHMSCPICK",sParm,rHMax);
+         
+      Strcpy_STR(sParm,"LIN");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);      
+      SetInt_SYS("CHMSCPICK",sParm,iHLin);         
+      
+      UnLockSymb_DB(Data,HCh);
+   }
+   if(iMask)
+      UnLockSymb_DB(Data,MCh);
+      
+   if(iZone)
+      UnLockSymb_DB(Data,ZoneCh);
+   
+   
+   // --- get the workspace REG ---
+      
+   GetWorkspaceREG_SYS(Reg);
+   Get_REG(Reg,"CHPROJ.COMPANY",sCompany,sizeof(sCompany));  
+   Get_REG(Reg,"CHPROJ.NAME",sName,sizeof(sName));
+   Get_REG(Reg,"CHPROJ.DESCR",sDescr,sizeof(sDescr));
+   Get_REG(Reg,"CHPROJ.SCIENTIST",sGeo,sizeof(sGeo));  
+   Get_REG(Reg,"CHPROJ.DATE",sDate,sizeof(sDate));
+   
+   
+   // --- add title block ---                             
+   
+   rX = 20.0;
+   rY = rMaxY-28.0;
+   FillColor_MVIEW(View,C_TRANSPARENT);
+   LineColor_MVIEW(View,C_BLACK);
+   LineThick_MVIEW(View,0.35);
+   LineStyle_MVIEW(View,0,0.0);
+   Rectangle_MVIEW(View,rMinX,rMinY,rMaxX,rMaxY);
+   Line_MVIEW(View,rMinX,rY,rMaxX,rY);
+   
+   
+   // --- set the default font ---
+   
+   rY += 21.0;
+   TextColor_MVIEW(View,C_BLACK);
+   TextAngle_MVIEW(View,0.0);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextSize_MVIEW(View,4.0);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,sTitle,1.5,rY);
+   
+   TextSize_MVIEW(View,3.0);
+   rY -= 5.0;
+   Text_MVIEW(View,sCompany,1.5,rY);
+         
+   TextSize_MVIEW(View,2.0);
+   rY -= 5.0;
+   
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Project:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sName,rX+1.0,rY);
+      
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Scientist:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sGeo,rX+1.0,rY);
+   
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Project date:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   Text_MVIEW(View,sDate,rX+1.0,rY);
+   
+   rY -= 3.0;
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_RIGHT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_BOLD,FALSE);
+   Text_MVIEW(View,_("Report date:"),rX,rY);
+   TextRef_MVIEW(View,TEXT_REF_BOTTOM_LEFT);
+   TextFont_MVIEW(View,"",FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   FormatDate_STR(rDate_SYS(),sDate,10,DATE_FORMAT_YYYYMMDD);
+   Text_MVIEW(View,sDate,rX+1.0,rY);
+   
+
+   // --- Add maker ---
+   
+   SetReal_SYS("CHMSCPICK","X",rLMargin);
+   SetReal_SYS("CHMSCPICK","Y",rBMargin);
+   SetReal_SYS("CHMSCPICK","DX",rCellSz);
+   SetReal_SYS("CHMSCPICK","DY",rCellSz);
+   SetInt_SYS("CHMSCPICK","NC",iCh);
+   SetString_SYS("CHMSCPICK","DATABASE",sDataName);
+   
+   
+   // --- channel names ---
+   
+   for(i=0; i<iCh; i++) {
+   
+      // --- parameter name ---
+      
+      Strcpy_STR(sParm,"C");
+      FormatI_STR(i,sNum,4); iStrMin_STR(sNum);
+      Strcat_STR(sParm,sNum);
+      
+      GetItem_LST(ChLST, 0, i, sCh);
+      SetString_SYS("CHMSCPICK",sParm,sCh);
+      
+   }
+
+   Maker_MVIEW(View,0,1,"CHMSCPICK",MAKER_GX,_("Scatter tool..."),"CHMSCPICK;");
+   
+
+   // --- Close ---
+
+   Destroy_ST(hST);
+   Destroy_VV(hHorz_VV);
+   Destroy_VV(hVert_VV);
+   Destroy_VV(hMask_VV);
+   Destroy_VV(hTmpH_VV);
+   Destroy_VV(hTmpV_VV);
+   Destroy_VV(hTmpM_VV);
+   Destroy_VV(ChNameVV);
+   Destroy_MVIEW(View);
+   Destroy_LST(ChLST);
+   Destroy_SYS(Reg);
+   if(iZone)   
+      Destroy_ITR(hITR);
+   
+
+   // --- select the group ---
+   
+   UnLock_EMAP(EMap);
+   if (iInteractive_SYS())
+      SelectGroup_EMAP(EMap,_n("Base/Scatter"));
+
+   Progress_SYS(0);
+
+   // --- release the database ---
+
+   UnLock_EDB(EData);
+   
+   
+   // --- For zone coloured symbols, plot legend ---
+   
+   if(iZone)
+   {   
+      rX = rGetReal_SYS("CLASSLEG", "X");
+      rY = rGetReal_SYS("CLASSLEG", "Y");
+      if(iInteractive_SYS() || 
+         (rX!=rDUMMY && rY!=rDUMMY))
+      {
+         SetString_SYS("CLASSLEG", "ITR", sZoneFile);
+         iRunGX_SYS("classleg.gx");
+      }
+   }
+
+}

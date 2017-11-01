@@ -1,0 +1,160 @@
+//===========================================================================
+NAME          = "Restore original X and Y channels after windowing."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Window Data"
+
+DESCRIPTION   = "
+
+   This GX will restore the original X and Y channels after windowing
+   the default X and Y channels.  The original X and Y were saved in
+   channels \"__X\" and \"__Y\".
+
+"
+// Revision History:
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+
+EDB         EData;
+DB          Data;                      // database handle
+DB_SELECT   Sel;                       // selection
+
+DB_SYMB     XCh,YCh;                   // Channel Handles
+DB_SYMB     __XCh,__YCh;               // Channel Handles
+DB_SYMB     Line;                      // Line Handle
+
+int         iLines;                    // Number of Lines Processed
+int         iTotLines;                 // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;                     // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sXCh, sXBackCh, sYCh, sYBackCh;
+string(STR_DEFAULT_LONG) sMsg;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get channel names ---
+   
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   Strcpy_STR(sXBackCh, "__");
+   Strcat_STR(sXBackCh, sXCh);
+   Strcpy_STR(sYBackCh, "__");
+   Strcat_STR(sYBackCh, sYCh);
+
+
+   // --- Do __X and __Y Exist? ---
+
+   XCh = FindChan_DB(Data,sXCh);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("Current X channel does not exist."));
+
+   __XCh = FindChan_DB(Data,sXBackCh);
+   if (__XCh==NULLSYMB) {
+      Printf_STR(sMsg, sizeof(sMsg), _("Backup \"%s\" of current X channel does not exist."), sXBackCh);
+      Abort_SYS(sMsg);
+   }
+
+   YCh = FindChan_DB(Data,sYCh);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("Current Y channel does not exist."));
+
+   __YCh = FindChan_DB(Data,sYBackCh);
+   if (__YCh==NULLSYMB) {
+      Printf_STR(sMsg, sizeof(sMsg), _("Backup \"%s\" of current Y channel does not exist."), sYBackCh);
+      Abort_SYS(sMsg);
+   }
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Restore original X and Y channels."),0);
+
+
+   // --- save selection ---
+
+   Sel = GetSelect_DB(Data);
+   Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+
+
+   // --- copy ---
+
+   LockSymb_DB(Data,__XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,__YCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+
+      Strcpy_STR(sLabel,_("Line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Copy ---
+
+      Decimate_DU(Data,Line,__XCh,XCh,1);
+      Decimate_DU(Data,Line,__YCh,YCh,1);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+
+   }
+
+   UnLockSymb_DB(Data,__XCh);
+   UnLockSymb_DB(Data,__YCh);
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+
+
+   // --- put back selection ---
+
+   SetSelect_DB(Data,Sel);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+   UnLock_EDB(EData);   
+
+}

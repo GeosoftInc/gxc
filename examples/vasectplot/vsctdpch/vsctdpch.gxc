@@ -1,0 +1,508 @@
+//===========================================================================
+NAME          = "Create an array depth channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools"
+
+DESCRIPTION   = "
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v7.2:   If the reference array channel is empty, use current X channel for length, fid info.
+// v7.0:   QA 12805: Set Fid start and increment to ref channel values.
+// v6.2:   Fixed a bug of finding the individual line name.
+// v6.0:   Fixed a bug of using	GetCurLine_EDB while it is locked.
+// v5.1.8: New GX.
+//===========================================================================
+
+RESOURCE = "vsctdpch.gr"
+#include "vsctdpch.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+
+DGW         Diag;
+LST         List,LineLST;
+EDB         EData;
+DB          Data;
+DB_SYMB     Line,DepCh,RefCh,XCh;
+RA          hRA;    
+VV          hVV,hVV1;
+VA          hVA;
+
+int         i,ii,iOverWright;
+int         iTotLines;
+int         iDepMethod,iExpInc;
+int         iCol,iRow,iIndLineDep,iComLineDep;
+int         iFileLen,iTok,iVV,iVV1,iL,iT;
+
+real        rDepStart,rLnrInc,rGeoInc,rDepth;
+real        rFidStart, rFidIncr;
+            
+string(100)                sLineSel,sCurLine,sBuff,sCurSymb;
+string(256)                sTemp;
+string(STR_FILE)           sDepFile;
+string(STR_DEFAULT_SHORT)  sTok;
+string(DB_SYMB_NAME_SIZE)  sDepCh,sRefCh;
+
+            
+//===========================================================================
+
+{
+   // --- Current EDB and Current line ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   
+   // --- Run dialog ---
+
+   iOverWright = 0;
+   ii = -2;
+   while (iInteractive_SYS() && ii != 0) {
+      
+      Diag = Create_DGW("VSCTDPCH");      
+      List = GetList_DGW(Diag,_VSCTDPCH_2);
+      ArrayLST_DB(Data,List);
+      Sort_LST(List,0,0);
+      
+      SetInfoSYS_DGW(Diag,_VSCTDPCH_0,DGW_TEXT,     "VSCTDPCH","DEPCH");     
+      SetInfoSYS_DGW(Diag,_VSCTDPCH_1,DGW_LISTALIAS,"VSCTDPCH","DEPMETHOD");     
+      SetInfoSYS_DGW(Diag,_VSCTDPCH_2,DGW_TEXT,     "VSCTDPCH","REFCH");     
+      SetInfoSYS_DGW(Diag,_VSCTDPCH_3,DGW_LISTALIAS,"VSCTDPCH","LINESEL");     
+
+      ii = iRunDialogue_DGW(Diag);
+      if (ii == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_VSCTDPCH_0,DGW_TEXT,     "VSCTDPCH","DEPCH");     
+      GetInfoSYS_DGW(Diag,_VSCTDPCH_1,DGW_LISTALIAS,"VSCTDPCH","DEPMETHOD");     
+      GetInfoSYS_DGW(Diag,_VSCTDPCH_2,DGW_TEXT,     "VSCTDPCH","REFCH");     
+      GetInfoSYS_DGW(Diag,_VSCTDPCH_3,DGW_LISTALIAS,"VSCTDPCH","LINESEL");     
+
+      Destroy_DGW(Diag);
+
+      // --- Get parameters ---
+
+      GetString_SYS("VSCTDPCH","DEPCH",sDepCh);
+      iStrMin_STR(sDepCh);
+      GetString_SYS("VSCTDPCH","REFCH",sRefCh);
+      iStrMin_STR(sRefCh);
+      iDepMethod = iGetInt_SYS("VSCTDPCH","DEPMETHOD");
+      GetString_SYS("VSCTDPCH","LINESEL",sLineSel);
+
+      // --- Check depth channel ---
+
+      if (iExistSymb_DB(Data,sDepCh,DB_SYMB_CHAN))    {
+
+         Printf_STR(sBuff, sizeof(sBuff), _("Overwrite the existing channel \"%s\""), sDepCh);
+         iOverWright = iDisplayQuestionWithCancel_SYS(_("The named channel already exist"),sBuff);
+         if (iOverWright==2) Cancel_SYS();
+         if (iOverWright==0) { ii=-2;     continue; }
+      }
+
+      // --- Check reference channel ---
+
+      if (!iExistSymb_DB(Data,sRefCh,DB_SYMB_CHAN))    {
+         DisplayMessage_SYS(_("VSCTDPCH"),_("Reference data channel does not exist."));
+         ii = -2;   continue;
+      }
+      RefCh = FindSymb_DB(Data,sRefCh,DB_SYMB_CHAN);
+      iCol = iGetColVA_DB(Data,RefCh);
+      if (iCol == 1)  {
+         DisplayMessage_SYS(_("VSCTDPCH"),_("Reference data channel should be array channel."));
+         ii = -2;   continue;
+      }
+		XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+		
+             
+      // --- Do we need to run wizard ? ---
+
+      if(ii==2)  i = iDepMethod;
+      
+      
+      // --- Wizard ---
+      
+      while (i >= 1) {
+      
+         switch (i) {
+         
+         case 1:
+               
+            Diag = Create_DGW("VSCTDPCH1");
+            SetInfoSYS_DGW(Diag,_VSCTDPCH1_0,DGW_TEXT,"VSCTDPCH","START");     
+            SetInfoSYS_DGW(Diag,_VSCTDPCH1_1,DGW_TEXT,"VSCTDPCH","LNRINC");     
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VSCTDPCH1_0,DGW_TEXT,"VSCTDPCH","START");     
+            GetInfoSYS_DGW(Diag,_VSCTDPCH1_1,DGW_TEXT,"VSCTDPCH","LNRINC");     
+            Destroy_DGW(Diag);            
+            ii = i;
+            break;
+            
+         case 2:
+            
+            Diag = Create_DGW("VSCTDPCH2");
+            SetInfoSYS_DGW(Diag,_VSCTDPCH2_0,DGW_TEXT,"VSCTDPCH","START");     
+            SetInfoSYS_DGW(Diag,_VSCTDPCH2_1,DGW_TEXT,"VSCTDPCH","GEOINC");     
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VSCTDPCH2_0,DGW_TEXT,"VSCTDPCH","START");     
+            GetInfoSYS_DGW(Diag,_VSCTDPCH2_1,DGW_TEXT,"VSCTDPCH","GEOINC");     
+            Destroy_DGW(Diag);            
+            ii = i;
+            break;
+         
+         case 3:
+            
+            Diag = Create_DGW("VSCTDPCH3");
+            SetInfoSYS_DGW(Diag,_VSCTDPCH3_0,DGW_TEXT,"VSCTDPCH","START");     
+            SetInfoSYS_DGW(Diag,_VSCTDPCH3_1,DGW_TEXT,"VSCTDPCH","EXPINC");     
+            i = iRunDialogue_DGW(Diag);  
+            GetInfoSYS_DGW(Diag,_VSCTDPCH3_0,DGW_TEXT,"VSCTDPCH","START");     
+            GetInfoSYS_DGW(Diag,_VSCTDPCH3_1,DGW_TEXT,"VSCTDPCH","EXPINC");     
+            Destroy_DGW(Diag);            
+            ii = i;
+            break;
+         
+         case 4:
+            
+            Diag = Create_DGW("VSCTDPCH4");
+            SetInfoSYS_DGW(Diag,_VSCTDPCH4_0,DGW_FILEPATH,"VSCTDPCH","DEPFILE");     
+            i = iRunDialogue_DGW(Diag);   
+            GetInfoSYS_DGW(Diag,_VSCTDPCH4_0,DGW_FILEPATH,"VSCTDPCH","DEPFILE");     
+            Destroy_DGW(Diag);            
+            ii = i;
+            break;
+
+         default:
+            
+            DisplayInt_SYS(_("I'm lost"),i);            
+            i = -1;
+            ii = -2;
+            break;
+         }   
+      }
+   } 
+
+   // --- get parameters ---
+
+   GetString_SYS("VSCTDPCH","DEPCH",sDepCh);
+   iStrMin_STR(sDepCh);
+   GetString_SYS("VSCTDPCH","REFCH",sRefCh);
+   iStrMin_STR(sRefCh);
+   iDepMethod = iGetInt_SYS("VSCTDPCH","DEPMETHOD");
+   GetString_SYS("VSCTDPCH","LINESEL",sLineSel);
+
+   // --- Set line selections ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+
+   if (iCharComp_STR(sLineSel,"A")) 
+
+      SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
+
+   else if(iCharComp_STR(sLineSel,"S")) 
+
+      SelectedLineLST_DB(Data, LineLST);
+
+   else if(iInteractive_SYS() && iCharComp_STR(sLineSel,"D")) {
+
+      UnLock_EDB(EData);
+      EData = Current_EDB();
+      GetCurLine_EDB(EData,sCurLine);
+      Data = Lock_EDB(EData);
+      Line = FindSymb_DB(Data,sCurLine,DB_SYMB_LINE);
+      FormatI_STR((int)Line,sCurSymb,32);
+      
+      AddItem_LST(LineLST, sCurLine, sCurSymb);
+   }
+
+   iTotLines = iSize_LST(LineLST);
+   if(iTotLines==0)
+      Abort_SYS(_("No lines selected to plot."));
+   
+
+   // --- Check reference channel ---
+
+   if (!iExistSymb_DB(Data,sRefCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Reference channel does not exist."));
+   RefCh = FindSymb_DB(Data,sRefCh,DB_SYMB_CHAN);
+   iCol = iGetColVA_DB(Data,RefCh);
+   if (iCol<=1)
+      Abort_SYS(_("Reference channel should be array channel."));
+ 
+   
+   // --- creat VVs ---
+   
+   hVV = Create_VV(REAL,iCol);
+   hVV1 = Create_VV(REAL,iCol);
+
+   Progress_SYS(1);
+
+   // --- Get parameters  and set depth VV---
+
+   iDepMethod = iGetInt_SYS("VSCTDPCH","DEPMETHOD");
+   if(iDepMethod==iDUMMY)    iDepMethod = 1;
+
+   if(iDepMethod==1) {
+      rDepStart = rGetReal_SYS("VSCTDPCH","START");
+      if(rDepStart==rDUMMY)  rDepStart = 0.0;
+      rLnrInc = rGetReal_SYS("VSCTDPCH","LNRINC");
+      if(rLnrInc==rDUMMY)    rLnrInc = 5.0;
+
+      for(i=0; i<iCol; i++) {
+         rDepth = rDepStart + (real)i*rLnrInc;
+         SetReal_VV (hVV,i,rDepth);
+      }
+
+   } else if(iDepMethod==2) {
+      rDepStart = rGetReal_SYS("VSCTDPCH","START");
+      if(rDepStart==rDUMMY)  rDepStart = 1.0;
+      rGeoInc = rGetReal_SYS("VSCTDPCH","GEOINC");
+      if(rGeoInc==rDUMMY)    rGeoInc = 1.1;
+
+      for(i=0; i<iCol; i++) {
+         rDepth = rDepStart * rPow_MATH(rGeoInc,(real)i);
+         SetReal_VV (hVV,i,rDepth);
+     }
+
+   } else if(iDepMethod==3) {
+      rDepStart = rGetReal_SYS("VSCTDPCH","START");
+      if(rDepStart==rDUMMY)  rDepStart = 1.0;
+      iExpInc = iGetInt_SYS("VSCTDPCH","EXPINC");
+      if(iExpInc==iDUMMY)    iExpInc = 20;
+
+      for(i=0; i<iCol; i++) {
+         rDepth = rDepStart * rPow_MATH(10.0,(real)i/(real)iExpInc);
+         SetReal_VV (hVV,i,rDepth);
+     }
+
+   } else if(iDepMethod==4) {
+      
+      GetString_SYS("VSCTDPCH","DEPFILE",sDepFile);
+      if (iFileExist_SYS(sDepFile)) {
+         hRA = Create_RA(sDepFile);
+         iFileLen = iLen_RA(hRA);
+        
+         // --- check Common and/or Individual line depth block in file ---
+
+         iComLineDep = 0;
+         iIndLineDep = 0;
+         for(i=0;i<iFileLen;i++) {
+            if(iComLineDep==1 && iIndLineDep==1)  break;
+            iGets_RA(hRA,sTemp);
+            TrimSpace_STR(sTemp,STR_TRIMBOTH);
+            if(iStrMin2_STR(sTemp)==0)  continue;
+            if(iStrStr_STR(sTemp,"/",STR_CASE_TOLERANT)==0)  continue;
+            if(iComLineDep==0) {
+               if(iStrStr_STR(sTemp,_n("All"),STR_CASE_TOLERANT)!=-1 || 
+                  iStrStr_STR(sTemp,_n("Common"),STR_CASE_TOLERANT)!=-1)  
+                  iComLineDep = 1;
+            }
+            if(iIndLineDep==0) {
+               for(ii=0; ii<iTotLines; ii++) {
+                  GetItem_LST(LineLST, 0, ii, sCurLine);
+                  if(iStrcmp_STR(sTemp,sCurLine,STR_CASE_TOLERANT)==0) { 
+                     iIndLineDep = 1;    break;
+                  }
+               }
+            }
+         }
+    
+         // --- skip lines before common depths data lines ---
+        
+         iL = iFileLen;
+         iSeek_RA (hRA,0);
+         for(i=0;i<iFileLen;i++) {
+            iGets_RA(hRA,sTemp);
+            TrimSpace_STR(sTemp,STR_TRIMBOTH);
+            if(iStrMin2_STR(sTemp)==0)  continue;
+            if(iStrStr_STR(sTemp,"/",STR_CASE_TOLERANT)==0)  continue;
+
+            if(iStrStr_STR(sTemp,_n("All"),STR_CASE_TOLERANT)==-1 &&
+               iStrStr_STR(sTemp,_n("Common"),STR_CASE_TOLERANT)==-1)  continue;                
+            else { iL=i+1;  break; }
+         }
+
+         // --- read common line depths from file ---
+
+         if(iL<iFileLen)  iSeek_RA (hRA,iL);
+         iVV = 0;
+         FillReal_VV(hVV,rDUMMY);
+         for(i=iL;i<iFileLen;i++) {
+            iGets_RA(hRA,sTemp);
+            TrimSpace_STR(sTemp,STR_TRIMBOTH);
+            if(iStrMin2_STR(sTemp)==0)  continue;
+            if(iStrStr_STR(sTemp,"/",STR_CASE_TOLERANT)==0)  continue;
+            if(iStrStr_STR(sTemp,_n("end"),STR_CASE_TOLERANT)==0)  break;
+
+            // --- set Common line depth VV ---
+
+            iTok = iTokens_STR(sTemp," \t,");
+            for (iT=0;iT<iTok;iT++) {
+               GetToken_STR(sTok,sTemp,iT);
+               rDepth = rScanR_STR(sTok);
+               if(rDepth==rDUMMY)  { i=iFileLen;  break; }
+               else  { SetReal_VV (hVV,iVV,rDepth);  iVV++; }
+               if(iVV>iCol)  break;
+            }
+            if(iVV>iCol)  break;
+         }
+      } else {
+         Strcpy_STR(sBuff,_("Cannot find depth file: "));
+         Strcat_STR(sBuff,sDepFile);
+         Abort_SYS(sBuff);
+      }     
+   }
+
+   // --- If interactive is off and sDepCh exists, always overwight ---
+
+   i = iInteractive_SYS();
+   if(i==0 && iExistSymb_DB(Data,sDepCh,DB_SYMB_CHAN))    {
+      DepCh = FindSymb_DB(Data,sDepCh,DB_SYMB_CHAN);
+      LockSymb_DB(Data,DepCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(Data,DepCh);
+   }
+
+   // --- If interactive is on and overwight existing sDepCh chosen ---
+   
+   if (i==1 && iOverWright==1) {
+      DepCh = FindSymb_DB(Data,sDepCh,DB_SYMB_CHAN);
+      LockSymb_DB(Data,DepCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(Data,DepCh);
+   }
+
+   // --- Create Depth channel ---
+
+   DepCh = DupSymb_DB(Data,RefCh,sDepCh);
+   LockSymb_DB(Data,RefCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   
+   
+   // --- Lock current X channel if it exists ---
+   
+   if(XCh != NULLSYMB)
+		LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+		
+                                    
+   // --- Go through all selected Lines ---
+                           
+   for(ii=0; ii<iTotLines; ii++) {
+   
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, ii);
+      GetItem_LST(LineLST, 0, ii, sCurLine);
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      Strcpy_STR(sBuff,_("Processing line: "));
+      Strcat_STR(sBuff,sCurLine);
+
+      ProgName_SYS(sBuff,0);
+      ProgUpdateL_SYS(ii,iTotLines);
+      
+      
+      // --- Get the reference VA channel Fid info ---
+      
+      rFidStart = rGetFidStart_DB(Data, Line, RefCh);
+      rFidIncr = rGetFidIncr_DB(Data, Line, RefCh);
+      
+
+      iRow = iGetChannelLength_DB(Data,Line,RefCh);
+      
+      // --- If the array channel has just been created, it might be empty.
+      //     Get the length from the current X channel ---
+      
+      if(iRow == 0 && XCh != NULLSYMB)
+		{
+			iRow = iGetChannelLength_DB(Data, Line, XCh);
+	      rFidStart = rGetFidStart_DB(Data, Line, XCh);
+		   rFidIncr = rGetFidIncr_DB(Data, Line, XCh);
+		}
+      
+      hVA = Create_VA(REAL,iRow,iCol);
+
+      if(iDepMethod==4 && iIndLineDep==1) {
+
+         // --- skip lines before Individual depths data lines ---
+        
+         iL = iFileLen;
+         iSeek_RA (hRA,0);
+         for(i=0;i<iFileLen;i++) {
+            iGets_RA(hRA,sTemp);
+            TrimSpace_STR(sTemp,STR_TRIMBOTH);
+            if(iStrMin2_STR(sTemp)==0)  continue;
+            if(iStrStr_STR(sTemp,"/",STR_CASE_TOLERANT)==0)  continue;
+
+            if(iStrcmp_STR(sTemp,sCurLine,STR_CASE_TOLERANT)!=0)  continue;
+            else { iL=i+1;  break; }
+         }
+
+         // --- read individual line depth from file ---
+
+         if(iL<iFileLen)  iSeek_RA (hRA,iL);
+         iVV1 = 0;
+         FillReal_VV(hVV1,rDUMMY);
+         for(i=iL;i<iFileLen;i++) {
+            iGets_RA(hRA,sTemp);
+            TrimSpace_STR(sTemp,STR_TRIMBOTH);
+            if(iStrMin2_STR(sTemp)==0)  continue;
+            if(iStrStr_STR(sTemp,"/",STR_CASE_TOLERANT)==0)  continue;
+            if(iStrStr_STR(sTemp,_n("end"),STR_CASE_TOLERANT)==0)  break;
+
+            // --- set depth VV ---
+
+            iTok = iTokens_STR(sTemp," \t,");
+            for (iT=0;iT<iTok;iT++) {
+               GetToken_STR(sTok,sTemp,iT);
+               rDepth = rScanR_STR(sTok);
+               if(rDepth==rDUMMY)  { i=iFileLen;  break; }
+               else  { SetReal_VV (hVV1,iVV1,rDepth);  iVV1++; }
+               if(iVV1>iCol)  break;
+            }
+            if(iVV1>iCol)  break;
+         }
+      }
+
+      for(i=0; i<iRow; i++) {
+
+         if(iDepMethod==4 && iIndLineDep==1 && iVV1>0)
+            SetVV_VA(hVA,i,VA_ROW,hVV1);
+         else
+            SetVV_VA(hVA,i,VA_ROW,hVV);
+      }
+
+		
+		// --- Set the VA Fid and Increment ---
+		
+		SetFidStart_VA(hVA, rFidStart);
+		SetFidIncr_VA(hVA, rFidIncr);
+		
+		
+		// --- Output the VA ---
+		
+      PutChanVA_DB(Data,Line,DepCh,hVA);
+
+      Destroy_VA(hVA);
+      UnLockSymb_DB(Data,Line);
+   }
+      
+   
+   // --- Unload temp database ---
+
+   UnLockSymb_DB(Data,DepCh);
+   UnLockSymb_DB(Data,RefCh);
+   if(XCh != NULLSYMB)
+		UnLockSymb_DB(Data,XCh);
+   
+   UnLock_EDB(EData);
+   
+   if (iInteractive_SYS())
+      LoadChan_EDB(EData,sDepCh);
+      
+} 
+
+ 

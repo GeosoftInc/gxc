@@ -1,0 +1,451 @@
+//===========================================================================
+NAME          = "Sort all channels on two reference channels"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   SORTALL2.CHANNEL1   primary channel
+           .CHANNEL2   secondary channel (blank if none)
+           .ORDER1     \"ASCENDING\" or \"DESCENDING\"
+           .ORDER2     \"ASCENDING\" or \"DESCENDING\"
+           .READONLY   sort read-only channels \"Yes\" or \"No\"
+
+   This GX is normally run by another GX.
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.0.0: Add check to ensure input channel is defined.
+// v5.1.6: Don't sort zero length channels.
+// v5.1.5: Use FindChan_DB and iExistChan_DB instead of FindSymb_DB and iExistSymb_DB.
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCh1,sCh2;
+
+string(STR_DEFAULT_SHORT) sTemp;              // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+DB          Data;
+EDB         eDB;
+DB_SYMB     Ch,RefCh1, RefCh2;
+DB_SYMB     Line;
+VV          ChanVV;             // channel list
+VV          RefVV1, RefVV2;     // reference VVs
+VV          IndVV;              // sort index VV
+VV          ChVV;               // current channel VV
+VA          ChVA;               // current channel VA
+int         iOrder1,iOrder2;    // sort orders
+int         iReadOnly;          // TRUE if should process read-only channels
+int         iLine,iTotLines;    // counters
+int         i,iChan,iChType,iChLen,iProt,iCol,iCol1,iCol2,iLen;
+int         iFidLen;
+real        rChStart,rChIncr,rChEnd;
+real        rFidMin,rFidMax,rFidInc;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   eDB = Current_EDB();
+   Data = Lock_EDB(eDB);
+
+
+   // --- Do the Reference Channels Exist ? ---
+   
+   GetString_SYS("SORTALL2","CHANNEL1",sCh1);
+   GetString_SYS("SORTALL2","CHANNEL2",sCh2);
+   if(!iStrlen_STR(sCh1) || !iStrlen_STR(sCh2))
+      Abort_SYS(_("One or both channels not defined for sorting. This GX is not normally run interactively, use the SORTALL2.GX."));
+
+   if (iExistChan_DB(Data,sCh1) &&
+       iExistChan_DB(Data,sCh2)) {
+
+
+      if(!iStrcmp_STR(sCh1,sCh2,STR_CASE_TOLERANT))
+         Abort_SYS(_("Primary and Secondary reference channels must be different.")); 
+   
+      
+      // --- get parameters ---
+         
+      GetString_SYS("SORTALL2","ORDER1",sTemp);
+      ToUpper_STR(sTemp);
+      if (iCharComp_STR(sTemp,"D"))
+         iOrder1 = DU_SORT_DESCENDING;
+      else
+         iOrder1 = DU_SORT_ASCENDING;
+         
+      GetString_SYS("SORTALL2","ORDER2",sTemp);
+      ToUpper_STR(sTemp);
+      if (iCharComp_STR(sTemp,"D"))
+         iOrder2 = DU_SORT_DESCENDING;
+      else
+         iOrder2 = DU_SORT_ASCENDING;
+         
+      GetString_SYS("SORTALL2","READONLY",sTemp);
+      ToUpper_STR(sTemp);
+      if (iCharComp_STR(sTemp,"Y"))
+         iReadOnly = TRUE;
+      else
+         iReadOnly = FALSE;
+         
+         
+      // --- get reference channels ---         
+         
+      RefCh1 = FindChan_DB(Data,sCh1);
+      RefCh2 = FindChan_DB(Data,sCh2);
+      LockSymb_DB(Data,RefCh1,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      LockSymb_DB(Data,RefCh2,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      
+
+      // --- Can't use VA channels as references ---
+
+      iCol1 = iGetColVA_DB(Data, RefCh1);
+      iCol2 = iGetColVA_DB(Data, RefCh2);
+      if(iCol1 > 1 || iCol2>1)
+         Abort_SYS(_("You may not use an array channel as reference for sorting."));
+
+
+      // --- get a list of channels ---
+
+      ChanVV = Create_VV(INT,0);
+      iChan = iSymbList_DB(Data,ChanVV,DB_SYMB_CHAN);
+
+
+      // --- get reference VVs ---
+
+      iChType = iGetChanType_DB(Data,RefCh1);
+      RefVV1 = CreateExt_VV(iChType,0);
+      iChType = iGetChanType_DB(Data,RefCh2);
+      RefVV2 = CreateExt_VV(iChType,0);
+
+
+      // --- Create an index VV ---
+      
+      IndVV = Create_VV(INT, 0);
+      
+            
+      // --- Prepare to do the work ---
+
+      iLine = 0;
+      iTotLines = iCountSelLines_DB(Data);
+      Progress_SYS(1);
+
+
+      // --- Go through all selected Lines ---
+
+      ProgName_SYS("",1);
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+         // --- Update the Progress Bar ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Sort line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLine,iTotLines);
+
+
+         // --- index must have some data ---
+
+         if ((iGetChannelLength_DB(Data,Line,RefCh1) > 0) &&
+             (iGetChannelLength_DB(Data,Line,RefCh2) > 0)) {
+
+
+            // --- Must first cycle through all the channels to determine the
+            //     full range in FIDs. Channels must all then be re-fidded to the
+            //     maximum range and minimum FID increment before sorting, 
+            //     to preserve the synchronicity of data; e.g. all items which
+            //     share the same FID at the start should share the same FID at the
+            //     end, even after the individual FIDs are re-ordered. This does NOT
+            //     necessarily occur if we re-FID the reference channel to each
+            //     sorted channel as we go.
+
+            rFidMin = rMAX;
+            rFidMax = rMIN;
+            rFidInc = rMAX;
+            for (i=0;i<iChan;i++) {
+            
+
+               // --- get the channel ---
+
+               Ch = (DB_SYMB)iGetInt_VV(ChanVV,i);
+
+
+               // --- lock the channel ---
+
+               LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+               // --- process all protected channels ---
+
+               if (iGetChanProtect_DB(Data,Ch) == DB_CHAN_PROTECTED && !iReadOnly) {
+                  UnLockSymb_DB(Data,Ch);
+                  continue;
+               }
+
+
+               // --- Skip zero-length channels ---
+
+               if (iGetChannelLength_DB(Data,Line,Ch) == 0)  {
+                  UnLockSymb_DB(Data,Ch);
+                  continue;
+               }
+
+
+               // --- Find bounding FIDs ---
+
+               rChStart = rGetFidStart_DB(Data,Line,Ch);
+               rChIncr  = rGetFidIncr_DB(Data,Line,Ch);
+               iChLen   = iGetChannelLength_DB(Data,Line,Ch);
+
+               if(rChStart == rDUMMY) rChStart = 0.0;
+               if(rChIncr  == rDUMMY) rChIncr  = 1.0;               
+
+               rChEnd = rChStart + (real)(iChLen-1)*rChIncr;
+
+               if(rChStart < rFidMin) rFidMin = rChStart;
+               if(rChEnd > rFidMax) rFidMax = rChEnd;
+
+               if(rChIncr < rFidInc) rFidInc = rChIncr;
+
+
+               // --- UnLock the channel ---
+
+               UnLockSymb_DB(Data,Ch);
+
+
+            }
+
+
+            // --- get the reference channel #1 data ---
+
+            GetChanVV_DB(Data,Line,RefCh1,RefVV1);
+
+
+            // --- get its FID info ---
+
+            rChStart = rGetFidStart_DB(Data,Line,RefCh1);
+            rChIncr  = rGetFidIncr_DB(Data,Line,RefCh1);
+            iChLen   = iGetChannelLength_DB(Data,Line,RefCh1);
+
+            if(rChStart == rDUMMY) rChStart = 0.0;
+            if(rChIncr  == rDUMMY) rChIncr  = 1.0;               
+
+            rChEnd = rChStart + (real)(iChLen-1)*rChIncr;
+            
+            
+            // --- resample it to the "master" FID ---
+
+            iFidLen = (int)((rFidMax - rFidMin)/rFidInc) + 1;
+            if(rChStart != rFidMin ||
+               rChEnd   != rFidMax ||
+               rChIncr  != rFidInc) {
+
+               ReFid_VV(RefVV1,rFidMin,rFidInc, iFidLen);
+            }
+
+
+            // --- get the reference channel #2 data ---
+
+            GetChanVV_DB(Data,Line,RefCh2,RefVV2);
+
+
+            // --- get its FID info ---
+
+            rChStart = rGetFidStart_DB(Data,Line,RefCh2);
+            rChIncr  = rGetFidIncr_DB(Data,Line,RefCh2);
+            iChLen   = iGetChannelLength_DB(Data,Line,RefCh2);
+
+            if(rChStart == rDUMMY) rChStart = 0.0;
+            if(rChIncr  == rDUMMY) rChIncr  = 1.0;               
+
+            rChEnd = rChStart + (real)(iChLen-1)*rChIncr;
+            
+            
+            // --- resample it to the "master" FID ---
+
+            iFidLen = (int)((rFidMax - rFidMin)/rFidInc) + 1;
+            if(rChStart != rFidMin ||
+               rChEnd   != rFidMax ||
+               rChIncr  != rFidInc) {
+
+               ReFid_VV(RefVV2,rFidMin,rFidInc, iFidLen);
+            }
+
+            
+            // --- Create a sort index VV at the master FID ---
+
+            SortIndex2_VV(RefVV1, RefVV2, IndVV, iOrder1, iOrder2);
+
+
+            // --- process each channel of the line ---
+
+            for (i=0;i<iChan;i++) {
+            
+
+               // --- get the channel ---
+
+               Ch = (DB_SYMB)iGetInt_VV(ChanVV,i);
+
+
+               // --- lock the channel ---
+
+               LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+               // --- process all but protected channels ---
+
+               if(iGetChanProtect_DB(Data,Ch) == DB_CHAN_PROTECTED && !iReadOnly) {
+
+                  UnLockSymb_DB(Data,Ch);
+                  continue;
+               }
+                  
+
+               // --- unprotect the channel ---
+
+               iProt = iGetChanProtect_DB(Data,Ch);
+               if (iProt == DB_CHAN_PROTECTED)
+               SetChanProtect_DB(Data,Ch,DB_CHAN_UNPROTECTED);
+
+
+               // --- Get FID info for this channel ---
+
+               iCol = iGetColVA_DB(Data, Ch);
+               iChType = iGetChanType_DB(Data, Ch);
+
+               rChStart = rGetFidStart_DB(Data,Line,Ch);
+               rChIncr  = rGetFidIncr_DB(Data,Line,Ch);
+               iChLen   = iGetChannelLength_DB(Data,Line,Ch);
+
+               if(iChLen > 0) {
+
+                  if (rChStart == rDUMMY) rChStart = 0.0;
+                  if (rChIncr  == rDUMMY) rChIncr  = 1.0;
+
+                  rChEnd = rChStart + (real)(iChLen-1)*rChIncr;
+               
+
+                  // --- Get the data ---
+
+                  if(iCol==1) {
+
+                     ChVV = CreateExt_VV(iChType, 0);
+                     GetChanVV_DB(Data,Line,Ch,ChVV);
+
+                  }
+                  else {
+
+                     ChVA = CreateExt_VA(iChType, 0, iCol);
+                     GetChanVA_DB(Data,Line,Ch,ChVA);
+
+                  }
+
+
+                  // --- Re-FID to master ---
+
+                  if(rChStart != rFidMin ||
+                     rChEnd   != rFidMax ||
+                     rChIncr  != rFidInc) {
+
+                     if(iCol==1)
+                        ReFid_VV(ChVV,rFidMin,rFidInc,iFidLen);
+                     else
+                        ReFid_VA(ChVA,rFidMin,rFidInc,iFidLen);
+                  }
+
+
+                  // --- Sort using the index ---
+
+                  if(iCol==1)
+                     IndexOrder_VV(IndVV, ChVV);
+                  else
+                     IndexOrder_VA(IndVV, ChVA);
+
+               
+                  // --- Reset the FIDs for the data channel to accept the sorted output,
+                  //     but keep the initial FID increment.
+
+                  SetFid_DB(Data,Line,Ch,rFidMin,rChIncr);
+
+
+
+                  // --- Refid the sorted data back to the new channel FID 
+                  //     (only necessary with different FID increments) ---
+
+                  if(rChIncr  != rFidInc) {
+
+                     iLen = (int)((rFidMax - rFidMin)/rChIncr) + 1;
+
+                     if(iCol==1)
+                        ReFid_VV(ChVV,rFidMin,rChIncr, iLen);
+                     else
+                        ReFid_VA(ChVA,rFidMin,rChIncr, iLen);
+                  }
+
+
+                  // --- Put the data back in the channel ---
+                       
+                  if(iCol==1) {
+                     PutChanVV_DB(Data,Line,Ch,ChVV);
+                     Destroy_VV(ChVV);
+                  }
+                  else {
+                     PutChanVA_DB(Data,Line,Ch,ChVA);
+                     Destroy_VA(ChVA);
+                  }
+
+               }
+
+               // --- reprotect ---
+
+               if (iProt == DB_CHAN_PROTECTED)
+                  SetChanProtect_DB(Data,Ch,DB_CHAN_PROTECTED);
+                        
+               // --- unlock ---
+
+               UnLockSymb_DB(Data,Ch);
+
+            }
+
+         }
+
+
+         // --- Advance to Next Line ---    
+
+         Line = NextSelLine_DB(Data, Line);
+         iLine++;
+         
+      }
+      
+      Destroy_VV(RefVV1);
+      Destroy_VV(RefVV2);
+      Destroy_VV(IndVV);
+
+      UnLockSymb_DB(Data,RefCh1);
+      UnLockSymb_DB(Data,RefCh2);
+   }
+         
+   UnLock_EDB(eDB);
+   Progress_SYS(0);
+
+}

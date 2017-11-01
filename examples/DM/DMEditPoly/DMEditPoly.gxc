@@ -1,0 +1,504 @@
+//===========================================================================
+NAME          = "Datamine Polygon Editor - Add, Move or Delete a point"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/PopupMap"
+
+DESCRIPTION   = "
+   
+   This GX is called as a subroutine by DMAddPt, DMMovePt or
+   DMDelPt to add, move or delete points from a Datamine polygon
+   plotted onto a Wholeplot section.
+
+   DMEDIT.FILE : Datamine polygon file
+   DMEDIT.MODE : Set by the calling GX.
+"
+// Revision History:
+// v6.0.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+#define MODE_ADD 0
+#define MODE_DELETE 1
+#define MODE_MOVE 2
+
+VV          VVx, VVy, VVz, VVl, VVj, VVx2, VVy2;
+DMPPLY      DMPoly;
+PLY         Poly;
+IPJ         UserIPJ, EmptyIPJ;
+MVIEW       View;
+EMAP        EMap;
+MAP         Map;
+REG         Reg;
+CRC         Crc;
+
+
+real rAz, rHeight, rSwing, rWidth, rPi, rRad;
+real rXC, rYC, rZC;
+real rB, rX, rY, rXT, rYT, rZ, rXN, rYN, rZN;
+real rD1, rD2, rDX, rDY, rX1, rY1, rZ1, rX2, rY2, rZ2, rX3, rY3, rZ3;
+real rCos1, rCos2, rDistL, rDistP, rDL, rDP, rI, rM;
+real rXMin, rXMax, rYMin, rYMax;
+int  i, iMod, iMode, iL, iN, iNP, iP, iPoly, iRet, iV, j, iJ;
+
+string(2048) sMsg;
+string(STR_DEFAULT) sCRC, sViewCRC, sVal;
+string(STR_FILE) sFile;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   if(!iInteractive_SYS())
+      Abort_SYS(_("This GX must be run interactively"));
+
+   
+   // --- Get the editing mode and reset it immediately to dummy. ---
+
+   iMode = iGetInt_SYS("DMEDIT", "MODE");
+   SetInt_SYS("DMEDIT", "MODE", iDUMMY);
+
+   if(iMode!=MODE_ADD &&
+      iMode!=MODE_DELETE &&
+      iMode!=MODE_MOVE) {
+
+      Abort_SYS(_("This GX must be called from one of DMAddPt, DMDelPt or DMMovePt."));
+   }
+
+
+   // --- Get the current map ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   
+
+   // --- Get the Datamine polygon file name and the polygon number ---
+   
+   View = Create_MVIEW(Map, "Section", MVIEW_WRITEOLD);
+   Reg = GetREG_MVIEW(View);
+
+   GetString_REG(Reg, "DMPOLY.FILE", sFile);
+   GetInt_REG(Reg, "DMPOLY.POLY", iPoly);
+
+   if(!iStrlen_STR(sFile) || iPoly==iDUMMY)
+      Abort_SYS(_("The current map does not appear to contain a Datamine polygon"));
+
+
+   // --- Get the size of the vertex boxes ---
+
+   GetReal_REG(Reg, "DMPLOT.BOX_SIZE", rB);
+   if(rB==rDUMMY) rB = 3.0;  // 3mm by default
+       
+
+   // --- Open the Datamine polygon file ---
+
+   DMPoly = Create_DMPPLY();
+   Load_DMPPLY(DMPoly, sFile);
+
+
+   // --- Make a list of the available polygons to edit ---
+
+   iNP = iNumPolys_DMPPLY(DMPoly);
+   if(iPoly<1 || iPoly>iNP)
+      Abort_SYS(_("Invalid polygon index stored in map."));
+
+
+   // --- Allocate some vectors ---
+
+   VVx = Create_VV(REAL, 0);
+   VVy = Create_VV(REAL, 0);
+   VVz = Create_VV(REAL, 0);
+
+
+   // --- Get the CRC from the polygon and compare it to the CRC stored in the view REG ---
+
+   GetPoly_DMPPLY(DMPoly, iPoly, VVx, VVy, VVz);
+   
+   Crc = CRC_VV(VVx, CRC_INIT_VALUE);
+   Crc = CRC_VV(VVy, Crc);
+   Crc = CRC_VV(VVz, Crc);
+
+   FormatCRC_STR(Crc, sCRC, 8);
+   GetString_REG(Reg, "DMPOLY.CRC", sViewCRC);
+
+   if(iStrcmp_STR(sCRC, sViewCRC, STR_CASE_SENSITIVE)) {
+      FormatI_STR(iPoly, sVal, 4);
+      
+      Printf_STR(sMsg, sizeof(sMsg), _("The plotted polygon does not match the corresponding polygon\r\nnumber %s in polygon file %s.\r\nSelect \"Redraw polygon..\" from the right-mouse menu to update the polygon."), sVal, sFile);
+      DisplayMessage_SYS(_("DataMine Polygon Editing Error"), sMsg);
+      Cancel_SYS();
+   }
+
+   // --- Check for valid polygon size ---
+
+   iN = iLength_VV(VVx);
+   if(iMode == MODE_DELETE && iN<=3)
+      Abort_SYS(_("You cannot delete a point from a polygon with only three vertices."));
+
+
+   // --- Get the azimuth and extents of the selected polygon ---
+
+   GetAzimuth_DMPPLY(DMPoly, iPoly, rAz);
+   GetSwing_DMPPLY(DMPoly, iPoly, rSwing);
+   GetExtents_DMPPLY(DMPoly, iPoly, rXC, rYC, rZC, rWidth, rHeight);
+
+
+   // --- Project the polygon onto the created section ---
+
+   ProjectPoly_DMPPLY(DMPoly, iPoly, rXC, rYC, 0.0, rAz, rSwing, VVx, VVy, VVz);
+
+   
+   // --- Temporarily clear the User IPJ ---
+
+   UserIPJ = Create_IPJ();
+   EmptyIPJ = Create_IPJ();
+
+   GetUserIPJ_MVIEW(View, UserIPJ);
+   SetUserIPJ_MVIEW(View, EmptyIPJ);
+
+
+   // --- Get the CRC from the map (drawn) polygon and compare it with the CRC of the
+   //     stored when it was last redrawn. If it has changed, the user has modified the
+   //     polygon using the regular map tools. ---
+
+   Poly = Create_PLY();
+   GroupToPLY_MVIEW(View, "Polygon", Poly);
+
+   VVx2 = Create_VV(REAL, 0);
+   VVy2 = Create_VV(REAL, 0);
+
+   GetPolygon_PLY(Poly, VVx2, VVy2, 0);
+   Crc = CRC_VV(VVx2, CRC_INIT_VALUE);
+   Crc = CRC_VV(VVy2, Crc);
+
+
+   FormatCRC_STR(Crc, sCRC, 8);
+   GetString_REG(Reg, "DMPOLY.MAP_CRC", sViewCRC);
+
+   if(iStrcmp_STR(sCRC, sViewCRC, STR_CASE_SENSITIVE)) {
+      FormatI_STR(iPoly, sVal, 4);
+      Printf_STR(sMsg, sizeof(sMsg), _("The plotted polygon does not match the corresponding polygon\r\nnumber %s in polygon file %s, as it was last plotted in the map.\r\n"), sVal, sFile);
+      Strcat_STR(sMsg, _("Because the polygon has associated attributes, you should only\r\nuse the special right-mouse polygon editing tools to modify the polygon.\r\n"));
+      Strcat_STR(sMsg, _("Select \"Redraw polygon..\" from the right-mouse menu to update the polygon."));
+      DisplayMessage_SYS(_("DataMine Polygon Editing Error"), sMsg);
+   
+      
+      // --- Restore the user IPJ before exiting ---
+      
+      SetUserIPJ_MVIEW(View, UserIPJ);
+      
+      Cancel_SYS();
+   }
+
+   // --- Adjust the polygons to the view projection; adjust "X" to the
+   //     view center. The values in VVx are locations w.r.t the center of the
+   //     current view in view coordinates. For NS and EW sections, the X coordinate
+   //     is true NS and true EW, but for angled sections, the X coordinate begins
+   //     at zero on the left side. ---
+
+   iN = iLength_VV(VVx);
+   for(i=0;i<iN;i++) {
+      if(rAz==0.0)
+         rX = rGetReal_VV(VVx, i) + rYC;
+      else if(rAz==90.0)
+         rX = rGetReal_VV(VVx, i) + rXC;
+      else {
+      
+         // --- Get the current view extents ---
+         
+         Extent_MVIEW(View, MVIEW_EXTENT_CLIP, MVIEW_EXTENT_UNIT_VIEW, rXMin, rYMin, rXMax, rYMax);
+         rX = rGetReal_VV(VVx, i) + 0.5*(rXMax - rXMin);
+      
+      }
+      SetReal_VV(VVx, i, rX);
+   }
+
+
+   // --- Need to close view and unlock map to get locations ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+
+
+   // --- Select a point ---
+
+   iMod = FALSE;
+   do {
+      
+
+      if(iMode == MODE_ADD)
+         Strcpy_STR(sMsg, _("Select a location to add a vertex..."));
+      else if(iMode == MODE_DELETE)
+         Strcpy_STR(sMsg, _("Select a vertex to delete..."));
+      else if(iMode == MODE_MOVE)
+         Strcpy_STR(sMsg, _("Select a vertex to move..."));
+         
+      iRet = iGetPoint_EMAP(EMap, sMsg, rXT, rYT);
+      if(iRet==1) break;
+
+      
+      if(iMode == MODE_ADD) {
+         iMod = TRUE;
+         break;
+      }
+
+      
+      // --- Is a point found at the current location? ---
+         
+      for(i=0;i<iN;i++) {
+
+         rX = rGetReal_VV(VVx, i);
+         rY = rGetReal_VV(VVy, i);
+
+         if(rAbs_MATH(rX-rXT)<=rB &&
+            rAbs_MATH(rY-rYT)<=rB) {
+
+               
+            if(iMode == MODE_MOVE) {
+
+               iRet = iGetPoint_EMAP(EMap, _("Select the new location"), rXT, rYT);
+               if(iRet==1) break;
+            }
+               
+            iV = i;
+            iMod = TRUE;
+            break;
+         }
+      }
+
+      if(iMod) break;
+
+   } while(1);
+
+
+   // --- Restore the User IPJ ---
+
+   Map = Lock_EMAP(EMap);
+
+   View = Create_MVIEW(Map, "Section", MVIEW_WRITEOLD);
+
+   SetUserIPJ_MVIEW(View, UserIPJ);
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+
+   Destroy_IPJ(UserIPJ);
+   Destroy_IPJ(EmptyIPJ);
+
+
+   if(iMod) {
+     
+      
+      if(iMode == MODE_MOVE ||
+         iMode == MODE_ADD) {
+
+         
+         // --- Determine the selected location, using
+         //     the normal vector and the offset from the center point ---
+
+         GetNormalVectors_DMPPLY(DMPoly, iPoly, rX1, rY1, rZ1, rX2, rY2, rZ2, rX3, rY3, rZ3);
+
+
+         // --- The along-plate distances exact as measured from the map view ---
+
+         if(rAz==90.0)
+            rDX = rXT - rXC;
+         else if(rAz==0.0)
+            rDX = rXT - rYC;
+         else
+            rDX = rXT - 0.5*(rXMax - rXMin);
+
+
+         // --- The down-dip distance must be adjusted for the swing. For a vertical plate, rDY is
+         //     the same as the projected vertical offset, but as swing increases, the length of
+         //     plate viewed in this vertical distance increases sqrt(2) * dY at swing = 45 degrees,
+         //     and to infinity at swing = 90 (horizontal plate). ---
+
+         rPi = rArcCos_MATH(-1.0);
+         rRad = rPi/180.0;
+         rDY = (rZC - rYT)/rCos_MATH(rSwing*rRad);   // Dip vector is opposite direction to plate "Y"
+                                                 // so take negative of differences in location
+
+         rXN = rXC + rDX*rX1 + rDY*rX2;
+         rYN = rYC + rDX*rY1 + rDY*rY2;
+         rZN = rYT;   // z values are preserved in the transform to the section
+
+         if(iMode == MODE_MOVE)
+
+            MoveVertex_DMPPLY(DMPoly, iPoly, iV+1, rXN, rYN, rZN);
+            
+         else if(iMode == MODE_ADD) {
+
+
+            // --- Get shortest distance to any line segment in the polygon. Count this
+            //     only if the point is closer to the line itself than to either of the
+            //     vertices at the ends ---
+
+            rDistL = rMAX;
+            rDistP = rMAX;
+
+            VVl = Create_VV(REAL, 0);
+            iL = -1;
+            for(i=0;i<iN;i++) {
+
+               j = i+1;
+               if(j==iN) j=0;
+
+               rX1 = rGetReal_VV(VVx, i);
+               rY1 = rGetReal_VV(VVy, i);
+
+
+               // --- Get distance to first point ---
+
+               rDP = rHypot_MATH(rX1-rXT, rY1-rYT);
+               if(rDP<rDistP) {
+                  rDistP = rDP;
+                  iP = i;
+               }
+
+
+               // --- Get distance to line joining the two points ---
+
+               rX2 = rGetReal_VV(VVx, j);
+               rY2 = rGetReal_VV(VVy, j);
+
+               if(rX1==rX2) { // vertical line case
+
+                  rDL = rAbs_MATH(rX1 - rXT);
+               }
+               else {
+                  rM = (rY2-rY1)/(rX2-rX1);
+                  rI = rY1 - rM*rX1;
+
+                  rDL = rAbs_MATH(rYT - rM*rXT - rI) / rHypot_MATH(1.0, rM);
+               }
+
+               SetReal_VV(VVl, i, rDL);    // save all the distances
+
+               if(rDL < rDistL) {
+
+                  // --- Count this as a close line only if the subtended angles are less than 90 degrees ---
+
+                  rCos1 = (rXT-rX1)*(rX2-rX1) + (rYT-rY1)*(rY2-rY1);
+                  rCos2 = (rXT-rX2)*(rX1-rX2) + (rYT-rY2)*(rY1-rY2);
+
+                  if(rCos1>0.0 && rCos2>0.0) {
+         
+                     iL = i;
+                     rDistL = rDL;
+                  }
+               }
+            }
+
+
+            // --- If a vertex is closer than any line, find the join on that vertex
+            //     which is farthest to the point ---
+
+            if(rDistP <= rDistL) {
+
+               i = iP - 1;
+               if(i<0) i = iN-1;
+               rD1 = rGetReal_VV(VVl, i);
+               rD2 = rGetReal_VV(VVl, iP);
+
+               if(rD1>rD2)
+                  iV = iP;
+               else
+                  iV = iP+1;
+            }
+            else {
+
+               // --- Split the close line by putting a vertex between its end points ---
+
+               iV = iL+1;
+            }
+
+
+            // --- Get the original polygon and insert the new point at index iV ---
+
+            GetPoly_DMPPLY(DMPoly, iPoly, VVx, VVy, VVz);
+
+            iN = iLength_VV(VVx);
+
+            SetLen_VV(VVx, iN+1);
+            SetLen_VV(VVy, iN+1);
+            SetLen_VV(VVz, iN+1);
+
+            for(i=iN-1;i>=iV;i--) {
+
+               rX = rGetReal_VV(VVx, i);
+               rY = rGetReal_VV(VVy, i);
+               rZ = rGetReal_VV(VVz, i);
+
+               SetReal_VV(VVx, i+1, rX);
+               SetReal_VV(VVy, i+1, rY);
+               SetReal_VV(VVz, i+1, rZ);
+            }
+            SetReal_VV(VVx, iV, rXN);
+            SetReal_VV(VVy, iV, rYN);
+            SetReal_VV(VVz, iV, rZN);
+
+            SetPoly_DMPPLY(DMPoly, iPoly, VVx, VVy, VVz);
+         }
+      }
+      else {      // Delete the point 
+
+
+         // --- First, see if the selected point is part of a join line;
+         //     You cannot delete a join line ---
+         
+         VVj = Create_VV(INT, 0);      // join line indices         
+         GetJoins_DMPPLY(DMPoly, iPoly, VVj);
+         
+         iJ = iGetInt_VV(VVj, iV);
+         if(iJ!=0) {         
+            Abort_SYS(_("You cannot delete a vertex which is part of a join line."));
+         }
+         
+         GetPoly_DMPPLY(DMPoly, iPoly, VVx, VVy, VVz);
+
+         iN = iLength_VV(VVx);
+         for(i=iV+1;i<iN;i++) {
+
+            rX = rGetReal_VV(VVx, i);
+            rY = rGetReal_VV(VVy, i);
+            rZ = rGetReal_VV(VVz, i);
+
+            SetReal_VV(VVx, i-1, rX);
+            SetReal_VV(VVy, i-1, rY);
+            SetReal_VV(VVz, i-1, rZ);
+         }
+
+         SetLen_VV(VVx, iN-1);
+         SetLen_VV(VVy, iN-1);
+         SetLen_VV(VVz, iN-1);
+
+         SetPoly_DMPPLY(DMPoly, iPoly, VVx, VVy, VVz);
+      }
+
+
+      // --- Re-save the modified polygon file ---
+
+      Save_DMPPLY(DMPoly, sFile);
+
+      
+      // --- Redraw the polygon ---
+
+      iRunGX_SYS("DMRedraw.gx");
+
+   }
+}

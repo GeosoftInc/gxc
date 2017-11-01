@@ -1,0 +1,404 @@
+//===========================================================================
+NAME          = "Display and Edit Distant Electrode Information"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+         Display and Edit IP Distant Electrode Information. 
+         The information displayed and edited is sensistive to the
+         current array type.  
+
+"
+// Revision History:
+// v7.3.0:  Updated to handle Schlumberger and Wenner arrays.
+// v7.2.1:  Export to channels always; fix up workflow.
+// v6.3.0:  Added "Export to lines" button.
+//          Added Z-values.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPLNINFO.gr"
+#include "IPLNINFO.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               
+REG         Reg;               
+DB_SYMB     Line, CurLine;
+LST         LineLST, SelLineLST;
+
+int i, iArray, iNLines, iLines;
+
+string(STR_DB_SYMBOL) sCurLine;
+string(STR_DEFAULT_SHORT) sT1x, sT1y, sT1z, sT2x, sT2y, sT2z, sR2x, sR2y, sR2z, sSymb;
+string(65536) sLines;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+
+   // --- Get currently selected line ---
+
+	if(iInteractive_SYS() == 1)
+	{
+	   GetCurLine_EDB(EData,sCurLine);
+	   CurLine = GetCurLineSymb_EDB(EData);
+	}	   
+   
+   Data = Lock_EDB(EData);
+ 
+
+   Reg = Create_REG(50);   
+   if(iInteractive_SYS())
+   {
+      Line = FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+
+      // --- Get the REG from the line ---
+
+      GetRegSymb_DB(Data, Line, Reg);
+
+      // --- Ensure this is an IP line ---
+
+      iArray = 0;       // prevent compiler warning
+      GetInt_REG(Reg, "IP_ARRAY", iArray);
+      if(iArray==iDUMMY)
+         Abort_SYS(_("The current line does not appear to be a valid IP data line."));
+
+
+      // --- Get distant electrode positions ---
+
+      Get_REG(Reg, "T1X", sT1x, 20);
+      Get_REG(Reg, "T1Y", sT1y, 20);
+      Get_REG(Reg, "T1Z", sT1z, 20);
+      Get_REG(Reg, "T2X", sT2x, 20);
+      Get_REG(Reg, "T2Y", sT2y, 20);
+      Get_REG(Reg, "T2Z", sT2z, 20);
+      Get_REG(Reg, "R2X", sR2x, 20);
+      Get_REG(Reg, "R2Y", sR2y, 20);
+      Get_REG(Reg, "R2Z", sR2z, 20);
+
+      if(iArray==iDUMMY) iArray = IP_ARRAY_DPDP;
+
+
+      // --- Create the dialog and set the parameters ---
+
+      if(iArray==IP_ARRAY_DPDP || iArray==IP_ARRAY_3D)
+         Abort_SYS(_("There are no distant electrodes for Dipole-Dipole Arrays."));
+		else if(iArray==IP_ARRAY_SCHLUMBERGER)
+         Abort_SYS(_("There are no distant electrodes for Schlumberger Arrays."));
+		else if(iArray==IP_ARRAY_WENNER)
+         Abort_SYS(_("There are no distant electrodes for Wenner Arrays."));
+   }
+   
+
+   if(iInteractive_SYS())
+   {
+      if(iArray==IP_ARRAY_PLDP ||
+         iArray==IP_ARRAY_3D_PLDP) 
+		{
+         Diag = Create_DGW("IPLNINFO2");
+
+         SetInfo_DGW(Diag,(DGW_OBJ)0,DGW_TEXT,sCurLine);
+			if(iArray == IP_ARRAY_PLDP)
+				SetInfo_DGW(Diag,(DGW_OBJ)1,DGW_TEXT,_("Pole-Dipole"));
+			else
+				SetInfo_DGW(Diag,(DGW_OBJ)1,DGW_TEXT,_("3D"));
+         SetInfo_DGW(Diag,(DGW_OBJ)2,DGW_TEXT,sT2x);
+         SetInfo_DGW(Diag,(DGW_OBJ)3,DGW_TEXT,sT2y);
+         SetInfo_DGW(Diag,(DGW_OBJ)4,DGW_TEXT,sT2z);
+         SetInfoSYS_DGW(Diag,(DGW_OBJ)5,DGW_LISTALIAS,"IPLNINFO","LINES");
+      }
+      else if(iArray==IP_ARRAY_PLPL ||
+              iArray==IP_ARRAY_3D_PLPL) 
+      {
+
+         Diag = Create_DGW("IPLNINFO3");
+
+         SetInfo_DGW(Diag,(DGW_OBJ)0,DGW_TEXT,sCurLine);
+         SetInfo_DGW(Diag,(DGW_OBJ)1,DGW_TEXT,_("Pole-Pole"));
+         SetInfo_DGW(Diag,(DGW_OBJ)2,DGW_TEXT,sT2x);
+         SetInfo_DGW(Diag,(DGW_OBJ)3,DGW_TEXT,sT2y);
+         SetInfo_DGW(Diag,(DGW_OBJ)4,DGW_TEXT,sT2z);
+         SetInfo_DGW(Diag,(DGW_OBJ)5,DGW_TEXT,sR2x);
+         SetInfo_DGW(Diag,(DGW_OBJ)6,DGW_TEXT,sR2y);
+         SetInfo_DGW(Diag,(DGW_OBJ)7,DGW_TEXT,sR2z);
+         SetInfoSYS_DGW(Diag,(DGW_OBJ)8,DGW_LISTALIAS,"IPLNINFO","LINES");      
+      }
+      else if(iArray==IP_ARRAY_GRAD) {
+
+         Diag = Create_DGW("IPLNINFO4");
+                  
+         SetInfo_DGW(Diag,(DGW_OBJ)0,DGW_TEXT,sCurLine);
+         SetInfo_DGW(Diag,(DGW_OBJ)1,DGW_TEXT, _("Gradient"));
+         SetInfo_DGW(Diag,(DGW_OBJ)2,DGW_TEXT,sT1x);
+         SetInfo_DGW(Diag,(DGW_OBJ)3,DGW_TEXT,sT1y);
+         SetInfo_DGW(Diag,(DGW_OBJ)4,DGW_TEXT,sT1z);
+         SetInfo_DGW(Diag,(DGW_OBJ)5,DGW_TEXT,sT2x);
+         SetInfo_DGW(Diag,(DGW_OBJ)6,DGW_TEXT,sT2y);
+         SetInfo_DGW(Diag,(DGW_OBJ)7,DGW_TEXT,sT2z);
+         SetInfoSYS_DGW(Diag,(DGW_OBJ)8,DGW_LISTALIAS,"IPLNINFO","LINES");
+      }
+		else
+			Abort_SYS(_("The array type for this line of data is not supported by this GX"));
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    // cancel
+      
+
+      // --- Get the parameters back ---
+
+      if(iArray==IP_ARRAY_PLDP ||
+         iArray==IP_ARRAY_3D_PLDP) 
+		{
+         GetInfo_DGW(Diag,(DGW_OBJ)2,DGW_TEXT,sT2x);
+         GetInfo_DGW(Diag,(DGW_OBJ)3,DGW_TEXT,sT2y);
+         GetInfo_DGW(Diag,(DGW_OBJ)4,DGW_TEXT,sT2z);
+         GetInfoSYS_DGW(Diag,(DGW_OBJ)5,DGW_LISTALIAS,"IPLNINFO","LINES");
+      }
+      else if(iArray==IP_ARRAY_PLPL ||
+              iArray==IP_ARRAY_3D_PLPL) 
+		{
+         GetInfo_DGW(Diag,(DGW_OBJ)2,DGW_TEXT,sT2x);
+         GetInfo_DGW(Diag,(DGW_OBJ)3,DGW_TEXT,sT2y);
+         GetInfo_DGW(Diag,(DGW_OBJ)4,DGW_TEXT,sT2z);
+         GetInfo_DGW(Diag,(DGW_OBJ)5,DGW_TEXT,sR2x);
+         GetInfo_DGW(Diag,(DGW_OBJ)6,DGW_TEXT,sR2y);
+         GetInfo_DGW(Diag,(DGW_OBJ)7,DGW_TEXT,sR2z);
+         GetInfoSYS_DGW(Diag,(DGW_OBJ)8,DGW_LISTALIAS,"IPLNINFO","LINES");
+      }
+      else if(iArray==IP_ARRAY_GRAD) 
+		{
+         GetInfo_DGW(Diag,(DGW_OBJ)2,DGW_TEXT,sT1x);
+         GetInfo_DGW(Diag,(DGW_OBJ)3,DGW_TEXT,sT1y);
+         GetInfo_DGW(Diag,(DGW_OBJ)4,DGW_TEXT,sT1z);
+         GetInfo_DGW(Diag,(DGW_OBJ)5,DGW_TEXT,sT2x);
+         GetInfo_DGW(Diag,(DGW_OBJ)6,DGW_TEXT,sT2y);
+         GetInfo_DGW(Diag,(DGW_OBJ)7,DGW_TEXT,sT2z);
+         GetInfoSYS_DGW(Diag,(DGW_OBJ)8,DGW_LISTALIAS,"IPLNINFO","LINES");
+      }
+      
+      
+      // --- GX parameters ---
+      
+      SetString_SYS("IP", "T1X", sT1x);
+      SetString_SYS("IP", "T1Y", sT1y);
+      SetString_SYS("IP", "T1Z", sT1z);
+      SetString_SYS("IP", "T2X", sT2x);
+      SetString_SYS("IP", "T2Y", sT2y);
+      SetString_SYS("IP", "T2Z", sT2z);
+      SetString_SYS("IP", "R2X", sR2x);
+      SetString_SYS("IP", "R2Y", sR2y);
+      SetString_SYS("IP", "R2Z", sR2z);
+   }
+   
+   
+   iLines = iGetInt_SYS("IPLNINFO","LINES");
+   if(iLines<0 || iLines>3) iLines = 1;   // Current line selection by default
+   
+   
+   // --- Let user select from a list of all the lines to update ---
+   
+   SelLineLST = Create_LST(64);      
+   if(iLines == 0)
+		AddSymbItem_LST(SelLineLST, sCurLine, CurLine);
+   else if(iLines == 1)
+		SelectedLineLST_DB(Data, SelLineLST);
+   else if(iLines == 2)
+		LineLST_DB(Data, SelLineLST);
+	else
+	{
+   
+		if(iInteractive_SYS())
+		{      
+			LineLST = Create_LST(64);
+			SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
+	      
+	      
+			// --- Set starting selection for GUI ---
+
+			GetString_SYS("IPLNINFO", "LINE_LIST", sLines);
+			ConvertFromCSVString_LST(SelLineLST, sLines);
+			if(iFindItem_LST(SelLineLST, 0, sCurLine)==-1)
+				AddSymbItem_LST(SelLineLST, sCurLine, Line);
+
+			i = iTwoPanelSelection_GUI(LineLST, SelLineLST, _("Select Lines to Update"));
+			
+			if(i!=0) Cancel_SYS();
+	               
+	      
+			// --- Save selection ---
+	      
+			ConvertToCSVString_LST(SelLineLST, sLines);
+			SetString_SYS("IPLNINFO", "LINE_LIST", sLines);     
+		}    
+
+
+		// --- Get the lines to update ---
+	   
+		GetString_SYS("IPLNINFO", "LINE_LIST", sLines);   
+		ConvertFromCSVString_LST(SelLineLST, sLines);
+	}
+	
+   iNLines = iSize_LST(SelLineLST);
+
+
+   // --- If no lines are specified, do ALL the lines ---
+   
+   if(iNLines==0) {
+      SymbLST_DB(Data, SelLineLST, DB_SYMB_LINE);
+   }      
+
+
+   //--- Check out and fix up the selected lines LST ---
+   
+   iNLines = iSize_LST(SelLineLST);
+   for(i=iNLines-1;i>=0;i--)     // backwards so we can delete from LST
+   {      
+      
+      // --- Get the line ---
+      
+      GetItem_LST(SelLineLST, LST_ITEM_NAME, i, sCurLine);
+      Line = FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+      FormatI_STR((int)Line, sSymb, 10);
+      SetItem_LST(SelLineLST, LST_ITEM_VALUE, i, sSymb);    // Reset symbol part for WriteDistantElectrodesLST_IP
+      
+      
+      // --- Get the REG ---
+      
+      GetRegSymb_DB(Data, Line, Reg);
+
+      
+      // --- Ensure this is an IP line ---
+
+      GetInt_REG(Reg, "IP_ARRAY", iArray);
+      if(iArray==iDUMMY) 
+      {
+         DelItem_LST(SelLineLST, i);   
+         continue;
+      }
+   }
+   
+   
+   // --- Get the locations ---
+      
+   GetString_SYS("IP", "T1X", sT1x);
+   GetString_SYS("IP", "T1Y", sT1y);
+   GetString_SYS("IP", "T1Z", sT1z);
+   GetString_SYS("IP", "T2X", sT2x);
+   GetString_SYS("IP", "T2Y", sT2y);
+   GetString_SYS("IP", "T2Z", sT2z);
+   GetString_SYS("IP", "R2X", sR2x);
+   GetString_SYS("IP", "R2Y", sR2y);
+   GetString_SYS("IP", "R2Z", sR2z);
+   
+   
+   // --- Update all the selected lines ---
+         
+   iNLines = iSize_LST(SelLineLST);
+   for(i=0;i<iNLines;i++)
+   {      
+      
+      // --- Get the line ---
+      
+      GetSymbItem_LST(SelLineLST, i, sCurLine, Line);
+      
+      
+      // --- Get the REG ---
+      
+      GetRegSymb_DB(Data, Line, Reg);
+
+      
+      Set_REG(Reg, "T1X", sT1x);
+      Set_REG(Reg, "T1Y", sT1y);
+      Set_REG(Reg, "T1Z", sT1z);
+      Set_REG(Reg, "T2X", sT2x);
+      Set_REG(Reg, "T2Y", sT2y);
+      Set_REG(Reg, "T2Z", sT2z);
+      Set_REG(Reg, "R2X", sR2x);
+      Set_REG(Reg, "R2Y", sR2y);
+      Set_REG(Reg, "R2Z", sR2z);
+   
+      
+      // --- Set the REG back into the line ---
+
+      SetRegSymb_DB(Data, Line, Reg);                  
+	}
+	
+   
+   // --- Export to channels ---
+   
+   Ip = Create_IP();
+   WriteDistantElectrodesLST_IP(Ip, Data, SelLineLST);
+  
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+
+
+   // --- Load channels ---  
+  
+   if(iArray==IP_ARRAY_PLDP) 
+	{
+      LoadChan_EDB(EData, "T2X");
+      LoadChan_EDB(EData, "T2Y");
+      LoadChan_EDB(EData, "T2Z");
+   }
+   else if(iArray==IP_ARRAY_PLPL) {
+
+      LoadChan_EDB(EData, "T2X");
+      LoadChan_EDB(EData, "T2Y");
+      LoadChan_EDB(EData, "T2Z");
+      LoadChan_EDB(EData, "R2X");
+      LoadChan_EDB(EData, "R2Y");
+      LoadChan_EDB(EData, "R2Z");
+   }
+   else if(iArray==IP_ARRAY_GRAD) {
+
+      LoadChan_EDB(EData, "T1X");
+      LoadChan_EDB(EData, "T1Y");
+      LoadChan_EDB(EData, "T1Z");
+      LoadChan_EDB(EData, "T2X");
+      LoadChan_EDB(EData, "T2Y");
+      LoadChan_EDB(EData, "T2Z");
+   }
+   else if(iArray==IP_ARRAY_3D_PLPL)
+   {
+      LoadChan_EDB(EData, "Tx2X");
+      LoadChan_EDB(EData, "Tx2Y");
+      LoadChan_EDB(EData, "Tx2Z");
+      LoadChan_EDB(EData, "Rx2X");
+      LoadChan_EDB(EData, "Rx2Y");
+      LoadChan_EDB(EData, "Rx2Z");
+   }
+   else if(iArray==IP_ARRAY_3D_PLDP)
+   {
+      LoadChan_EDB(EData, "Tx2X");
+      LoadChan_EDB(EData, "Tx2Y");
+      LoadChan_EDB(EData, "Tx2Z");
+   }   
+   
+   // Destroy objects
+
+   Destroy_REG(Reg);
+}

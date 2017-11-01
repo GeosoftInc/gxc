@@ -1,0 +1,262 @@
+//===========================================================================
+NAME          = "Export database to shape file or files."
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Export data to a shape file or files.  Either displayed
+   data channels or all data channels may be exported, and either
+   the displayed line/group, selected lines/groups or all lines may be exported.
+   The line/group names will be used as suffixes prefixed with the basename followed 
+   by an underscore for the case where M is passed to the SINGLE parameter.
+	
+   EXPSHP.FILE   Shape file name base, .shp assumed.
+
+         .CHAN   \"D\" for displayed channels.
+                 \"A\" for all channels.
+
+         .LINE   \"D\" for the displayed line only.
+                 \"S\" for selected lines.
+                 \"A\" for all lines
+
+         .SINGLE \"M\" for one line per shape file
+                 \"S\" for all lines in one shape file
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
+
+// Revision History:
+// v7.0.0: Modify title in ArcGIS.
+// v6.1.0 Created
+
+//===========================================================================
+
+RESOURCE = "expshp.gr"
+#include "expshp.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE)           sFile, sGDB;
+string(STR_FILE)           sSHP;
+string(STR_DB_SYMBOL)      sLine,sChan,sCurLine;
+string(STR_DEFAULT_SHORT)  sSingle;
+string(64)                 sLicClass;
+
+int         i;
+int         iArcGIS;
+int         iLine;         // Output line selections
+int         iChan;         // Output channel selections
+int         iSingle;       // Line collection mode
+
+EDB         EData;         // database handle
+DB          Data;          // database handle
+DGW         Diag;          // dialogue box
+VV          DispChanVV;    // Displayed channels
+DB_SELECT   Select;        // current selection mode
+LST         FileList;      // Shape file list
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+   
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, _n("ArcGIS"), STR_CASE_TOLERANT) == 0;
+   
+	if(!iArcGIS)
+		EData = Current_EDB();
+
+   if (iInteractive_SYS())
+   {
+		// --- Create the Dialogue ---
+
+	   if(iArcGIS)
+	   {
+			i = 0;
+			while (i != 99)
+			{
+				switch (i)
+				{
+					case 0:
+						Diag = Create_DGW("EXPSHPGDB");
+				   
+
+						// --- Set any Defaults ---
+
+						SetInfoSYS_DGW(Diag,_EXPSHPGDB_0,DGW_FILEPATH,"EXPSHP","GDB");
+
+
+						// --- Run the Dialogue ---
+
+						i = iRunDialogue_DGW(Diag);
+						if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+						// --- Get the Strings ---
+
+						GetInfoSYS_DGW(Diag,_EXPSHPGDB_0,DGW_FILEPATH,"EXPSHP","GDB");
+						
+						GetString_SYS("EXPSHP","GDB",sGDB);
+						EData = Load_EDB(sGDB);
+					
+						break;
+					case 1:
+						Diag = Create_DGW("EXPSHP2");
+				   
+
+						// --- Set any Defaults ---
+
+						SetInfoSYS_DGW(Diag,_EXPSHP2_0,DGW_FILEPATH,"EXPSHP","FILE");
+						SetInfoSYS_DGW(Diag,_EXPSHP2_1,DGW_LISTALIAS,"EXPSHP","CHAN");    
+						SetInfoSYS_DGW(Diag,_EXPSHP2_2,DGW_LISTALIAS,"EXPSHP","LINE");     
+						SetInfoSYS_DGW(Diag,_EXPSHP2_3,DGW_LISTALIAS,"EXPSHP","SINGLE");     
+
+
+						// --- Run the Dialogue ---
+
+						i = iRunDialogue_DGW(Diag);
+						if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+						// --- Get the Strings ---
+
+						GetInfoSYS_DGW(Diag,_EXPSHP2_0,DGW_FILEPATH,"EXPSHP","FILE");
+						GetInfoSYS_DGW(Diag,_EXPSHP2_1,DGW_LISTALIAS,"EXPSHP","CHAN");    
+						GetInfoSYS_DGW(Diag,_EXPSHP2_2,DGW_LISTALIAS,"EXPSHP","LINE");    
+						GetInfoSYS_DGW(Diag,_EXPSHP2_3,DGW_LISTALIAS,"EXPSHP","SINGLE");    
+						
+						break;
+				}
+			}
+		}
+		else
+		{
+	      Diag = Create_DGW("EXPSHP");
+	   
+
+			// --- Set any Defaults ---
+
+			SetInfoSYS_DGW(Diag,_EXPSHP_0,DGW_FILEPATH,"EXPSHP","FILE");
+			SetInfoSYS_DGW(Diag,_EXPSHP_1,DGW_LISTALIAS,"EXPSHP","CHAN");    
+			SetInfoSYS_DGW(Diag,_EXPSHP_2,DGW_LISTALIAS,"EXPSHP","LINE");     
+			SetInfoSYS_DGW(Diag,_EXPSHP_3,DGW_LISTALIAS,"EXPSHP","SINGLE");     
+
+
+			// --- Run the Dialogue ---
+
+			i = iRunDialogue_DGW(Diag);
+			if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+			// --- Get the Strings ---
+
+			GetInfoSYS_DGW(Diag,_EXPSHP_0,DGW_FILEPATH,"EXPSHP","FILE");
+			GetInfoSYS_DGW(Diag,_EXPSHP_1,DGW_LISTALIAS,"EXPSHP","CHAN");    
+			GetInfoSYS_DGW(Diag,_EXPSHP_2,DGW_LISTALIAS,"EXPSHP","LINE");    
+			GetInfoSYS_DGW(Diag,_EXPSHP_3,DGW_LISTALIAS,"EXPSHP","SINGLE");    
+		}		
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("EXPSHP","FILE",sFile);
+   GetString_SYS("EXPSHP","LINE",sLine);
+   GetString_SYS("EXPSHP","CHAN",sChan);
+   GetString_SYS("EXPSHP","SINGLE",sSingle);
+	if (!iInteractive_SYS() && iArcGIS)
+	{
+		GetString_SYS("EXPSHP","GDB",sGDB);
+		EData = Load_EDB(sGDB);
+	}
+   
+   if (iChar_STR(sLine) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+   if (iChar_STR(sChan) == iChar_STR("D")) 
+      iChan = DU_CHANNELS_DISPLAYED;
+   else if (iChar_STR(sChan) == iChar_STR("A")) 
+      iChan = DU_CHANNELS_ALL;
+   else
+      Abort_SYS(_("Channel selection invalid"));
+
+   if (iChar_STR(sSingle) == iChar_STR("S")) 
+      iSingle = DU_LINEOUT_SINGLE;
+   else if (iChar_STR(sSingle) == iChar_STR("M")) 
+      iSingle = DU_LINEOUT_MULTIPLE;
+   else
+      Abort_SYS(_("Multiple/Single Table Output selection invalid"));
+
+
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   // --- Get currently displayed channels ---
+
+   DispChanVV = Create_VV(INT,0);
+   iDispChanList_EDB(EData, DispChanVV);
+
+   Data = Lock_EDB(EData);
+
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+
+   // --- export data ---
+
+   Progress_SYS(1);
+
+   FileList = Create_LST(STR_FILE);
+   ExportSHP_DU(Data,sCurLine,DispChanVV,iChan,iSingle,sFile,FileList);
+
+   if (iArcGIS)
+   {
+      // --- Display shape file(s) ---
+
+      for (i=0; i< iSize_LST(FileList); i++)
+	   {
+         GetItem_LST(FileList, 0, i, sSHP);
+         LoadShape_ARCMAP(sSHP, "", "");
+      }
+   }
+
+   Progress_SYS(0);
+
+   Destroy_VV(DispChanVV);
+
+   // --- reset starting selections
+
+   if (iLine != DU_LINES_SELECTED)
+      SetSelect_DB(Data,Select);
+
+   UnLock_EDB(EData);
+}

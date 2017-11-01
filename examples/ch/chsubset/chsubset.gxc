@@ -1,0 +1,314 @@
+//===========================================================================
+NAME          = "Create a new subset database based on a mask channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Geostatistics Toolkit"
+
+DESCRIPTION   = "
+
+   Create a new subset database from a Master database. The subset GDB
+   will only include data that is not dummy in the Master database.
+"
+// Revision History:
+// v5.1.8: Added validation on subset database name.
+// v5.1.6: Remove restriction against string-type mask channels.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//         Set Current X,Y channels from Master.
+// v5.1.4: Added this GX to the Geophysical Stats package
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chsubset.gr"
+#include "chsubset.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EMaster,ESubset;
+DB          Master,Subset;
+DB_SYMB     Line,SubsetLine;
+DB_SYMB     Ch,MCh,SubsetCh;
+LST         List;
+
+DGW         Diag;
+VV          MaskVV,ChVV,PruneVV;
+
+string(STR_FILE) sMaster,sMasterN;
+string(STR_FILE) sSubset,sSubsetN;
+string(STR_DB_SYMBOL) sMask,sCh,sLine,sXCh,sYCh;
+string(1024) sTemp;
+
+int i,iChan,iFirst;
+int iChType;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get the database ---
+
+   EMaster = Current_EDB();
+   Master = Lock_EDB(EMaster);
+   GetName_DB(Master,DB_NAME_FILE,sMaster);
+
+
+   // --- Get Default Mask Channel if required, and if it exists, and if it is
+   //     not set to "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0 &&
+       iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 && iExistChan_DB(Master,sMask))
+            SetString_SYS("CHSUBSET","MASK",sMask);
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the dialogue ---
+
+      Diag = Create_DGW("CHSUBSET");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_CHSUBSET_1);
+      MaskChanLST_CHIMERA(Master,List);
+      Sort_LST(List,0,0);
+
+      // --- Remove "None" from the list ---
+
+      i = iFindItem_LST(List,0, "None");
+      if(i!=-1) DelItem_LST(List, i);
+
+
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_CHSUBSET_0,DGW_FILEPATH,"CHSUBSET","SUBSET");
+      SetInfoSYS_DGW(Diag,_CHSUBSET_1,DGW_TEXT,"CHSUBSET","MASK");
+
+      // --- Run the dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1) Cancel_SYS();    // He hit cancel
+
+      // --- Get the strings ---
+
+      GetInfoSYS_DGW(Diag,_CHSUBSET_0,DGW_FILEPATH,"CHSUBSET","SUBSET");
+      GetInfoSYS_DGW(Diag,_CHSUBSET_1,DGW_TEXT,"CHSUBSET","MASK");
+
+  
+      // --- Destroy the dialogue ---
+
+      Destroy_DGW(Diag);
+  }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHSUBSET","SUBSET",sSubset);
+   GetString_SYS("CHSUBSET","MASK",sMask);
+
+
+   // --- Validate name for subset database ---
+
+   if(!iStrlen_STR(sSubset))
+       Abort_SYS(_("Subset database name not specified."));
+
+
+   // --- Mask channel must be specified ---
+
+   if(!iStrlen_STR(sMask) || !iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))
+      Abort_SYS(_("A Mask Channel must be specified."));
+
+
+   // --- Get symbol channel ---
+   
+   if (!iExistChan_DB(Master,sMask))
+   {
+      Printf_STR(sTemp, sizeof(sTemp), _("The Master database '%s' does not have the Mask channel '%s' as specified."), sMaster, sMask);
+      Abort_SYS(sTemp);
+   }
+   MCh = FindChan_DB(Master,sMask);
+
+
+   // --- Subset and Master databases cannot have the same name ---
+
+   FileNamePart_STR(sMaster,sMasterN,STR_FILE_PART_NAME);
+   FileNamePart_STR(sSubset,sSubsetN,STR_FILE_PART_NAME);
+   if (iStrcmp_STR(sSubsetN,sMasterN,STR_CASE_TOLERANT) == 0)
+      Abort_SYS(_("Master database cannot have the same name as Subset database."));
+
+
+   // --- Does the subset database existing ? ---
+
+   if (iFileExist_SYS(sSubset) == 1)       // exist
+   {
+      Printf_STR(sTemp, sizeof(sTemp), _("Database '%s' exists. Overwrite?"), sSubset);
+      if (iDisplayQuestion_SYS(sSubset,sTemp) == 0) Cancel_SYS();
+   }
+   if (iLoaded_EDB(sSubset) == 1) UnLoad_EDB(sSubset);
+   CreateDup_DB(Master,sSubset);
+   ESubset = Load_EDB (sSubset);
+   Subset  = Lock_EDB(ESubset);
+   
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Create subset database"),1);
+
+
+   // --- Create Mask VV --
+
+   iChType = iGetChanType_DB(Master,MCh);
+   MaskVV = CreateExt_VV(iChType,0);
+
+
+   // --- Go through all selected Lines ---
+
+   ChVV = Create_VV(INT,0);
+   iChan = iSymbList_DB(Master,ChVV,DB_SYMB_CHAN);
+   Line = FirstSelLine_DB(Master);
+   while (iIsLineValid_DB(Master,Line))
+   {
+
+      // --- Get the line label
+
+      LockSymb_DB(Master,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Master,Line,sLine,7);
+      UnLockSymb_DB(Master,Line);
+
+
+      LockSymb_DB(Master,MCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      GetChanVV_DB(Master,Line,MCh,MaskVV);
+      UnLockSymb_DB(Master,MCh);
+      
+      
+      // --- Skip the line if no values are non-dummy ---
+      
+      iFirst = iFindDummy_VVU(MaskVV,0,1,0,-1);
+      if(iFirst==-1) {
+         Line = NextSelLine_DB(Master, Line);
+         continue;
+      }
+
+
+      // --- Create Line in Subset database ---
+
+      if (iExistSymb_DB(Subset,sLine,DB_SYMB_LINE) == 1)
+         SubsetLine = FindSymb_DB(Subset,sLine,DB_SYMB_LINE);
+      else
+         SubsetLine = DupSymbAcross_DB(Master,Subset,Line);
+
+
+      // --- Go through standard channels ---
+   
+      for (i=0;i<iChan;i++) {
+   
+   
+         // --- Get channel name ---
+      
+         Ch = (DB_SYMB)iGetInt_VV(ChVV,i);
+         GetChanName_DB(Master,Ch,sCh);
+          
+         
+         // --- progress ---
+         
+         ProgName_SYS(sCh,1);
+         ProgUpdateL_SYS(i,iChan);
+         
+         
+         // --- Get VV from the channel found ---
+
+         iChType = iGetChanType_DB(Master,Ch);
+         PruneVV = CreateExt_VV(iChType,0);
+
+         LockSymb_DB(Master,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);      
+         GetChanVV_DB(Master,Line,Ch,PruneVV);
+         UnLockSymb_DB(Master,Ch);
+
+
+         // --- refid to mask channel ---
+         
+         ReFidVV_VV(PruneVV,MaskVV);
+
+
+         // --- Prune dummies ---
+
+         Prune_VVU(PruneVV,MaskVV,VVU_PRUNE_DUMMY);
+
+
+         // --- Put pruned VV back to subset database ---
+
+         if (iExistChan_DB(Subset,sCh))
+            SubsetCh = FindChan_DB(Subset,sCh);
+         else
+            SubsetCh = DupSymbAcross_DB(Master,Subset,Ch);
+
+         LockSymb_DB(Subset,SubsetCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         PutChanVV_DB(Subset,SubsetLine,SubsetCh,PruneVV);
+         UnLockSymb_DB(Subset,SubsetCh);
+
+
+         // --- Destroy VV ---
+
+         Destroy_VV(PruneVV);
+
+      }
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Master, Line);
+
+   }
+
+
+   // --- Set the current X, Y channels for the subset database ---
+
+   GetXYZChan_DB(Master, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Master, DB_CHAN_Y, sYCh);
+
+   if(iExistChan_DB(Subset, sXCh))
+      SetXYZChan_DB(Subset, DB_CHAN_X, sXCh);
+   if(iExistChan_DB(Subset, sYCh))
+      SetXYZChan_DB(Subset, DB_CHAN_Y, sYCh);
+
+
+   // --- Clean up ---
+
+   Select_DB(Subset,"",DB_LINE_SELECT_INCLUDE);
+   DupChanLocks_DU(Master,Subset);      
+   
+   UnLock_EDB(EMaster);
+   UnLock_EDB(ESubset);
+
+   Destroy_VV(ChVV);
+   
+   
+
+   // --- Redisplay standard database ---
+   
+   DelLine0_EDB(ESubset);
+   LoadChan_EDB(ESubset,"Sample");
+   LoadAllChans_EDB(ESubset);
+ 
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+}

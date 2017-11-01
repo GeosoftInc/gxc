@@ -1,0 +1,208 @@
+//===========================================================================
+NAME          = "WholePlot - Edit Hole"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Allows the user to delete one or more drill holes from the project. 
+         DHDELHOLES.MASK    Hole name mask - accepts * and ? wild cards.
+
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhdelholes.gr"
+#include "dhdelholes.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+LST         List,HoleLST,DelLST;
+EDB         EData;
+DH          Drill;
+
+string(STR_DB_SYMBOL) sMask, sHole;
+string(STR_FILE) sDB;
+string(STR_DEFAULT_LONG) sMsg, sSelected, sList;
+string(STR_DEFAULT) sVal;
+string(16384) sHoleLST;
+int i,iD,iHoles,iDelItems,iSelect,iInteractive;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+	iInteractive = iInteractive_SYS();
+
+
+   // --- Get DB/DH ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+   Drill  = Create_DH(sDB);
+   
+   HoleLST = Create_LST(STR_DB_SYMBOL);
+   HoleLST2_DH(Drill,HoleLST);
+   Sort_LST(HoleLST,0,0);
+   iHoles = iSize_LST(HoleLST);
+   
+	Strcpy_STR(sSelected, _("Selected holes"));
+	Strcpy_STR(sList, _("Select from list"));
+
+	if(iInteractive)
+	{
+		// --- Run the dialog ---
+       
+		Diag = Create_DGW("DHDELHOLES");
+   
+   
+		// --- Create the hole list ---
+            
+		List = GetList_DGW(Diag,_DHDELHOLES_0);
+		HoleLST2_DH(Drill,List);
+		Sort_LST(List,0,0);
+
+
+		// --- Add the item "Selected Holes"  and "Select from List" to the top of the list ---
+
+		InsertItem_LST(List, 0, sSelected, _n(""));
+		InsertItem_LST(List, 1, sList, _n(""));
+            
+		SetInfoSYS_DGW(Diag,_DHDELHOLES_0,DGW_TEXT,"DHDELHOLES","MASK");     
+            
+		iD = iRunDialogue_DGW(Diag);
+		if (iD == -1) Cancel_SYS();
+            
+		GetInfoSYS_DGW(Diag,_DHDELHOLES_0,DGW_TEXT,"DHDELHOLES","MASK");     
+		Destroy_DGW(Diag);
+	}
+
+
+   GetString_SYS("DHDELHOLES", "MASK", sMask);
+   if(!iStrlen_STR(sMask))
+      Abort_SYS(_("No mask specified"));
+
+
+   // --- Create the list of holes to delete ---
+
+   DelLST = Create_LST(STR_DB_SYMBOL);
+
+
+   // --- Handle special cases ---
+
+   iSelect = 0;   
+   if(iStrcmp_STR(sMask, sSelected, STR_CASE_TOLERANT)==0) {
+      HoleLST_DH(Drill, DelLST);
+      iSelect = 1;
+   }
+   else if(iStrcmp_STR(sMask, sList, STR_CASE_TOLERANT)==0) 
+	{
+		if (iInteractive==0)
+		{
+			GetString_SYS("DHDELHOLES", "HOLELIST", sHoleLST);
+			ConvertFromCSVString_LST(DelLST, sHoleLST);
+		}
+		else
+		{
+	      if(iTwoPanelSelection_GUI(HoleLST, DelLST, _("Select holes to delete")))
+		      Cancel_SYS();
+
+			ConvertToCSVString_LST(DelLST, sHoleLST);
+			SetString_SYS("DHDELHOLES", "HOLELIST", sHoleLST);
+		}
+      iSelect = 1;
+   }
+   else {
+   
+      // --- Remove items not being deleted ---
+
+      Copy_LST(DelLST, HoleLST);
+      for(i=iHoles-1; i>=0; i--) {
+
+         GetItem_LST(DelLST, 0, i, sHole);
+
+         // --- If the mask doesn't match, remove the hole from the deletion list ---
+
+         if(!iStriMask_STR(sMask, sHole))
+            DelItem_LST(DelLST, i);
+      }
+   }
+
+   iDelItems = iSize_LST(DelLST);
+
+   if(iDelItems==0) 
+      Abort_SYS(_("There are no holes matching the hole mask."));
+
+	if(iInteractive)
+	{
+		if(iDelItems==iHoles) {
+      
+			if(iHoles==1) {
+				if(!iDisplayQuestion_SYS(_("Delete Holes"), _("Are you sure you wish to delete the last hole?")))
+					Cancel_SYS();         
+			}
+			else {
+				if(!iDisplayQuestion_SYS(_("Delete Holes"), _("Are you sure you wish to delete all the holes?")))
+					Cancel_SYS();
+			}
+		}
+
+
+		// --- Check to see if deleting the holes in the list will result in empty (and deleted) databases. ---
+
+		if(iDeleteWillDeleteDB_DH(Drill, DelLST)) {
+
+			Strcpy_STR(sMsg, _("Proceeding will delete one or more databases in\r\n the project. Do you wish to proceed?"));
+			if(!iDisplayQuestion_SYS(_("Delete Holes"), sMsg))
+				Cancel_SYS();
+		}
+	}
+
+
+   // --- Delete the holes ---
+
+   DeleteHoles_DH(Drill, DelLST);
+
+
+   // --- Clean up ---
+
+   Destroy_DH(Drill);
+
+
+	if(iInteractive)
+	{
+		if(iDelItems==1) {
+
+			GetItem_LST(DelLST, 0, 0, sHole);
+
+			Printf_STR(sMsg, sizeof(sMsg), _("The hole \"%s\" has been removed from the project."), sHole);
+
+		}
+		else {
+   
+			FormatI_STR(iDelItems, sVal, 5);
+			if(iSelect==1)
+				Printf_STR(sMsg, sizeof(sMsg), _("A total of %s holes have been removed from the project."), sVal);
+			else
+				Printf_STR(sMsg, sizeof(sMsg), _("A total of %s holes matching the mask \"%s\" have been removed from the project."), sVal, sMask);
+
+		}
+		DisplayMessage_SYS(_("Delete Holes"), sMsg);
+	}
+}

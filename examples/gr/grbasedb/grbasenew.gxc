@@ -1,0 +1,117 @@
+//===========================================================================
+NAME          = "Create a new base station database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Base Stations"
+
+DESCRIPTION   = "
+
+   Create and open a new Base Station database.
+
+"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         eDB;                  // Database
+DB          hDB;                  // Database
+REG         hWorkREG;
+REG         hDataREG;
+DB_SYMB     Group,Chan;
+
+string(STR_FILE) sDB;
+
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- get workspace REG and parameters ---
+   
+   hWorkREG = Create_REG(156);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sDB,sizeof(sDB));
+   if (iStrlen_STR(sDB) == 0)
+      Abort_SYS(_("Base station database name not specified."));
+
+
+   // --- create/load a new database ---
+
+   if (!iFileExist_SYS (sDB)) {
+      Create_DB(sDB,10,50,10+50+20,10,100,"SUPER","");
+   }
+   eDB = Load_EDB(sDB);
+   hDB = Lock_EDB(eDB);
+
+
+   // --- set the database type to base ---
+      
+   hDataREG = Create_REG(256);
+   GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+   Set_REG(hDataREG,"GRAVRED.TYPE","Base");
+   SetRegSymb_DB(hDB,NULLSYMB,hDataREG);
+   Destroy_SYS(hDataREG);
+   
+   
+   // --- create required channels ---
+
+   Group = CreateSymb_DB(hDB,"GravData",DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_GROUP);
+   Associate_DB(hDB,Group,CreateSymb_DB(hDB,"Station",DB_SYMB_CHAN,DB_OWN_SHARED,-24));
+   
+   Chan = CreateSymb_DB(hDB,"Gravity",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(hDB,Chan);
+   SetChanWidth_DB(hDB,Chan,12);
+   SetChanDecimal_DB(hDB,Chan,3);
+   SetChanUnit_DB(hDB,Chan,_("mgal"));
+   UNLOCK(hDB,Chan);
+   Associate_DB(hDB,Group,Chan);
+   
+   Chan = CreateSymb_DB(hDB,"Longitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(hDB,Chan);
+   SetChanFormat_DB(hDB,Chan,DB_CHAN_FORMAT_GEOGR);
+   SetChanWidth_DB(hDB,Chan,14);
+   SetChanDecimal_DB(hDB,Chan,2);
+   SetChanUnit_DB(hDB,Chan,_("dega"));
+   UNLOCK(hDB,Chan);
+   Associate_DB(hDB,Group,Chan);
+
+   Chan = CreateSymb_DB(hDB,"Latitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(hDB,Chan);
+   SetChanFormat_DB(hDB,Chan,DB_CHAN_FORMAT_GEOGR);
+   SetChanWidth_DB(hDB,Chan,14);
+   SetChanDecimal_DB(hDB,Chan,2);
+   SetChanUnit_DB(hDB,Chan,_("dega"));
+   UNLOCK(hDB,Chan);
+   Associate_DB(hDB,Group,Chan);
+
+   Chan = CreateSymb_DB(hDB,"Elevation",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+   LOCK_RW(hDB,Chan);
+   SetChanWidth_DB(hDB,Chan,10);
+   SetChanDecimal_DB(hDB,Chan,2);
+   SetChanUnit_DB(hDB,Chan,_("m"));
+   UNLOCK(hDB,Chan);
+   Associate_DB(hDB,Group,Chan);
+  
+   UnLock_EDB(eDB);
+   DelLine0_EDB(eDB);
+   if (  iInteractive_SYS()) {
+       
+	   GotoLine_EDB(eDB,Group);
+	   LoadChan_EDB(eDB,"Station");
+	   LoadChan_EDB(eDB,"Gravity");
+	   LoadChan_EDB(eDB,"Longitude");
+	   LoadChan_EDB(eDB,"Latitude");
+	   LoadChan_EDB(eDB,"Elevation");
+   }
+   
+}

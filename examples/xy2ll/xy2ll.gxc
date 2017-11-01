@@ -1,0 +1,350 @@
+//===========================================================================
+NAME          = "Convert Local X,Y to Longitude,Latitude"
+#include <version.gxh>
+DESCRIPTION   = "
+
+    LL2XY.LON        longitude channel
+         .LAT        latitude channel
+         .X          
+         
+         .Y
+         .LOCLON
+         .LOCLAT
+         .LOCX
+         .LOCY
+         .UNITS
+         .AZM
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates/Georeferencing"
+
+// Revision History:
+// v7.0.0: Added validation
+//         QA 12960 Removed hanging else statement, display Lat/Lon channels.
+// v6.4.0: Check and set default X and Y to the current X, Y or Lat, Lon, 
+//         depending on the projection.       
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//======================================================set=====================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "xy2ll.gr"
+#include "xy2ll.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         eDB;
+DB          hDB;
+DGW         hDGW;                 // Dialogue handle
+DB_SYMB     Group,LonCh,LatCh,XCh,YCh;
+PJ          hPJ;
+VV          hXVV,hYVV;
+LTB         hUNI;
+LST         hLST;
+IPJ         hIPJ;
+
+string(STR_DEFAULT_SHORT) sUnit,sName;
+string(STR_DB_SYMBOL) sLonCh,sLatCh,sXCh,sYCh;
+real        rLon,rLat,rX,rY,rAzm;
+int         i;
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- get the database ---
+         
+   eDB = Current_EDB();
+   hDB = Lock_EDB(eDB);
+   
+
+   // --- Set default Long, Lat channels to the existing current X, Y if they
+   //     are defined as Geographic ---
+   
+   GetString_SYS("LL2XY", "LON", sLonCh);
+   GetString_SYS("LL2XY", "LAT", sLatCh);
+   if(!iStrlen_STR(sLonCh) || !iExistChan_DB(hDB, sLonCh) ||
+      !iStrlen_STR(sLatCh) || !iExistChan_DB(hDB, sLatCh))
+   {
+      GetXYZChan_DB(hDB, DB_CHAN_X, sLonCh);
+      GetXYZChan_DB(hDB, DB_CHAN_Y, sLatCh);
+   
+      LonCh = FindChan_DB(hDB,sLonCh);
+      LatCh = FindChan_DB(hDB,sLatCh);
+      if(LonCh!=NULLSYMB && LatCh!=NULLSYMB)
+      {      
+         hIPJ = Create_IPJ();
+      
+         LOCK_R(hDB,LonCh);
+         GetIPJ_DB(hDB, LonCh, hIPJ);
+         UNLOCK(hDB,LonCh);
+         
+         if(iSourceType_IPJ(hIPJ)==IPJ_TYPE_GCS)
+         {
+            SetString_SYS("LL2XY", "LON", sLonCh);
+            SetString_SYS("LL2XY", "LAT", sLatCh);
+         }
+      }
+   }
+
+
+   // --- Set default X, Y channels to the existing current X, Y if they
+   //     are not defined as Geographic ---
+   
+   GetString_SYS("LL2XY", "X", sXCh);
+   GetString_SYS("LL2XY", "Y", sYCh);
+   if(!iStrlen_STR(sXCh) || !iExistChan_DB(hDB, sXCh) ||
+      !iStrlen_STR(sYCh) || !iExistChan_DB(hDB, sYCh))
+   {
+      GetXYZChan_DB(hDB, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(hDB, DB_CHAN_Y, sYCh);
+   
+      XCh = FindChan_DB(hDB,sXCh);
+      YCh = FindChan_DB(hDB,sYCh);
+      if(XCh!=NULLSYMB && YCh!=NULLSYMB)
+      {      
+         hIPJ = Create_IPJ();
+      
+         LOCK_R(hDB,XCh);
+         GetIPJ_DB(hDB, XCh, hIPJ);
+         UNLOCK(hDB,XCh);
+         
+         if(iSourceType_IPJ(hIPJ)!=IPJ_TYPE_GCS)
+         {
+            SetString_SYS("LL2XY", "X", sXCh);
+            SetString_SYS("LL2XY", "Y", sYCh);
+         }
+      }
+   }
+
+   
+   // --- child? ---
+   
+   i = iGetYesNo_SYS("XY2LL","CHILD");
+   if (i) SetString_SYS("XY2LL","CHILD","");
+      
+   if (!i && iInteractive_SYS()) {
+   
+      i = 0;
+      while (i != 2) {
+      
+         if (i == 0) {
+         
+            hDGW = Create_DGW("XY2LL");
+      
+            hLST = GetList_DGW(hDGW,_XY2LL_0);
+            SymbLST_DB(hDB,hLST,DB_SYMB_CHAN);
+            Sort_LST(hLST,0,0);
+            Copy_LST(GetList_DGW(hDGW,_XY2LL_1),hLST);
+            Copy_LST(GetList_DGW(hDGW,_XY2LL_2),hLST);
+            Copy_LST(GetList_DGW(hDGW,_XY2LL_3),hLST);
+      
+            SetInfoSYS_DGW(hDGW,_XY2LL_0,DGW_TEXT,"LL2XY","X"     );
+            SetInfoSYS_DGW(hDGW,_XY2LL_1,DGW_TEXT,"LL2XY","Y"     );
+            SetInfoSYS_DGW(hDGW,_XY2LL_2,DGW_TEXT,"LL2XY","LON"   );
+            SetInfoSYS_DGW(hDGW,_XY2LL_3,DGW_TEXT,"LL2XY","LAT"   );
+            i = iRunDialogue_DGW(hDGW);
+            if (i == -1) Cancel_SYS();
+            GetInfoSYS_DGW(hDGW,_XY2LL_0,DGW_TEXT,"LL2XY","X"     );
+            GetInfoSYS_DGW(hDGW,_XY2LL_1,DGW_TEXT,"LL2XY","Y"     );
+            GetInfoSYS_DGW(hDGW,_XY2LL_2,DGW_TEXT,"LL2XY","LON"   );
+            GetInfoSYS_DGW(hDGW,_XY2LL_3,DGW_TEXT,"LL2XY","LAT"   );
+            Destroy_DGW(hDGW);
+            
+         } else {
+         
+            hDGW = Create_DGW("XY2LLC");
+      
+            // --- get/set units ---
+            
+            GetString_SYS("LL2XY","X"     ,sXCh);
+            GetChanUnit_DB(hDB,FindChan_DB(hDB,sXCh),sUnit);
+            SetString_SYS("LL2XY","UNITS" ,sUnit);
+   
+            hUNI = Create_LTB("units",LTB_TYPE_HEADER,LTB_DELIM_COMMA,"");
+            GetLST_LTB(hUNI,iFindField_LTB(hUNI,"Unit_length"),GetList_DGW(hDGW,_XY2LLC_2));
+            Destroy_SYS(hUNI);
+      
+            SetInfoSYS_DGW(hDGW,_XY2LLC_0,DGW_TEXT,"LL2XY","LOCX"  );
+            SetInfoSYS_DGW(hDGW,_XY2LLC_1,DGW_TEXT,"LL2XY","LOCY"  );
+            SetInfoSYS_DGW(hDGW,_XY2LLC_2,DGW_TEXT,"LL2XY","UNITS" );
+            SetInfoSYS_DGW(hDGW,_XY2LLC_3,DGW_TEXT,"LL2XY","AZM"   );
+            SetInfoSYS_DGW(hDGW,_XY2LLC_4,DGW_TEXT,"LL2XY","LOCLON");
+            SetInfoSYS_DGW(hDGW,_XY2LLC_5,DGW_TEXT,"LL2XY","LOCLAT");
+            i = iRunDialogue_DGW(hDGW);
+            if (i == -1) Cancel_SYS();
+            GetInfoSYS_DGW(hDGW,_XY2LLC_0,DGW_TEXT,"LL2XY","LOCX"  );
+            GetInfoSYS_DGW(hDGW,_XY2LLC_1,DGW_TEXT,"LL2XY","LOCY"  );
+            GetInfoSYS_DGW(hDGW,_XY2LLC_2,DGW_TEXT,"LL2XY","UNITS" );
+            GetInfoSYS_DGW(hDGW,_XY2LLC_3,DGW_TEXT,"LL2XY","AZM"   );
+            GetInfoSYS_DGW(hDGW,_XY2LLC_4,DGW_TEXT,"LL2XY","LOCLON");
+            GetInfoSYS_DGW(hDGW,_XY2LLC_5,DGW_TEXT,"LL2XY","LOCLAT");
+            
+            Destroy_DGW(hDGW);
+            
+         }
+      }                     
+   }
+   
+   
+   // --- get parameters ---
+         
+   GetString_SYS("LL2XY","LON"   ,sLonCh);
+   GetString_SYS("LL2XY","LAT"   ,sLatCh);
+   GetString_SYS("LL2XY","X"     ,sXCh);
+   GetString_SYS("LL2XY","Y"     ,sYCh);
+   GetString_SYS("LL2XY","UNITS" ,sUnit);
+   rLon = rGetReal_SYS("LL2XY","LOCLON");
+   rLat = rGetReal_SYS("LL2XY","LOCLAT");
+   rX   = rGetReal_SYS("LL2XY","LOCX"  );
+   rY   = rGetReal_SYS("LL2XY","LOCY"  );
+   rAzm = rGetReal_SYS("LL2XY","AZM"   );
+   
+   if(!iStrlen_STR(sLonCh))
+      Abort_SYS(_("No Longitude channel name defined."));
+
+   if(!iStrlen_STR(sLatCh))
+      Abort_SYS(_("No Latitude channel name defined."));
+
+   if(!iStrlen_STR(sXCh))
+      Abort_SYS(_("No X channel name defined."));
+
+   if(!iStrlen_STR(sYCh))
+      Abort_SYS(_("No Y channel name defined."));
+
+   
+   // --- get channels ---
+   
+   XCh = FindChan_DB(hDB,sXCh);
+   if (XCh == NULLSYMB) Abort_SYS(_("No X channel"));
+   
+   YCh = FindChan_DB(hDB,sYCh);
+   if (YCh == NULLSYMB) Abort_SYS(_("No Y channel"));
+   
+   LonCh = FindChan_DB(hDB,sLonCh);
+   if (LonCh == NULLSYMB) {
+      LonCh = CreateSymb_DB(hDB,sLonCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+      LOCK_RW(hDB,LonCh);
+      SetChanWidth_DB(hDB,LonCh,13);
+      SetChanDecimal_DB(hDB,LonCh,2);
+      SetChanFormat_DB(hDB,LonCh,DB_CHAN_FORMAT_GEOGR);
+      UNLOCK(hDB,LonCh);
+   }
+   
+      
+   LatCh = FindChan_DB(hDB,sLatCh);
+   if (LatCh == NULLSYMB) {
+      LatCh = CreateSymb_DB(hDB,sLatCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+      LOCK_RW(hDB,LatCh);
+      SetChanWidth_DB(hDB,LatCh,13);
+      SetChanDecimal_DB(hDB,LatCh,2);
+      SetChanFormat_DB(hDB,LatCh,DB_CHAN_FORMAT_GEOGR);
+      UNLOCK(hDB,LatCh);
+   }
+      
+      
+   if (XCh == LonCh || XCh == LatCh ||
+       YCh == LonCh || YCh == LatCh ) 
+      Abort_SYS(_("X,Y cannot be the same as Longitude,Latitude."));
+      
+   LOCK_R(hDB,XCh);
+   LOCK_R(hDB,YCh);
+   LOCK_RW(hDB,LonCh);
+   LOCK_RW(hDB,LatCh);
+   
+   if (iStrlen_STR(sUnit) == 0)
+      GetChanUnit_DB(hDB,XCh,sUnit);
+   else {   
+      SetChanUnit_DB(hDB,XCh,sUnit);
+      SetChanUnit_DB(hDB,YCh,sUnit);
+   }
+   
+   
+   // --- work VV ---
+   
+   hXVV = Create_VV(REAL,0);
+   hYVV = Create_VV(REAL,0);
+   
+
+   // --- create a PJ ---
+   
+   hPJ = CreateRectified_PJ(
+            rLon,         
+            rLat,         
+            rX,         
+            rY,         
+            rAzm,         
+            rUnitScale_IPJ(sUnit,1.0),
+            PJ_RECT_XY2LL);         
+
+   Group = FirstSelLine_DB(hDB);
+   while (Group != NULLSYMB) {
+   
+   
+      // --- reproject ---
+      
+      GetChanVV_DB(hDB,Group,XCh,hXVV);
+      GetChanVV_DB(hDB,Group,YCh,hYVV);
+      ReFidVV_VV(hYVV,hXVV);
+      ConvertVV_PJ(hPJ,hXVV,hYVV);         
+      PutChanVV_DB(hDB,Group,LonCh,hXVV);
+      PutChanVV_DB(hDB,Group,LatCh,hYVV);
+      Associate_DB(hDB,Group,LonCh);
+      Associate_DB(hDB,Group,LatCh);
+      
+      
+      // --- next group ---
+      
+      Group = NextSelLine_DB(hDB,Group);
+      
+   }
+   
+   // --- clear projections from output channels if not geographic ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(hDB,LonCh,hIPJ);
+   GetName_IPJ(hIPJ,IPJ_NAME_METHOD,sName);
+   
+   
+   // --- if geographic, check the other channel ---
+   
+   if (iStrcmp_STR(sName,_n("Geographic"),STR_CASE_TOLERANT)==0) {
+      GetIPJ_DB(hDB,LatCh,hIPJ);
+      GetName_IPJ(hIPJ,IPJ_NAME_METHOD,sName);
+   }
+   Destroy_SYS(hIPJ);
+   
+   
+   // --- not geographic, clear it --
+   
+   if (iStrcmp_STR(sName,_n("Geographic"),STR_CASE_TOLERANT)!=0) {
+      hIPJ = Create_IPJ();
+      SetUnits_IPJ(hIPJ,1.0,_("dega"));
+      SetIPJ_DB(hDB,LonCh,LatCh,hIPJ);
+      Destroy_SYS(hIPJ);
+   }
+   
+   UnLockSymb_DB(hDB,LonCh);
+   UnLockSymb_DB(hDB,LatCh);
+   UnLockSymb_DB(hDB,XCh);
+   UnLockSymb_DB(hDB,YCh);
+   UnLock_EDB(eDB);
+   
+
+	// --- Display the Lat and Lon channels ---
+	
+   LoadChan_EDB(eDB, sLatCh);
+   LoadChan_EDB(eDB, sLonCh);      
+}      

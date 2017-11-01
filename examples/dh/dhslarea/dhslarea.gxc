@@ -1,0 +1,162 @@
+//===========================================================================
+
+NAME          = "Drill Hole - Select Holes in Area"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot/Select Holes"
+
+DESCRIPTION   = "
+		Define an area on a plan map to select holes inside.
+
+		DHSLAREA.PLY  Name of file to save the polygon area to for script mode.
+"
+// Revision History:
+// v7.3.1: Made the GX scriptable.
+// v5.1.7: Fix bug on placement of Destroy_DH
+//===========================================================================
+
+RESOURCE = "dhslarea.gr"
+#include "dhslarea.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+int         i,iLen;
+
+PLY         Poly;                         // polygon object
+EDB         EData;
+DH          Drill;
+VV          VVx,VVy;                    // polyline VV's
+EMAP        EMap;
+DGW         Diag;
+MAP         Map;
+REG         MapReg;
+
+string(STR_FILE) sDB, sMap, sPLY;
+int iType;
+
+//===========================================================================
+
+{
+    
+   // --- create polygon ---
+
+   Poly = Create_PLY();
+
+   if(iInteractive_SYS())
+	{
+	   // --- create VV's ---
+
+		VVx = Create_VV(REAL,0);
+		VVy = Create_VV(REAL,0);
+
+
+		// --- Get the current map, check its REG to see if it's a plan map ---
+
+		EMap = Current_EMAP();
+		GetName_EMAP(EMap, sMap);
+		Map = Lock_EMAP(EMap);
+		MapReg = GetREG_MAP(Map);                   
+		iType = iDUMMY;
+		GetInt_REG(MapReg, "DH_TYPE", iType);              
+		UnLock_EMAP(EMap);
+
+
+		// --- If the current map is not a plan map, search for a plan map ---
+
+		while(iType!=0) 
+		{
+               
+			if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sMap)) 
+			{
+
+				// --- No plan maps found, prompt for a new map and try again ---
+
+				Diag = Create_DGW("DHSLAREA");
+				SetInfoSYS_DGW(Diag,_DHSLAREA_0,DGW_FILEPATH,"DHSLAREA","MAP");                     
+				if(iRunDialogue_DGW(Diag)==-1) Cancel_SYS();
+      
+				GetInfoSYS_DGW(Diag,_DHSLAREA_0,DGW_FILEPATH,"DHSLAREA","MAP");
+				Destroy_DGW(Diag);
+
+				GetString_SYS("DHSLAREA","MAP",sMap);
+
+				// --- See if the new map is a plan map; if not, exit the procedure ---
+
+				EMap = Load_EMAP(sMap);
+
+				if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sMap)) 
+				{
+					DisplayMessage_SYS(_("Define Section"),_("The specified map is not a plan map."));
+					continue;
+				}
+			} 
+      
+			EMap = Load_EMAP(sMap);         
+			break;
+		} 
+
+		iSetCurrentView_EMAP(EMap,"*data");
+
+   
+		// --- get profile points ---
+
+		DisplayMessage_SYS(_("Define polygon"),_("Enter points on polygon, Right button when done, Esc to cancel."));
+
+		i = iGetPolyLine_EMAP(EMap,_("Click on polygon corners, Right button when done..."),VVx,VVy);
+   
+
+		// --- if not cancelled, and there are 3 or more points, process ---
+
+		iLen = iLength_VV(VVx);
+		if ((i == 0) && (iLen >= 3)) 
+		{
+			AddPolygonEx_PLY(Poly,VVx,VVy,0);
+
+			
+			// --- Save the polygon for scripts ---
+
+			Strcpy_STR(sPLY, "_dhslarea.ply");  
+			SaveTable_PLY(Poly, sPLY);
+			SetString_SYS("DHSLAREA", "PLY", sPLY);
+			GetString_SYS("DHSLAREA", "PLY", sPLY);  // This line forces output to a GS script file.
+		}
+		else
+		   Cancel_SYS();
+
+	   Destroy_SYS(VVx);
+		Destroy_SYS(VVy);
+	}
+	else
+	{
+		GetString_SYS("DHSLAREA", "PLY", sPLY);
+		if(iStrlen_STR(sPLY) == 0)
+			Abort_SYS(_("A \"*.ply\" file must be specified using the DHSLAREA.PLY parameter when this GX is used in script mode."));
+
+		LoadTable_PLY(Poly, sPLY);
+	}
+      
+   EData = Current_EDB();
+   GetName_EDB(EData,sDB);
+   Drill = Create_DH(sDB);
+
+
+   // --- Unselect all holes ---
+
+   UnSelectAllHoles_DH(Drill);
+
+
+   // --- Select the ones in the polygon ---
+
+   SelectPLY_DH(Drill,Poly);
+
+   Destroy_DH(Drill);
+   Destroy_SYS(Poly);
+}
+

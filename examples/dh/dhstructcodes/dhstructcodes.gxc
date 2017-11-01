@@ -1,0 +1,105 @@
+//===========================================================================
+NAME          = "Drill Hole - Add/Edit Structure Codes"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Allows the user to add/edit structure code information.
+"
+// Revision History
+// v6.3.0 If a current database exists, pass its handle so you
+//        populate the list from the WP project.
+// v6.1.0 New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhstructcodes.gr"
+#include "dhstructcodes.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DGW         Diag;             // Dialogue handle
+string(STR_FILE) sFile;
+int i;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if(!iInteractive_SYS()) Abort_SYS(_("This GX must be run interactively."));
+   
+
+   // --- Create the Dialogue ---
+
+   Diag = Create_DGW("DHSTRUCTCODES");
+      
+      
+   // --- Get the preference as the default ---
+
+   GetString_SYS("DHSTRUCTCODES","FILE",sFile);
+   if(!iStrlen_STR(sFile)) {
+      if (iGlobal_SYS("WHOLEPLOT.STRUCTURE_CODES",sFile) == 0) {
+         SetString_SYS("DHSTRUCTCODES","FILE",sFile);
+      }
+      else {
+         iFindPathNameEx_SYS(DH_DEFAULT_STRUCTURECODE_FILE, FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_USER_CSV, sFile);
+         SetString_SYS("DHSTRUCTCODES","FILE",sFile);
+      }
+   }
+
+      
+   // --- Run Dialog ---
+         
+   SetInfoSYS_DGW(Diag,_DHSTRUCTCODES_0,DGW_FILEPATH,"DHSTRUCTCODES","FILE");     
+
+
+   // --- Run the Dialogue ---
+              
+   i = iRunDialogue_DGW(Diag);
+   if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+   GetInfoSYS_DGW(Diag,_DHSTRUCTCODES_0,DGW_FILEPATH,"DHSTRUCTCODES","FILE");     
+
+
+   // --- Destroy the Dialogue ---
+
+   Destroy_DGW(Diag);
+
+
+   // --- Get the file ---
+
+   GetString_SYS("DHSTRUCTCODES","FILE",sFile);
+
+
+   // --- Run the editor. If there is a current database, then pass its handle ---
+
+   if(iHaveCurrent_EDB()) {
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+      iModifyStructureCodesGUI2_DH(Data, sFile);
+      MakeCurrent_EDB(EData);    // ensure original database remains current
+   }
+   else 
+      iModifyStructureCodesGUI_DH(sFile);
+
+      
+}

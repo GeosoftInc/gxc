@@ -1,0 +1,330 @@
+//===========================================================================
+NAME          = "GRIDFILT"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids"
+
+DESCRIPTION   = "\Apply a 9-Point Filter to a Grid using any number of passes.
+Parameters:
+       GRIDFILT.GRD      File Name of the Input Grid.
+               .NEW      File Name of New Grid.                          
+               .DEFFILT  Name of pre-defined 9 point filter.
+                           (optional)
+               .FILT     Name of file containing 9 point filter.
+                           (optional)
+               .FILTSTR  9 Point filter string - 9 comma delimited
+                           numbers: e.g. 1,2,3,4,5,6,7,8,9
+                           (optional)
+               .PASS     Number of filter Passes to apply
+                           to create the new grid.
+               .MULT     Multiplier to apply to the grid.
+               .DUMMY    If 'INTERPOLATE', dummies are replaced by 
+                         interpolated values, except for the
+                         center value if it is a dummy.
+                         If 'DUMMY', the grid will have a dummy if
+                         any of the grid values in the filter
+                         are dummy or outside of the grid.\r\n"
+
+//===========================================================================
+
+RESOURCE = "gridfilt.gr"
+#include "gridfilt.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+
+int        i;                 // utility int
+int        iHz;               // Horizontal derivative flag
+int        iSet;              // flags if filter is set
+int        iToks;             // Tokens in filter point string
+int        iUseFile;          // flags to use file for filter values
+int        iPass;             // Number of passes to apply
+int        iDum;              // Flags whether to write dummies into
+                              // grid or interpolate values
+
+string(STR_FILE)  sGrd;            // Name of input grid
+string(STR_FILE)  sNew;            // Name of new resultant grid
+string(STR_FILE)  sFiltFile;       // Name of filter file
+string(STR_DEFAULT) sDefFilt;        // Pre-Defined filter
+string(STR_DEFAULT_LONG) sFiltStr;        // Filter string
+
+string(STR_DEFAULT) sTemp;           // Temporary string
+
+IMG         IMG1;             // Image tied to the input grid
+IMG         IMGO;             // Image for the output grid
+
+real        rMult;            // Multiplier
+real        rVal;             // Placeholder for Filter values
+
+VV          hVV;              // Holds the 9 point values in filter
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDFILTForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_0,DGW_FILEPATH,"GRIDFILT","GRD");     
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_1,DGW_FILEPATH,"GRIDFILT","NEW");    
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_2,DGW_LISTALIAS,"GRIDFILT","DEFFILT");     
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_3,DGW_FILEPATH,"GRIDFILT","FILT");     
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_4,DGW_TEXT,"GRIDFILT","FILTSTR");     
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_5,DGW_TEXT,"GRIDFILT","PASS");
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_6,DGW_TEXT,"GRIDFILT","MULT");     
+      SetInfoSYS_DGW(Diag,_GRIDFILTFORM_7,DGW_LISTALIAS,"GRIDFILT","DUMMY");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_0,DGW_FILEPATH,"GRIDFILT","GRD");     
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_1,DGW_FILEPATH,"GRIDFILT","NEW");    
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_2,DGW_LISTALIAS,"GRIDFILT","DEFFILT");     
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_3,DGW_FILEPATH,"GRIDFILT","FILT");     
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_4,DGW_TEXT,"GRIDFILT","FILTSTR");     
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_5,DGW_TEXT,"GRIDFILT","PASS");
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_6,DGW_TEXT,"GRIDFILT","MULT");     
+      GetInfoSYS_DGW(Diag,_GRIDFILTFORM_7,DGW_LISTALIAS,"GRIDFILT","DUMMY");
+           
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDFILT","GRD",sGrd);
+   GetString_SYS("GRIDFILT","NEW",sNew);
+   GetString_SYS("GRIDFILT","DEFFILT",sDefFilt);
+   GetString_SYS("GRIDFILT","FILT",sFiltFile);
+   GetString_SYS("GRIDFILT","FILTSTR",sFiltStr);
+
+   
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrd))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   if (!iStrlen_STR(sNew))
+      Abort_SYS(_("New Resultant Grid Not Specified!"));   
+
+   if (!iStrcmp_STR(sGrd,sNew,STR_CASE_TOLERANT))
+      Abort_SYS(_("Names of Input Grid and New Resultant Grid Must be Different!"));
+
+   iSet = 0;                  // Filter is not set
+   iHz = IMU_FILT_HZDRV_NO;   // No horizontal filter
+
+   // --- Create and initialize a VV to hold the filter values ---
+
+   hVV = Create_VV(REAL,10);
+   for (i=0;i<9;i++)
+      SetReal_VV(hVV,i,0.0);
+
+   // --- Check the defined filter and set values in ---
+
+   if (!iStrcmp_STR(sDefFilt,_n("Hanning"),STR_CASE_TOLERANT))
+   {
+      iSet = 1;
+      SetReal_VV(hVV,0,0.06);
+      SetReal_VV(hVV,1,0.1);
+      SetReal_VV(hVV,2,0.06);
+      SetReal_VV(hVV,3,0.1);
+      SetReal_VV(hVV,4,0.36);
+      SetReal_VV(hVV,5,0.1);
+      SetReal_VV(hVV,6,0.06);
+      SetReal_VV(hVV,7,0.1);
+      SetReal_VV(hVV,8,0.06);
+   }
+   else if (!iStrcmp_STR(sDefFilt,_n("Laplace"),STR_CASE_TOLERANT))
+   {
+      iSet = 1;      
+      SetReal_VV(hVV,1,-0.25);
+      SetReal_VV(hVV,3,-0.25);
+      SetReal_VV(hVV,4,1.0);
+      SetReal_VV(hVV,5,-0.25);
+      SetReal_VV(hVV,7,-0.25);
+   }
+   else if (!iStrcmp_STR(sDefFilt,_n("Horiz. Deriv. X Direction"),STR_CASE_TOLERANT))
+   {
+      iSet = 1;      
+      iHz = IMU_FILT_HZDRV_X;
+      SetReal_VV(hVV,3,-1.0);
+      SetReal_VV(hVV,5,1.0);            
+   }
+   else if (!iStrcmp_STR(sDefFilt,_n("Horiz. Deriv. Y Direction"),STR_CASE_TOLERANT))
+   {
+      iSet = 1;
+      iHz = IMU_FILT_HZDRV_Y;      
+      SetReal_VV(hVV,1,1.0);
+      SetReal_VV(hVV,7,-1.0);            
+   }
+   else if (!iStrcmp_STR(sDefFilt,_n("Horiz. Deriv. 45 Deg"),STR_CASE_TOLERANT))
+   {
+      iSet = 1;
+      SetReal_VV(hVV,1,-1.0);
+      SetReal_VV(hVV,3,1.0);
+      SetReal_VV(hVV,5,-1.0);
+      SetReal_VV(hVV,7,1.0);      
+   }
+
+
+   // --- If filter not set, then try to get it from the file ---
+
+   iUseFile = IMU_FILT_FILE_NO;
+
+   if ( (!iSet) && (iStrlen_STR(sFiltFile)) )
+   {
+      iUseFile = IMU_FILT_FILE_YES;
+      iSet = 1;    
+   }
+
+   // --- if filter still not set, try to get it from filter edit box ---
+
+   if ( (!iSet) && (iStrlen_STR(sFiltStr)) )
+   {
+      iSet = 1;
+
+      // --- Tokenize the string and get the 9 points ---
+
+      iToks = iTokens_STR(sFiltStr,",");
+      if (iToks != 9)
+      {
+         Destroy_VV(hVV);
+         Abort_SYS(_("Invalid Filter Value string. Must have 9 numbers delimited by commas"));
+      }
+
+      // --- Get the values and put into the VV ---
+
+      for (i=0;i<9;i++)
+      {
+         rVal = 0.0;
+         GetToken_STR(sTemp,sFiltStr,i);
+         rVal = rScanR_STR(sTemp);
+         if (rVal == rDUMMY)
+         {
+            Destroy_VV(hVV);
+            Abort_SYS(_("Invalid Value in Filter string. Must have 9 numbers delimited by commas"));
+         }
+         SetReal_VV(hVV,i,rVal);      
+      }
+   }
+
+   // --- If the filter is still not set - default to Hanning filter ---   
+
+   if (!iSet)
+   {
+      iSet = 1;
+      SetReal_VV(hVV,0,0.06);
+      SetReal_VV(hVV,1,0.1);
+      SetReal_VV(hVV,2,0.06);
+      SetReal_VV(hVV,3,0.1);
+      SetReal_VV(hVV,4,0.36);
+      SetReal_VV(hVV,5,0.1);
+      SetReal_VV(hVV,6,0.06);
+      SetReal_VV(hVV,7,0.1);
+      SetReal_VV(hVV,8,0.06);
+   }
+
+   // --- Check for null multiplier,pass, and dummy strings and 
+   //     set to default values if blank ---
+
+   GetString_SYS("GRIDFILT","PASS",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iPass = 1;
+   else
+      iPass = iGetInt_SYS("GRIDFILT","PASS");
+
+   GetString_SYS("GRIDFILT","MULT",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      rMult = 1.0;
+   else
+      rMult = rGetReal_SYS("GRIDFILT","MULT");
+
+   GetString_SYS("GRIDFILT","DUMMY",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iDum = IMU_FILT_DUMMY_NO;
+   else if (!iStrcmp_STR(sTemp,"DUMMY",STR_CASE_TOLERANT))
+      iDum = IMU_FILT_DUMMY_YES;
+   else if (!iStrcmp_STR(sTemp,"INTERPOLATE",STR_CASE_TOLERANT))
+      iDum = IMU_FILT_DUMMY_NO;
+   else
+   {
+      Destroy_VV(hVV);
+      Abort_SYS(_("Invalid grid dummy option specified. Must be DUMMY or INTERPOLATE"));
+   }
+
+   // --- Check the multiplier and pass parameters ---
+
+   if ((iPass < 1) || (iPass > iMAX) || (iPass == iDUMMY))
+   {
+      Destroy_VV(hVV);
+      Abort_SYS(_("Number of Passes is Invalid. Must be an integer from 1 to 2147483647"));
+   }
+
+   if ((rMult < rMIN) || (rMult > rMAX) || (rMult == rDUMMY))
+   {
+      Destroy_VV(hVV);
+      Abort_SYS(_("Multiplier Value is Invalid. Must be a number from -1e31 to 1e31"));
+   }
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   IMG1 = CreateFile_IMG(GS_FLOAT,sGrd,IMG_FILE_READONLY);
+   
+   IMGO = CreateOutFile_IMG(GS_FLOAT,sNew,IMG1); 
+
+   ProgName_SYS(_("Filtering Grid..."),1);
+
+   // --- Filter the grid ---
+
+   GridFilt_IMU(IMG1,IMGO,iPass,rMult,iDum,iHz,iUseFile,sFiltFile,hVV);  
+
+   // --- Destroy the Images and VV ---
+   
+   Destroy_IMG(IMG1);
+   Destroy_IMG(IMGO);
+   Destroy_VV(hVV);
+        
+
+   // --- done ---
+   
+   Progress_SYS(0);
+
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sNew,"Grid",1);
+}

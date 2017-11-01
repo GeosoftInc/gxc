@@ -1,0 +1,307 @@
+//===========================================================================
+NAME          = "FFT space -> frequency domain"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D/Advanced Usage"
+
+DESCRIPTION   = "
+
+Transform a channel from the space domain to the frequency domain.  Three
+output channels are created.  They will have the same name as the input
+channel but extension \"_r\", \"_i\" and \"_w\" for real, imaginary and
+wavenumber components of the transform.
+
+Parameters: 
+
+   FFTIN.IN  - Name of the channel to transform
+      .DETRD - Type of trend line to remove
+                 \"remove mean value\"                          , 3
+                 \"remove trend line based on all data points\" , 2 (the default)
+                 \"remove trend line based on two edge points\" , 1
+                 \"do not remove trend\"                        , 0
+      .EXP   - Minimum expansion (%)  (the default: 10%)
+"
+// Revision History:
+// v7.0.1: Fixed incorrect lock on InCh preventing update of the channel REG.
+// v5.1.6: Added a message "1D-FFT does not support array channel filtering!"
+// v5.1.8: Modified to add de-trend and expansion parameters.
+
+//===========================================================================
+
+RESOURCE = "fftin.gr"
+#include "fftin.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sRCh,sICh,sWCh; // Channel Names
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh,RCh,ICh,WCh;  // Channel handles
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+VV         VVs,VVr,VVi;       // VV's
+FFT        hFFT;              // FFT object
+EXP        Exp;               // Expression
+REG        Reg;               
+
+int        i;                 // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iDeTrend;          // Type of trend line to remove
+real       rExpansion;        // Minimum expansion (%)
+
+string(STR_DEFAULT_SHORT) sTemp;    // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                            Filter CORRECTION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      i = 1;
+      while(i!=0) {
+      
+         switch(i) {
+         
+            case 1:
+   
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("FFTIN1");
+
+               // --- Set up lists ---
+    
+               List = GetList_DGW(Diag,_FFTIN1_0);
+               SymbLST_DB(Data,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+
+               // --- Set any Defaults from INI ---
+
+               SetInfoSYS_DGW(Diag,_FFTIN1_0,DGW_TEXT,"FFTIN","IN");     
+
+               // --- Run the Dialogue ---
+
+               i = iRunDialogue_DGW(Diag);
+               if (i==-1) Cancel_SYS();    // He hit cancel
+
+               // --- Get the Strings and replace in INI ---
+
+               GetInfoSYS_DGW(Diag,_FFTIN1_0,DGW_TEXT,"FFTIN","IN");     
+
+               // --- Destroy the Dialogue ---
+
+               Destroy_DGW(Diag);
+
+               break;
+            
+            case 2:
+   
+               Diag = Create_DGW("FFTIN2");
+
+               SetInfoSYS_DGW(Diag,_FFTIN2_0,DGW_LISTALIAS,"FFTIN","DETRD");     
+
+               i = iRunDialogue_DGW(Diag);
+
+               if (i!=-1) 
+                  GetInfoSYS_DGW(Diag,_FFTIN2_0,DGW_LISTALIAS,"FFTIN","DETRD");     
+
+               Destroy_DGW(Diag);
+               i = 1;
+               break;
+            
+            case 3:
+
+               Diag = Create_DGW("FFTIN3");
+
+               SetInfoSYS_DGW(Diag,_FFTIN3_0,DGW_TEXT,"FFTIN","EXP");     
+
+               i = iRunDialogue_DGW(Diag);
+
+               if (i!=-1) 
+                  GetInfoSYS_DGW(Diag,_FFTIN3_0,DGW_TEXT,"FFTIN","EXP");     
+
+               Destroy_DGW(Diag);
+               i = 1;
+               break;
+         } // end switch
+      } // end while
+   } // end if
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FFTIN","IN",sInCh);
+   Strcpy_STR(sRCh,sInCh); Strcat_STR(sRCh,"_r");
+   Strcpy_STR(sICh,sInCh); Strcat_STR(sICh,"_i");
+   Strcpy_STR(sWCh,sInCh); Strcat_STR(sWCh,"_w");
+
+   iDeTrend = iGetInt_SYS("FFTIN","DETRD");
+   if(iDeTrend==iDUMMY)          iDeTrend = 2;
+   rExpansion = rGetReal_SYS("FFTIN","EXP");
+   if(rExpansion==rDUMMY)        rExpansion = 10.0;
+
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+   if(iGetColVA_DB(Data, InCh) > 1)
+      Abort_SYS(_("1D-FFT does not support array channel filtering!"));
+
+
+   // --- Output channels ---
+
+   if (!iExistSymb_DB(Data,sRCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data,InCh,sRCh);       // Create it 
+   RCh = FindSymb_DB(Data,sRCh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sICh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data,InCh,sICh);       // Create it 
+   ICh = FindSymb_DB(Data,sICh,DB_SYMB_CHAN);
+
+   if (!iExistSymb_DB(Data,sWCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data,InCh,sWCh);       // Create it 
+   WCh = FindSymb_DB(Data,sWCh,DB_SYMB_CHAN);
+
+
+   // --- set up expression to convert to wavenumber ---
+
+   Exp = Create_EXP(Data,"$sWCh=$sWCh*6.2831853;",128);
+
+
+   // --- Lock the channel symbols ---
+
+   if ( (InCh != RCh) && (InCh != ICh) && (InCh != WCh))
+      LockSymb_DB(Data,InCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   else
+      Abort_SYS(_("Input and output channels are the same."));
+
+   LockSymb_DB(Data,RCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ICh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,WCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- get some VV's ---
+
+   VVs  = Create_VV(REAL,0);
+   VVi = Create_VV(REAL,0);
+   VVr = Create_VV(REAL,0);
+
+
+   // --- Set REG to RCh ---
+
+   Reg = Create_REG(50);  
+   SetInt_REG(Reg, "FFT_DETREND", iDeTrend);
+   SetReal_REG(Reg, "FFT_EXPANSION", rExpansion);
+   SetRegSymb_DB(Data, InCh, Reg);
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("FFT line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+
+   
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,InCh,VVs);
+
+
+
+      // --- if input VV is empty or all dummy, then don't do FFT process ---
+
+      if (iLength_VV(VVs) > 0) {
+
+         if (iFindDum_VV(VVs,0,(iLength_VV(VVs)-1),1,0) != -1) {
+
+
+            // --- FFT ---
+
+            hFFT = CreateEx_FFT(VVs,rGetFidIncr_VV(VVs),iDeTrend,rExpansion);
+            GetVV_FFT(hFFT,VVr,VVi);
+            Destroy_FFT(hFFT);
+
+
+            // --- Write the output VVs ---
+
+            PutChanVV_DB(Data,Line,RCh,VVr);
+            PutChanVV_DB(Data,Line,ICh,VVi);
+         }
+      }
+
+
+      // --- Make a wavenumber channel ---
+
+      MakeFid_DU(Data,Line,RCh,WCh);
+
+
+      // --- apply expression to convert to radians/m ---
+
+      UnLockSymb_DB(Data,WCh);
+      Math_DU(Data,Line,Exp);
+      LockSymb_DB(Data,WCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,RCh);
+   UnLockSymb_DB(Data,ICh);
+   UnLockSymb_DB(Data,WCh);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+   Destroy_REG(Reg);
+}

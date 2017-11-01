@@ -1,0 +1,310 @@
+//===========================================================================
+NAME          = "Create a Overlay"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+   Create a SEMPLOT Overlay File from a map group.
+   
+         SEMOVERLAY.OVERLAY      OVERLAY file name
+         SEMOVERLAY.GROUP        Selected group.
+"
+// Revision History
+// v6.3.0: Use new XField parameter names.
+//         Removed unused DATA, EDATA variables.
+//         New version of OverlayLST_SEMPLOT.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.7 Overlays now accessed by file names.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semoverlay.gr"
+#include "semoverlay.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+#define DELETE_GROUP(A) \
+   Strcpy_STR(sGroup, sType); \
+   Strcat_STR(sGroup, A);\
+   iGroups = iSize_LST(Lst);  \
+   for(i=iGroups-1;i>=0;i--) {   \
+      GetItem_LST(Lst, 0, i, sG); \
+      if(iStrncmp_STR(sGroup, sG, iStrlen_STR(sGroup), STR_CASE_TOLERANT)==0) \
+         DelItem_LST(Lst, i); \
+   }
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+
+EMAP        EMap;
+MAP         Map;
+
+MVIEW       View;
+LST         Lst, List, OverlayLST;
+REG         Reg;
+
+int i, iGroup, iGroups, iN, iRet, iType;
+
+string(200) sMsg, sType;
+string(STR_FILE) sMap, sOverlay, sName, sView, sPath;
+string(STR_DB_SYMBOL) sXStage, sYStage, sZStage, sXOxide, sYOxide, sZOxide, sGroup, sG;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("This GX must be run interactively"));
+
+
+   EMap = Current_EMAP();
+   GetCurrentView_EMAP(EMap, sView);
+
+   // --- See if this map is already an overlay map ---
+
+   Map = Lock_EMAP(EMap);
+
+   Reg = GetREG_MAP(Map);
+   GetInt_REG(Reg, "SEMPLOT_OVERLAY_MAP", iRet);
+   if(iRet==1)
+      Abort_SYS(_("The current map is already a SEMPLOT overlay map."));
+
+   UnLock_EMAP(EMap);
+
+   // --- See if the current view is an XYPlot or TRIPlot view ---
+
+   Lst = Create_LST(64);
+
+   iType = -1;
+   if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0)
+      iType = SEMPLOT_PLOT_XYPLOT;
+   else if(iStrncmp_STR(sView, "Triplot_", 8, STR_CASE_TOLERANT)==0)
+      iType = SEMPLOT_PLOT_TRIPLOT;
+
+   // --- If a required view is not the current view, search all the views ---
+
+   if(iType==-1) {
+
+      Map = Lock_EMAP(EMap);
+
+      ViewList_MAP(Map, Lst);
+
+      iN = iSize_LST(Lst);
+      for(i=0;i<iN;i++) {
+
+         GetItem_LST(Lst,0,i,sView);
+         if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0)
+            iType = SEMPLOT_PLOT_XYPLOT;
+         else if(iStrncmp_STR(sView, "Triplot_", 7, STR_CASE_TOLERANT)==0)
+            iType = SEMPLOT_PLOT_TRIPLOT;
+
+         // --- Set to this view ---
+                  
+         if(iType!=-1) break;
+      }
+
+      UnLock_EMAP(EMap);
+      
+
+      // --- Set to this view ---
+                  
+      if(iType!=-1)                     
+         iSetCurrentView_EMAP(EMap, sView);
+      
+   }
+
+   if(iType==-1) {
+      Abort_SYS(_("The current map does not appear to contain any XYPlot or TriPlot views."));
+   }
+
+   // --- Get the groups from the current view. First, try the marked groups ---
+
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map, sView, MVIEW_READ);
+   
+   iGroups = iListGroups_MVIEW(View, Lst, MVIEW_GROUP_LIST_MARKED);
+
+   // --- Remove all "standard" groups, ending "_Data", "_Labels" or "_Grid" ---
+
+   if(iType==SEMPLOT_PLOT_XYPLOT) 
+      Strcpy_STR(sType, "XYPlot_");
+   else
+      Strcpy_STR(sType, "TriPlot_");
+
+   DELETE_GROUP(_n("Data"))
+   DELETE_GROUP(_n("Labels"))
+   DELETE_GROUP(_n("Grid"))
+
+   if(iSize_LST(Lst)==0) {
+      
+      // --- Go through all the groups ---
+
+      iGroups = iListGroups_MVIEW(View, Lst, MVIEW_GROUP_LIST_ALL);
+
+      // --- Remove all "standard" groups, ending "_Data", "_Labels" or "_Grid" ---
+
+      DELETE_GROUP(_n("Data"))
+      DELETE_GROUP(_n("Labels"))
+      DELETE_GROUP(_n("Grid"))
+
+      if(iSize_LST(Lst)==0) {
+      
+         // --- Go through all the groups ---
+
+         Strcpy_STR(sMsg,_("There are no groups other than the standard ones to create an overlay from."));
+         Strcat_STR(sMsg,_("You must create a new group and add annotations within it to create an overlay."));
+         Abort_SYS(sMsg);
+      }
+   }
+
+
+   // --- Create list of current overlays to prevent duplication ---
+
+   OverlayLST = Create_LST(128);
+   OverlayLST_SEMPLOT(OverlayLST, SEMPLOT_EXT_SEMPLOT, SEMPLOT_PLOT_ALL);
+
+
+   // --- Create dialog ---
+      
+   while(1) {
+
+      Diag = Create_DGW("SEMOVERLAY");
+               
+      List = GetList_DGW(Diag,_SEMOVERLAY_1);
+      Copy_LST(List, Lst);
+            
+      GetString_SYS("SEMOVERLAY","GROUP",sGroup);
+      iGroup = iFindItem_LST(Lst, 0, sGroup);
+      if(iGroup==-1) {
+         GetItem_LST(Lst,0,0,sGroup);
+         SetString_SYS("SEMOVERLAY","GROUP",sGroup);
+      }
+
+      SetInfoSYS_DGW(Diag,_SEMOVERLAY_0,DGW_TEXT,"SEMOVERLAY","OVERLAY");
+      SetInfoSYS_DGW(Diag,_SEMOVERLAY_1,DGW_TEXT,"SEMOVERLAY","GROUP");
+               
+      iRet = iRunDialogue_DGW(Diag);
+      if (iRet == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_SEMOVERLAY_0,DGW_TEXT,"SEMOVERLAY","OVERLAY");
+      GetInfoSYS_DGW(Diag,_SEMOVERLAY_1,DGW_TEXT,"SEMOVERLAY","GROUP");
+                      
+      Destroy_DGW(Diag);
+
+
+      // --- get overlay name ---
+   
+      GetString_SYS("SEMOVERLAY","OVERLAY",sOverlay);
+      if(!iStrlen_STR(sOverlay))
+         Abort_SYS(_("Overlay name not specified"));
+
+
+      // --- If the overlay already exists, prompt to see if user should
+      //     overwrite existing overlay ---
+
+      if(iFindItem_LST(OverlayLST, 0, sOverlay)!=-1) {
+
+         Printf_STR(sMsg, sizeof(sMsg), _("The selected overlay \"%s\" already exists.\r\nDo you wish to overwrite it?"), sOverlay);
+         
+         if(!iDisplayQuestion_SYS(_("New Overlay"), sMsg)) continue;
+      }
+
+      break;
+
+   }
+   
+   
+   // --- get overlay name ---
+   
+   GetString_SYS("SEMOVERLAY","OVERLAY",sOverlay);
+   if(!iStrlen_STR(sOverlay))
+      Abort_SYS(_("Overlay name not specified"));
+
+   GetString_SYS("SEMOVERLAY","GROUP",sGroup);
+   if(!iStrlen_STR(sGroup))
+      Abort_SYS(_("Map group not specified"));
+
+   
+   // --- Create the overlay map name from the overlay name ---
+
+   Strcpy_STR(sMap, sOverlay);
+   Strcat_STR(sMap, "_Overlay");
+
+   FileCombineParts_STR("", "", sMap, "map", "", sName);
+
+
+   // --- Unload and delete if it already exists. Should have already
+   //     asked user to overwrite if this is true. ---
+
+   if(!iFindPathNameEx_SYS(sName, FIND_GEOSOFT, GEO_DIRECTORY_USER_ETC, sPath)) {
+      UnLoad_EMAP(sPath);   // Unload (harmless if not loaded)
+      iDeleteFile_SYS(sPath);
+   }
+
+
+   // --- Get the Oxides and Stages from the Map REG ---
+
+   Reg = GetREG_MVIEW(View);
+
+   Get_REG(Reg, "Components.XStage", sXStage, sizeof(sXStage));
+   Get_REG(Reg, "Components.YStage", sYStage, sizeof(sYStage));
+   Get_REG(Reg, "Components.ZStage", sZStage, sizeof(sZStage));
+
+   Get_REG(Reg, "Components.XField", sXOxide, sizeof(sXOxide));
+   Get_REG(Reg, "Components.YField", sYOxide, sizeof(sYOxide));
+   Get_REG(Reg, "Components.ZField", sZOxide, sizeof(sZOxide));
+
+   // --- If field values are not found, check the old syntax ---
+   
+   if(!iStrlen_STR(sXOxide) || !iStrlen_STR(sYOxide)) {
+      Get_REG(Reg, "Components.XOxide", sXOxide, sizeof(sXOxide));
+      Get_REG(Reg, "Components.YOxide", sYOxide, sizeof(sYOxide));
+      Get_REG(Reg, "Components.ZOxide", sZOxide, sizeof(sZOxide));
+   }
+  
+
+   // --- Create the overlay ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating Overlay"),1);
+   
+   ExportOverlay_SEMPLOT(sOverlay, sName, View, sGroup, iType, 
+                     sXStage, sXOxide, sYStage, sYOxide, sZStage, sZOxide, SEMPLOT_EXT_SEMPLOT);
+
+   
+   // --- Relocate the map... it should be in user\etc ---
+
+   if(iFindPathNameEx_SYS(sName, FIND_GEOSOFT, GEO_DIRECTORY_USER_ETC, sPath)) {
+
+      Printf_STR(sMsg, sizeof(sMsg), _("Error opening new overlay map file %s."), sName);
+      Abort_SYS(sMsg);
+   }
+
+   Map = Create_MAP(sPath,  MAP_WRITEOLD);
+
+
+   // --- Write to the new map REG to set it as an overlay map ---
+
+   Reg = GetREG_MAP(Map);
+   SetInt_REG(Reg, "SEMPLOT_OVERLAY_MAP", 1);
+
+   Destroy_MAP(Map);
+
+
+   Progress_SYS(0);
+
+      
+}

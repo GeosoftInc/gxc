@@ -1,0 +1,118 @@
+//===========================================================================
+NAME          = "Run a process in Windows"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   WINEXEC.COMMAND   command
+          .TYPE      \"E\" for EXE or COM
+                     \"D\" for BAT or system commands
+          .ARGS      command line arguments
+          .EXIT      \"H\" to hold screen when done,
+                     \"E\" to hold screen on error,
+                     \"D\" don't hold the screen
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+//===========================================================================
+
+RESOURCE = "winexec.gr"
+#include "winexec.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_LONG) sProcess;
+string(STR_DEFAULT_LONG) sArgs;
+string(2)   sTemp;
+
+DGW   Diag;
+int   i;
+int   iType,iExit,iWait;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("WINEXEC");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_WINEXEC_0,DGW_FILEPATH,"WINEXEC","COMMAND");
+      SetInfoSYS_DGW(Diag,_WINEXEC_1,DGW_TEXT,"WINEXEC","ARGS");
+      SetInfoSYS_DGW(Diag,_WINEXEC_2,DGW_LISTALIAS,"WINEXEC","TYPE");
+      SetInfoSYS_DGW(Diag,_WINEXEC_3,DGW_LISTALIAS,"WINEXEC","EXIT");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_WINEXEC_0,DGW_FILEPATH,"WINEXEC","COMMAND");
+      GetInfoSYS_DGW(Diag,_WINEXEC_1,DGW_TEXT,"WINEXEC","ARGS");
+      GetInfoSYS_DGW(Diag,_WINEXEC_2,DGW_LISTALIAS,"WINEXEC","TYPE");
+      GetInfoSYS_DGW(Diag,_WINEXEC_3,DGW_LISTALIAS,"WINEXEC","EXIT");
+                                                             
+   }
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("WINEXEC","COMMAND",sProcess);
+   GetString_SYS("WINEXEC","ARGS",sArgs);
+
+   GetString_SYS("WINEXEC","TYPE",sTemp);
+   if (iStrcmp_STR(sTemp,"W",STR_CASE_TOLERANT)==0) 
+      iType = SYS_RUN_TYPE_WINDOWS;
+   else if (iStrcmp_STR(sTemp,"E",STR_CASE_TOLERANT)==0) 
+      iType = SYS_RUN_TYPE_EXE;
+   else
+      iType = SYS_RUN_TYPE_DOS;
+
+   iWait = SYS_RUN_WIN_NOWAIT;
+   GetString_SYS("WINEXEC","EXIT",sTemp);
+   if (iStrcmp_STR(sTemp,"H",STR_CASE_TOLERANT)==0) 
+   {
+      iExit = SYS_RUN_HOLD_ALWAYS;
+      if (iType == SYS_RUN_TYPE_WINDOWS)
+         iWait = SYS_RUN_WIN_WAIT;
+   }
+   else if (iStrcmp_STR(sTemp,"E",STR_CASE_TOLERANT)==0) 
+   {
+      iExit = SYS_RUN_HOLD_ONERROR;
+      if (iType == SYS_RUN_TYPE_WINDOWS)
+         iWait = SYS_RUN_WIN_WAIT;
+   }
+   else
+      iExit = SYS_RUN_HOLD_NEVER;
+
+
+   // --- run the process ---
+
+   iRun_SYS(sProcess,sArgs,iType+iExit+iWait);
+
+}

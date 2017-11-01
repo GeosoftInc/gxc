@@ -1,0 +1,218 @@
+//===========================================================================
+NAME          = "Create a New Channel"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Create a New Channel in a database.
+
+Parameters: 
+
+     NEWCHAN.NAME         - Name of the New Channel
+            .DTYPE        - Channel data type
+            .SIZE         - Channel size, if String type data
+            .FORMAT       - Channel format
+            .DISPWIDTH    - Width of channel to display
+            .DISPDIG      - Number of digits to display
+            .ARRAYSIZE    - Number of array elements
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+// Revision History
+// v5.1.4: Fixed bug with undefined array size, running from scripts.
+// v5.1.3: Added array size parameter.
+//===========================================================================
+
+RESOURCE = "newchan.gr"
+#include "newchan.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define  MAX_CHAN_WIDTH 50
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCh, sCurLine;
+string(STR_DEFAULT_SHORT) sType;             // Data type parameter
+string(STR_DEFAULT_SHORT) sFormat;           // Data format parameter
+
+EDB        EData;
+DB         Data;
+DB_SYMB    Ch;                // Channel handle
+DB_SYMB    Line;              // Current line handle
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+int        iType;             // Data type category
+int        iSize;             // Channel size if string data type
+int        iFormat;           // Channel format
+int        iWidth;            // Display width
+int        iDig;              // Digits displayed 
+int        iArraySize;        // Array size
+
+//===========================================================================
+//                         CHANNEL CREATION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+
+   
+   // --- Get the current line ---
+
+   GetCurLine_EDB(EData, sCurLine);
+
+   
+   // --- Lock the DB ---
+
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("NEWCHAN");
+
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_NEWCHAN_0,DGW_TEXT,"NEWCHAN","NAME");     
+      SetInfoSYS_DGW(Diag,_NEWCHAN_1,DGW_TEXT,"NEWCHAN","DTYPE"); 
+      SetInfoSYS_DGW(Diag,_NEWCHAN_2,DGW_TEXT,"NEWCHAN","SIZE");           
+      SetInfoSYS_DGW(Diag,_NEWCHAN_3,DGW_TEXT,"NEWCHAN","FORMAT");           
+      SetInfoSYS_DGW(Diag,_NEWCHAN_4,DGW_TEXT,"NEWCHAN","DISPWIDTH");           
+      SetInfoSYS_DGW(Diag,_NEWCHAN_5,DGW_TEXT,"NEWCHAN","DISPDIG");           
+      SetInfoSYS_DGW(Diag,_NEWCHAN_6,DGW_TEXT,"NEWCHAN","ARRAYSIZE");           
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_NEWCHAN_0,DGW_TEXT,"NEWCHAN","NAME");     
+      GetInfoSYS_DGW(Diag,_NEWCHAN_1,DGW_TEXT,"NEWCHAN","DTYPE"); 
+      GetInfoSYS_DGW(Diag,_NEWCHAN_2,DGW_TEXT,"NEWCHAN","SIZE");          
+      GetInfoSYS_DGW(Diag,_NEWCHAN_3,DGW_TEXT,"NEWCHAN","FORMAT");
+      GetInfoSYS_DGW(Diag,_NEWCHAN_4,DGW_TEXT,"NEWCHAN","DISPWIDTH");
+      GetInfoSYS_DGW(Diag,_NEWCHAN_5,DGW_TEXT,"NEWCHAN","DISPDIG");
+      GetInfoSYS_DGW(Diag,_NEWCHAN_6,DGW_TEXT,"NEWCHAN","ARRAYSIZE");           
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("NEWCHAN","NAME",sCh);
+   GetString_SYS("NEWCHAN","DTYPE",sType);
+   iSize  = iGetInt_SYS("NEWCHAN","SIZE");
+   GetString_SYS("NEWCHAN","FORMAT",sFormat);
+   iWidth = iGetInt_SYS("NEWCHAN","DISPWIDTH");
+   iDig  = iGetInt_SYS("NEWCHAN","DISPDIG");
+   iArraySize = iGetInt_SYS("NEWCHAN","ARRAYSIZE");
+
+   // --- check all parameters ---
+        
+   if (iStrcmp_STR(sType,_n("Byte"),0) == 0)
+      iType = DB_CATEGORY_CHAN_BYTE;
+   else if (iStrcmp_STR(sType,_n("UShort"),0) == 0)
+      iType = DB_CATEGORY_CHAN_USHORT;
+   else if (iStrcmp_STR(sType,_n("Short"),0) == 0)
+      iType = DB_CATEGORY_CHAN_SHORT;
+   else if (iStrcmp_STR(sType,_n("Long"),0) == 0)
+      iType = DB_CATEGORY_CHAN_LONG;
+   else if (iStrcmp_STR(sType,_n("Float"),0) == 0)
+      iType = DB_CATEGORY_CHAN_FLOAT;
+   else if (iStrcmp_STR(sType,_n("Double"),0) == 0)
+      iType = DB_CATEGORY_CHAN_DOUBLE;
+   else if (iStrcmp_STR(sType,_n("String"),0) == 0)
+      iType = -(iSize);
+   else 
+      Abort_SYS(_("Invalid Channel data type"));
+
+   if ((iSize < 1) || (iSize > 4096))
+      Abort_SYS(_("Channel size parameter must be from 1 to 4096."));
+
+   if (iStrcmp_STR(sFormat,_n("Normal"),0) == 0)
+      iFormat = DB_CHAN_FORMAT_NORMAL;
+   else if (iStrcmp_STR(sFormat,_n("Exponent"),0) == 0)
+      iFormat = DB_CHAN_FORMAT_EXP;
+   else if (iStrcmp_STR(sFormat,_n("Time"),0) == 0)
+      iFormat = DB_CHAN_FORMAT_TIME;
+   else if (iStrcmp_STR(sFormat,_n("Date"),0) == 0)
+      iFormat = DB_CHAN_FORMAT_DATE;
+   else if (iStrcmp_STR(sFormat,_n("Geograph"),0) == 0)
+      iFormat = DB_CHAN_FORMAT_GEOGR;
+   else 
+      Abort_SYS(_("Invalid Channel format type"));
+   
+   if ((iWidth < 2) || (iWidth > MAX_CHAN_WIDTH))
+      Abort_SYS(_("Channel width must be from 2 to 50"));
+
+   if ((iDig < 0) || (iDig > MAX_CHAN_WIDTH))
+      Abort_SYS(_("Channel digits right of decimal must be from 0 to 50"));
+
+   if (iArraySize==iDUMMY) iArraySize = 1;
+   if (iArraySize < 0 || iArraySize > 4096)
+      Abort_SYS(_("Array channel size must be in the range 1 to 4096"));
+
+
+   // --- Does the Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sCh,DB_SYMB_CHAN))
+      Ch = CreateSymbEx_DB(Data,sCh,DB_SYMB_CHAN,DB_OWN_SHARED,iType,iArraySize);       // Create it 
+   else
+      Abort_SYS(_("New channel could not be created. The channel already exists in database."));
+
+   // --- Set the new channel's format, display and protection ---
+ 
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   SetChanFormat_DB(Data,Ch,iFormat);
+   SetChanWidth_DB(Data,Ch,iWidth);
+   SetChanDecimal_DB(Data,Ch,iDig);
+   SetChanProtect_DB(Data,Ch,DB_CHAN_UNPROTECTED);
+
+   // --- If the current line is a group, add the channel to the load list ---
+
+   Line = FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
+   if(Line!=NULLSYMB) {
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+      if(iLineCategory_DB(Data, Line)==DB_CATEGORY_LINE_GROUP)
+         AddAssociatedLoad_DB(Data, Line, Ch);
+
+      UnLockSymb_DB(Data,Line);
+   }
+
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,Ch,_("New channel"),"NEWCHAN;");
+
+
+   UnLockSymb_DB(Data,Ch);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

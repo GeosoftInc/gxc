@@ -1,0 +1,438 @@
+//===========================================================================
+NAME          = "LOOKUPDBCH"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Copy a channel from one database to another, using a lookup table
+created from a reference channel.
+
+Parameters:
+      LOOKUPDBCH.DB       Lookup database filename. 
+               .DEST      Destination database filename.  
+               .REFCH     Reference channel.
+               .DATACH    Data channel.
+               .LOOKUP    Lookup table method
+               .DIST      Max distance for 'close' lookup methods
+
+Original source and idea provided courtesy Joel Jansen
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Database Utilities"
+
+// Revision History:
+// v6.4.2 Extended to handle VA channels.
+// v6.4.0 Improved error messages for missing channels.
+//        Removed unnecessary iGetChanType_DB call.
+//        Replace one more hFindSymb_DB with hFindChan_DB (QA 9899).
+// v6.3.0 Ignore line selection status in the lookup DB.
+//        Ignore channels without data.
+// v6.2.0 Source and destination channel VVs should be same type.
+// v6.0.0 Reference channels can now be string type.
+// v5.1.5 Use hFindChan_DB instead of hFindSymb_DB(,,DB_SYMB_CHAN)
+// v5.1.4 New GX.
+//===========================================================================
+
+RESOURCE = "LOOKUPDBCH.gr"
+#include "LOOKUPDBCH.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+
+#define DATABASES 1
+#define CHANNELS 2
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         Diag;                            // Dialogue handle
+DB          hDBd,hDBs;                       // Database handles
+EDB         eDBd,eDBs;                       // Edit database handles
+DB_SYMB     Chd,ChRefd,Chs,ChRefs;           // Channel handles
+DB_SYMB     LineDBd,LineDBs;                 // Line handle
+LST         List,LstDBs,LstDBd;              // List handles
+VV          hVVd,hVVs,hVVrefd,hVVrefs;	      // Channel VV handles
+VA          hVAd,hVAs;                       // Channel VA handles
+VV          hVVsind, hVVind;                 // Index VV handles
+
+string(STR_FILE) sDBs, sDBd, sName;          // Name of input databases
+string(STR_DEFAULT) sLabel, sMsg;
+string(STR_DB_SYMBOL) sChRef,sChData,sLine;  // Channel/Line names
+
+int         i,iItem,iLookup,iNs,iType,iCol,iNData;                    
+real        rDist;
+
+
+//===========================================================================
+//                            LOOKUPDBCH CODE
+//===========================================================================
+
+{
+
+   eDBd = Current_EDB();
+   GetName_EDB(eDBd, sDBd);
+   hDBd = Lock_EDB(eDBd);
+
+
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS()) {
+   
+
+      while(1) {
+
+         // --- Get Lookup DB ---
+
+         Diag = Create_DGW("LOOKUPDBCH0");
+
+         SetInfoSYS_DGW(Diag,_LOOKUPDBCH0_0,DGW_FILEPATH,"LOOKUPDBCH","DB");   
+
+         i = iRunDialogue_DGW(Diag);         
+         if (i == -1) Cancel_SYS();
+   
+         GetInfoSYS_DGW(Diag,_LOOKUPDBCH0_0,DGW_FILEPATH,"LOOKUPDBCH","DB");   
+
+         Destroy_DGW(Diag);
+
+         GetString_SYS("LOOKUPDBCH","DB" ,sDBs);
+         
+         eDBs = Load_EDB(sDBs);
+         GetName_EDB(eDBs, sDBs);
+
+
+         // --- Databases cannot have the same name --- 
+
+         if (iStrcmp_STR(sDBd,sDBs,STR_CASE_TOLERANT) == 0) {
+            DisplayMessage_SYS(_("Database Error"), _("The current database must not be the same as the lookup database."));
+            continue;
+         }
+
+         hDBs = Lock_EDB(eDBs);
+         break;
+      }
+
+       
+      // --- Create the Dialogue ---
+               
+      Diag = Create_DGW("LOOKUPDBCH");
+
+               
+      // --- Set up lists ---
+               
+      List = GetList_DGW(Diag,_LOOKUPDBCH_1);
+      SymbLST_DB(hDBs,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_LOOKUPDBCH_2);
+      SymbLST_DB(hDBs,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      UnLock_EDB(eDBs);
+         
+               
+      while(1) {
+      
+         FileNamePart_STR(sDBs,sName,STR_FILE_PART_NAME_EXTENSION);
+         SetInfo_DGW(Diag,_LOOKUPDBCH_0,DGW_TEXT,sName);
+
+         SetInfoSYS_DGW(Diag,_LOOKUPDBCH_1,DGW_TEXT,"LOOKUPDBCH","REFCH");   
+         SetInfoSYS_DGW(Diag,_LOOKUPDBCH_2,DGW_TEXT,"LOOKUPDBCH","DATACH");    
+         SetInfoSYS_DGW(Diag,_LOOKUPDBCH_3,DGW_LISTALIAS,"LOOKUPDBCH","LOOKUP");    
+         SetInfoSYS_DGW(Diag,_LOOKUPDBCH_4,DGW_TEXT,"LOOKUPDBCH","DIST");    
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+          
+         if (i == -1) Cancel_SYS();
+
+       
+         // --- Get the Strings and replace in INI ---
+
+         GetInfoSYS_DGW(Diag,_LOOKUPDBCH_1,DGW_TEXT,"LOOKUPDBCH","REFCH");   
+         GetInfoSYS_DGW(Diag,_LOOKUPDBCH_2,DGW_TEXT,"LOOKUPDBCH","DATACH");    
+         GetInfoSYS_DGW(Diag,_LOOKUPDBCH_3,DGW_LISTALIAS,"LOOKUPDBCH","LOOKUP");    
+         GetInfoSYS_DGW(Diag,_LOOKUPDBCH_4,DGW_TEXT,"LOOKUPDBCH","DIST");    
+
+               
+         // --- Validate lookup method with distance ---
+
+         iLookup = iGetInt_SYS("LOOKUPDBCH","LOOKUP");
+         rDist = rGetReal_SYS("LOOKUPDBCH","DIST");
+
+         if(iLookup == VV_LOOKUP_NEARESTCLOSE ||
+            iLookup == VV_LOOKUP_INTERPCLOSE) {
+ 
+            if(rDist == rDUMMY) {
+               DisplayMessage_SYS(_("Lookup Error"), _("The lookup \"close\" options require a maximum search distance."));
+               continue;
+            }
+         }
+         break;                    
+      }
+      
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get and validate parameters ---
+
+   GetString_SYS("LOOKUPDBCH","DB" ,sDBs);
+   if(!iStrlen_STR(sDBs))
+      Abort_SYS(_("No lookup database specified."));
+   
+
+   // --- Get Databases ---
+
+   eDBs = Load_EDB(sDBs);
+   hDBs = Lock_EDB(eDBs);
+   
+
+   // --- Get channels ---
+
+   GetString_SYS("LOOKUPDBCH","REFCH",  sChRef);  
+   GetString_SYS("LOOKUPDBCH","DATACH", sChData);  
+                 
+
+   // --- Do the source channels exist ? ---
+
+   ChRefs = FindChan_DB(hDBs,sChRef);
+   if(ChRefs==NULLSYMB)
+   {
+      Printf_STR(sMsg, sizeof(sMsg), _("Lookup reference channel \"%s\" does not exist."), sChRef);
+      Abort_SYS(sMsg);
+   }
+
+   ChRefd = FindChan_DB(hDBd,sChRef);
+   if(ChRefd==NULLSYMB)
+   {
+      Printf_STR(sMsg, sizeof(sMsg), _("Destination reference channel \"%s\" does not exist."), sChRef);
+      Abort_SYS(sMsg);
+   }
+
+   Chs = FindChan_DB(hDBs,sChData);
+   if(Chs==NULLSYMB)
+   {
+      Printf_STR(sMsg, sizeof(sMsg), _("Lookup data channel \"%s\" does not exist."), sChData);
+      Abort_SYS(sMsg);
+   }
+
+
+   // --- Does the destination data channel exist ? ---
+
+   Chd = FindChan_DB(hDBd,sChData);
+   if(Chd==NULLSYMB) {
+      Chd = DupSymbAcross_DB(hDBs,hDBd, Chs);       // Create it 
+   }
+
+   
+   // --- Validate lookup method with distance ---
+
+   iLookup = iGetInt_SYS("LOOKUPDBCH","LOOKUP");
+   rDist = rGetReal_SYS("LOOKUPDBCH","DIST");
+
+   if(iLookup == VV_LOOKUP_NEARESTCLOSE ||
+      iLookup == VV_LOOKUP_INTERPCLOSE) {
+
+      if(rDist == rDUMMY)
+         Abort_SYS(_("The lookup \"close\" options require a maximum search distance."));
+   }
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(hDBs,ChRefs,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDBs,Chs,   DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDBd,ChRefd,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(hDBd,Chd,   DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   
+   // --- Make LSTs of the lines in both databases, but operate only on the
+   //     selected lines in the destination database. ---
+
+   LstDBs = Create_LST(STR_DB_SYMBOL*2);
+   SymbLST_DB(hDBs, LstDBs, DB_SYMB_LINE);
+
+   LstDBd = Create_LST(STR_DB_SYMBOL*2);
+   SelectedLineLST_DB(hDBd, LstDBd);
+
+
+   // --- Keep only items shared by both lists.  ---
+
+   iNs = iSize_LST(LstDBs);
+   for(i=iNs-1;i>=0;i--) {     
+      GetItem_LST(LstDBs, 0, i, sLine);
+      iItem = iFindItem_LST(LstDBd, 0, sLine);
+      if(iItem==-1) 
+         DelItem_LST(LstDBs, i);
+   }
+
+   iNs = iSize_LST(LstDBs);
+   if(iNs==0)
+      Abort_SYS(_("The source and destination databases do not share any selected lines."));
+
+
+   // --- Create VVs. The Source and Destination VVs must be the same type for the Lookup function. ---
+   
+   iType = iGetChanType_DB(hDBs, ChRefs);
+   hVVrefs = CreateExt_VV(iType,0);     // reference data - source DB
+   hVVrefd = CreateExt_VV(iType,0);     // reference data - destination DB
+   hVVsind = Create_VV(INT, 0);    // sort index
+   hVVind  = Create_VV(REAL, 0);    // look-up index
+
+
+   // --- Create data VVs ---
+
+   iType = iGetChanType_DB(hDBs, Chs);
+   iCol = iGetColVA_DB(hDBs, Chs);
+   if(iCol==1)
+   {
+      hVVs = CreateExt_VV(iType, 0);
+      hVVd = CreateExt_VV(iType, 0);
+   }
+   else
+   {
+      hVAs = CreateExt_VA(iType, 0, iCol);
+      hVAd = CreateExt_VA(iType, 0, iCol);
+   }
+
+      
+   // --- Go through all the matched lines ---
+
+   Progress_SYS(1);
+   for(i=0;i<iNs;i++) {
+
+      // --- Get and lock the lines ---
+   
+      GetItem_LST(LstDBs, 0, i, sLine);
+   
+      LineDBs = FindSymb_DB(hDBs, sLine, DB_SYMB_LINE);
+      LockSymb_DB(hDBs,LineDBs,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      LineDBd = FindSymb_DB(hDBd, sLine, DB_SYMB_LINE);
+      LockSymb_DB(hDBd,LineDBd,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+      
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Merging line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(i,iNs);
+  
+
+      // --- Read source and destination reference channels, and the source data channel ---
+
+      GetChanVV_DB(hDBs,LineDBs,ChRefs,hVVrefs);
+      GetChanVV_DB(hDBd,LineDBd,ChRefd,hVVrefd);
+      if(iCol==1)
+         GetChanVV_DB(hDBs,LineDBs,Chs,hVVs);
+      else
+         GetChanVA_DB(hDBs,LineDBs,Chs,hVAs);
+     
+     
+      // --- If there is no data in the source data, there is nothing to do ---
+      
+      if(iCol==1)
+			iNData = iLength_VV(hVVs);
+		else
+			iNData = iLen_VA(hVAs);
+
+		if(iNData > 0)
+		{      
+	      
+			// --- Sort the reference channel and create an index ---
+
+			SortIndex1_VV(hVVrefs, hVVsind, VV_SORT_ASCENDING);
+
+
+			// --- Sort the reference and data channel using the index. The table lookup
+			//     method requires that the reference be in ascending order. ---
+
+			IndexOrder_VV(hVVsind, hVVrefs);       // sorts into ascending order
+	      
+			if(iCol==1)
+				IndexOrder_VV(hVVsind, hVVs);          
+			else
+				IndexOrder_VA(hVVsind, hVAs);          
+
+
+			// --- Create index VV for lookup into source reference ---
+
+			SetupIndex_VV(hVVrefs, hVVrefd, hVVind, iLookup, rDist);
+
+
+			// --- Create output data from index ---
+
+			if(iCol==1)
+				LookupIndex_VV(hVVs, hVVind, hVVd);
+			else
+				LookupIndex_VA(hVAs, hVVind, hVAd);
+
+
+			// --- Write data to destination ---
+
+			if(iCol==1)
+				PutChanVV_DB(hDBd,LineDBd,Chd,hVVd);
+			else
+				PutChanVA_DB(hDBd,LineDBd,Chd,hVAd);
+		}
+
+
+      // --- Unlock lines ---
+
+      UnLockSymb_DB(hDBs,LineDBs);
+      UnLockSymb_DB(hDBd,LineDBd);
+
+   }
+
+
+   // --- Add lookup table name used to the 'label' entry for the channel symbol
+   
+   Strcpy_STR(sLabel,_("Source: "));
+   RelativeFileName_SYS(sDBs,sDBs);
+   Strcat_STR(sLabel,sDBs);
+   SetChanLabel_DB(hDBd,Chd,sLabel);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(hDBd,Chd, _("LOOKUPDBCH"),"LOOKUPDBCH;");
+
+
+   // --- Release the channel locks ---
+
+   UnLockSymb_DB(hDBs, Chs);
+   UnLockSymb_DB(hDBs, ChRefs);
+   UnLockSymb_DB(hDBd, Chd);
+   UnLockSymb_DB(hDBd, ChRefd);
+
+
+   // --- Release the Databases ---
+
+   UnLock_EDB(eDBd);
+   UnLock_EDB(eDBs);
+
+
+   // --- Make destination database current, and load the channel ---
+
+   MakeCurrent_EDB(eDBd);
+   LoadChan_EDB(eDBd,sChData);
+
+   
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+
+}

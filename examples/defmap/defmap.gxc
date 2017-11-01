@@ -1,0 +1,262 @@
+//===========================================================================
+NAME          = "Create a new default map"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+
+   DEFMAP.MAP       name of the map, cleared after calling.
+         .NOMARGIN  0 - Use a 0.5 cm margin, 1 - No margin (default)
+"
+// Revision History
+// v7.1.0: NOMARGIN default was actually implemented to be 1.
+// v6.0.0: Ensure at least default units are set in new map.
+// v5.1.7: For oriented views, use XYZ status bar.
+// v5.1.4: For oriented views, use XYZ status bar.
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+
+string(STR_FILE)  sMap;
+string(STR_DEFAULT) sPrompt;
+string(STR_DEFAULT) sTmpl;
+
+MAP   Map;
+MVIEW View;
+SBF   hSBF;
+BF    hBF;
+IPJ   hIPJ, hIPJ2;
+REG   MapReg;
+
+real  rMinX;     // Minimum X of map area (ground units)
+real  rMaxX;     // Maximum X of map area (ground units)
+real  rMinY;     // Minimum Y of map area (ground units)
+real  rMaxY;     // Maximum Y of map area (ground units) 
+
+real  rConv;     // Conversion factor (to units/meter) (rDummy for default)
+real  rScale;    // externally set map scale
+real  rVertExag; // externally set vertical exaggeration (1.0 by default)
+real  rSize, rSizeX, rSizeY, rInsideEdge, rFact;
+int   i,iOK,iOrient,iNoMargin;
+
+string(STR_DEFAULT) sSize, sVal, sUnits;
+
+
+//===========================================================================
+
+{
+
+   // --- get the data range ---
+
+   if(!iExistReal_SYS("XYRANGE","MIN_X") ||
+      !iExistReal_SYS("XYRANGE","MIN_Y") ||
+      !iExistReal_SYS("XYRANGE","MAX_X") ||
+      !iExistReal_SYS("XYRANGE","MAX_Y"))
+      Abort_SYS(_("XYRANGE parameters not set."));
+
+   rMinX = rGetReal_SYS("XYRANGE","MIN_X");
+   rMinY = rGetReal_SYS("XYRANGE","MIN_Y");
+   rMaxX = rGetReal_SYS("XYRANGE","MAX_X");
+   rMaxY = rGetReal_SYS("XYRANGE","MAX_Y");
+
+	
+	// --- get vertical exaggeration - reset each time ---
+
+	rVertExag = rGetReal_SYS("DEFMAP", "VERTICAL_EXAGGERATION");
+	if(rVertExag != rDUMMY)
+		SetString_SYS("DEFMAP", "VERTICAL_EXAGGERATION", "");
+
+	if(rVertExag == rDUMMY || rVertExag <= 0.0)
+		rVertExag = 1.0;
+
+
+   // --- 
+   // If the "MAP" parameter is set, use it for the map name, otherwise
+   // create a unique map name.
+   // ---
+   
+   GetString_SYS("DEFMAP","MAP",sMap);
+   
+   
+   // --- Set up the margin. Apparently, it was originally intended that
+   //     the default value for "NOMARGIN" was to be 0, but the code
+   //     was implemented to give the opposite effect (it never checked
+   //     for a dummy and should have set dummy values to 0). Rather than
+   //     break existing scripts and tests, the documentation now
+   //     follows the implementation, and the default is 1 (no margin).   
+   
+   iNoMargin = iGetInt_SYS("DEFMAP","NOMARGIN");
+   if(iNoMargin!=0) iNoMargin = 1;
+
+   if(!iStrlen_STR(sMap)) {
+      i = 0;
+      while(i<1000) {
+         i++;
+         Strcpy_STR(sMap,"~Map");
+         FormatI_STR(i,sTmpl,4);
+         Strcat_STR(sMap,sTmpl);
+         Strcat_STR(sMap,".map");
+         if (iFileExist_SYS(sMap)==0) break;
+      }
+   } else {
+      iOK = FALSE;
+      while (iOK == FALSE) {
+         iOK = TRUE;   
+         FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);
+         if (iInteractive_SYS() && iFileExist_SYS(sMap)) {
+            Printf_STR(sPrompt, sizeof(sPrompt), _("\"%s\" exists. Overwrite?"), sMap);
+            if (iDisplayQuestion_SYS(_("Map exists"),sPrompt) == 0) {
+               if (Prompt_SYS(_("New map name"),sMap)) Cancel_SYS();
+               iOK = FALSE;
+            }
+         }
+      }
+   }
+   
+
+   // --- get IPJ ---
+   
+   rConv = 1.0;
+   hSBF = hGetSYS_SBF();
+   if (iExistFile_SBF(hSBF,"_xyrange.ipj")) {
+   
+      hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READ);
+      hIPJ = CreateS_IPJ(hBF);
+      DestroyEx_BF(hBF);
+      
+      
+      // --- Get and re-set the units. Even if there are no units defined in the IMG, GetUnit_IPJ
+      //     will return the user's default units. Calling SetUnit_IPJ will make these defaults
+      //     effective in the new map. ---
+      
+      GetUnits_IPJ(hIPJ,rConv,sTmpl);
+      SetUnits_IPJ(hIPJ,rConv,sTmpl);      
+   }
+   
+   
+   // --- open the map ---
+
+   if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+   
+   // --- Save the name of the new map for other GXs ---
+
+   SetString_SYS("DEFMAP","NEWMAP",sMap);
+   rScale = rGetReal_SYS("DEFMAP","MAPSCALE");
+
+   rSize = 30.0;     // make map 30cm by 30cm
+
+   if (iNoMargin)
+      rInsideEdge = 0.0;
+   else 
+      rInsideEdge = 0.5;
+   
+   if(rScale != rDUMMY) {
+
+      // --- Create a size large enough to fit the map ---
+
+      rSizeX = 100.0*(rMaxX - rMinX)/rConv/rScale;
+      rSizeY = 100.0*(rMaxY - rMinY)/rConv/rScale;
+		rSizeY *= rVertExag;
+      rSize = rSizeX;
+      if(rSizeY > rSize) 
+         rSize = rSizeY;
+
+
+      rSize += 2.0*rInsideEdge;
+      rSize *= 1.05; // add a bit
+
+      // --- Round up to the nearest 10 cm ---
+
+      rSize = 10.0*rCeil_MATH(rSize/10.0);
+   }
+
+   if(rSize < 30.0) rSize = 30.0;
+
+   FormatR_STR(rSize,sVal,10,2);
+   Strcpy_STR(sSize, sVal);
+   Strcat_STR(sSize, ",");
+   Strcat_STR(sSize, sVal);
+
+
+   // --- set up views from an MDF ---
+
+   if (iNoMargin) 
+      Mapset2_MVU(Map,"","*Data",rMinX,rMaxX,rMinY,rMaxY,sSize,0,1,
+                 rScale,rVertExag,rConv,0.0,0.0,0.0,0.0,0.0);
+   else
+      Mapset2_MVU(Map,"","*Data",rMinX,rMaxX,rMinY,rMaxY,sSize,0,0,
+                 rScale,rVertExag,rConv,0.0,0.0,0.0,0.0,rInsideEdge);
+
+              
+              
+   // --- get/set IPJ ---
+   
+   if (iExistFile_SBF(hSBF,"_xyrange.ipj")) {
+   
+      View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+      SetIPJ_MVIEW(View,hIPJ);
+
+      // --- If this is an oriented IPJ, set the status bar to show X, Y and Z locations ---
+
+      iOrient = iGetOrientation_IPJ(hIPJ);
+      if(iOrient != IPJ_ORIENT_DEFAULT &&
+         iOrient != IPJ_ORIENT_PLAN) {
+         
+         // --- Create blank user IPJ to reverse the warp ---
+   
+         hIPJ2 = Create_IPJ();
+
+         GetUnits_IPJ(hIPJ, rFact, sUnits);
+         SetUnits_IPJ(hIPJ2, rFact, sUnits);
+
+         ClearWarp_IPJ(hIPJ2);
+         SetUserIPJ_MVIEW(View,hIPJ2);
+
+   
+         // --- Set Working IPJ now because SetUserIPJ_MVIEW sets the
+         //     working IPJ as well ---
+
+         SetWorkingIPJ_MVIEW(View,hIPJ2);  
+
+         Destroy_IPJ(hIPJ2);
+      }
+      
+   }
+   
+   
+   // --- sreate a starting map REG ---
+   
+   MapReg = GetREG_MAP(Map);
+   SetReal_REG(MapReg,"MAP.MARGIN_INSIDE",rInsideEdge);
+   SetREG_MAP(Map,MapReg);
+   
+   
+   
+   // --- Delete _xyrange.ipj file if it exists ---
+   
+   if (iExistFile_SBF(hSBF,"_xyrange.ipj")) 
+      DelFile_SBF(hSBF, "_xyrange.ipj");
+   
+   
+   // --- done ---
+
+   Destroy_SYS(Map);
+   Destroy_SYS(hSBF);
+   Destroy_SYS(MapReg);
+
+
+   // --- Display Map ---
+
+   Load_EMAP(sMap);
+      
+   SetString_SYS("DEFMAP","MAP","");      
+   SetString_SYS("DEFMAP","MAPSCALE","");       // must be set every time
+   
+   
+   
+      
+}

@@ -1,0 +1,447 @@
+//===========================================================================
+NAME          = "Import a Microstation DGN file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Import a Microstation DGN file.
+
+    IMPORTDGN.FILES   Microstation DGN file(s), delimited with '|'.
+    IMPORTDGN.DBOUT   1: Import items to a database 0: Don't import
+    IMPORTDGN.DB      New database name
+    IMPORTDGN.MAPOUT  0: Current map, 1: New Map
+    Current Map:
+      IMPORTDGN.VIEW     		0: Current data view, 1: 3D View    
+      IMPORTDGN.VIEW3DNAME    Name of 3D view to import into in scripting mode (defaults to 3D)
+    New Maps:
+      IMPORTDGN.MAP      New map name
+      IMPORTDGN.MAPSCALE New map scale (optional) for new maps, 2D views.
+      IMPORTDGN.ORIENT   0:Plan map, 1:N-S section, 2:E-W section
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map/Import"
+
+// Revision History:
+// v7.1.0: Change how 3D imports are handled (only from within 3D viewer, but supports scripting with name)
+// v6.3.0   Call GetDisplayAreaRaw_EMAP only in interactive mode.
+//          Added ESRI options.
+// v6.2.0: Rewrite to new design like the new IMPSURPAC GX.
+// v6.0.0: Make detection of sections a user option.
+// v5.1.8: Set view orientations in new maps for section DGNs.
+// v5.1.6: New GX based on IMPORTMI
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IMPORTDGN.gr"
+#include "IMPORTDGN.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+
+EMAP        EMap;             // Map handle
+MAP         Map;              // Map handle
+
+MVIEW       MView;            // Map View handle
+IPJ         hIPJ;					// Projection handle
+GIS         hGIS;             // GIS handle
+LST         FileLST;          // Files
+
+DGW         Diag;             // Dialogue handle
+
+string(STR_GROUP) sGrpName;
+string(STR_FILE) sDataFile,sDB,sInfo,sMap,sTemp;
+string(STR_DEFAULT_SHORT) sGroup, sName;
+int iDB, iRet, iNewMap, iOrientation;
+
+real rScale;
+string(STR_VIEW) s3DView, sView;
+string(STR_DEFAULT_SHORT) sStr;
+string(STR_MULTI_PATH) sFiles;
+
+int iFile,iFiles,iOrient,i3D,iNewMapCreated,iNewDBCreated;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+		i3D = 0;
+		if (iHaveCurrent_EMAP())
+		{
+		   EMap = Current_EMAP();
+			i3D = iIs3DView_EMAP(EMap);
+		}
+
+      if(i3D)
+      {
+      
+         // --- Put current values into the dialogue --
+
+         Diag = Create_DGW("IMPORTDGN_3D");
+         SetInfoSYS_DGW(Diag,_IMPORTDGN_3D_0,DGW_FILEPATH, "IMPORTDGN","FILES");  
+         
+
+         // --- Run the Dialogue ---
+
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();
+         
+
+         // --- Read the returned values from the dialogue ---
+       
+         GetInfoSYS_DGW(Diag,_IMPORTDGN_3D_0,DGW_FILEPATH, "IMPORTDGN","FILES");
+         Destroy_DGW(Diag);
+      }
+      else
+      {
+      
+         // --- Put current values into the dialogue --
+
+         Diag = Create_DGW("IMPORTDGN");
+         SetInfoSYS_DGW(Diag,_IMPORTDGN_0,DGW_FILEPATH, "IMPORTDGN","FILES");  
+         SetInfoSYS_DGW(Diag,_IMPORTDGN_1,DGW_LISTALIAS, "IMPORTDGN","DBOUT");  
+         
+
+         // --- Run the Dialogue ---
+
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();
+         
+
+         // --- Read the returned values from the dialogue ---
+       
+         GetInfoSYS_DGW(Diag,_IMPORTDGN_0,DGW_FILEPATH, "IMPORTDGN","FILES");
+         GetInfoSYS_DGW(Diag,_IMPORTDGN_1,DGW_LISTALIAS, "IMPORTDGN","DBOUT");  
+         Destroy_DGW(Diag);
+      
+      
+         // --- Set map target ---
+         
+         SetInt_SYS("IMPORTDGN","MAPOUT", iRet);   // 0: Current map, 1: New map
+         iNewMap = iRet;
+         if(iNewMap==1)  // New map
+         {
+            Diag = Create_DGW("IMPORTDGNNEW");
+            SetInfoSYS_DGW(Diag,_IMPORTDGNNEW_0,DGW_LISTALIAS, "IMPORTDGN","ORIENT");  
+            SetInfoSYS_DGW(Diag,_IMPORTDGNNEW_1,DGW_TEXT,      "IMPORTDGN","MAPSCALE");           
+            
+            if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag,_IMPORTDGNNEW_0,DGW_LISTALIAS, "IMPORTDGN","ORIENT");  
+            GetInfoSYS_DGW(Diag,_IMPORTDGNNEW_1,DGW_TEXT,      "IMPORTDGN","MAPSCALE");           
+            Destroy_DGW(Diag);
+         }
+      }
+   }
+      
+   
+   // --- Get and validate parameters ---
+
+   GetString_SYS("IMPORTDGN","FILES", sFiles);
+   iFiles = iCountTokens_STR(sFiles,"|");
+   if (iFiles == 0) Abort_SYS(_("No DGN Files specified."));
+
+   // --- Handle 3D ---
+
+	if (iInteractive_SYS())
+	{
+		SetInt_SYS("IMPORTDGN", "VIEW", i3D);
+		if (i3D)
+		{
+			Get3DViewName_EMAP(EMap, s3DView);
+			SetString_SYS("IMPORTDGN", "VIEW3DNAME", s3DView);
+		}
+	}
+	else
+	{
+		i3D = iGetInt_SYS("IMPORTDGN", "VIEW");
+		if (i3D != 1 && i3D != 0) 
+			i3D = 0;  // Default to current view
+		if (i3D)
+		{
+			GetString_SYS("IMPORTDGN", "VIEW3DNAME", s3DView);
+			if (iStrlen_STR(s3DView) == 0)
+				Strcpy_STR(s3DView, "3D");
+		}
+   }
+
+   if(i3D)
+   {
+      iDB = 0;
+      iNewMap = 0;   
+      iOrientation = 3;
+   }
+   else 
+   {
+
+      // --- Support the old character-based parameters. Now only
+      //     support the "New"  or "Don't import" options for database,
+      //     and "New" or "Current" for maps.
+
+      GetString_SYS("IMPORTDGN","DBOUT", sStr);
+      if (iCharComp_STR(sStr,"N") || iCharComp_STR(sStr,"1"))
+         iDB = 1;
+      else if (iCharComp_STR(sStr,"D") || iCharComp_STR(sStr,"0"))
+         iDB = 0;
+      else if (iCharComp_STR(sStr,"C"))
+         Abort_SYS(_("Import to current database no longer supported."));
+      else   
+         Abort_SYS(_("Invalid database import option"));
+
+      
+      GetString_SYS("IMPORTDGN","MAPOUT", sStr);
+      if (iCharComp_STR(sStr,"C") || iCharComp_STR(sStr,"0"))
+         iNewMap = 0;
+      else if (iCharComp_STR(sStr,"N") || iCharComp_STR(sStr,"1"))
+         iNewMap = 1;
+      else if (iCharComp_STR(sStr,"D") || iCharComp_STR(sStr,"2"))
+         Abort_SYS(_("The option to NOT import to a map is no longer supported."));
+      else   
+         Abort_SYS(_("Invalid map import option"));
+      
+      rScale = rGetReal_SYS("IMPORTDGN","MAPSCALE");
+      iOrientation = iGetInt_SYS("IMPORTDGN","ORIENT");
+      if(iOrientation<0 || iOrientation>2) iOrientation = 0;
+   }
+
+
+   // --- Transfer all files to a LST ---
+
+   FileLST = Create_LST(2*STR_FILE);
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {      
+      // --- get the file ---
+      
+      GetMFile_STR(sFiles,sDataFile,iFile);
+      AddItem_LST(FileLST, sDataFile, "");
+   }
+   
+  
+   iOrient = IPJ_ORIENT_PLAN;
+   iNewMapCreated = FALSE;
+   iNewDBCreated = FALSE;
+   for (iFile=0;iFile<iFiles;iFile++) 
+   {
+   
+      // --- get the file ---
+      
+      GetItem_LST(FileLST, 0, iFile, sDataFile);        
+      
+
+      // --- Create the GIS object ---
+
+      hGIS = Create_GIS(sDataFile,sInfo,GIS_TYPE_DGN);
+      hIPJ = GetIPJ_GIS(hGIS);
+            
+
+      // --- New Map ---
+      
+      if(iNewMap && !iNewMapCreated)           
+      {       
+         GetString_SYS("IMPORTDGN","MAP",sMap);
+         if (iStrlen_STR(sMap) == 0)
+         {
+            // --- Get the new map name ---
+
+            FileNamePart_STR(sDataFile, sMap, STR_FILE_PART_NAME);
+            SetString_SYS("IMPORTDGN","MAP",sMap);
+         }
+               
+         if(iInteractive_SYS()) {   
+
+            while(TRUE) {
+
+               Diag = Create_DGW("IMPORTDGNMAP");
+
+               SetInfoSYS_DGW(Diag,_IMPORTDGNMAP_0,DGW_FILEPATH, "IMPORTDGN","MAP");  
+               if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+               GetInfoSYS_DGW(Diag,_IMPORTDGNMAP_0,DGW_FILEPATH, "IMPORTDGN","MAP");
+               Destroy_DGW(Diag);
+
+               // --- open the map and set up views ---
+
+               GetString_SYS("IMPORTDGN","MAP",sMap);
+               if (iLoaded_EMAP(sMap)) {
+                  if (iDisplayQuestion_SYS(_("Map is open"), _("Replace currently open map?")))
+                     UnLoad_EMAP(sMap);
+                  else
+                     continue;
+               }
+
+               break;
+
+            }  // End While
+         }
+         
+
+			// --- Get the map name ---
+			   
+         GetString_SYS("IMPORTDGN","MAP",sMap);
+         if(!iStrlen_STR(sMap)) 
+            Abort_SYS(_("Output map name not specified."));
+         
+
+			// --- Unload and delete existing map ---   
+			         
+         if(iFileExist_SYS(sMap))
+         {
+	         if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+		      iDeleteFile_SYS(sMap);         
+		   }
+
+
+			// --- Create the new map ---
+			
+			CreateMap2D_GIS(hGIS, sMap, rScale, hIPJ, iOrientation);
+			
+			
+			// --- Load the new map ---
+
+			Load_EMAP(sMap);
+
+
+			// --- Don't do it again ---
+						
+         iNewMapCreated = TRUE;               
+      
+      } // end if(iNewMap && !iNewMapCreated)
+         
+               
+      // --- Get Map ---
+
+      EMap = Current_EMAP();
+
+
+      // --- Lock Map ---
+
+      Map  = Lock_EMAP(EMap);
+
+
+  	   // --- If importing to a 3D view, see if this is a 3D view (test needed for scripting) ---
+	   
+	   if(i3D) 
+	   {
+		   // --- Get the 3D view ---
+		        
+		   MView = Create_MVIEW(Map, s3DView, MVIEW_WRITEOLD);
+		   Strcpy_STR(sView, s3DView);
+
+			if (!iIsView3D_MVIEW(MView))
+			{
+					Printf_STR(sTemp, sizeof(sTemp), _("Importing to 3D View '%s' but it is not a 3D View"), s3DView);
+		      Abort_SYS(sTemp);
+	   	}
+	   }
+	   else 
+		{
+		   // --- Get the current data view ---
+		        
+		   MView = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
+		   GetName_MVIEW(MView, sView);
+		}
+
+      
+		// --- If this is not a new map, set the working IPJ to the GIS IPJ ---
+      
+      if(!iNewMap)
+	      SetWorkingIPJ_MVIEW(MView, hIPJ);
+
+         
+      // --- Set the group name ---
+
+      FileNamePart_STR(sDataFile, sName, STR_FILE_PART_NAME);
+      GenGroupName_STR("DGN",sName,"",sGrpName);
+      Strcpy_STR(sGroup,sGrpName);
+      SetThinRes_MVIEW(MView,-1.0);
+      StartGroup_MVIEW (MView, sGroup, MVIEW_GROUP_NEW);
+
+      
+      // --- import the map ---
+
+      Progress_SYS(1);
+      ProgName_SYS(_("Import DGN Map Data"),1);         
+      LoadMAP_GIS(hGIS, MView);
+      Progress_SYS(0);
+
+
+      // --- Destroy the view ---
+
+      Destroy_MVIEW(MView);
+      UnLock_EMAP(EMap);
+
+      
+ 
+      // ---  Import map elements information into a new database? ---
+      
+      if(iDB) 
+      {
+         
+         //--- Create a new database name from the file name ---
+         
+         if(!iNewDBCreated)
+         {
+            FileExt_STR(sDataFile, "gdb", sDB, FILE_EXT_FORCE);
+               
+            if (iInteractive_SYS()) {
+               
+               Diag = Create_DGW("IMPORTDGNDB");
+               SetInfo_DGW(Diag,_IMPORTDGNDB_0,DGW_TEXT, sDataFile);  
+               SetInfo_DGW(Diag,_IMPORTDGNDB_1,DGW_FILEPATH, sDB);  
+               if(iRunDialogue_DGW(Diag)!=0) Cancel_SYS();
+               GetInfo_DGW(Diag,_IMPORTDGNDB_1,DGW_FILEPATH, sDB);
+               Destroy_DGW(Diag);                  
+            }
+            
+               
+            // --- Create the new database ---
+
+            if (iLoaded_EDB(sDB) == 1) UnLoad_EDB(sDB);
+            Create_DB(sDB,10,256,10+128+20,10,100,"SUPER","");
+            iNewDBCreated = TRUE;
+         }
+
+            
+         // --- import the data ---
+         
+         EData = Load_EDB(sDB);
+         Data  = Lock_EDB(EData);
+
+         Progress_SYS(1);
+         ProgName_SYS(_("Import DGN Data"),1);
+         LoadGDB_GIS(hGIS, Data);
+         Progress_SYS(0);
+
+         UnLock_EDB(EData);
+      }
+      
+      
+      // --- Destroy objects ---
+
+      Destroy_IPJ(hIPJ);
+      Destroy_GIS(hGIS);      
+   }
+   
+   
+   // --- Set up the new database ---
+   
+   if(iDB) {
+       EData = Current_EDB();
+       DelLine0_EDB(EData);
+       LoadAllChans_EDB(EData);
+   }
+}

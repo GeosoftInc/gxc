@@ -1,0 +1,410 @@
+//===========================================================================
+NAME          = "GRIDGRIDASIG Analytic Signal Program"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Filters"
+
+DESCRIPTION   = "\
+
+Computes the analytic signal of an input grid
+		     
+Parameters: 
+
+     GRIDASIG.IN  - Name of input grid file
+             .OUT - Name of output analytic signal grid file
+             .METHOD - z-derivative method
+             .DXDYDZ - Retain derivative grids (0:No, 1:Yes)
+"
+// Revision History:
+// v7.0.0: Projection now set into dZ grid.
+// v6.3.0: Add option to retain derivative grids.
+//===========================================================================
+
+RESOURCE = "GRIDASIG.gr"
+#include "GRIDASIG.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sIn;        // Name of input grid file
+string(STR_FILE) sOut;       // Name of output analytic signal grid file
+
+IMG         IMGi;      //
+IMG         IMGi2;     // Grid image objects
+IMG         IMGi3;
+IMG         IMGo;     //
+IMG         IMGt;       // Image for the trend removed grid
+VM          VMcoef;     // VM contains trend coefficients (if any)
+DGW         Diag;       // Dialogue handle
+VV          VVHzDrv;    // Holds convolution filter values for horiz. deriv.
+IEXP        IEXP_asig;  // Analytic signal image expression
+IPJ         hIPJ;       // Input grid projection
+ 
+WA          WA_con;     // handle to control file _drvz.con
+PG          PG1;
+PG          PG2;
+TR          TR1; 
+int         iNX,iNY,iNXe,iNYe,iXo,iYo;     // grid size
+real        rXoe,rYoe;
+string(STR_FILE) sRefFil;      // Name of reference file (_ref.bin)
+
+int         i,iMethod, iSaveGrids; 
+real        rDx,rDy,rXo,rYo,rRot;          // grid info
+
+
+//===========================================================================
+//                           GRIDASIG CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS())  
+   {
+		// --- Create the Dialogue ---
+
+		Diag = Create_DGW("GRIDASIGForm");
+
+		// --- Set any Defaults from INI ---
+
+		SetInfoSYS_DGW(Diag,_GRIDASIGFORM_0,DGW_FILEPATH, "GRIDASIG","IN");
+		SetInfoSYS_DGW(Diag,_GRIDASIGFORM_1,DGW_FILEPATH, "GRIDASIG","OUT");
+      SetInfoSYS_DGW(Diag,_GRIDASIGFORM_2,DGW_LISTALIAS,"GRIDASIG","METHOD");
+      SetInfoSYS_DGW(Diag,_GRIDASIGFORM_3,DGW_LISTALIAS,"GRIDASIG","DXDYDZ");
+
+		// --- Run the Dialogue ---
+
+		i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+		// --- Put values back in INI ---
+
+		GetInfoSYS_DGW(Diag,_GRIDASIGFORM_0,DGW_FILEPATH, "GRIDASIG","IN");
+		GetInfoSYS_DGW(Diag,_GRIDASIGFORM_1,DGW_FILEPATH, "GRIDASIG","OUT");
+      GetInfoSYS_DGW(Diag,_GRIDASIGFORM_2,DGW_LISTALIAS,"GRIDASIG","METHOD");
+      GetInfoSYS_DGW(Diag,_GRIDASIGFORM_3,DGW_LISTALIAS,"GRIDASIG","DXDYDZ");
+
+		Destroy_DGW(Diag);
+   } 
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDASIG","IN",sIn);
+   GetString_SYS("GRIDASIG","OUT",sOut);
+   iMethod = iGetInt_SYS("GRIDASIG","METHOD");
+   iSaveGrids = iGetInt_SYS("GRIDASIG","DXDYDZ");
+   if(iSaveGrids!=1) iSaveGrids = 0;
+   
+   
+   // --- Validate essential parameters ---
+   
+   if (iStrlen_STR(sIn) <=0)
+      Abort_SYS(_("Input grid file name is invalid"));
+   if (iStrlen_STR(sOut) <=0)
+      Abort_SYS(_("X-derivative grid file name is invalid"));
+
+
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+   
+   // --- CALCULATE Z-DERIVATIVE GRID ---
+
+   if(iMethod==1)  {  // --- Convolution method
+   
+      // --- Create Images tied to the grids ---  
+      
+      IMGi = CreateFile_IMG(GS_DOUBLE,sIn,IMG_FILE_READONLY);
+      IMGo = CreateOutFile_IMG(GS_DOUBLE,"_dz.grd",IMGi); 
+      IMGt = CreateOutFile_IMG(GS_DOUBLE,"__tr_tmp.grd",IMGi); 
+
+      // --- Grid Trend Remove ---
+
+      ProgName_SYS(_("Grid Trend Remove ..."),1);
+
+      VMcoef = Create_VM(REAL,10);
+
+      if(GridTrnd_IMU(IMGi,IMGt,0,IMU_TREND_EDGE,1,VMcoef,3)) 
+      {
+         Destroy_IMG(IMGi);
+         Destroy_IMG(IMGo);
+         Destroy_IMG(IMGt);
+         Abort_SYS(_("Grid Trend Remove Failed!"));
+      }
+      
+      // --- Convoluting the grid ---
+
+      ProgName_SYS(_("Grid Convolution..."),1);
+
+      if (GridVD_IMU(IMGt,IMGo))
+      {
+         Destroy_IMG(IMGi);
+         Destroy_IMG(IMGo);
+         Destroy_IMG(IMGt);
+         Abort_SYS(_("Grid Vertical Derivative Failed!"));
+      }
+
+
+		// --- Copy the projection ---
+		
+		hIPJ = Create_IPJ();
+		GetIPJ_IMG(IMGi, hIPJ);
+		SetIPJ_IMG(IMGo, hIPJ);
+		SetIPJ_IMG(IMGt, hIPJ);
+		
+      Destroy_IMG(IMGi);
+      Destroy_IMG(IMGo);
+      Destroy_IMG(IMGt);
+      if(VMcoef)  Destroy_VM(VMcoef);
+      if (iFileExist_SYS("__tr_tmp.grd"))
+         iDeleteFile_SYS("__tr_tmp.grd");
+   
+   } else { // --- FFT method
+   
+      // Write Filter Control File
+
+      WA_con=Create_WA("_drvz.con",0);
+      i=1;
+      while (i<=5)
+      {
+         NewLine_WA(WA_con);
+         i++;
+      }
+      Puts_WA(WA_con,_n("DRVZ 1 /"));
+      NewLine_WA(WA_con);
+      Destroy_WA(WA_con);
+
+      // Create ref file name
+
+      FileNamePart_STR(sIn,sRefFil,STR_FILE_PART_NAME);
+      Strcat_STR(sRefFil,"_ref.bin");
+      
+      rDx = 1.0;
+      rDy = 1.0;
+      rXo = 0.0;
+      rYo = 0.0;
+      rRot= 0.0;
+      rXoe = 0.0;
+      rYoe = 0.0;
+      
+      // Get pager(PG1) from input grid ---
+
+      IMGi = CreateFile_IMG(GS_FLOAT,sIn,IMG_FILE_READONLY);
+      GetInfo_IMG(IMGi,rDx,rDy,rXo,rYo,rRot);
+      iNX = iNX_IMG(IMGi);
+      iNY = iNY_IMG(IMGi);
+      TR1 = Create_TR(1);  //iTOrder
+      PG1 = Create_PG(iNY,iNX,GS_FLOAT);
+      GetPG_IMG(IMGi,PG1);
+
+
+		// --- Get the projection ---
+		
+		hIPJ = Create_IPJ();
+		GetIPJ_IMG(IMGi, hIPJ);		
+      
+      Destroy_IMG(IMGi);
+      
+      
+      // Grid Trend Remove ---
+
+      PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+      if(Trend_PGU(PG1,PG2,TR1,0,1,rXo,rYo,rDx,rDy))
+      // Trend_PGU(PG1,PG2,TR1,iTOpt,iTBase,rXo,rYo,rDx,rDy))
+         Abort_SYS(_("Error executing Trend_PGU"));
+
+      // Grid Expand ---
+
+      if(Expand_PGU(PG2,PG1,20.0,0,0,0))
+      // Expand_PGU(PG2,PG1,rPEx,iTEx,iXX,iXY))
+         Abort_SYS(_("Error executing Expand_PGU"));
+      Destroy_PG(PG2);
+
+      iNYe = iNRows_PG(PG1);
+      iNXe = iNCols_PG(PG1);
+      iYo = (iNYe-iNY)/2;
+      iXo = (iNXe-iNX)/2;
+
+      // Grid Fill ---
+
+      RefFile_PGU(PG1,sRefFil);
+
+      if(Fill_PGU(PG1,1,0.0,-1,0,0,0.0,-1.0,0,1,sRefFil))
+      // Fill_PGU(PG1,iRollOpt,rRollBase,iZDist,iMxf,iMxp,rALim,rELim,iWLim,iNPass,sRefFil)
+         Abort_SYS(_("Error executing Fill_PGU")); 
+
+      // FFT2 forward transform ---
+
+      ReAllocate_PG(PG1,iNYe,iNXe+2);
+      TransPG_FFT2(PG1,0);                    // FFT2_PG_FORWARD  0
+                                               
+      // FFT2 Filter ---
+
+      FilterPG_FFT2(PG1,"_drvz.con",TR1,rDx,rDy,rRot);
+
+      // Inverse FFT ---
+      
+      TransPG_FFT2(PG1,1);                       // FFT2_PG_INVERSE  1
+      ReAllocate_PG(PG1,iNYe,iNXe);
+
+      // Grid Bool ---
+
+      if(Bool_PGU(PG1,sRefFil))
+         Abort_SYS(_("Error executing Bool_PGU")); 
+
+      PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+      CopySubset_PG(PG2,PG1,0,0,iYo,iXo,iNY,iNX);
+
+      // Output grid ---
+
+      IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNX,iNY,"_dz.grd");
+      SetInfo_IMG(IMGo,rDx,rDy,rXo,rYo,rRot);
+      SetTR_IMG(IMGo,TR1);
+      SetPG_IMG(IMGo,PG2);
+		SetIPJ_IMG(IMGo, hIPJ);
+      Destroy_IMG(IMGo);
+
+      Destroy_PG(PG1);
+      Destroy_PG(PG2);
+      Destroy_TR(TR1);
+
+      if (iFileExist_SYS(sRefFil))
+         iDeleteFile_SYS(sRefFil);
+   }
+
+   
+   // --- CALCULATE X-DERIVATIVE GRID ---
+
+    // X-Derivative Step 1: Create Images tied to the grids
+   
+   ProgName_SYS(_("Creating Images..."),1); 
+   
+   IMGi = CreateFile_IMG(GS_FLOAT,sIn,IMG_FILE_READONLY);
+   IMGo = CreateOutFile_IMG(GS_FLOAT,"_dx.grd",IMGi); 
+   
+   rDx = 1.0;
+   rDy = 1.0;
+   rXo = 0.0;
+   rYo = 0.0;
+   rRot= 0.0;
+   GetInfo_IMG(IMGi,rDx,rDy,rXo,rYo,rRot);
+
+    // X-Derivative Step 2: Create VV with filter values
+
+   VVHzDrv = Create_VV(REAL,10);
+   for (i=0;i<9;i++)
+      SetReal_VV(VVHzDrv,i,0.0);
+   SetReal_VV(VVHzDrv,3,-0.5/rDx);
+   SetReal_VV(VVHzDrv,5,0.5/rDx);            
+
+
+    // X-Derivative Step 3: GridFilt 
+
+   ProgName_SYS(_("Filtering Grid..."),1);
+  
+   if (GridFilt_IMU(IMGi,IMGo,1,1.0,IMU_FILT_DUMMY_NO,IMU_FILT_HZDRV_NO,IMU_FILT_FILE_NO,"",VVHzDrv))
+   {
+      Destroy_IMG(IMGi);
+      Destroy_IMG(IMGo);
+      Destroy_VV(VVHzDrv);
+      Abort_SYS(_("Grid filter operation failed."));
+   }
+
+   // --- Destroy Image ---
+   
+   Destroy_IMG(IMGo);
+   
+   
+   // --- CALCULATE Y-DERIVATIVE GRID ---
+    
+    // Y-Derivative Step 1: Create Images tied to the grids  
+   
+   ProgName_SYS(_("Creating Images..."),1); 
+   
+   IMGo = CreateOutFile_IMG(GS_FLOAT,"_dy.grd",IMGi); 
+
+    // Y-Derivative Step 2: Create VV with filter values
+
+   for (i=0;i<9;i++)
+      SetReal_VV(VVHzDrv,i,0.0);
+   SetReal_VV(VVHzDrv,1,0.5/rDy);
+   SetReal_VV(VVHzDrv,7,-0.5/rDy);            
+   
+    // Y-Derivative Step 3: GridFilt
+
+   ProgName_SYS(_("Filtering Grid..."),1);
+
+   if (GridFilt_IMU(IMGi,IMGo,1,1.0,IMU_FILT_DUMMY_NO,IMU_FILT_HZDRV_NO,IMU_FILT_FILE_NO,"",VVHzDrv))
+   {
+      Destroy_IMG(IMGi);
+      Destroy_IMG(IMGo);
+      Destroy_VV(VVHzDrv);
+      Abort_SYS(_("Grid filter operation failed."));
+   }
+
+   // --- Cleanup ---
+   
+   Destroy_IMG(IMGi);
+   Destroy_IMG(IMGo);
+   Destroy_VV(VVHzDrv);
+
+
+   // --- COMPUTE ANALYTIC SIGNAL ---
+
+   IEXP_asig=Create_IEXP();
+
+   IMGi = CreateFile_IMG(GS_DOUBLE,"_dx.grd",IMG_FILE_READONLY);
+   IMGi2 = CreateFile_IMG(GS_DOUBLE,"_dy.grd",IMG_FILE_READONLY);
+   IMGi3 = CreateFile_IMG(GS_DOUBLE,"_dz.grd",IMG_FILE_READONLY);
+   IMGo = CreateOutFile_IMG(GS_DOUBLE,sOut,IMGi);
+
+
+   AddGrid_IEXP (IEXP_asig,IMGi,"dx");
+   AddGrid_IEXP (IEXP_asig,IMGi2,"dy");
+   AddGrid_IEXP (IEXP_asig,IMGi3,"dz");
+   AddGrid_IEXP (IEXP_asig,IMGo,"asig");
+
+   DoFormula_IEXP (IEXP_asig,"asig=sqrt(dx*dx+dy*dy+dz*dz);",100);
+					  
+   // --- cleanup ---
+
+   Destroy_IEXP(IEXP_asig);
+   Destroy_IMG(IMGi);
+   Destroy_IMG(IMGi2);
+   Destroy_IMG(IMGi3);
+   Destroy_IMG(IMGo);
+   
+   
+   // --- erase intermediate files ---
+
+   if(iSaveGrids!=1)
+   {   
+      iDeleteFile_SYS("_dx.grd");
+      iDeleteFile_SYS("_dx.grd.gi");
+      iDeleteFile_SYS("_dy.grd");
+      iDeleteFile_SYS("_dy.grd.gi");
+      iDeleteFile_SYS("_dz.grd");
+      iDeleteFile_SYS("_dz.grd.gi");
+   }
+   
+
+   // --- done ---
+    
+   Progress_SYS(0);
+
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sOut,"Grid",1);
+   
+   
+}

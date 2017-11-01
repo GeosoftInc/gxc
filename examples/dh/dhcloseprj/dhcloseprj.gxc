@@ -1,0 +1,137 @@
+//===========================================================================
+NAME          = "Drill Hole - Close Project"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Close the current Drill Hole Project.
+
+"
+// Revision History
+// 5.1.8: Closes only Wholeplot maps.
+// 5.1.4: Closes only Wholeplot maps.
+// 5.1.2: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EMAP        EMap;
+MAP         Map;
+
+DH          Drill;
+REG         Reg;
+VV          VVf;
+LST         Lst;
+
+string(STR_FILE) sDB, sMap;
+int         i,iSaveClose,iN,iType,iIsESRI,lType;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+   // --- Is it ArcView? ---
+
+   iIsESRI = iIsESRI_DH();
+
+   if (iIsESRI)
+   {
+      if (iHaveCurrent_EDB())
+      {
+         // --- Unload all open database files ---
+
+         iSaveClose = iSaveCloseDocuments_PROJ(_n("Database"));
+         if (iSaveClose == -1)
+            Cancel_SYS();
+         else if (iSaveClose == 1)
+            Abort_SYS(_("Error closing all databases"));
+		else
+			CloseProject_ARCDH();
+      }
+   } else if (iHaveCurrent2_DH(sDB)) 
+   {
+      // --- get database ---
+   
+      Drill = Create_DH(sDB);
+         
+
+      // --- Get the list of databases in the project ---
+
+      VVf = Create_VV(-STR_FILE, 0);
+      GetDatabasesVV_DH(Drill, VVf);
+
+
+      // --- Destroy DH object to free databases ---
+
+      Destroy_DH(Drill);
+
+
+      // --- Unload them ---
+
+      iN = iLength_VV(VVf);
+      for(i=0;i<iN;i++) {
+
+         GetString_VV(VVf, i, sDB);
+         if(iLoaded_EDB(sDB))
+            UnLoad_EDB(sDB);
+      }
+   
+
+      // --- Unload open maps ---
+
+      Lst = Create_LST(STR_FILE);
+
+      iN = iGetMapsLST_EMAP(Lst, EMAP_PATH_FULL);
+      for(i=0;i<iN;i++) {
+
+         GetItem_LST(Lst, 0, i, sMap);
+         if(iLoaded_EMAP(sMap)) {
+
+            // --- See if it is a Wholeplot map ---
+
+            EMap = Load_EMAP(sMap);
+            Map = Lock_EMAP(EMap);
+
+            Reg = GetREG_MAP(Map);
+            UnLock_EMAP(EMap);
+
+            GetInt_REG(Reg,"DH_TYPE",iType);
+	    GetInt_REG(Reg,"DH_STANDALONE",lType);
+
+            if(iType != iDUMMY && lType != 1)
+               UnLoad_EMAP(sMap);
+         
+            Destroy_REG(Reg);
+         }
+      }
+
+      Destroy_LST(Lst);
+      Destroy_VV(VVf);
+   }
+}
+
+
+
+
+
+
+
+
+
+
+
+      

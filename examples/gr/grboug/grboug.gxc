@@ -1,0 +1,729 @@
+//===========================================================================
+NAME          = "Free-Air and Bouguer anomaly"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+
+   GRBOUG.BOUGCHAN      -  Bouguer anomaly channel.
+"
+
+// Revision History
+// v8.1:   User-supplied density for Bullard.
+// v8.1:   Added Bullard Correction as a channel.
+// v6.4.1: Reviewed and corrected.
+// v6.3.0: Don't delete existing output channels first.
+// v6.2.0: Added survey type parameter (ground/shipborne/airborne).
+// v5.1.8: IM Added support for scripting of parameters.
+// v5.1.7: SC Terrain correction channel now selectable.
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "grboug.gr"
+#include "grboug.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB      eDB;                       // database handle
+DB       hDB;                       // database handle
+
+DB_SYMB  Ch;
+DB_SYMB  Survey;                    // Survey Handle
+DGW      hDGW;                      // Dialogue handle
+REG      hWorkREG;                  // gravity reg
+EXP      Exp;
+LST      hLST;                      // list
+LST      hFormulaLST;               // formula list
+LST      hFaLST;                    // free air list
+VV       VVelev,VVlat,VVboug,VVwater,VVbullard;
+DB_SYMB  ElevCh,LatCh,BougCh,WaterCh,BullardCh;
+DB_SYMB  XCh,YCh,DEMCh;
+VV       VVx,VVy,VVdem;
+IMG      ImgDEM;
+
+real     rEm,rWm,rIm; 
+int      i,iRtn,iDEMelev;
+int      iLine,iTotLines,iProtect,iItem;
+real     rDensityEarth;
+
+string(STR_FILE)          sDB,sDEMgrid;
+string(STR_DEFAULT_LONG)  sFormula, sExp;
+string(STR_DEFAULT_LONG)  sFa;
+string(STR_DB_SYMBOL)     sGravity,sBouguer,sCBouguer,sTcorCh,sDEMelev,sBullard;
+string(STR_DEFAULT_SHORT) sDistance_units;
+string(STR_DEFAULT_SHORT) sDensity_earth;
+string(STR_DEFAULT_SHORT) sDensity_water;
+string(STR_DEFAULT_SHORT) sDensity_ice;
+string(STR_DEFAULT_SHORT) sUnits;
+string(STR_DEFAULT_SHORT) sCurvature;
+string(STR_DEFAULT_SHORT) sSurveyType;
+string(STR_DEFAULT)       sLabel,sTemp;
+
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   if (!iInteractive_SYS()) {
+   
+      // --- load database ---
+      
+      GetString_SYS("GRBOUG","DATABASE",sDB);
+      if (iStrMin2_STR(sDB))
+         Load_EDB(sDB);
+         
+   }
+   
+   eDB  = Current_EDB();
+   GetName_EDB(eDB,sDB);
+   FileNamePart_STR(sDB,sDB,STR_FILE_PART_NAME_EXTENSION);
+   hDB   = Lock_EDB(eDB);
+
+   iDEMelev = 0;
+
+
+   // --- get gravity REG ---
+
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+   
+   
+   // --- if a script, set registry settings from system settings ---
+   
+   if (!iInteractive_SYS()) {
+   
+      if (iExistString_SYS("GRAVRED","GRAVITY")) {
+         GetString_SYS("GRAVRED","GRAVITY",sGravity);
+         Set_REG(hWorkREG,"GRAVRED.GRAVITY",sGravity);
+      }   
+      if (iExistString_SYS("GRAVRED","BOUGUER")) {
+         GetString_SYS("GRAVRED","BOUGUER",sBouguer);
+         Set_REG(hWorkREG,"GRAVRED.BOUGUER",sBouguer);
+      }   
+      if (iExistString_SYS("GRAVRED","FORMULA")) {
+         GetString_SYS("GRAVRED","FORMULA",sFormula);
+         Set_REG(hWorkREG,"GRAVRED.FORMULA",sFormula);
+      }   
+      if (iExistString_SYS("GRAVRED","FREE_AIR")) {
+         GetString_SYS("GRAVRED","FREE_AIR",sFa);
+         Set_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa);
+      }   
+      if (iExistString_SYS("GRAVRED","CURVATURE")) {
+         GetString_SYS("GRAVRED","CURVATURE",sCurvature);
+         Set_REG(hWorkREG,"GRAVRED.CURVATURE",sCurvature);
+      }   
+      if (iExistString_SYS("GRAVRED","DENSITY_EARTH")) {
+         GetString_SYS("GRAVRED","DENSITY_EARTH",sDensity_earth);
+         Set_REG(hWorkREG,"GRAVRED.DENSITY_EARTH",sDensity_earth);
+      }   
+      if (iExistString_SYS("GRAVRED","DENSITY_WATER")) {
+         GetString_SYS("GRAVRED","DENSITY_WATER",sDensity_water);
+         Set_REG(hWorkREG,"GRAVRED.DENSITY_WATER",sDensity_water);
+      }   
+      if (iExistString_SYS("GRAVRED","DENSITY_ICE")) {
+         GetString_SYS("GRAVRED","DENSITY_ICE",sDensity_ice);
+         Set_REG(hWorkREG,"GRAVRED.DENSITY_ICE",sDensity_ice);
+      }   
+      if (iExistString_SYS("GRAVRED","DENSITY_ICE")) {
+         GetString_SYS("GRAVRED","DENSITY_ICE",sDensity_ice);
+         Set_REG(hWorkREG,"GRAVRED.DENSITY_ICE",sDensity_ice);
+      }   
+      if (iExistString_SYS("GRAVRED","TCORCH")) {
+         GetString_SYS("GRAVRED","TCORCH",sTcorCh);
+         Set_REG(hWorkREG,"GRAVRED.TCORCH",sTcorCh);
+      }   
+      if (iExistString_SYS("GRAVRED","SURVEYTYPE")) {
+         GetString_SYS("GRAVRED","SURVEYTYPE",sSurveyType);
+         Set_REG(hWorkREG,"GRAVRED.SURVEYTYPE",sSurveyType);
+      }   
+   }
+   
+   Get_REG(hWorkREG,"GRAVRED.GRAVITY",sGravity,sizeof(sGravity));
+   Get_REG(hWorkREG,"GRAVRED.BOUGUER",sBouguer,sizeof(sBouguer));
+   Get_REG(hWorkREG,"GRAVRED.FORMULA",sFormula,sizeof(sFormula));
+   Get_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa,sizeof(sFa));
+   Get_REG(hWorkREG,"GRAVRED.CURVATURE",sCurvature,sizeof(sCurvature));
+   Get_REG(hWorkREG,"GRAVRED.DISTANCE_UNITS",sDistance_units,sizeof(sDistance_units));
+   Get_REG(hWorkREG,"GRAVRED.DENSITY_EARTH",sDensity_earth,sizeof(sDensity_earth));
+   Get_REG(hWorkREG,"GRAVRED.DENSITY_WATER",sDensity_water,sizeof(sDensity_water));
+   Get_REG(hWorkREG,"GRAVRED.DENSITY_ICE",sDensity_ice,sizeof(sDensity_ice));
+   Get_REG(hWorkREG,"GRAVRED.TCORCH",sTcorCh,sizeof(sTcorCh));
+   GetString_SYS("GRAVRED","SURVEYTYPE",sSurveyType);
+   		
+   
+   // --- get/create formula lists ---
+   
+   hFormulaLST = Create_LST(256);
+   LoadFile_LST(hFormulaLST,"Gravity_Formulas");
+   if (iSize_LST(hFormulaLST) == 0) {
+   
+   
+      // --- the grparm gx contains the default formulas ---
+   
+#include "../gravity_formulas.gxh"
+   
+      SaveFile_LST(hFormulaLST,"Gravity_Formulas");
+      
+   }
+   
+   
+   // --- default formula ---
+   
+   if (iStrlen_STR(sFormula) == 0)
+      GetItem_LST(hFormulaLST,0,1,sFormula);
+      
+      
+   // --- free-air list ---      
+   
+   hFaLST = Create_LST(256);
+   LoadFile_LST(hFaLST,"Gravity_Free_Air");
+   if (iSize_LST(hFaLST) == 0) {
+   
+   
+      // --- the grparm gx contains the default formulas ---
+   
+#include "../gravity_free_air.gxh"
+   
+      SaveFile_LST(hFaLST,"Gravity_Free_Air");
+      
+   }
+   
+   // --- default free-air correction ---
+   
+   if (iStrlen_STR(sFa) == 0)
+      GetItem_LST(hFaLST,0,0,sFa);
+      
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      hDGW = Create_DGW("grboug");
+      
+
+      // --- Set up lists ---
+
+      hLST = GetList_DGW(hDGW,_GRBOUG_1);
+      SymbLST_DB(hDB,hLST,DB_SYMB_CHAN);
+      Sort_LST(hLST,0,0);
+      Copy_LST(GetList_DGW(hDGW,_GRBOUG_2),hLST);
+      Copy_LST(GetList_DGW(hDGW,_GRBOUG_3),hLST);
+
+      Copy_LST(GetList_DGW(hDGW,_GRBOUG_4),hFormulaLST);
+      Copy_LST(GetList_DGW(hDGW,_GRBOUG_5),hFaLST);
+      
+      SetInfo_DGW(hDGW,_GRBOUG_0,DGW_TEXT,sDB);
+      SetInfo_DGW(hDGW,_GRBOUG_1,DGW_TEXT,sGravity);
+      SetInfo_DGW(hDGW,_GRBOUG_2,DGW_TEXT,sTcorCh);
+      SetInfo_DGW(hDGW,_GRBOUG_3,DGW_TEXT,sBouguer);
+      SetInfo_DGW(hDGW,_GRBOUG_4,DGW_TEXT,sFormula);
+      SetInfo_DGW(hDGW,_GRBOUG_5,DGW_TEXT,sFa);
+      SetInfo_DGW(hDGW,_GRBOUG_6,DGW_TEXT,sCurvature);
+      SetInfo_DGW(hDGW,_GRBOUG_7,DGW_TEXT,sDensity_earth);
+      SetInfo_DGW(hDGW,_GRBOUG_8,DGW_TEXT,sDensity_water);
+      SetInfo_DGW(hDGW,_GRBOUG_9,DGW_TEXT,sDensity_ice);
+      SetInfo_DGW(hDGW,_GRBOUG_10,DGW_TEXT,sSurveyType);
+
+      iRtn = iRunDialogue_DGW(hDGW);
+      if (iRtn==-1) Cancel_SYS();
+
+      GetInfo_DGW(hDGW,_GRBOUG_1,DGW_TEXT,sGravity);
+      GetInfo_DGW(hDGW,_GRBOUG_2,DGW_TEXT,sTcorCh);
+      GetInfo_DGW(hDGW,_GRBOUG_3,DGW_TEXT,sBouguer);
+      GetInfo_DGW(hDGW,_GRBOUG_4,DGW_TEXT,sFormula);
+      GetInfo_DGW(hDGW,_GRBOUG_5,DGW_TEXT,sFa);
+      GetInfo_DGW(hDGW,_GRBOUG_6,DGW_TEXT,sCurvature);
+      GetInfo_DGW(hDGW,_GRBOUG_7,DGW_TEXT,sDensity_earth);
+      GetInfo_DGW(hDGW,_GRBOUG_8,DGW_TEXT,sDensity_water);
+      GetInfo_DGW(hDGW,_GRBOUG_9,DGW_TEXT,sDensity_ice);
+      GetInfo_DGW(hDGW,_GRBOUG_10,DGW_TEXT,sSurveyType);
+      
+      Destroy_DGW(hDGW);
+      
+
+      // --- put reg back ---
+
+      Set_REG(hWorkREG,"GRAVRED.GRAVITY",sGravity);
+      Set_REG(hWorkREG,"GRAVRED.BOUGUER",sBouguer);
+      Set_REG(hWorkREG,"GRAVRED.FORMULA",sFormula);
+      Set_REG(hWorkREG,"GRAVRED.FREE_AIR",sFa);
+      Set_REG(hWorkREG,"GRAVRED.CURVATURE",sCurvature);
+      Set_REG(hWorkREG,"GRAVRED.DENSITY_EARTH",sDensity_earth);
+      Set_REG(hWorkREG,"GRAVRED.DENSITY_WATER",sDensity_water);
+      Set_REG(hWorkREG,"GRAVRED.DENSITY_ICE",sDensity_ice);
+      Set_REG(hWorkREG,"GRAVRED.TCORCH",sTcorCh);
+      Set_REG(hWorkREG,"GRAVRED.SURVEYTYPE",sSurveyType);
+      SetWorkspaceREG_SYS(hWorkREG);
+      SetString_SYS("GRAVRED","SURVEYTYPE",sSurveyType);
+
+      if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0) {
+
+         Strcpy_STR(sTemp,_("Hit Yes for using existing ground (DEM) elevation channel, ")); 
+         Strcat_STR(sTemp,_("hit No for creating ground (DEM) elevation channel from DEM grid."));
+         i = iDisplayQuestion_SYS(_n("Airborne Survey"),sTemp);
+
+         if(i==1) {
+                                      
+            hDGW = Create_DGW("grboug2");
+      
+            hLST = GetList_DGW(hDGW,_GRBOUG2_0);
+            SymbLST_DB(hDB,hLST,DB_SYMB_CHAN);
+            Sort_LST(hLST,0,0);
+           
+            SetInfoSYS_DGW(hDGW,_GRBOUG2_0,DGW_TEXT,"GRBOUG","DEMELEV");
+
+            iRtn = iRunDialogue_DGW(hDGW);
+            if (iRtn==-1) Cancel_SYS();
+
+            GetInfoSYS_DGW(hDGW,_GRBOUG2_0,DGW_TEXT,"GRBOUG","DEMELEV");
+            Destroy_DGW(hDGW);
+            
+            GetString_SYS("GRBOUG","DEMELEV",sDEMelev);
+            iDEMelev = 1;
+
+         } else {
+
+            hDGW = Create_DGW("grboug3");
+            SetInfoSYS_DGW(hDGW,_GRBOUG3_0,DGW_FILEPATH,"GRBOUG","DEMGRID");
+
+            iRtn = iRunDialogue_DGW(hDGW);
+            if (iRtn==-1) Cancel_SYS();
+
+            GetInfoSYS_DGW(hDGW,_GRBOUG3_0,DGW_FILEPATH,"GRBOUG","DEMGRID");
+            Destroy_DGW(hDGW);
+            
+            GetString_SYS("GRBOUG","DEMGRID",sDEMgrid);
+         }
+      }
+   }
+
+
+   // --- create new channels ---
+
+   if (iExistSymb_DB(hDB,sBouguer,DB_SYMB_CHAN)) {
+      Ch = FindSymb_DB(hDB,sBouguer,DB_SYMB_CHAN);
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   }
+   else {
+      CreateSymb_DB(hDB,sBouguer,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      Ch = FindSymb_DB(hDB,sBouguer,DB_SYMB_CHAN);
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanWidth_DB(hDB,Ch,10);
+      SetChanDecimal_DB(hDB,Ch,3);
+      SetChanUnit_DB(hDB,Ch,_("mgal"));
+   }
+   
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(hDB,Ch,_("Free-air and Bouguer anomaly"),"GRBOUG;");
+
+   UnLockSymb_DB(hDB,Ch);
+
+   if (iExistSymb_DB(hDB,"FreeAir",DB_SYMB_CHAN)) {
+      Ch = FindSymb_DB(hDB,"FreeAir",DB_SYMB_CHAN);
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   }
+   else {
+      CreateSymb_DB(hDB,"FreeAir",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+      Ch = FindSymb_DB(hDB,"FreeAir",DB_SYMB_CHAN);
+      LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanWidth_DB(hDB,Ch,10);
+      SetChanDecimal_DB(hDB,Ch,3);
+      SetChanUnit_DB(hDB,Ch,_("mgal"));
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(hDB,Ch,_("Free-air and Bouguer anomaly"),"GRBOUG;");
+
+   UnLockSymb_DB(hDB,Ch);
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+
+
+   // --- get units from elevation channel, or use default ---
+      
+   GetString_SYS("GRBOUG","DEMELEV",sDEMelev);
+   Ch = NULLSYMB;
+   Ch = FindSymb_DB(hDB,"Elevation",DB_SYMB_CHAN);
+   
+   if (Ch == NULLSYMB) {
+      if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0 && iStrlen_STR(sDEMelev))
+         Ch = FindSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN);
+   }   
+   
+   if (Ch != NULLSYMB) 
+   {
+      LOCK_R(hDB,Ch);
+      GetChanUnit_DB(hDB,Ch,sUnits);
+      UNLOCK(hDB,Ch);
+      rEm = rUnitScale_IPJ(sUnits,1.0);
+   }
+   else if (iGlobal_SYS("MONTAJ.DEFAULT_UNIT",sUnits) == 0)   
+      rEm = rUnitScale_IPJ(sTemp,1.0);   // user default
+   else
+      rEm = rUnitScale_IPJ(_("m"),1.0);   // default to meters
+   
+
+   // --- make new Station Height Channel for Airborne Survey ---
+
+   if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0) {
+
+      if (!iInteractive_SYS()) {
+         GetString_SYS("GRBOUG","DEMELEV",sDEMelev);
+         Ch = FindSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN);
+         if (Ch == NULLSYMB)     iDEMelev = 0;    
+         else                    iDEMelev = 1;    
+      }
+
+      if(iDEMelev == 0)   {
+
+         Strcpy_STR(sDEMelev,_n("DEMelev"));
+
+         if (iExistSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN)) {
+            DEMCh = FindSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN);
+            LockSymb_DB(hDB,DEMCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         }
+         else {
+            CreateSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+            DEMCh = FindSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN);
+            LockSymb_DB(hDB,DEMCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+            SetChanWidth_DB(hDB,DEMCh,10);
+            SetChanDecimal_DB(hDB,DEMCh,3);
+            SetChanUnit_DB(hDB,DEMCh,sUnits);
+         }
+
+         XCh = GetXYZChanSymb_DB(hDB,DB_CHAN_X);
+         YCh = GetXYZChanSymb_DB(hDB,DB_CHAN_Y);
+         if (XCh==NULLSYMB || YCh==NULLSYMB)
+            Abort_SYS(_("X/Y channel does not exist."));
+         ElevCh = FindSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN);
+
+         LockSymb_DB(hDB,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+         LockSymb_DB(hDB,YCh, DB_LOCK_READONLY,DB_WAIT_NONE);
+         LockSymb_DB(hDB,ElevCh, DB_LOCK_READONLY,DB_WAIT_NONE);
+      
+         VVx = Create_VV(REAL,0);
+         VVy  = Create_VV(REAL,0);
+         VVelev  = Create_VV(REAL,0);
+         VVdem = Create_VV(REAL,0);
+         
+         ImgDEM = CreateFile_IMG(GS_DOUBLE,sDEMgrid,IMG_FILE_READONLY);
+  
+         // --- Get data ---
+
+         ProgName_SYS(_("Make DEM elevation channel..."),1); 
+         iLine = 0;
+         iTotLines = iCountSelLines_DB(hDB);
+         Survey = FirstSelLine_DB(hDB);
+         while (iIsLineValid_DB(hDB,Survey)) {
+         
+            // --- Update the Progress Bar ---
+           
+            LockSymb_DB(hDB,Survey,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+            GetSymbName_DB(hDB,Survey,sTemp);
+            UnLockSymb_DB(hDB,Survey);
+            Strcpy_STR(sLabel,_("Processing line: "));
+            Strcat_STR(sLabel,sTemp);
+            ProgName_SYS(sLabel,1);
+            ProgUpdateL_SYS(iLine,iTotLines);        
+
+            GetChanVV_DB(hDB,Survey,XCh,VVx);
+            GetChanVV_DB(hDB,Survey,YCh,VVy);
+            GetChanVV_DB(hDB,Survey,ElevCh,VVelev);
+
+            GrDEMVV_GU(ImgDEM,VVx,VVy,VVdem);
+
+            PutChanVV_DB(hDB,Survey,DEMCh,VVdem);
+            
+            Survey = NextSelLine_DB(hDB, Survey);
+            iLine++;
+         }
+         
+         UnLockSymb_DB(hDB,XCh);
+         UnLockSymb_DB(hDB,YCh);
+         UnLockSymb_DB(hDB,ElevCh);
+         UnLockSymb_DB(hDB,DEMCh);
+         Destroy_VV(VVx);
+         Destroy_VV(VVy);
+         Destroy_VV(VVelev);
+         Destroy_VV(VVdem);
+         Destroy_IMG(ImgDEM);
+      }
+   }
+
+
+   // --- latitude correction ---
+
+   if (iStrlen_STR(sFormula) == 0) 
+      Abort_SYS(_("Gravity formula is not defined."));
+	iItem = iFindItem_LST(hFormulaLST,0,sFormula);
+	if(iItem == -1)
+		Abort_SYS(_("Formula not found in the formula list"));
+   GetItem_LST(hFormulaLST,1,iItem,sFormula);
+   
+   
+   // --- free air correction ---
+   
+   if (iStrlen_STR(sFa) == 0) 
+      Abort_SYS(_("Free Air formula is not defined."));
+	iItem = iFindItem_LST(hFaLST,0,sFa);
+	if(iItem == -1)
+		Abort_SYS(_("Free air Formula not found in the formula list"));
+
+   GetItem_LST(hFaLST,1,iItem,sFa);
+   Strcat_STR(sFormula,sFa);
+   if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0) {
+      ReplaceMatchString_STR(sFormula,_n("Elevation"),"$sDEMelev"); 
+   }   
+   
+   Exp = Create_EXP(hDB,sFormula,512);
+   Survey = FirstSelLine_DB(hDB);
+   while (iIsLineValid_DB(hDB,Survey)) {
+      Math_DU(hDB,Survey,Exp);
+      Survey = NextSelLine_DB(hDB, Survey);
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Bouguer anomaly ---
+
+   if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0)
+      Strcpy_STR(sFormula,"$sBouguer=FreeAir-0.0419088*($sDensity_earth*$rEm*$sDEMelev");
+   else
+      Strcpy_STR(sFormula,"$sBouguer=FreeAir-0.0419088*($sDensity_earth*$rEm*Elevation");
+   
+   Ch = FindSymb_DB(hDB,"Water",DB_SYMB_CHAN);
+   if (Ch != NULLSYMB) {
+      LOCK_R(hDB,Ch);
+      GetChanUnit_DB(hDB,Ch,sUnits);
+      UNLOCK(hDB,Ch);
+      rWm = rUnitScale_IPJ(sUnits,1.0);
+      if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0)
+         Strcat_STR(sFormula,"+($sDensity_water)*$rWm*Water");
+      else 
+         Strcat_STR(sFormula,"+($sDensity_water-$sDensity_earth)*$rWm*Water");
+   } 
+
+   Ch = FindSymb_DB(hDB,"Ice",DB_SYMB_CHAN);
+   if (Ch != NULLSYMB) {
+      LOCK_R(hDB,Ch);
+      GetChanUnit_DB(hDB,Ch,sUnits);
+      UNLOCK(hDB,Ch);
+      rIm = rUnitScale_IPJ(sUnits,1.0);
+      Strcat_STR(sFormula,"+($sDensity_ice-$sDensity_water)*$rIm*Ice");
+   }
+   Strcat_STR(sFormula,");");
+
+   //DisplayMessage_SYS(_("Bouguer anomaly"),sFormula);      
+   WaterCh = FindSymb_DB(hDB,"Water",DB_SYMB_CHAN);
+   if (WaterCh != NULLSYMB) {
+      LockSymb_DB(hDB,WaterCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      iProtect = iGetChanProtect_DB(hDB,WaterCh);
+      SetChanProtect_DB(hDB,WaterCh,0);
+      VVwater = Create_VV(REAL,0);
+   }
+
+   Exp = Create_EXP(hDB,sFormula,255);
+   Survey = FirstSelLine_DB(hDB);
+   while (iIsLineValid_DB(hDB,Survey)) {
+      if (WaterCh != NULLSYMB) {
+         GetChanVV_DB(hDB,Survey,WaterCh,VVwater);
+         SearchReplace_VVU(VVwater,rDUMMY,0.0);
+         PutChanVV_DB(hDB,Survey,WaterCh,VVwater);
+	  }
+      Math_DU(hDB,Survey,Exp);
+      Survey = NextSelLine_DB(hDB, Survey);
+   }
+   Destroy_EXP(Exp);
+   if (WaterCh != NULLSYMB) {
+      SetChanProtect_DB(hDB,WaterCh,iProtect);
+      UnLockSymb_DB(hDB,WaterCh);
+      Destroy_VV(VVwater);
+   }
+
+
+   // --- Curvature (Bullard B) correction ---
+   
+   if(iStrcmp_STR(sCurvature,_n("Yes"),STR_CASE_TOLERANT)==0) {
+   
+      // --- channels exist ? ---
+
+      if(iStrcmp_STR(sSurveyType,_n("Airborne Survey"),STR_CASE_TOLERANT)==0)
+         ElevCh = FindSymb_DB(hDB,sDEMelev,DB_SYMB_CHAN);
+      else
+         ElevCh = FindSymb_DB(hDB,"Elevation",DB_SYMB_CHAN);
+   
+      if(ElevCh==(DB_SYMB)-1)
+         Abort_SYS(_("Elevation channel does not exist."));
+
+      if (!iExistSymb_DB(hDB,"Latitude",DB_SYMB_CHAN))
+         Abort_SYS(_("Latitude channel does not exist."));
+      LatCh = FindSymb_DB(hDB,"Latitude",DB_SYMB_CHAN);
+
+      if (!iExistSymb_DB(hDB,sBouguer,DB_SYMB_CHAN)) 
+         Abort_SYS(_("Bouguer channel does not exist."));
+      BougCh = FindSymb_DB(hDB,sBouguer,DB_SYMB_CHAN);
+
+		Strcpy_STR(sBullard, _n("BullardCorr"));
+      if (iExistSymb_DB(hDB,sBullard,DB_SYMB_CHAN)) {
+         BullardCh = FindSymb_DB(hDB,sBullard,DB_SYMB_CHAN);
+         LockSymb_DB(hDB,BullardCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      } else {
+         CreateSymb_DB(hDB,sBullard,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+         BullardCh = FindSymb_DB(hDB,sBullard,DB_SYMB_CHAN);
+         LockSymb_DB(hDB,BullardCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         SetChanWidth_DB(hDB,BullardCh,10);
+         SetChanDecimal_DB(hDB,BullardCh,3);
+         SetChanUnit_DB(hDB,BullardCh,_("mgal"));
+      }
+      EasyMakerSymb_DB(hDB,BullardCh,_("Bullard Correction"),"GRBOUG;");
+
+
+      // --- get some VV's ---
+
+      VVelev = Create_VV(REAL,0);
+      VVlat  = Create_VV(REAL,0);
+      VVboug = Create_VV(REAL,0);
+		VVbullard = Create_VV(REAL,0);
+
+
+		// --- Get the user-defined gravity value ---
+
+		rDensityEarth = rScanR_STR(sDensity_earth);
+
+ 
+      // --- Lock the channel symbols ---
+
+      LockSymb_DB(hDB,ElevCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+      LockSymb_DB(hDB,LatCh, DB_LOCK_READONLY,DB_WAIT_NONE);
+      LockSymb_DB(hDB,BougCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   
+      // --- Get data ---
+
+      ProgName_SYS(_("Curvature (Bullard B) correction..."),1); 
+      iLine = 0;
+      Survey = FirstSelLine_DB(hDB);
+      while (iIsLineValid_DB(hDB,Survey)) {
+      
+         LockSymb_DB(hDB,Survey,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         GetSymbName_DB(hDB,Survey,sTemp);
+         UnLockSymb_DB(hDB,Survey);
+         Strcpy_STR(sLabel,_("Processing line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,1);
+         ProgUpdateL_SYS(iLine,iTotLines);        
+
+         GetChanVV_DB(hDB,Survey,ElevCh,VVelev);
+         GetChanVV_DB(hDB,Survey,LatCh, VVlat);
+         GetChanVV_DB(hDB,Survey,BougCh,VVboug);
+         ReFidVV_VV(VVelev,VVboug);
+         ReFidVV_VV(VVlat, VVboug);
+
+
+			// --- Save pre-corrected values ---
+
+			Copy_VV(VVbullard, VVboug);
+
+
+         // --- curvature correction ---
+      
+         GrCurvCorEx_GU(VVelev,VVlat,VVboug,rDensityEarth);
+         PutChanVV_DB(hDB,Survey,BougCh,VVboug);
+
+
+			// --- Recover the actual correction ---
+
+			Subtract_VV(VVboug, VVbullard, VVbullard);		// Final - Original = Correction
+         PutChanVV_DB(hDB,Survey,BullardCh,VVbullard);
+         
+         Survey = NextSelLine_DB(hDB, Survey);
+         iLine++;
+      }
+      
+      // --- Unlock the channel symbols ---
+    
+      UnLockSymb_DB(hDB,ElevCh);
+      UnLockSymb_DB(hDB,LatCh);
+      UnLockSymb_DB(hDB,BougCh);
+      UnLockSymb_DB(hDB,BullardCh);
+      Destroy_VV(VVelev);
+      Destroy_VV(VVlat );
+      Destroy_VV(VVboug);
+      Destroy_VV(VVbullard);
+   }
+   
+   
+   // --- Complete Bouguer anomaly ---
+
+   if (iStrMin2_STR(sTcorCh) && iExistSymb_DB(hDB,sTcorCh,DB_SYMB_CHAN)) {
+
+      Strcpy_STR(sCBouguer,"C_");
+      Strcat_STR(sCBouguer,sBouguer);
+   
+      if (iExistSymb_DB(hDB,sCBouguer,DB_SYMB_CHAN)) {
+         Ch = FindSymb_DB(hDB,sCBouguer,DB_SYMB_CHAN);
+         LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      } else {
+         CreateSymb_DB(hDB,sCBouguer,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+         Ch = FindSymb_DB(hDB,sCBouguer,DB_SYMB_CHAN);
+         LockSymb_DB(hDB,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+         SetChanWidth_DB(hDB,Ch,10);
+         SetChanDecimal_DB(hDB,Ch,3);
+         SetChanUnit_DB(hDB,Ch,_("mgal"));
+      }
+      EasyMakerSymb_DB(hDB,Ch,_("Free-air and Bouguer anomaly"),"GRBOUG;");
+
+      UnLockSymb_DB(hDB,Ch);
+      
+      Strcpy_STR(sExp, "$sCBouguer=$sBouguer+");
+      Strcat_STR(sExp, sTcorCh);
+      Strcat_STR(sExp, ";");
+
+      Exp = Create_EXP(hDB,sExp,128);
+      Survey = FirstSelLine_DB(hDB);
+      while (iIsLineValid_DB(hDB,Survey)) {
+         Math_DU(hDB,Survey,Exp);
+         Survey = NextSelLine_DB(hDB, Survey);
+      }
+      Destroy_EXP(Exp);
+      
+   }
+
+
+   // --- Done ---
+
+   Destroy_REG(hWorkREG);
+   Progress_SYS(0);
+   
+   UnLock_EDB(eDB);
+   LoadChan_EDB(eDB,sGravity);
+   LoadChan_EDB(eDB,"FreeAir");
+   LoadChan_EDB(eDB,sBouguer);
+   LoadChan_EDB(eDB,sCBouguer);
+
+}

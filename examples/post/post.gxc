@@ -1,0 +1,434 @@
+//===========================================================================
+NAME          = "Post data on a map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Surface Mapping/Symbols"
+
+DESCRIPTION   = "
+
+   POST.CHANNEL      - Data channel
+       .SIZE         - posting size (mm)
+       .COLOR        - posting color
+       .DECIMALS     - posting decimals
+       .ANGLE        - posting angle (deg CCW from down-line)
+       .FIXANGLE     - 1 to fix angle relative to map
+       .JUSTIFY      - justification (0-9)
+       .H_OFF        - Horizontal offset (mm)
+       .V_OFF        - Vertical offset (mm)
+       .DUMMY        - Plot dummies  (0=No; 1=Yes)
+       .BASE         - Base value to remove
+       .MINDETECT    - Detection limit
+       .ALTER        - Post alternately
+       .REFERENCE    - Reference channel
+       .INCR         - Post modulas
+"
+// Revision History:
+// v6.3.0: Turn on the group clipping instead of previous changes.
+// v6.2.1: Reverted data view clipping to reconsider.
+// v6.2.0: Now clips the data to the data view.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "post.gr"
+#include "post.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sChan,sStation;
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sLine;
+string(STR_GROUP) sGroup;
+string(STR_DEFAULT_SHORT) sT;
+string(STR_DEFAULT) sColor,sFont;
+string(STR_GROUP) sGrpName;
+string(GS_MAX_PATH) sDatabaseFile;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,ZCh,SCh;
+DB_SYMB    Line;     
+EMAP  EMap;
+MAP   Map;
+REG   MapReg;
+MVIEW View;
+DGW   Diag;
+LST   List;
+IPJ   DataIPJ;
+VV    VVx,VVy,VVz,VVs,VVm;
+PLY   Ply;
+int   iLines,iTotLines,iJust,iDum,iFixed,iUp;
+int   iChType,iChSize,iChFormat,iChDecimals;
+real  rSize,rAngle,rOffsetL,rOffsetP,rScalePJ;
+real  rBase,rMinDetect,rMod,rVangle;
+int   iAlter,iStation;
+real  rMinX, rMinY, rMaxX, rMaxY;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   // --- get current database and map ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   
+   // --- Set some required defaults ---
+   
+   DefaultInt_SYS("POST","DUMMY",0);
+   DefaultInt_SYS("POST","ALTER",0);
+   DefaultInt_SYS("POST","FIXANGLE",0);
+   DefaultReal_SYS("POST","INCR",1.0);
+   DefaultReal_SYS("POST","H_OFF",0.0);
+   DefaultReal_SYS("POST","V_OFF",0.0);   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("POST");
+
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_POST_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_POST_13);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_POST_0, DGW_TEXT,     "POST","CHANNEL");
+      SetInfoSYS_DGW(Diag,_POST_1, DGW_TEXT,     "POST","SIZE");
+      SetInfoSYS_DGW(Diag,_POST_2, DGW_TEXT,     "POST","COLOR");
+      SetInfoSYS_DGW(Diag,_POST_3, DGW_TEXT,     "POST","DECIMALS");
+      SetInfoSYS_DGW(Diag,_POST_4, DGW_TEXT,     "POST","ANGLE");     
+      SetInfoSYS_DGW(Diag,_POST_5, DGW_LISTALIAS,"POST","FIXANGLE");     
+      SetInfoSYS_DGW(Diag,_POST_6, DGW_LISTALIAS,"POST","JUSTIFY");     
+      SetInfoSYS_DGW(Diag,_POST_7, DGW_TEXT,     "POST","H_OFF");     
+      SetInfoSYS_DGW(Diag,_POST_8, DGW_TEXT,     "POST","V_OFF");     
+      SetInfoSYS_DGW(Diag,_POST_9, DGW_LISTALIAS,"POST","DUMMY");
+      SetInfoSYS_DGW(Diag,_POST_10,DGW_TEXT,     "POST","BASE");
+      SetInfoSYS_DGW(Diag,_POST_11,DGW_TEXT,     "POST","MINDETECT");
+      SetInfoSYS_DGW(Diag,_POST_12,DGW_LISTALIAS,"POST","ALTER");
+      SetInfoSYS_DGW(Diag,_POST_13,DGW_TEXT,     "POST","REFERENCE");
+      SetInfoSYS_DGW(Diag,_POST_14,DGW_TEXT,     "POST","INCR");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_POST_0, DGW_TEXT,     "POST","CHANNEL");
+      GetInfoSYS_DGW(Diag,_POST_1, DGW_TEXT,     "POST","SIZE");
+      GetInfoSYS_DGW(Diag,_POST_2, DGW_TEXT,     "POST","COLOR");
+      GetInfoSYS_DGW(Diag,_POST_3, DGW_TEXT,     "POST","DECIMALS");
+      GetInfoSYS_DGW(Diag,_POST_4, DGW_TEXT,     "POST","ANGLE");     
+      GetInfoSYS_DGW(Diag,_POST_5, DGW_LISTALIAS,"POST","FIXANGLE");     
+      GetInfoSYS_DGW(Diag,_POST_6, DGW_LISTALIAS,"POST","JUSTIFY");     
+      GetInfoSYS_DGW(Diag,_POST_7, DGW_TEXT,     "POST","H_OFF");     
+      GetInfoSYS_DGW(Diag,_POST_8, DGW_TEXT,     "POST","V_OFF");     
+      GetInfoSYS_DGW(Diag,_POST_9, DGW_LISTALIAS,"POST","DUMMY");
+      GetInfoSYS_DGW(Diag,_POST_10,DGW_TEXT,     "POST","BASE");
+      GetInfoSYS_DGW(Diag,_POST_11,DGW_TEXT,     "POST","MINDETECT");
+      GetInfoSYS_DGW(Diag,_POST_12,DGW_LISTALIAS,"POST","ALTER");
+      GetInfoSYS_DGW(Diag,_POST_13,DGW_TEXT,     "POST","REFERENCE");
+      GetInfoSYS_DGW(Diag,_POST_14,DGW_TEXT,     "POST","INCR");
+      
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("POST","CHANNEL",sChan);
+   GetString_SYS("POST","REFERENCE",sStation);
+   GetString_SYS("POST","COLOR",sColor);    
+   if(iStrlen_STR(sStation)>0)
+      iStation = 1;
+   else   
+      iStation = 0;
+   rSize    = rGetReal_SYS("POST","SIZE");     
+   rAngle   = rGetReal_SYS("POST","ANGLE");     
+   iJust    = iGetInt_SYS("POST","JUSTIFY");     
+   rOffsetL    = rGetReal_SYS("POST","H_OFF");     
+   rOffsetP    = rGetReal_SYS("POST","V_OFF");     
+   iFixed      = iGetInt_SYS("POST","FIXANGLE");  
+   
+   GetString_SYS("POST","BASE",sT);
+   if(iStrlen_STR(sT)>0)
+      rBase    = rGetReal_SYS("POST","BASE");     
+   else
+      rBase    = 0.0;
+         
+   if (iExistReal_SYS("POST","MINDETECT"))         
+      rMinDetect = rGetReal_SYS("POST","MINDETECT");     
+   else   
+      rMinDetect = rDUMMY;
+      
+   iDum = iGetInt_SYS("POST","DUMMY");
+   if ((iDum != 0) && (iDum != 1))
+     Abort_SYS(_("Dummy plot option was invalid. Must be 0 or 1."));
+   
+   iAlter = iGetInt_SYS("POST","ALTER");  
+   if ((iAlter != 0) && (iAlter != 1))
+     Abort_SYS(_("Alternate plot option was invalid. Must be 0 or 1."));
+   
+   rMod = rGetReal_SYS("POST","INCR");
+
+
+   // --- channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+   ZCh = FindChan_DB(Data,sChan);
+   if (ZCh==NULLSYMB)
+      Abort_SYS(_("Data channel does not exist."));
+
+   if(iStation) {
+      SCh = FindChan_DB(Data,sStation);
+      if (SCh==NULLSYMB)
+         Abort_SYS(_("Station (ref) channel does not exist."));
+   }
+   
+
+   // --- Get the Z channel type ---
+
+   iChType     = iGetChanType_DB(Data,ZCh);
+   iChFormat   = iGetChanFormat_DB(Data,ZCh);
+   iChSize     = iGetChanWidth_DB(Data,ZCh);
+   
+   
+   // --- decimal places ---
+   
+   if (iExistInt_SYS("POST","DECIMALS"))
+      iChDecimals = iGetInt_SYS("POST","DECIMALS");
+   else   
+      iChDecimals = iGetChanDecimal_DB(Data,ZCh);
+   
+  
+   // --- open the data view ---
+
+   EMap = Current_EMAP();
+   Map  = Lock_EMAP(EMap);
+   MapReg = GetREG_MAP(Map);
+   
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+   
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+   SetWorkingIPJ_MVIEW(View,DataIPJ);
+   
+   SetThinRes_MVIEW(View,0.02);
+
+
+   // --- Get the view's data extents. ---
+   
+   Ply = Create_PLY();
+   Extent_MVIEW(View, MVIEW_EXTENT_ALL, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
+   Rectangle_PLY(Ply, rMinX, rMinY, rMaxX, rMaxY);
+
+
+   // --- vertical line info ---
+
+   Get_REG(MapReg,"MAP.UP_DIRECTION",sLabel,sizeof(sLabel));
+   if (iStrcmp_STR(sLabel,_n("left"),STR_CASE_TOLERANT) == 0)
+      iUp = -1;
+   else
+      iUp = 1;
+
+   rVangle = rDUMMY;   
+   GetReal_REG(MapReg,"MAP.UP_ANGLE",rVangle);
+   if (rVangle == rDUMMY)
+      rVangle = 67.5;
+
+
+   // --- scale parameters ---
+
+   rSize *= rScaleMM_MVIEW(View);
+   rScalePJ = rScalePjMM_MVIEW(View);
+   rOffsetL *= rScalePJ;
+   rOffsetP *= rScalePJ;
+
+
+   // --- Set the group clip mode ---
+   
+   GroupClipMode_MVIEW(View, CLIP_ON);
+   
+   
+   // --- start a group ---
+
+   GetName_DB(Data,DB_NAME_FILE,sDatabaseFile);
+   FileNamePart_STR(sDatabaseFile,sGroup,STR_FILE_PART_NAME);
+   GenGroupName_STR("POST",sGroup,sChan,sGrpName);
+   Strcpy_STR(sGroup,sGrpName);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+   // --- add maker ---
+
+   Maker_MVIEW(View,1,1,"POST",MAKER_GX,_("Posting..."),"POST;");
+
+
+   // --- link ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+
+   // --- set parameters ---
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Arial"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextAngle_MVIEW(View,rAngle);
+   TextSize_MVIEW(View,rSize);
+   TextColor_MVIEW(View,iColor_MVIEW(sColor));
+
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   VVz = CreateExt_VV(iChType,0);  
+   if(iStation)
+      VVs = Create_VV(REAL,0);
+   VVm = Create_VV(INT,0);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   if(iStation)
+      LockSymb_DB(Data,SCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- process lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+      if(iCheckStop_SYS())  Cancel_SYS(); 
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+      GetChanVV_DB(Data,Line,ZCh,VVz);
+      if(iStation)
+         GetChanVV_DB(Data,Line,SCh,VVs);
+      ReFidVV_VV(VVx,VVz);
+      ReFidVV_VV(VVy,VVz);
+      if(iStation)
+         ReFidVV_VV(VVs,VVz);
+
+/*    
+      // --- Clip the data to the view's data extents ---
+            
+      iN = iLength_VV(VVx);
+      SetLen_VV(VVm, iN);
+      FillInt_VV(VVm, 1);
+      PolygonMask_VVU(VVx, VVy, VVm, Ply, VVU_MASK_OUTSIDE);
+      
+      
+      // --- Remove values clipped out ---
+
+      Prune_VVU(VVx, VVm, VVU_PRUNE_DUMMY);
+      Prune_VVU(VVy, VVm, VVU_PRUNE_DUMMY);
+      Prune_VVU(VVz, VVm, VVU_PRUNE_DUMMY);
+      if(iStation)
+         Prune_VVU(VVs, VVm, VVU_PRUNE_DUMMY);
+*/      
+
+      // --- add line link ---
+
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine);
+
+
+      // --- post ---
+
+      if(iStation)
+         PostEx_MVU(View,VVx,VVy,VVz,VVs,iDum,rBase,rMinDetect,iChSize,iChFormat,iChDecimals,
+                    rOffsetL,rOffsetP,iAlter,rMod,iJust,rAngle,iFixed,rVangle,iUp);
+      else
+         PostEx_MVU(View,VVx,VVy,VVz,(VV)-1,iDum,rBase,rMinDetect,iChSize,iChFormat,iChDecimals,
+                    rOffsetL,rOffsetP,iAlter,rMod,iJust,rAngle,iFixed,rVangle,iUp);
+      
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+   Progress_SYS(0);
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,ZCh);
+   if(iStation)
+      UnLockSymb_DB(Data,SCh);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+   
+}

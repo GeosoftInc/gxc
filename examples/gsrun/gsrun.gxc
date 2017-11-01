@@ -1,0 +1,136 @@
+//===========================================================================
+NAME          = "Run a script with parameters"
+#include <version.gxh>
+DESCRIPTION   = "\
+
+Runs a gcript (*.gs) and allows you to set parameters.
+
+        GSRUN.SCRIPT    - Project name
+             .P0        - parameters, P0 through P7
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "gsrun.gr"
+#include "gsrun.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         hDGW;             // Dialogue handle
+int         i;
+string(STR_FILE) sGS;
+string(STR_DEFAULT_LONG) sP,sParm,sSet,sS;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      hDGW = Create_DGW("GSRUN");
+
+      SetInfoSYS_DGW(hDGW,_GSRUN_0,DGW_FILEPATH,"GSRUN","SCRIPT");
+      SetInfoSYS_DGW(hDGW,_GSRUN_1,DGW_TEXT,"GSRUN","P0");
+      SetInfoSYS_DGW(hDGW,_GSRUN_2,DGW_TEXT,"GSRUN","P1");
+      SetInfoSYS_DGW(hDGW,_GSRUN_3,DGW_TEXT,"GSRUN","P2");
+      SetInfoSYS_DGW(hDGW,_GSRUN_4,DGW_TEXT,"GSRUN","P3");
+      SetInfoSYS_DGW(hDGW,_GSRUN_5,DGW_TEXT,"GSRUN","P4");
+      SetInfoSYS_DGW(hDGW,_GSRUN_6,DGW_TEXT,"GSRUN","P5");
+      SetInfoSYS_DGW(hDGW,_GSRUN_7,DGW_TEXT,"GSRUN","P6");
+      SetInfoSYS_DGW(hDGW,_GSRUN_8,DGW_TEXT,"GSRUN","P7");
+                                                      
+      
+      i = 1;
+      while (i != 0) {
+      
+         i = iRunDialogue_DGW(hDGW);
+         if (i==-1) Cancel_SYS();
+         
+      
+         // --- edit script? ---
+      
+         if (i == 1) {
+            GetInfo_DGW(hDGW,_GSRUN_0,DGW_FILEPATH,sGS);
+            SetString_SYS("EDIT","FILE",sGS);
+            SetString_SYS("EDIT","WAIT","YES");
+            SetString_SYS("EDIT","CHILD","YES");
+            iRunGX_SYS("edit");
+         }
+      
+      }         
+
+      GetInfoSYS_DGW(hDGW,_GSRUN_0,DGW_FILEPATH,"GSRUN","SCRIPT");
+      GetInfoSYS_DGW(hDGW,_GSRUN_1,DGW_TEXT,"GSRUN","P0");
+      GetInfoSYS_DGW(hDGW,_GSRUN_2,DGW_TEXT,"GSRUN","P1");
+      GetInfoSYS_DGW(hDGW,_GSRUN_3,DGW_TEXT,"GSRUN","P2");
+      GetInfoSYS_DGW(hDGW,_GSRUN_4,DGW_TEXT,"GSRUN","P3");
+      GetInfoSYS_DGW(hDGW,_GSRUN_5,DGW_TEXT,"GSRUN","P4");
+      GetInfoSYS_DGW(hDGW,_GSRUN_6,DGW_TEXT,"GSRUN","P5");
+      GetInfoSYS_DGW(hDGW,_GSRUN_7,DGW_TEXT,"GSRUN","P6");
+      GetInfoSYS_DGW(hDGW,_GSRUN_8,DGW_TEXT,"GSRUN","P7");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(hDGW);
+
+   }
+   
+
+   // --- Get/set Values ---
+
+   GetString_SYS("GSRUN","SCRIPT",sGS);
+   GetString_SYS("GSRUN","P0",sP);
+   for (i=0;i<8;i++) {
+   
+      // --- get parameter ---
+      
+      Strcpy_STR(sS,"P");
+      FormatI_STR(i,sSet,sizeof(sSet)-1);
+      Strcat_STR(sS,sSet);
+      GetString_SYS("GSRUN",sS,sP);
+      
+      if (iStrlen_STR(sP)) {
+      
+         // --- parse the setting ---
+      
+         if (iTokens_STR(sP,"=") > 1)
+            GetToken_STR(sSet,sP,1);
+         else
+            Strcpy_STR(sSet,"");   
+         if (iTokens_STR(sP,".")==2) {
+            GetToken_STR(sParm,sP,1);
+            SetString_SYS(sP,sParm,sSet);
+         } else
+            Abort_SYS(_("Invalid parameter.  Format must be \"name.parameter=setting\" "));
+      }
+   }
+         
+   
+   // --- run script ---
+   LogScriptRun_SYS("OMUI");
+   SetInteractive_SYS(0);   
+   iRunGS_SYS(sGS);
+   
+}
+

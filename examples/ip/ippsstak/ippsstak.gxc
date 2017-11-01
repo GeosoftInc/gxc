@@ -1,0 +1,206 @@
+//===========================================================================
+NAME          = "Plot Stacked Pseudo-Section Map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Plot Stacked Pseudo-Section Map
+
+    IP.STAKTYPE: Type of stacked section to create:
+                 0: Equal-spaced, horizontal
+                 1: Map-spacing, horizontal
+    IP.STAKCON : IPPLOT control file for stacked sections
+    IP.STAKMAP : Name of map to create
+"
+// Revision History:
+// v6.2.0: Removed "preserve directions" options, as map-based now does
+//         horizontal and vertical at the same time.
+// v6.1.0: Added ability to plot sections correctly oriented.
+// v5.1.3: Using "Current" X, Y and Z channels - WinnowChanList2_IP.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPPSSTAK.gr"
+#include "IPPSSTAK.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP object
+LST         List;
+
+int         i;                // Utility 
+
+string(STR_FILE) sConFile, sMap, sDirectory;
+string(300) sBuff;
+string(STR_DB_SYMBOL) sChan;
+int iDone, iType;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   iDone = 0;
+   while (iInteractive_SYS() && !iDone)
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPPSSTAK");
+
+      // --- Set up channel list ---
+             
+      List = GetList_DGW(Diag,_IPPSSTAK_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      WinnowChanList2_IP(List, Data);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPPSSTAK_0,DGW_TEXT,"IP","STAKCHAN");
+      SetInfoSYS_DGW(Diag,_IPPSSTAK_1,DGW_LISTALIAS,"IP","STAKTYPE");
+      SetInfoSYS_DGW(Diag,_IPPSSTAK_2,DGW_FILEPATH,"IP","STAKCON");
+      SetInfoSYS_DGW(Diag,_IPPSSTAK_3,DGW_FILEPATH,"IP","STAKMAP");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPPSSTAK_0,DGW_TEXT,"IP","STAKCHAN");
+      GetInfoSYS_DGW(Diag,_IPPSSTAK_1,DGW_LISTALIAS,"IP","STAKTYPE");
+      GetInfoSYS_DGW(Diag,_IPPSSTAK_2,DGW_FILEPATH,"IP","STAKCON");
+      GetInfoSYS_DGW(Diag,_IPPSSTAK_3,DGW_FILEPATH,"IP","STAKMAP");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+      // --- Run IPPLOT control file wizard ---
+
+      if(i==1) {
+         iRunGX_SYS("ipstakcon");         
+      }
+      else {
+
+         GetString_SYS("IP","STAKCHAN",sChan);
+         if(!iStrlen_STR(sChan)) {
+            DisplayMessage_SYS(_("IPPSSTAK"),_("The \"Channel to plot\" parameter is required"));
+            continue;
+         }
+
+         GetString_SYS("IP","STAKCON",sConFile);
+         if(!iStrlen_STR(sConFile)) {
+             DisplayMessage_SYS(_("IPPSSTAK"),_("The \"IP Stacked Plot Control file\" parameter is required."));
+             continue;
+         }
+         else {
+            if(!iFileExist_SYS(sConFile)) {
+               Printf_STR(sBuff, sizeof(sBuff), _("The file %s does not exist. Use the \"Modify\" button to create a new IP Stacked Plot Control file."), sConFile);
+               DisplayMessage_SYS(_("IPPSTAK"),sBuff);
+               continue;
+            }
+         }
+
+         GetString_SYS("IP","STAKMAP",sMap);
+         if(!iStrlen_STR(sMap)) {
+             DisplayMessage_SYS(_("IPPSTAK"),_("The \"Output map name\" parameter is required."));
+             continue;
+         }
+         else {
+            if(iFileExist_SYS(sMap)) {
+
+               if(iDisplayQuestion_SYS(_("Map Definition"), _("Overwrite existing map?"))) {
+
+                  if(iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);                  
+                  iDeleteFile_SYS(sMap);
+               }
+               else
+                  continue;
+            }
+         }
+
+         iDone = 1;
+      }
+   } 
+      
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","STAKCHAN",sChan);
+   GetString_SYS("IPPSSTAK","DIRECTORY",sDirectory);
+   
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("The \"Channel to plot\" parameter is required"));
+
+   iType = iGetInt_SYS("IP","STAKTYPE");
+   if(iType != 1) iType = 0;     // Map-based spacing by default
+
+   GetString_SYS("IP","STAKCON",sConFile);
+   if(!iStrlen_STR(sConFile))
+      Abort_SYS(_("The \"IP Stacked Plot Control file\" parameter is required."));
+
+   GetString_SYS("IP","STAKMAP",sMap);
+   if(!iStrlen_STR(sMap))
+      Abort_SYS(_("The \"Output map name\" parameter is required."));
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Plotting Stacked Pseudo-Sections"),1);
+
+   // Create IP object 
+
+   Ip = Create_IP();
+
+   // --- Delete existing map ---
+
+   if(iLoaded_EMAP(sMap)) {
+      UnLoad_EMAP(sMap);                  
+      iDeleteFile_SYS(sMap);
+   }
+
+   // --- Plot the stacked section ---
+
+   if (iInteractive_SYS())
+      PSStack2_IP(Ip, Data, sChan, sConFile, iType, sMap);
+   else
+      PSStack2Dir_IP(Ip, Data, sChan, sConFile, iType, sMap, sDirectory);
+
+
+   Load_EMAP(sMap);
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+}

@@ -1,0 +1,175 @@
+//===========================================================================
+NAME          = "GRIDADD"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid"
+
+DESCRIPTION   = "
+
+Add Two Grids together, or Subtract one Grid from another.
+
+Parameters: 
+
+       GRIDADD.GRD1  File Name of the First Grid.
+              .GRD2  File Name of the Second Grid.                          
+              .MUL1  Multiplier to Apply to First Grid.
+              .MUL2  Multiplier to Apply to Second Grid.
+              .NEW   File Name of New Grid.                          
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+RESOURCE = "gridadd.gr"
+#include "gridadd.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+real       rM1;               // Grid 1 multiplier
+real       rM2;               // Grid 2 multiplier
+
+int        i;                 // utility int
+
+string(STR_FILE)  sGrd1;           // Name of input grid 1
+string(STR_FILE)  sGrd2;           // Name of input grid 2
+string(STR_FILE)  sNew;            // Name of new resultant grid
+string(STR_DEFAULT) sM1;              // Multiplier #1 string 
+string(STR_DEFAULT) sM2;              // Multiplier #2 string 
+
+IMG         hIMG1,hIMG2;        // Images tied to the input grids
+IMG         hIMGO;             // Image for the output grid
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDADDForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDADDFORM_0,DGW_FILEPATH,"GRIDADD","GRD1");     
+      SetInfoSYS_DGW(Diag,_GRIDADDFORM_1,DGW_FILEPATH,"GRIDADD","GRD2");     
+      SetInfoSYS_DGW(Diag,_GRIDADDFORM_2,DGW_TEXT,"GRIDADD","MUL1");    
+      SetInfoSYS_DGW(Diag,_GRIDADDFORM_3,DGW_TEXT,"GRIDADD","MUL2");    
+      SetInfoSYS_DGW(Diag,_GRIDADDFORM_4,DGW_FILEPATH,"GRIDADD","NEW");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // User hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDADDFORM_0,DGW_FILEPATH,"GRIDADD","GRD1");     
+      GetInfoSYS_DGW(Diag,_GRIDADDFORM_1,DGW_FILEPATH,"GRIDADD","GRD2");     
+      GetInfoSYS_DGW(Diag,_GRIDADDFORM_2,DGW_TEXT,"GRIDADD","MUL1"); 
+      GetInfoSYS_DGW(Diag,_GRIDADDFORM_3,DGW_TEXT,"GRIDADD","MUL2");    
+      GetInfoSYS_DGW(Diag,_GRIDADDFORM_4,DGW_FILEPATH,"GRIDADD","NEW");    
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDADD","GRD1",sGrd1);
+   GetString_SYS("GRIDADD","GRD2",sGrd2);
+   GetString_SYS("GRIDADD","NEW",sNew);
+
+   
+   // --- Check for null multiplier strings and set to 
+   //     default values if blank ---
+
+   GetString_SYS("GRIDADD","MUL1",sM1);
+
+   if (!iStrlen_STR(sM1))
+      rM1 = 1.0;
+   else
+      rM1 = rGetReal_SYS("GRIDADD","MUL1");
+
+   GetString_SYS("GRIDADD","MUL2",sM2);
+
+   if (!iStrlen_STR(sM2))
+      rM2 = 1.0;
+   else
+      rM2 = rGetReal_SYS("GRIDADD","MUL2");
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrd1))
+      Abort_SYS(_("Input Grid #1 Not Specified!"));
+
+   if (!iStrlen_STR(sGrd2))
+      Abort_SYS(_("Input Grid #2 Not Specified!"));
+      
+   if (!iStrlen_STR(sNew))
+      Abort_SYS(_("New Resultant Grid Not Specified!"));   
+      
+
+   // --- Check the multipliers ---
+
+   if ((rM1 < rMIN) || (rM1 > rMAX) || (rM1 == rDUMMY))
+      Abort_SYS(_("Multiplier for Grid 1 is invalid - must be a real number from -1e31 to 1e32."));
+
+   if ((rM2 < rMIN) || (rM2 > rMAX) || (rM2 == rDUMMY))
+      Abort_SYS(_("Multiplier for Grid 2 is invalid - must be a real number from -1e31 to 1e32."));
+
+    
+   
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   hIMG1 = CreateFile_IMG(GS_DOUBLE,sGrd1,IMG_FILE_READONLY);
+   hIMG2 = CreateFile_IMG(GS_DOUBLE,sGrd2,IMG_FILE_READONLY);
+   hIMGO = CreateOutFile_IMG(GS_DOUBLE,sNew,hIMG1); 
+   InheritIMG_IMG(hIMG2,hIMG1);
+   
+   
+   // --- Add the grids ---
+   
+   ProgName_SYS(_("Adding Grids..."),1);
+   GridAdd_IMU(hIMG1,rM1,hIMG2,rM2,hIMGO);
+   Progress_SYS(0);
+
+
+   // --- Destroy the Images ---
+   
+   Destroy_IMG(hIMG1);
+   Destroy_IMG(hIMG2);
+   Destroy_IMG(hIMGO);
+   
+        
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sNew,"Grid",1);
+   
+}

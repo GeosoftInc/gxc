@@ -1,0 +1,456 @@
+//===========================================================================
+
+NAME          = "3D Surface from a grid/image"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+   GRIDIMG3D.GRID          image/grid
+            .METHOD        colouring method
+            .TABLE         colour table
+            .CONTOUR       contour interval
+            .BRIGHT        brightness (-1 to +1, 0 is normal)
+            .VIEW          name of 3D view to plot to in scripting (defaults to 3D)
+
+            .EXTMAP        MAP Handle if the EMAP has already been locked externally
+
+            grid orientation options (for cases where the grid has no
+            orientation info of its own).
+
+            .ORIENTATION   0: Plan 1: Section
+            .REFTYPE       How to tie the grid to a 3D location:
+                           0: Use origin of the grid axes
+                           1: Use the top left corner of the grid
+                           2: Use the bottom left corner of the grid
+                           3: Use the top centre point of the grid
+            .REFX          The location in 3D of the grid reference point.
+            .REFY
+            .REFZ
+            .AZIMUTH       For Sections, angle CW from North for the grid 'X' axis.
+            .DIP           For Sections, dip from horizontal, CW looking down
+                           grid Y axis, valid 0 < Dip < 180
+            .ADDTOPROJECT - If 0, no files will be added to the project. Default is 1, and is reset to 1 after execution
+"
+//===========================================================================
+//  The following 8 GXs are very similar in structure and should probably be updated
+//  together (except, perhaps for GRIDIMG3D) whenever something fundamental is 
+//  changed in any one of them. 
+//
+//  Eventually, they should be replaced by a GX.Net method which consolidates 
+//  the duplication.
+//
+// GRIDIMG1.GX:  Display 1 grid (GRD, etc) on a map
+// GRIDIMG.GX    Display 1 image (TIF, BMP etc) on a map
+// GRIDIMGS.GX   Display a colour-shaded grid on a map
+// GRIDIMGT.GX   Display a 3-grid ternary image (e.g. RGB) on a map.
+// GRIDIMG2/3/4.GX  Display 2,3 or 4 grid composite on a map (creates one Agg).
+// GRIDIMG3D     Display a grid in a 3D map: not so much like the others because 
+//               of the 3D handling.
+//===========================================================================
+// Revision History:
+//
+// v7.3:    Added support for IPJ_ORIENT_3D orientations on grids.
+// v7.1.0	Change how 3D imports are handled (only from within 3D viewer, but supports scripting with name)
+// v7.0.1   Rewritten slightly to fix QA 10745, plotting grids with different
+//          projections to the same map.
+// v6.4.1   Input grids with different projected coordinate systems are
+//          correctly handled.
+// v6.4.0   Default colour method changed to histogram to match GRIDIMG1.GX.
+//          New map interactive portion enclosed in interactive if statement.
+//          Use iScript_SYS so can center new 3D view when run non-interactively,
+//             3D view is activated, and grids get added to the project.
+//          Added option to call the GX to set up map/view, but not plot the grid.
+//          Swung section grids now display correctly (removed scale factors).
+//          Fixed bug setting 3D view name.
+// v6.3.0   Enabled ArcGIS specific functionality.
+// v6.3.0   Call the IMGORIENT3D GX to set the orientation if none is specified.
+//          Call GetDisplayAreaRaw_EMAP only in interactive mode.
+// v6.0.0   Add image to the grid explorer
+// v5.1.8   Removed warning about plotting section grids with dips not 
+//          equal to 90.0.
+//          Added dip option.
+//===========================================================================
+
+RESOURCE="GRIDIMG3D.gr"
+#include "GRIDIMG3D.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define IPJ_PLAN 0
+#define IPJ_SECTION 1
+#define IPJ_3D 2
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+DGW   Diag;
+MVIEW View;
+AGG   hAGG;
+IMG   hIMG;
+IPJ   hIPJ;
+IPJ   hIPJt;
+
+string(STR_MAX_PATH) sGrid,sName,sTemp,sColor;
+string(STR_MULTI_FILE) sFiles;
+string(STR_VIEW) s3DView,sGroup,sAgg;
+string(1024) sMsg;
+
+int i,iPlane,iMAP;
+int iZone,iOrientation,iNX,iNY,iOrient;
+int iGrid, iGrids, iInteractive, iProgState;
+
+real rContour;
+real rDx, rDy,rXo,rYo,rBright;
+real rPitch, rYaw, rRoll, rXOff, rYOff, rZOff, rSX, rSY, rSZ;
+real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
+
+#define GETR(a,b,c,d) a=rGetReal_SYS(b,c); if(a==rDUMMY) a = d;
+#define GETI(a,b,c,d) a=iGetInt_SYS(b,c);  if(a==iDUMMY) a = d;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Special script parameters to optimize external use of this GX for multiple adds ---
+   iMAP = iGetInt_SYS("GRIDIMG3D","EXTMAP");
+   if (iMAP != iDUMMY)
+   {
+      EMap = (EMAP)0;
+      SetInt_SYS("GRIDIMG3D", "EXTMAP", iDUMMY); // Reset to make it go away from subsequent runs
+   }
+
+   // --- Are we running interactively ? ---
+
+	iInteractive = iInteractive_SYS();
+   if (iInteractive) 
+   {
+      if (iMAP == iDUMMY)
+	  {
+		if (iHaveCurrent_EMAP())
+		{
+		   EMap = Current_EMAP();
+			if (!iIs3DView_EMAP(EMap))
+				Abort_SYS(_("This GX only works from within the 3D viewer"));
+		}
+		else
+			Abort_SYS(_("This GX only works from within the 3D viewer"));
+	  }
+
+      // --- Create the Dialogue ---
+            
+      Diag = Create_DGW("GRIDIMG3D");
+
+      SetInfoSYS_DGW(Diag,_GRIDIMG3D_0,DGW_FILEPATH, "GRIDIMG3D","GRID");
+      SetInfoSYS_DGW(Diag,_GRIDIMG3D_1,DGW_LISTALIAS,"GRIDIMG3D","METHOD");
+      SetInfoSYS_DGW(Diag,_GRIDIMG3D_2,DGW_FILEPATH, "GRIDIMG3D","TABLE");
+      SetInfoSYS_DGW(Diag,_GRIDIMG3D_3,DGW_TEXT,     "GRIDIMG3D","CONTOUR");
+      SetInfoSYS_DGW(Diag,_GRIDIMG3D_4,DGW_LISTALIAS,"GRIDIMG3D","BRIGHT");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==-1) Cancel_SYS(); 
+
+
+      // --- Get Information ---
+      
+      GetInfoSYS_DGW(Diag,_GRIDIMG3D_0,DGW_FILEPATH, "GRIDIMG3D","GRID");
+      GetInfoSYS_DGW(Diag,_GRIDIMG3D_1,DGW_LISTALIAS,"GRIDIMG3D","METHOD");
+      GetInfoSYS_DGW(Diag,_GRIDIMG3D_2,DGW_FILEPATH, "GRIDIMG3D","TABLE");
+      GetInfoSYS_DGW(Diag,_GRIDIMG3D_3,DGW_TEXT,     "GRIDIMG3D","CONTOUR");
+      GetInfoSYS_DGW(Diag,_GRIDIMG3D_4,DGW_LISTALIAS,"GRIDIMG3D","BRIGHT");
+      Destroy_DGW(Diag);
+   }
+
+   // --- PARAMETERS ---
+      
+   GetString_SYS("GRIDIMG3D","GRID",sFiles);
+   GetString_SYS("GRIDIMG3D","TABLE",sColor);
+   GETI(iZone,"GRIDIMG3D","METHOD",3)
+   GETR(rBright,"GRIDIMG3D","BRIGHT",0.0)
+   GETR(rContour,"GRIDIMG3D", "CONTOUR", rDUMMY)
+
+
+   // --- Validate ---
+
+   if(!iStrlen_STR(sFiles))
+      Abort_SYS(_("Input images/grids not specified."));   
+
+
+   // --- How many grids? ---
+   
+   iGrids = iCountTokens_STR(sFiles,"|");
+   
+   
+   // --- Get the first one ---
+   
+   GetMFile_STR(sFiles,sGrid,0);   
+
+   if (iMAP != iDUMMY)
+      Map = (MAP) iMAP;
+   {
+	   EMap = Current_EMAP();
+	   Map  = Lock_EMAP(EMap);
+   }
+
+	// --- Handle interactive/scripting ---
+
+	if (iMAP == iDUMMY && iInteractive_SYS())
+	{
+		Get3DViewName_EMAP(EMap, s3DView);
+		SetString_SYS("GRIDIMG3D", "VIEW", s3DView);
+	}
+	else
+	{
+		GetString_SYS("GRIDIMG3D", "VIEW", s3DView);
+		if (iStrlen_STR(s3DView) == 0)
+			Strcpy_STR(s3DView, "3D");
+	}
+
+
+   View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD); 
+
+	if (!iIsView3D_MVIEW(View))
+	{
+      Printf_STR(sTemp, sizeof(sTemp), _("Importing to 3D View '%s' but it is not a 3D view."), s3DView);
+      Abort_SYS(sTemp);
+	}   
+   
+   hIPJt = Create_IPJ();
+   GetIPJ_MVIEW(View, hIPJt);
+
+   
+   // --- Import the grids ---
+   
+   for(iGrid=0; iGrid<iGrids; iGrid++)
+   {
+      
+      GetMFile_STR(sFiles,sGrid,iGrid);   
+
+   
+      // --- Get the image/grid orientation and information ---
+      
+      hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGrid, IMG_FILE_READONLY);
+      hIPJ = Create_IPJ();
+      GetIPJ_IMG(hIMG, hIPJ);
+
+      iOrientation = iGetOrientation_IPJ(hIPJ);
+      GetOrientationInfo_IPJ(hIPJ, rRefX, rRefY, rRefZ, rAz, rSwing);
+      GetInfo_IMG(hIMG, rDx, rDy, rXo, rYo, rRot);
+      iNX = iNX_IMG(hIMG);
+      iNY = iNY_IMG(hIMG);
+
+      Destroy_IMG(hIMG);
+
+
+      // --- If it is undefined, set the orientation for the grid by 
+      //     running the IMGORIENT3D GX. ---
+
+      if(iOrientation==IPJ_ORIENT_DEFAULT) 
+      {
+         
+         //if(iInteractive_SYS()) {
+   
+            SetInt_SYS("IMGORIENT3D", "GETGRID", 0);
+            SetString_SYS("IMGORIENT3D","GRID",sGrid);
+            if(iRunGX_SYS("imgorient3d.gx")!=0)
+               Cancel_SYS();               
+         //}
+      
+         
+         // --- Get the new image/grid orientation ---
+      
+         hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGrid, IMG_FILE_READONLY);
+         GetIPJ_IMG(hIMG, hIPJ);
+         GetInfo_IMG(hIMG, rDx, rDy, rXo, rYo, rRot);
+         iNX = iNX_IMG(hIMG);
+         iNY = iNY_IMG(hIMG);
+         Destroy_IMG(hIMG);
+         
+         iOrientation = iGetOrientation_IPJ(hIPJ);
+         GetOrientationInfo_IPJ(hIPJ, rRefX, rRefY, rRefZ, rAz, rSwing);
+      }
+
+      if(iOrientation == IPJ_ORIENT_SECTION) {
+      
+         /* As of v6.4.1, Target section grids with a swing are produced with a ratio in DY/DX to
+            compensate for the swing. In other words, when viewed in section, the horizontal projection
+            produces a grid with equal DX and DY, but when viewed in 3D, the grid is stretched along the
+            Y axis, with a swing of 75 degrees producing a stretch factor of 3.86. This allows Target
+            section grids to be displayed in 3D views in the correct location. */
+
+         iOrient = IPJ_SECTION;   // Section
+      }
+      else if(iOrientation == IPJ_ORIENT_SECTION_CROOKED) 
+      {
+      
+			// --- Call the special method for Crooked Section grids ---
+			
+			Destroy_MVIEW(View);
+	      Destroy_IPJ(hIPJ);
+	      UnLock_EMAP(EMap);
+      
+			SetString_SYS("SECTIONPLOT3D", "GRID", sGrid);
+			SetString_SYS("SECTIONPLOT3D", "VIEW", s3DView);
+			SetInt_SYS("SECTIONPLOT3D", "METHOD", iZone);
+			SetString_SYS("SECTIONPLOT3D", "TABLE", sColor);
+			SetReal_SYS("SECTIONPLOT3D", "CONTOUR", rContour);
+			
+			SetInteractive_SYS(0);
+			iRunGX_SYS("geogxnet.dll(Geosoft.GX.GridUtils.PlotCrookedSectionGrid3D;Run)");
+			SetInteractive_SYS(iInteractive);
+	
+			Map = Lock_EMAP(EMap);
+			View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);	
+			
+			continue;
+      }
+      else if(iOrientation == IPJ_ORIENT_PLAN)
+         iOrient = IPJ_PLAN;   // Plan
+		else if(iOrientation == IPJ_ORIENT_3D || iOrientation == IPJ_ORIENT_3D_MATRIX)
+			iOrient = IPJ_3D;
+      else
+         Abort_SYS(_("This GX supports only grids with Plan, Section, 3D, 3D Matrix and Default orientations"));
+      
+
+      // --- Generate a valid group name ---
+
+      FileNamePart_STR(sGrid,sName,STR_FILE_PART_NAME);
+      ToLower_STR(sName);
+
+      Strcpy_STR(sTemp,"");
+      if (iZone == 4)
+         Strcat_STR(sTemp,_n("s"));
+
+      GenGroupName_STR("AGG", sName, sTemp, sGroup);
+      
+
+      // --- For long file names, ensure that the group name is unique. ---
+
+      if(iStrlen_STR(sGroup)==STR_GROUP-1) 
+         GenNewGroupName_MVIEW(View, sGroup, sAgg);
+      else
+         Strcpy_STR(sAgg, sGroup);
+
+      // --- Create the Plane and set the grid in it ---
+
+      iPlane = iFindPlane_MVIEW(View, sGroup);
+      if(iPlane==-1)
+         iPlane = iCreatePlane_MVIEW(View,sGroup);
+
+
+      // --- Get the equation of the plane from the IPJ ---
+
+      if(iOrient==IPJ_PLAN) 
+      { 
+         // --- Set Plan grids directly ---
+
+         rPitch = 0.0;
+         rYaw   = 0.0;
+         rRoll  = 0.0;
+         rSX    = 1.0;
+         rSY    = 1.0;
+         rSZ    = 1.0;
+         rXOff  = rRefX;
+         rYOff  = rRefY;
+         rZOff  = rRefZ;
+      }
+      else 
+      {
+         GetPlaneEquation2_IPJ(hIPJ, hIPJt, rXo, rYo, rXo+rDx, rYo+rDy, rPitch, rYaw, rRoll,
+                                 rXOff, rYOff, rZOff, rSX, rSY, rSZ);
+         
+         // --- Do NOT rescale axes for section grids; the differing X to Y ratio compensates
+         //     for the affect of swing, and the input min/max values are NOT intended to represent
+         //     a perfect square area. ---
+         
+         rSX = 1.0;
+         rSY = 1.0;
+         rSZ = 1.0;              
+      }
+         
+      SetPlaneEquation_MVIEW(View,iPlane, rPitch, rYaw, rRoll,
+                                 rXOff, rYOff, rZOff, rSX, rSY, rSZ);
+                                 
+
+      // --- create an aggregate ---
+      
+      hAGG = Create_AGG();
+      if (iStrlen_STR(sColor) == 0)                             // undefined in dialogue
+         if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor) == 1)  // undefined in parm block
+            Strcpy_STR(sColor,"colour.tbl");                    // hardwire
+                   
+      iProgState = iProgState_SYS();  
+      Progress_SYS(1);
+      Printf_STR(sMsg, sizeof(sMsg), _("Importing %s"), sGrid);
+      ProgName_SYS(sMsg,1);
+      LayerIMG_AGG(hAGG,sGrid,iZone,sColor,rContour);
+      Progress_SYS(iProgState);
+      
+      
+      // --- adjust the brightness ---
+
+      if ((rBright != rDUMMY) && (rBright != 0.0))
+         ChangeBrightness_AGG(hAGG,rBright);
+      
+            
+      // --- put aggregate in the view ---
+      
+      Aggregate_MVIEW(View,hAGG,sAgg);
+      
+
+      // --- Put the AGG on its plane ---
+
+      SetGroupToPlane_MVIEW(View, iPlane, sAgg);
+
+
+		// --- If the input grid has a PCS, and the 3D view does not, set the 3D view's projection to the grid
+		//     projection ---
+		
+		if(iSourceType_IPJ(hIPJt) == IPJ_TYPE_NONE &&
+		   iSourceType_IPJ(hIPJ) == IPJ_TYPE_PCS)
+		{
+			ClearOrientation_IPJ(hIPJ);
+			SetIPJ_MVIEW(View, hIPJ);
+			GetIPJ_MVIEW(View, hIPJt);
+		}
+		
+		
+      // --- done ---
+
+      Destroy_IPJ(hIPJ);
+   }
+
+
+	Destroy_IPJ(hIPJt);
+	Destroy_MVIEW(View);
+
+
+	// --- Add grids to project ---
+
+	if (!iScript_SYS())
+	{
+		DefaultInt_SYS("GRIDIMG3D", "ADDTOPROJECT", 1);
+		i = iGetInt_SYS("GRIDIMG3D","ADDTOPROJECT");
+		SetInt_SYS("GRIDIMG3D", "ADDTOPROJECT", 1);
+
+		for(iGrid=0; iGrid<iGrids; iGrid++)
+		{
+			GetMFile_STR(sFiles,sGrid,iGrid);
+			iAddDocument_PROJ(sGrid,"Grid",0);
+		}
+	}
+
+	if (iMAP == iDUMMY)
+		UnLock_EMAP(EMap);
+}

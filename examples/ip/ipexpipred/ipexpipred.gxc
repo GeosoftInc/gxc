@@ -1,0 +1,219 @@
+//===========================================================================
+NAME          = "Export Pseudo-Sections to Geosoft IPRED format File(s)"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP/Export"
+
+DESCRIPTION   = "
+   Export Pseudo-Sections to Geosoft IPRED format file(s) from the current database.
+
+    IP.LINES : Line selections:
+               A : All lines
+               S : Selected lines
+               D : Displayed line
+    IP.IPREDTITLE : Title for first line
+    IP.CHAN      : Channel to output 
+    IP.SUFFIX    : Suffix for file (like 'res')
+    IP.FILTER :
+               1: Regular Pant-leg
+               2: Regular Pant-leg, single point at top
+               3: Regular Pyriamid
+               4: Regular Pyriamid, single point at top
+"
+// Revision History:
+// v5.1.4: In script mode, added a parameter to specify which directory to export to
+// v5.1.3: Using "Current" X, Y and Z channels - WinnowChanList2_IP.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPEXPIPRED.gr"
+#include "IPEXPIPRED.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+DB_SELECT   Select;        // current selection mode
+LST         List;             // List handle
+
+int         i;                // Utility 
+
+string(STR_DEFAULT_SHORT) sLine, sW, sSuffix;
+string(STR_DEFAULT_LONG) sAvgWindows, sTitle, sDir;
+string(STR_DB_SYMBOL) sCurLine, sChan;
+int iD, iDone, iNMax, iFilter, iLine;
+real rStn1, rStn2;
+
+#define IPEXP_MAIN 0
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();
+
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   iDone = 0;
+   i = IPEXP_MAIN;
+
+   if(iInteractive_SYS()) 
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPEXPIPRED");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_IPEXPIPRED_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+
+      // --- Remove obviously non-pseudo-section channels ---
+
+      WinnowChanList2_IP(List, Data);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_0,DGW_LISTALIAS,"IP","LINES");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_1,DGW_TEXT,"IP","IPREDTITLE");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_2,DGW_TEXT,"IP","CHAN");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_3,DGW_TEXT,"IP","SUFFIX");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_4,DGW_LISTALIAS,"IP","FILTER");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_5,DGW_TEXT,"IP","WEIGHTS");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_6,DGW_TEXT,"IP","STN1");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_7,DGW_TEXT,"IP","STN2");
+      SetInfoSYS_DGW(Diag,_IPEXPIPRED_8,DGW_TEXT,"IP","MAXN");
+
+      // --- Run the Dialogue ---
+
+      iD = iRunDialogue_DGW(Diag);
+      if (iD == -1) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_0,DGW_LISTALIAS,"IP","LINES");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_1,DGW_TEXT,"IP","IPREDTITLE");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_2,DGW_TEXT,"IP","CHAN");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_3,DGW_TEXT,"IP","SUFFIX");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_4,DGW_LISTALIAS,"IP","FILTER");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_5,DGW_TEXT,"IP","WEIGHTS");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_6,DGW_TEXT,"IP","STN1");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_7,DGW_TEXT,"IP","STN2");
+      GetInfoSYS_DGW(Diag,_IPEXPIPRED_8,DGW_TEXT,"IP","MAXN");
+
+        
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","LINES",sLine);
+
+   if (iChar_STR(sLine) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+   GetString_SYS("IP","IPREDTITLE",sTitle);
+   
+   GetString_SYS("IP","CHAN",sChan);
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("A channel must be selected"));
+   
+   GetString_SYS("IP","SUFFIX",sSuffix);
+   if(!iStrlen_STR(sSuffix))
+      Abort_SYS(_("A file suffix must be defined"));
+
+   GetString_SYS("IP","AVGWINDOWS",sAvgWindows);
+
+   iFilter = iGetInt_SYS("IP","FILTER");
+   if(iFilter<IP_FILTER_PANTLEG || iFilter>IP_FILTER_PYRIAMIDP) 
+      Abort_SYS(_("Invalid Filter Value"));
+
+   GetString_SYS("IP","WEIGHTS",sW);
+
+   rStn1 = rGetReal_SYS("IP","STN1");
+   rStn2 = rGetReal_SYS("IP","STN2");
+
+   iNMax = iGetInt_SYS("IP", "MAXN");
+   if(iNMax<1 || iNMax>20) 
+      Abort_SYS(_("Maximum n spacing must be in range 1-20"));
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Export IPRED"),1);
+
+
+   // --- import ---
+
+   if (iInteractive_SYS()) 
+      ExportIPREDDir_IP(Ip, Data, sTitle, sChan, sSuffix, iFilter, sW, rStn1, rStn2, 
+                     iNMax, "");
+   else {
+      GetString_SYS("IPEXPIPRED","DIR",sDir);
+      ExportIPREDDir_IP(Ip, Data, sTitle, sChan, sSuffix, iFilter, sW, rStn1, rStn2, 
+                     iNMax, sDir);
+   }
+  
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+
+   // --- reset starting selections
+
+   if (iLine != DU_LINES_SELECTED)
+      SetSelect_DB(Data,Select);
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+}

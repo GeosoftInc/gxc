@@ -1,0 +1,596 @@
+
+//===========================================================================
+NAME          = "Set Assay Attributes"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport/Assay Attributes"
+
+DESCRIPTION   = " "
+
+// Revision History:
+// v7.0.0: QA 10396: More fixes.
+// v6.4.2: QA 10396: Various fixes in creating lists, removed auto-setting the "ASSAY" class.
+// v6.4.1: Clear the assay channel LST before it is re-filled.
+// v6.0.0: Fixed bug backing up from first ASSAY dialog.
+// v5.1.8: Add select from list option
+//         Converted to use LSTs, not channel VVs.
+// v5.1.4: Fixed bug - EDB not unlocked after cancelling from Set Assay 
+//         Information dialog.
+// v5.1.3: Using "Current" X and Y channels so "Y" can be recognized as Yttrium
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chattrib.gr"
+#include "chattrib.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch;
+DGW         Diag;
+REG         Reg;
+LST         List;
+
+LST         ChLST, SelChanLST;
+
+string(STR_DEFAULT_LONG) sTemp, sChOpt, sMsg;
+string(STR_DB_SYMBOL) sChan, sXCh, sYCh, sZCh;
+string(STR_DEFAULT_SHORT) sUnits;
+string(STR_DEFAULT_SHORT) sDetLim;
+string(STR_DEFAULT_SHORT) sOutlierLim;
+string(STR_DEFAULT_SHORT) sLog, sSymbScl;
+string(STR_DEFAULT) sMethod;
+string(32768) sChannels;
+
+int i,iChans,iDiag,iMode,iDone,iRet,iDir,iLast,iItem,iMsg,iX,iY;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("The CHATTRIB GX must be run interactively"));
+
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   SelChanLST = Create_LST(2*STR_DB_SYMBOL);
+
+   
+   // --- Open current database ---
+
+   EData = Current_EDB();
+
+   iDone = 0;
+   iMode = -1;
+   iDiag = -1;
+   iMsg = 1;
+   while(!iDone) {
+
+      if(iMode==-1) {
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("CHATTRIB");
+
+         SetInfoSYS_DGW(Diag,_CHATTRIB_0,DGW_LISTALIAS,"CHATTRIB","CHANNELS");     
+         SetInfoSYS_DGW(Diag,_CHATTRIB_1,DGW_LISTALIAS,"CHATTRIB","MODE");     
+
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();
+      
+         GetInfoSYS_DGW(Diag,_CHATTRIB_0,DGW_LISTALIAS,"CHATTRIB","CHANNELS");
+         GetInfoSYS_DGW(Diag,_CHATTRIB_1,DGW_LISTALIAS,"CHATTRIB","MODE");     
+
+         Destroy_DGW(Diag);
+
+         if(iRet==1) {
+
+            // --- Get Parameters ---
+
+            GetString_SYS("CHATTRIB","CHANNELS",sChOpt);
+
+            
+            // --- Clear the channel LST ---
+            
+            Clear_LST(ChLST);
+            
+            
+            // --- All Assay Channels ---
+
+            if (iStrcmp_STR(sChOpt,"ASSAY",STR_CASE_TOLERANT) == 0) {
+   
+               Data = Lock_EDB(EData);
+               ClassChanLST_DB(Data, ChLST, "ASSAY"); 
+               UnLock_EDB(EData);
+            } 
+            
+            // --- Displayed Assay Channels ---
+
+            else if (iStrcmp_STR(sChOpt,"DISPLAYED_ASSAY",STR_CASE_TOLERANT) == 0) {
+        
+               iDispClassChanLST_EDB(EData, ChLST, "ASSAY"); 
+
+            }
+
+            // --- Element Channels ---
+
+            else if (iStrcmp_STR(sChOpt,"ELEMENT",STR_CASE_TOLERANT) == 0 ||
+                     iStrcmp_STR(sChOpt,"DISPLAYED_ELEMENT",STR_CASE_TOLERANT) == 0) 
+            {
+
+               if (iStrcmp_STR(sChOpt,"ELEMENT",STR_CASE_TOLERANT) == 0) 
+               {
+                  Data = Lock_EDB(EData);
+                  SymbLST_DB (Data, ChLST, DB_SYMB_CHAN);
+                  UnLock_EDB(EData);
+
+                  iChans = iSize_LST(ChLST);
+               }
+               else
+                  iChans = iDispChanLST_EDB (EData, ChLST);
+
+               
+               // --- Remove "X" and "Y" together if they are both present, otherwise, can
+               //     have "Y" for Yttrium. ---
+               
+               iX = iFindItem_LST(ChLST, LST_ITEM_NAME, "X");
+               iY = iFindItem_LST(ChLST, LST_ITEM_NAME, "Y");
+               if(iX!=-1 && iY!=-1)
+               {
+                  DelItem_LST(ChLST, iY);
+                  DelItem_LST(ChLST, iX);
+               }
+
+               
+               // --- Remove non-elements from the list ---
+               
+               iChans = iSize_LST(ChLST);
+               for (i=iChans-1;i>=0;i--) {
+            
+                  GetItem_LST(ChLST,0,i,sChan);
+               
+                  // --- is it an element? ---
+                  
+                  if (!iIsElement_CHIMERA(sChan, STR_CASE_SENSITIVE)) {
+               
+                     // --- not an element, remove from list ---
+                     
+                     DelItem_LST(ChLST, i);
+                  }           
+               }                  
+            } 
+            
+
+            // --- All Displayed Channels ---
+
+            else if (iStrcmp_STR(sChOpt,"DISPLAYED",STR_CASE_TOLERANT) == 0) 
+            {
+               iChans = iDispChanLST_EDB (EData, ChLST);
+
+
+               // --- Remove the common channels we know are NOT assay channels ---
+
+               Data = Lock_EDB(EData);
+               
+               
+               // --- Remove "X" and "Y" together if they are both present, and consecutive, otherwise, can
+               //     have "Y" for Yttrium. ---
+               
+               iX = iFindItem_LST(ChLST, LST_ITEM_NAME, "X");
+               iY = iFindItem_LST(ChLST, LST_ITEM_NAME, "Y");
+               if(iX!=-1 && iY!=-1 && iY==iX+1)
+               {
+                  DelItem_LST(ChLST, iY);
+                  DelItem_LST(ChLST, iX);
+               }
+               
+               
+               // --- Remove the current X,Y channels if they are NOT "X" and "Y". ---
+                              
+               GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+               GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+               GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+               
+               if(iStrcmp_STR(sXCh,"X",STR_CASE_TOLERANT))
+               {
+                  iX = iFindItem_LST(ChLST, LST_ITEM_NAME, sXCh);
+                  if(iX!=-1)
+                     DelItem_LST(ChLST, iX);
+               }
+               if(iStrcmp_STR(sYCh,"Y",STR_CASE_TOLERANT))
+               {
+                  iY = iFindItem_LST(ChLST, LST_ITEM_NAME, sYCh);
+                  if(iY!=-1)
+                     DelItem_LST(ChLST, iY);
+               }
+
+               iChans = iSize_LST(ChLST);
+               for (i=iChans-1;i>=0;i--) 
+               {            
+                  GetItem_LST(ChLST,0,i,sChan);
+
+                  if (iStrcmp_STR(sChan,sZCh,STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"MASK",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"CHEMMASK",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"SAMPLE",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"ORDER",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"BATCH",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"LAB_ID",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"LITHO",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"LITHOLOGY",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"WEIGHT",STR_CASE_TOLERANT) == 0 ||
+                      iStrncmp_STR(sChan,"PC",2,STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"SEQ",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"STANDARD",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"DUPLICATE",STR_CASE_TOLERANT) == 0) {
+
+                     // --- not likely to be an assay channel, remove from list ---
+                     
+                     DelItem_LST(ChLST, i);
+                     continue;
+                  }           
+
+                  // --- Remove those with classes defined to something other than "ASSAY" ---
+
+                  Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, i);
+
+                  GetRegSymbSetting_DB(Data,Ch,"CLASS",sTemp,sizeof(sTemp));
+                  if(iStrlen_STR(sTemp) &&
+                     iStrcmp_STR(sTemp,"ASSAY",STR_CASE_TOLERANT) != 0) {
+               
+                     // --- class is defined, and is not an assay, remove from list ---
+                     
+                     DelItem_LST(ChLST, i);
+                  }           
+               } 
+               UnLock_EDB(EData);                    
+            }
+            else if (iStrcmp_STR(sChOpt,"LIST",STR_CASE_TOLERANT) == 0) 
+            {
+
+               // --- Get all the channels ---
+
+               Data = Lock_EDB(EData);
+               Clear_LST(ChLST);
+               SymbLST_DB (Data, ChLST, DB_SYMB_CHAN);
+
+               iChans = iSize_LST(ChLST);
+
+
+               // --- Remove "X" and "Y" together if they are both present, otherwise, can
+               //     have "Y" for Yttrium. (Can't do consecutive test) ---
+               
+               iX = iFindItem_LST(ChLST, LST_ITEM_NAME, "X");
+               iY = iFindItem_LST(ChLST, LST_ITEM_NAME, "Y");
+               if(iX!=-1 && iY!=-1)
+               {
+                  DelItem_LST(ChLST, iY);
+                  DelItem_LST(ChLST, iX);
+               }
+               
+               
+               // --- Remove the current X,Y channels if they are NOT "X" and "Y". ---
+                              
+               GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+               GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+               GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+               
+               if(iStrcmp_STR(sXCh,"X",STR_CASE_TOLERANT))
+               {
+                  iX = iFindItem_LST(ChLST, LST_ITEM_NAME, sXCh);
+                  if(iX!=-1)
+                     DelItem_LST(ChLST, iX);
+               }
+               if(iStrcmp_STR(sYCh,"Y",STR_CASE_TOLERANT))
+               {
+                  iY = iFindItem_LST(ChLST, LST_ITEM_NAME, sYCh);
+                  if(iY!=-1)
+                     DelItem_LST(ChLST, iY);
+               }
+
+               iChans = iSize_LST(ChLST);
+               for (i=iChans-1;i>=0;i--) 
+               {            
+                  GetItem_LST(ChLST,0,i,sChan);
+
+                  if (iStrcmp_STR(sChan,sZCh,STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"MASK",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"CHEMMASK",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"SAMPLE",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"ORDER",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"BATCH",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"LAB_ID",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"LITHO",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"LITHOLOGY",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"WEIGHT",STR_CASE_TOLERANT) == 0 ||
+                      iStrncmp_STR(sChan,"PC",2,STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"SEQ",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"STANDARD",STR_CASE_TOLERANT) == 0 ||
+                      iStrcmp_STR(sChan,"DUPLICATE",STR_CASE_TOLERANT) == 0) {
+
+                     // --- not likely to be an assay channel, remove from list ---
+                     
+                     DelItem_LST(ChLST, i);
+                     continue;
+                  }           
+
+                  // --- Remove those with classes defined to something other than "ASSAY" ---
+
+                  Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, i);
+
+                  GetRegSymbSetting_DB(Data,Ch,"CLASS",sTemp,sizeof(sTemp));
+                  if(iStrlen_STR(sTemp) &&
+                     iStrcmp_STR(sTemp,"ASSAY",STR_CASE_TOLERANT) != 0) {
+               
+                     // --- class is defined, and is not an assay, remove from list ---
+                     
+                     DelItem_LST(ChLST, i);
+                  }           
+               }      
+               UnLock_EDB(EData);
+               
+               
+               // --- Sort the channel LST ---
+               
+               Sort_LST(ChLST, LST_ITEM_NAME, 0);
+
+
+               // --- Get previous selection ---
+      
+               GetString_SYS("CHATTRIB", "SELECTED", sChannels);
+
+      
+               // --- User selection ---
+
+               if(iInteractive_SYS()) {
+
+
+                  // --- Set starting selection for GUI ---
+   
+                  ConvertFromCSVString_LST(SelChanLST, sChannels);
+	               Sort_LST(SelChanLST, LST_ITEM_NAME, 0);
+
+                  iRet = iTwoPanelSelection2_GUI(ChLST, SelChanLST, _("Select Channels to Process"));
+                  if(iRet!=0) Cancel_SYS();
+
+         
+                  // --- Save selection ---
+      
+                  ConvertToCSVString_LST(SelChanLST, sChannels);
+                  SetString_SYS("CHATTRIB", "SELECTED", sChannels);
+               }
+               else 
+                  SelectCSVStringItems_LST(ChLST, sChannels, SelChanLST);
+
+               Copy_LST(ChLST, SelChanLST);
+               Sort_LST(ChLST,0,0);
+            }
+            else {
+               Strcpy_STR(sMsg, _("Selected channels must be one of \"ASSAY\", \"DISPLAYED_ASSAY\" ,\"ELEMENT\", \"DISPLAYED_ELEMENT\", \"DISPLAYED.\" or \"LIST\""));
+               Abort_SYS(sMsg);
+            }
+
+            iChans = iSize_LST(ChLST);
+            if(iChans==0)
+               Abort_SYS(_("No assay channels found"));
+
+
+            // --- Determine mode to set attributes ---
+
+            iMode = iGetInt_SYS("CHATTRIB", "MODE");
+            if(iMode!=1) iMode = 0;    // by default, one at a time
+
+
+         }
+      }
+
+      else if(iMode==0) 
+      {
+   
+         // --- Sort the channel LST ---
+         
+         Sort_LST(ChLST, LST_ITEM_NAME, 0);
+
+   
+         // --- Run the CHCHATTR GX as a child ---
+
+         if(iDiag == -1) iDiag = 1;
+
+         SetInt_SYS("CHCHATTR","CHILD",1);
+         Ch = (DB_SYMB)iGetInt_LST(ChLST,1,iDiag-1);
+
+         
+         SetInt_SYS("CHCHATTR","CHAN", (int)Ch);
+         iLast = 0;
+         if(iDiag==iChans) iLast = 1;
+         SetInt_SYS("CHCHATTR","LASTCHAN",iLast);
+
+         if(iRunGX_SYS("chchattr.gx")!=0)
+            Cancel_SYS();
+
+         iDir = iGetInt_SYS("CHCHATTR","DIR");
+         if(iDir==0) { // go backward            
+            iDiag--;
+
+            // --- If backing up before first ASSAY dialog, go back to original dialog ---
+
+            if(iDiag == 0) {
+               iDiag = -1;
+               iMode = -1;
+            }
+         }
+         else {
+            if(iDiag==iChans) 
+               iDone = 1;
+            else
+               iDiag++;
+         }
+      }
+
+      else if(iMode==1) {
+
+         
+         // --- Sort the channel LST ---
+         
+         Sort_LST(ChLST, LST_ITEM_NAME, 0);
+
+
+         // --- First, create a warning message ---
+
+         if(iMsg) {
+         
+            Strcpy_STR(sMsg,_("Are you sure you wish to set attributes at once for the following channels:\r\n"));
+
+            for (i=0;i<iChans;i++) {
+            
+               Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+               GetItem_LST(ChLST, 0, i, sChan);
+
+               if(iChans>1 && i==iChans-1)
+                  Strcat_STR(sMsg, _(" and "));
+
+               Strcat_STR(sMsg, sChan);
+               if(i<iChans-2) {
+                  Strcat_STR(sMsg, ", ");
+                  if(i%15==0 && i>0)
+                     Strcat_STR(sMsg, "\r\n");
+               }
+            }
+            Strcat_STR(sMsg, "?");
+
+            if(0==iDisplayQuestion_SYS(_("Set multiple-channel ASSAY attributes"), sMsg)) {
+               iMode = -1;
+               continue;
+            }
+
+            iMsg = 0;
+         }
+                              
+         Diag = Create_DGW("CHATTRIB1");
+         
+         // --- set up lists ---
+
+         List = GetList_DGW(Diag,_CHATTRIB1_5);
+         Clear_LST(List);
+         LoadFile_LST(List,"ch_assay_method");
+         Sort_LST(List,0,0);
+
+         SetInfoSYS_DGW(Diag,_CHATTRIB1_0,DGW_TEXT,"CHATTRIB1","UNITS");
+         SetInfoSYS_DGW(Diag,_CHATTRIB1_1,DGW_TEXT,"CHATTRIB1","DETLIM");
+         SetInfoSYS_DGW(Diag,_CHATTRIB1_2,DGW_TEXT,"CHATTRIB1","OUTLIER");
+         SetInfoSYS_DGW(Diag,_CHATTRIB1_3,DGW_TEXT,"CHATTRIB1","LOG");
+         SetInfoSYS_DGW(Diag,_CHATTRIB1_4,DGW_TEXT,"CHATTRIB1","SYMBSCL");
+         SetInfoSYS_DGW(Diag,_CHATTRIB1_5,DGW_TEXT,"CHATTRIB1","METHOD");
+      
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) {
+            iMode = -1;
+            Destroy_DGW(Diag);
+            iMsg = 1;
+            continue;
+         }
+
+         GetInfoSYS_DGW(Diag,_CHATTRIB1_0,DGW_TEXT,"CHATTRIB1","UNITS");
+         GetInfoSYS_DGW(Diag,_CHATTRIB1_1,DGW_TEXT,"CHATTRIB1","DETLIM");
+         GetInfoSYS_DGW(Diag,_CHATTRIB1_2,DGW_TEXT,"CHATTRIB1","OUTLIER");
+         GetInfoSYS_DGW(Diag,_CHATTRIB1_3,DGW_TEXT,"CHATTRIB1","LOG");
+         GetInfoSYS_DGW(Diag,_CHATTRIB1_4,DGW_TEXT,"CHATTRIB1","SYMBSCL");
+         GetInfoSYS_DGW(Diag,_CHATTRIB1_5,DGW_TEXT,"CHATTRIB1","METHOD");
+
+         GetString_SYS("CHATTRIB1","UNITS",  sUnits);
+         GetString_SYS("CHATTRIB1","DETLIM", sDetLim);
+         GetString_SYS("CHATTRIB1","OUTLIER",sOutlierLim);
+         GetString_SYS("CHATTRIB1","LOG",    sLog);
+         GetString_SYS("CHATTRIB1","SYMBSCL",sSymbScl);
+         GetString_SYS("CHATTRIB1","METHOD", sMethod);
+
+         // --- check for new assay method list entries ---
+                  
+         if(iStrlen_STR(sMethod)) {
+
+            iItem = iFindItem_LST(List,0, sMethod);
+            if(iItem==-1) {
+               AddUniqueItem_LST(List,sMethod,"");
+               SaveFile_LST(List,"ch_assay_method");
+            }
+         }
+
+         Destroy_DGW(Diag);
+
+         // --- new method? ---
+      
+         if (i==2) {
+			SetString_SYS("LISTEDIT","TITLE",_("Edit the Assay Method names"));
+			SetString_SYS("LISTEDIT","PROMPT",_("Method name"));
+            SetString_SYS("LISTEDIT","LIST","ch_assay_method");
+            SetString_SYS("LISTEDIT","SETTING",sMethod);
+            iRunGX_SYS("listedit");
+            GetString_SYS("LISTEDIT","SETTING",sMethod);
+            if(iStrlen_STR(sMethod))
+               SetString_SYS("CHATTRIB1","METHOD",sMethod);
+
+            continue;                        
+         }
+
+         // --- Set the Settings ---
+
+         Reg = Create_REG(128);
+   
+         Data = Lock_EDB(EData);
+         for (i=0;i<iChans;i++) {
+            
+            Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+            GetRegSymb_DB(Data,Ch,Reg);
+
+            // --- Set the class to "ASSAY" (may not always be set) ---
+
+            Set_REG(Reg,"CLASS","ASSAY");      
+   
+            if(iStrlen_STR(sUnits))
+               Set_REG(Reg,"UNITS",sUnits);      
+            
+            if(iStrlen_STR(sDetLim))
+               Set_REG(Reg,"DETECTLIMIT",sDetLim);      
+            
+            if(iStrlen_STR(sOutlierLim))
+               Set_REG(Reg,"OUTLIERLIMIT",sOutlierLim);      
+                        
+            if(iStrlen_STR(sSymbScl))
+               Set_REG(Reg,"SYMBOL_SCALING",sSymbScl);
+
+            if(iStrlen_STR(sLog))
+               Set_REG(Reg,"LOG",sLog);
+
+            if(iStrlen_STR(sMethod))
+               Set_REG(Reg,"ASSAYMETHOD",sMethod);
+
+            SetRegSymb_DB(Data,Ch,Reg);
+         }
+
+         Destroy_SYS(Reg);
+         UnLock_EDB(EData);
+
+         iDone = 1;
+
+      }
+   }                  
+
+}

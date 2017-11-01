@@ -1,0 +1,193 @@
+//===========================================================================
+NAME          = "GRIDXYZ"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "\
+\r\n\
+Export a Grid to an XYZ File.\r\n\
+\r\n\
+Parameters: \r\n\
+\r\n\
+       GRIDXYZ.GRD     File Name of the Grid.
+                         (.grd file)
+              .XYZ     Name of the .XYZ file.                          
+              .INDEX   Use Grid Indexes as Station Numbers
+                         (yes/no)
+              .XDEC    X Direction Decimation Factor 
+                         (integer)
+              .YDEC    X Direction Decimation Factor 
+                         (integer)
+              .LABEL   Use line labels in output file.
+                         (yes/no)
+\r\n"
+
+//===========================================================================
+
+RESOURCE = "gridxyz.gr"
+#include "gridxyz.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+int        iXdec,iYdec;       // X and Y Decimation factors
+int        iIndex;            // Flag to use Grid indexes
+int        iLab;              // Flag for using line labels
+
+string(STR_FILE)  sGrd;            // Name of input grid
+string(STR_FILE)  sXYZ;            // Name of new XYZ file
+string(STR_DEFAULT_SHORT) sTemp, sAliasFlagIndex, sAliasFlagLabel;           // working string
+
+IMG         IMG1;             // Image tied to the input grid
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDXYZForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDXYZFORM_0,DGW_FILEPATH,"GRIDXYZ","GRD");     
+      SetInfoSYS_DGW(Diag,_GRIDXYZFORM_1,DGW_FILEPATH,"GRIDXYZ","XYZ");     
+      SetInfoSYS_DGW(Diag,_GRIDXYZFORM_2,DGW_TEXT,"GRIDXYZ","INDEX");    
+      SetInfoSYS_DGW(Diag,_GRIDXYZFORM_3,DGW_TEXT,"GRIDXYZ","XDEC");    
+      SetInfoSYS_DGW(Diag,_GRIDXYZFORM_4,DGW_TEXT,"GRIDXYZ","YDEC");    
+      SetInfoSYS_DGW(Diag,_GRIDXYZFORM_5,DGW_TEXT,"GRIDXYZ","LABEL");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDXYZFORM_0,DGW_FILEPATH,"GRIDXYZ","GRD");     
+      GetInfoSYS_DGW(Diag,_GRIDXYZFORM_1,DGW_FILEPATH,"GRIDXYZ","XYZ");     
+      GetInfoSYS_DGW(Diag,_GRIDXYZFORM_2,DGW_TEXT,"GRIDXYZ","INDEX");    
+      GetInfoSYS_DGW(Diag,_GRIDXYZFORM_3,DGW_TEXT,"GRIDXYZ","XDEC");    
+      GetInfoSYS_DGW(Diag,_GRIDXYZFORM_4,DGW_TEXT,"GRIDXYZ","YDEC");    
+      GetInfoSYS_DGW(Diag,_GRIDXYZFORM_5,DGW_TEXT,"GRIDXYZ","LABEL");    
+
+
+      GetInfo_DGW(Diag,_GRIDXYZFORM_2,DGW_LISTALIAS,sAliasFlagIndex);
+      GetInfo_DGW(Diag,_GRIDXYZFORM_5,DGW_LISTALIAS,sAliasFlagLabel);
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDXYZ","GRD",sGrd);
+   GetString_SYS("GRIDXYZ","XYZ",sXYZ);
+   
+   // --- Check for null option strings and set to 
+   //     default values if blank ---
+
+   GetString_SYS("GRIDXYZ","INDEX",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iIndex = IMU_XYZ_INDEX_NO;
+   else if (!iStrcmp_STR(sTemp,"YES",STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlagIndex,"1",STR_CASE_TOLERANT))
+      iIndex = IMU_XYZ_INDEX_YES;
+   else if (!iStrcmp_STR(sTemp,"NO",STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlagIndex,"0",STR_CASE_TOLERANT))
+      iIndex = IMU_XYZ_INDEX_NO;
+   else
+      Abort_SYS(_("Invalid value for Grid Indexes option. Must be YES or NO"));
+
+   GetString_SYS("GRIDXYZ","LABEL",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iLab = IMU_XYZ_LABEL_YES;
+   else if (!iStrcmp_STR(sTemp,"YES",STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlagLabel,"1",STR_CASE_TOLERANT))
+      iLab = IMU_XYZ_LABEL_YES;
+   else if (!iStrcmp_STR(sTemp,"NO",STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlagLabel,"0",STR_CASE_TOLERANT))
+      iLab = IMU_XYZ_LABEL_NO;
+   else
+      Abort_SYS(_("Invalid value for Line labels option. Must be YES or NO"));
+
+
+   // --- get decimation factors and set to default if blank ---
+   
+   GetString_SYS("GRIDXYZ","XDEC",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iXdec = 1;
+   else
+      iXdec = iGetInt_SYS("GRIDXYZ","XDEC");
+
+   // --- Validate decimation factor ---
+
+   if ((iXdec < 1) || (iXdec > iMAX) || (iXdec == iDUMMY))
+      Abort_SYS(_("X Decimation factor is invalid - must be an integer from 1 to 2147483647"));
+
+
+   GetString_SYS("GRIDXYZ","YDEC",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iYdec = 1;
+   else
+      iYdec = iGetInt_SYS("GRIDXYZ","YDEC");
+
+   // --- Validate decimation factor ---
+
+   if ((iYdec < 1) || (iYdec > iMAX) || (iYdec == iDUMMY))
+      Abort_SYS(_("Y Decimation factor is invalid - must be an integer from 1 to 2147483647"));
+                                                                         
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrd))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   if (!iStrlen_STR(sXYZ))
+      Abort_SYS(_("New XYZ File name Not Specified!"));   
+
+   
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Image..."),1); 
+
+   // --- Create Images tied to the grid ---  
+   
+   IMG1 = CreateFile_IMG(GS_FLOAT,sGrd,IMG_FILE_READONLY);
+   
+
+  
+   ProgName_SYS(_("Exporting Grid Data..."),1);
+
+   // --- Add the grids ---
+
+   GridXYZ_IMU(IMG1,sXYZ,iIndex,iXdec,iYdec,iLab);
+   
+   // --- Destroy the Images ---
+   
+   Destroy_IMG(IMG1);
+       
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+}

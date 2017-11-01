@@ -1,0 +1,1015 @@
+
+//===========================================================================
+NAME          = "Extract duplicates"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport/Duplicates"
+
+DESCRIPTION   = " "
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v7.3:   Extensive refactoring, improvement in output.
+// v7.2:   Add support for string-type duplicates - QA 17155.
+// v6.2.0: Improved error message, error handling for unmatched duplicates.
+// v6.0.0: If duplicate GDB exists, but has no ASSAY channels,
+//         they are created from the assay database list.
+// v5.1.8: Force standards DB to front.
+//         Use "ORDER" channel for sorting if it exists
+//         Make Lab DB current before calling SORT GX.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "chdup.gr"
+#include "chdup.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         ELabDB,EDupDB;
+DB          LabDB,DupDB;
+DB_SYMB     LabLn,DupLn;
+
+DB_SYMB     LabCh;
+DB_SYMB     LabDupCh;
+DB_SYMB     LabSampleCh;
+DB_SYMB     LabOrderCh;
+DB_SYMB     LabLabCh; 
+DB_SYMB     LabBatchCh;
+DB_SYMB     LabWeightCh;
+
+DB_SYMB     DupCh;
+DB_SYMB     DupDupCh;
+DB_SYMB     DupSampleCh;
+DB_SYMB     DupOrderCh;
+DB_SYMB     DupLabCh; 
+DB_SYMB     DupBatchCh;
+DB_SYMB     DupWeightCh;
+DB_SYMB     DupSeqCh;
+DB_SYMB     DupDupOrderCh;
+
+DGW         Diag;
+VV          LabChVV;
+VV          DupChVV, DupChNameVV;
+VV          DupVV, DupVVInt;
+VV          SampleVV;
+VV          OutputSampleVV;
+VV          OutputDuplicateVV;
+VV          SeqVV;
+WA          Wa;
+LST         LineLST;
+
+string(STR_FILE) sLabDB, sCurline, sReportFile, sDupDBFile;
+string(STR_FILE) sDupDB;
+string(STR_DB_SYMBOL) sDup, sChan, sChan2, sLine, sDupSortChan, sTempDupChan;
+string(STR_DEFAULT_LONG) sTemp, sSample, sDupSample, sMsg;
+string(STR_DEFAULT) sLabel, sLabel2, sSymb;
+string(STR_DEFAULT) sVal;
+
+int   iInteractive;
+int   i,ii,iChans,iDup,iDupChanType,iLab,iSeq,iValDup,iLineDup,iNDup,iNDupInt,iTotDup,iSample,iVal1,iVal2,j;
+int   iRemove,iDupWarning,iDuplicateMethod,iNumDuplicates,iBlank;
+int   iLine;             // Number of Lines Processed
+int   iTotLines;         // Total Number of Lines to Process
+int   iDBOpened;
+
+real rFidStart, rFidIncr;
+
+//===========================================================================
+// MACROS
+//===========================================================================
+
+#define CREATE_CHAN(A,B,C,D) \
+   if (iExistChan_DB(D,A)) B = FindChan_DB(D,A);\
+   else B = CreateSymb_DB(D,A,DB_SYMB_CHAN,DB_OWN_SHARED,C);\
+   LockSymb_DB(D,B,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   
+#define MOVE_REAL_DATA(A,B) {\
+	if(iLab < iGetChannelLength_DB(LabDB, LabLn, A))\
+		SetChanReal_DB(DupDB,DupLn,B,iDup,rGetChanReal_DB(LabDB,LabLn,A,iLab));\
+	else\
+		SetChanReal_DB(DupDB,DupLn,B,iDup,rDUMMY);\
+}
+
+#define MOVE_INT_DATA(A,B) {\
+	if(iLab < iGetChannelLength_DB(LabDB, LabLn, A))\
+		SetChanInt_DB(DupDB,DupLn,B,iDup,iGetChanInt_DB(LabDB,LabLn,A,iLab));\
+	else\
+		SetChanInt_DB(DupDB,DupLn,B,iDup,iDUMMY);\
+}
+
+#define MOVE_STR_DATA(A,B) {\
+	if(iLab < iGetChannelLength_DB(LabDB, LabLn, A)) {\
+		GetChanStr_DB(LabDB,LabLn,A,iLab,sTemp,sizeof(sTemp)); SetChanStr_DB(DupDB,DupLn,B,iDup,sTemp);\
+	} else {\
+		SetChanStr_DB(DupDB,DupLn,B,iDup,"");\
+	}\
+}   
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+	iInteractive = iInteractive_SYS();
+   if (iInteractive) {
+   
+      // --- get database names ---
+
+      Diag = Create_DGW("chdup");
+
+
+		// --- Use the current database as the default, except if it is already defined as the 
+		//     duplicates DB ---
+
+		if(iHaveCurrent_EDB())
+		{
+			ELabDB = Current_EDB();
+			GetName_EDB(ELabDB, sLabDB);
+
+			GetString_SYS("CHDUP","DUPLICATE_DB",sDupDBFile);
+
+			if(!iStrlen_STR(sDupDBFile) || iStrcmp_STR(sDupDBFile, sLabDB, STR_CASE_TOLERANT)==1)
+				SetString_SYS("CHIMERA", "ASSAY", sLabDB);
+		}
+      
+      SetInfoSYS_DGW(Diag,_CHDUP_0,DGW_FILEPATH,"CHIMERA","ASSAY");
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_CHDUP_0,DGW_FILEPATH,"CHIMERA","ASSAY");
+
+      Destroy_DGW(Diag);
+   }      
+   
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("CHIMERA","ASSAY",sLabDB);
+   GetString_SYS("CHDUP","REPORTFILE",sReportFile);
+   GetString_SYS("CHDUP","DUPLICATE_DB",sDupDBFile);
+   
+	ELabDB = Load_EDB(sLabDB);
+   
+   iRemove=1;   // init to remove the second duplicate value for old 1,2 duplicates (note in descending order)
+   iDupWarning = 0;
+   
+   // --- Prepare to do the work ---
+
+   LabDB  = Lock_EDB(ELabDB);
+
+   // --- Create a LST for the selected lines. This list is ordered. ---
+
+   LineLST = Create_LST(STR_DB_SYMBOL);
+   SelectedLineLST_DB(LabDB, LineLST);
+   iTotLines = iSize_LST(LineLST);
+   if(iTotLines==0)
+      Abort_SYS(_("There are no lines selected in the assay database."));
+
+   Progress_SYS(1);
+
+
+   // --- Create a report log for warnings ---
+   if(iStrlen_STR(sReportFile) == 0) 
+      Strcpy_STR(sReportFile, "chdup.log");
+         
+   Wa = Create_WA(sReportFile, WA_NEW);
+
+   
+
+   // --- get and lock the Duplicate channel symbol ---
+      
+   if (!iExistChan_DB(LabDB,"Duplicate"))
+      Abort_SYS(_("A \"Duplicate\" channel is required in the lab database."));
+   LabDupCh = FindChan_DB(LabDB,"Duplicate");
+	LOCK_RW(LabDB,LabDupCh);
+
+   if(iGetChanProtect_DB(LabDB,LabDupCh))
+      Abort_SYS(_("\"Duplicate\" channel in the lab database must not be protected. Unprotect the channel and run the GX again"));
+
+
+
+	// --- See if the database contains old-style 1,2,3,4 duplicates. Do this by
+	//     reading the duplicate data as integers, sorting it, removing dummies,
+	//     and seeing if it contains exclusively odd-even consecutive values ---
+
+	DupVVInt = Create_VV(INT, 0);
+	DupVV = Create_VV(-64, 0);
+	OutputSampleVV = Create_VV(-64, 0);
+	OutputDuplicateVV = Create_VV(-64, 0);
+
+
+   // --- Go through all selected Lines ---
+
+	iDupChanType = iGetChanType_DB(LabDB, LabDupCh);
+   iDuplicateMethod = 0;	// 0: Old-style 1,2 duplicates, 1: New-style sample-ID duplicates
+	iDBOpened = 0;
+   for(iLine=0;iLine<iTotLines;iLine++)
+   {        
+      
+      iLineDup = 0;
+
+
+      // --- Get the line name and symbol ---
+      
+      GetItem_LST(LineLST, 0, iLine, sLine);      
+      GetItem_LST(LineLST, 1, iLine, sSymb);      
+      LabLn = (DB_SYMB)iScanI_STR(sSymb);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Determining duplicates method: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+      if(iCheckStop_SYS()) Cancel_SYS();            
+		
+
+		// --- Read the duplicates as both strings and integers ---
+
+		GetChanVV_DB(LabDB, LabLn, LabDupCh, DupVV);
+		GetChanVV_DB(LabDB, LabLn, LabDupCh, DupVVInt);
+		RemoveDummy_VVU(DupVV);
+		RemoveDummy_VVU(DupVVInt);
+
+		iNDup = iLength_VV(DupVV);
+		iNDupInt = iLength_VV(DupVVInt);
+
+
+		// --- If there are more string values than integers, then its sample-no duplicates for sure ---
+
+		if(iNDup != iNDupInt)
+		{
+         Printf_STR(sLabel, sizeof(sLabel), _("Sample Number duplicates method used, based on non-numeric duplicate ID(s) found on line %s."), sLine);
+			Puts_WA(Wa, sLabel);
+	      NewLine_WA(Wa);
+	      NewLine_WA(Wa);
+			iBlank = 1;
+
+			iDuplicateMethod = 1;
+			break;
+		}
+
+
+		// --- If no dups at all, can't tell from this line ---
+
+		iNDup = iLength_VV(DupVVInt);
+		if(iNDup == 0) 
+			continue;
+
+
+		// --- If there are an odd number of duplicates, must be strings ---
+
+		if(iNDup%2 == 1)
+		{
+         Printf_STR(sLabel, sizeof(sLabel), _("Sample Number duplicates method used; based on odd number of duplicate IDs found on line %s."), sLine);
+			Puts_WA(Wa, sLabel);
+	      NewLine_WA(Wa);
+	      NewLine_WA(Wa);
+			iBlank = 1;
+
+			iDuplicateMethod = 1;
+			break;
+		}
+		
+
+		// --- Sorted, the duplicates must be consecutive odd/even ---
+
+		Sort_VV(DupVVInt, VV_SORT_ASCENDING);
+		for(j=0; j<iNDup; j+=2)
+		{
+			iVal1 = iGetInt_VV(DupVVInt, j);
+			iVal2 = iGetInt_VV(DupVVInt, j+1);
+
+
+			// --- Break out early if not consecutive odd/even ---
+
+			if(iVal1 %2 != 1 || iVal2 != iVal1+1)
+			{
+	         Printf_STR(sLabel, sizeof(sLabel), _("Sample Number duplicates method used; based on invalid duplicate sequence %d, %d found on line %s."), iVal1, iVal2, sLine);
+				Puts_WA(Wa, sLabel);
+		      NewLine_WA(Wa);
+		      NewLine_WA(Wa);
+				iBlank = 1;
+
+				break;
+			}
+		}
+
+		if(j < iNDup)
+		{
+			iDuplicateMethod = 1;
+			break;
+		}
+	}
+
+	UNLOCK(LabDB,LabDupCh);
+   UnLock_EDB(ELabDB); 
+
+
+	if(iDuplicateMethod == 0)
+	{
+	   Strcpy_STR(sLabel, _("Numeric duplicates method used; duplicates are identified using odd/even pairs of consecutive integers (e.g. 1,2; 3,4 etc.)"));
+		Puts_WA(Wa, sLabel);
+      NewLine_WA(Wa);
+      NewLine_WA(Wa);
+		iBlank = 1;
+	}
+
+
+   // --- sort database by Duplicates. If the duplicates channel is string-type, with old-style numeric odd/even 
+	//     duplicates, need to create a temporary Integer duplicates copy channel and sort by that, because
+	//     a string-sort on numbers gives orders like 1, 11, 12, 2, etc.... ---
+
+	Strcpy_STR(sDupSortChan, _n("Duplicate"));
+	Strcpy_STR(sTempDupChan, "");
+	if(iDuplicateMethod == 0 &&  iDupChanType < 0)
+	{
+		Strcpy_STR(sTempDupChan, _n("_TempDuplicate"));
+		Strcpy_STR(sDupSortChan, sTempDupChan);
+
+		LabDB = Lock_EDB(ELabDB);
+		CREATE_CHAN(sTempDupChan,DupCh,DB_CATEGORY_CHAN_LONG,LabDB)
+		UnLock_EDB(ELabDB);
+
+		SetString_SYS("COPY","FROM", "Duplicate");
+		SetString_SYS("COPY","TO", sTempDupChan);
+		SetString_SYS("COPY","DECIMATE", "1");
+		SetString_SYS("COPY","FIDSTART", "");
+		SetString_SYS("COPY","FIDINCR", "");
+
+		SetInteractive_SYS(0);
+		iRunGX_SYS("copy.gx");
+		SetInteractive_SYS(iInteractive);
+	}
+    
+   SetString_SYS("SORTALL","CHANNEL", sDupSortChan);
+   SetString_SYS("SORTALL","ORDER", "DESCENDING");
+   SetString_SYS("SORTALL","READONLY", "YES");
+ 
+   if (iRunGX_SYS("sortal") != 0) 
+         Abort_SYS(_("Initial sort of assay database on the \"Duplicate\" channel failed"));
+   
+   LabDB = Lock_EDB(ELabDB); 
+
+
+	// --- Remove the temp duplicate sort channel; it is no longer required after the sort. ---
+
+	if(iStrlen_STR(sTempDupChan) != 0)
+	{
+		DupCh = FindChan_DB(LabDB, sTempDupChan);
+		LOCK_RW(LabDB, DupCh);
+		DeleteSymb_DB(LabDB, DupCh);
+	} 
+
+
+   // --- get/create/lock required channels ---
+      
+   CREATE_CHAN("Sample",LabSampleCh,-16,LabDB)
+   CREATE_CHAN("Order" ,LabOrderCh ,DB_CATEGORY_CHAN_LONG,LabDB)
+   CREATE_CHAN("Lab_ID",LabLabCh   ,-16,LabDB)
+   CREATE_CHAN("Batch" ,LabBatchCh ,-16,LabDB)
+   CREATE_CHAN("Weight",LabWeightCh,DB_CATEGORY_CHAN_FLOAT,LabDB)
+	LOCK_RW(LabDB,LabDupCh);
+
+
+   // --- create VV's to hold channel lists ---
+      
+   LabChVV = Create_VV(INT,0);
+   DupChVV = Create_VV(INT,0);
+	DupChNameVV = Create_VV(-STR_DB_SYMBOL, 0);
+   
+   
+   // --- VVs for samples ---
+      
+   SampleVV = Create_VV(-64, 0);
+
+   
+   // --- create name for output duplicates database ---
+
+   if(iStrlen_STR(sDupDBFile) == 0) {
+      Strcpy_STR(sDup,_n("Duplicate"));
+      Strcpy_STR(sDupDB,sDup);
+      FileExt_STR(sDup,"gdb",sDupDB,FILE_EXT_FORCE);
+   }
+   else {
+      Strcpy_STR(sDupDB,sDupDBFile);
+      FileExt_STR(sDupDBFile,"gdb",sDupDB,FILE_EXT_FORCE);
+   }
+
+   
+   // --- Turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS("",1);
+
+
+   // --- Go through all selected Lines ---
+
+   iTotDup = 0;
+   for(iLine=0;iLine<iTotLines;iLine++)
+   {        
+      
+      iLineDup = 0;
+
+
+      // --- Get the line name and symbol ---
+      
+      GetItem_LST(LineLST, 0, iLine, sLine);      
+      GetItem_LST(LineLST, 1, iLine, sSymb);      
+      LabLn = (DB_SYMB)iScanI_STR(sSymb);
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(LabDB,LabLn,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      Strcpy_STR(sLabel,_("Extracting Duplicates from line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+      if(iCheckStop_SYS()) Cancel_SYS();                  
+            
+         
+      // --- get the first Duplicate ---
+
+      iLab = 0;
+
+		if(iDuplicateMethod == 0)
+		{
+			iValDup = iGetChanInt_DB(LabDB,LabLn,LabDupCh,iLab);
+
+	      if (iValDup == iDUMMY) 
+			{         
+				Printf_STR(sLabel, sizeof(sLabel), _("%s : No duplicate samples."), sLine);
+				Puts_WA(Wa, sLabel);
+				NewLine_WA(Wa);
+				iBlank = 0;
+
+		      // --- Advance to Next Line ---    
+
+				UnLockSymb_DB(LabDB,LabLn);
+				continue;
+			}
+		}
+		else
+		{
+			GetChanStr_DB(LabDB,LabLn,LabDupCh,iLab,sDup, sizeof(sDup));	
+		
+			if (iStrlen_STR(sDup)==0) 
+			{         
+				Printf_STR(sLabel, sizeof(sLabel), _("%s : No duplicate samples."), sLine);
+				Puts_WA(Wa, sLabel);
+				NewLine_WA(Wa);
+				iBlank = 0;
+
+		      // --- Advance to Next Line ---    
+
+				UnLockSymb_DB(LabDB,LabLn);
+				continue;
+			}
+		}
+         
+         
+      // --- processing Duplicates ---
+      // --- open Duplicates database ---
+
+		if(!iDBOpened)
+		{                  
+			// --- if can't find Duplicates database, create one ---
+          
+			if (iFindPathNameEx_SYS(sDupDB,FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_USER_TEMP,sDupDB) == 1) 
+			{
+         
+				// --- new database required ---
+         
+				if (iInteractive)
+				{
+					Printf_STR(sTemp, sizeof(sTemp), _("%s does not exist. Do you want to create it?"), sDupDB);
+					if(iDisplayQuestion_SYS(_("Duplicate database not found"),sTemp) == 0)
+						Cancel_SYS();
+				}
+            
+				
+				// --- Create duplicates database using lab as model ---
+                  
+            CreateEx_DB(sDupDB,5,500,1000,10,100,"SUPER","",1024);
+
+            Printf_STR(sLabel, sizeof(sLabel), _("Created duplicates database %s."), sDupDB);
+            Puts_WA(Wa, sLabel);
+            NewLine_WA(Wa);
+            NewLine_WA(Wa);
+				iBlank = 1;
+			}
+                         
+
+			// --- Load duplicate database and get the current line ---
+         
+			EDupDB  = Load_EDB(sDupDB);
+			GetName_EDB(EDupDB, sDupDBFile);
+			SetString_SYS("CHDUP","DUPLICATE_DB",sDupDBFile);
+
+
+			if(iInteractive)
+				DupLn  = GetCurLineSymb_EDB(EDupDB);
+
+			DupDB   = Lock_EDB(EDupDB);
+            
+         if(!iInteractive) 
+			{
+            GetString_SYS("CHDUP", "CURLINE", sCurline);   
+            DupLn = FindSymb_DB(DupDB, sCurline, DB_SYMB_LINE);
+         }
+
+
+			// --- create lab channel list from Duplicate database ---
+            
+			iChans = iClassChanList_DB(DupDB,DupChVV,"ASSAY");
+			if(iChans==0) {
+            
+				// --- No assay channels found; create them from those found in the assays database ---
+               
+				iChans = iClassChanList_DB(LabDB,LabChVV,"ASSAY");
+				SetLen_VV(DupChVV,iChans);
+               
+				for (i=0;i<iChans;i++) {
+               
+					// --- Add it to Duplicates database ---
+                     
+					LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+					DupCh = DupSymbAcross_DB(LabDB,DupDB,LabCh);
+					SetInt_VV(DupChVV,i,(int)DupCh);
+				}
+				iChans = iClassChanList_DB(DupDB,DupChVV,"ASSAY");
+			}
+			SetLen_VV(LabChVV,iChans);
+
+			if(iChans == 0)
+			{
+				NewLine_WA(Wa);
+				Puts_WA(Wa, _("No channels with class \"ASSAY\" were found in either the Assay or Duplicates database."));
+				NewLine_WA(Wa);
+				NewLine_WA(Wa);
+				iBlank = 1;
+			}
+            
+			for (i=0;i<iChans;i++) {
+            
+				LabCh = (DB_SYMB)iGetInt_VV(DupChVV,i);
+
+				// --- Is it in the lab? ---
+                  
+				GetSymbName_DB(DupDB,LabCh,sTemp);
+				SetString_VV(DupChNameVV, i, sTemp);
+
+				if (iExistChan_DB(LabDB,sTemp)) {
+                  
+					// --- it's in the lab database, add it to lab list ---
+                    
+					LabCh = FindChan_DB(LabDB,sTemp);
+					SetInt_VV(LabChVV,i,(int)LabCh);
+                     
+				} else {
+                  
+					// --- not in lab database, don't process ---
+                     
+					SetInt_VV(LabChVV,i,(int)NULLSYMB);
+					SetInt_VV(DupChVV,i,(int)NULLSYMB);
+				}
+			}
+               
+         
+			ProgName_SYS(sLabel,0);
+			ProgUpdateL_SYS(iLine,iTotLines);    
+
+
+         // --- get/create/lock required channels ---
+            
+         CREATE_CHAN("Duplicate",DupDupCh,-32,DupDB)
+         CREATE_CHAN("Seq"   ,DupSeqCh,DB_CATEGORY_CHAN_LONG,DupDB)
+         CREATE_CHAN("Batch" ,DupBatchCh ,-16,DupDB)
+         CREATE_CHAN("Sample",DupSampleCh,-16,DupDB)
+         CREATE_CHAN("Order" ,DupOrderCh ,DB_CATEGORY_CHAN_LONG,DupDB)
+         CREATE_CHAN("Lab_ID",DupLabCh   ,-16,DupDB)
+         CREATE_CHAN("Weight",DupWeightCh,DB_CATEGORY_CHAN_FLOAT,DupDB)
+         CREATE_CHAN("DupOrder",DupDupOrderCh,DB_CATEGORY_CHAN_LONG,DupDB)
+            
+         // --- lock assay data ---
+            
+         for (i=0;i<iChans;i++) {
+            
+            LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+            if (LabCh != NULLSYMB) {
+               LockSymb_DB(LabDB,LabCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+               DupCh = (DB_SYMB)iGetInt_VV(DupChVV,i);
+               LockSymb_DB(DupDB,DupCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+            }
+         }
+            
+			// --- go to last Duplicate entry ---
+
+			iDup = iGetChannelLength_DB(DupDB,DupLn,DupSampleCh);
+	            
+
+			// --- read/set sequence number. There is a single sequence number for each
+			//     run of CHDUP ---
+            
+			SeqVV = Create_VV(INT, 0);
+			GetChanVV_DB(DupDB, DupLn, DupSeqCh, SeqVV);
+			Sort_VV(SeqVV, VV_SORT_DESCENDING);
+			RemoveDummy_VVU(SeqVV);
+			if(iLength_VV(SeqVV) == 0)
+				iSeq = 1;
+			else
+			{
+				iSeq = iGetInt_VV(SeqVV, 0);
+				iSeq++;
+			}
+
+			iDBOpened = TRUE;
+		}
+
+
+      if (iDuplicateMethod == 0)   // Numbered sequence duplicates
+      {
+	                        
+			// --- while current sample is the same Duplicate, process ---
+	               
+			while (iValDup != iDUMMY) {
+	            
+				// --- set sequence ---
+	               
+				SetChanInt_DB(DupDB,DupLn,DupSeqCh,iDup,iSeq);
+	               
+				// --- add required non-assay channels if they exist ---
+	                  
+				MOVE_INT_DATA(LabDupCh   ,DupDupCh )      
+				MOVE_STR_DATA(LabSampleCh,DupSampleCh)
+				SetString_VV(OutputSampleVV, iLineDup, sTemp);
+				MOVE_INT_DATA(LabOrderCh ,DupOrderCh )      
+				MOVE_STR_DATA(LabLabCh   ,DupLabCh   )      
+				MOVE_STR_DATA(LabBatchCh ,DupBatchCh )      
+				MOVE_REAL_DATA(LabWeightCh,DupWeightCh)
+
+				SetInt_VV(OutputDuplicateVV, iLineDup, iValDup);
+	                        
+				// --- move assay data ---
+	               
+				for (i=0;i<iChans;i++) {
+					LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+					if (LabCh != NULLSYMB) {
+						DupCh = (DB_SYMB)iGetInt_VV(DupChVV,i);
+						MOVE_REAL_DATA(LabCh,DupCh)
+					}
+				}
+	               	         
+				      
+				// --- remove Duplicate record ---
+	      
+				rFidStart = rGetFidStart_DB(LabDB, LabLn, LabDupCh);
+				rFidIncr  = rGetFidIncr_DB(LabDB, LabLn, LabDupCh);
+
+				if(iRemove==1) {
+					ModFidRange_DU(LabDB,LabLn,rFidStart,rFidIncr,iLab,1,DU_MODFID_DELETE);
+					iRemove = 0;
+				} else {
+					SetChanInt_DB(LabDB,LabLn,LabDupCh,iLab,iDUMMY);
+					iLab++;
+					iRemove = 1;
+				}   
+	               
+				// --- get the next Duplicate ---
+
+				iValDup = iGetChanInt_DB(LabDB,LabLn,LabDupCh,iLab);
+				iDup++;
+				iLineDup++;
+				iTotDup++;
+			}
+		}
+		else   // Sample ID duplicates
+		{
+
+
+         // --- Check to see if the duplicate channel in the duplicate database is string type ---
+               
+         if (iDupWarning == 0)
+         {
+				if(iGetChanType_DB(DupDB, DupDupCh) >= 0)
+				{
+					Strcpy_STR(sMsg, _("The \"Duplicate\" channel in the duplicates database has a numeric data type.\r\nIf you wish to store the \"Duplicate\" values, you need to replace\r\nit with a string-type channel of the same name.\r\nDo you wish to cancel?"));
+							
+					if(iDisplayQuestion_SYS(_("Extract Duplicate Samples"), sMsg)== 1)
+						Cancel_SYS();
+								
+					iDupWarning = 1;
+				}               
+         }
+
+			// --- Get the number of duplicates (they should be all sorted to the top, so find the
+			//     last non-dummy item) ---
+					
+			GetChanVV_DB(LabDB, LabLn, LabDupCh, DupVV);
+			iNumDuplicates = iFindDummy_VVU(DupVV, 0, 0, 0, -1);
+					
+	
+			// --- set sequence ---
+	               
+			SetChanInt_DB(DupDB,DupLn,DupSeqCh,iDup,iSeq);
+	               
+	      iLab = 0;
+			GetChanStr_DB(LabDB,LabLn,LabDupCh,iLab,sDupSample, sizeof(sDupSample));	            
+			GetChanStr_DB(LabDB,LabLn,LabSampleCh,iLab,sSample, sizeof(sSample));	            
+			TrimSpace_STR(sDupSample, STR_TRIMBOTH);           							
+									
+			ProgName_SYS(_("Extracting duplicates"), 1);
+			while (iStrlen_STR(sDupSample) != 0)
+			{
+				ProgUpdateL_SYS(iLineDup, iNumDuplicates);
+				if(iCheckStop_SYS()==1)
+					Cancel_SYS();
+						
+						
+				// --- Use the corresponding SAMPLE ID value to remove the duplicates ---
+
+				GetChanVV_DB(LabDB, LabLn, LabSampleCh, SampleVV);					
+				iSample = iSearchText_VVU(SampleVV, sDupSample, VVU_CASE_TOLERANT, VVU_MATCH_FULL_STRINGS, -1, 1);
+						
+				if( iSample == -1)
+				{
+					SetString_VV(OutputSampleVV, iLineDup, sSample);
+					SetString_VV(OutputSampleVV, iLineDup+1, sDupSample);
+
+					iLab++;  // Increment to the next sample
+					GetChanStr_DB(LabDB,LabLn,LabDupCh,iLab,sDupSample, sizeof(sDupSample));				               
+					GetChanStr_DB(LabDB,LabLn,LabSampleCh,iLab,sSample, sizeof(sSample));	 
+					TrimSpace_STR(sDupSample, STR_TRIMBOTH);           							
+				}
+				else
+				{
+					// --- Move the sample, then the duplicate ---
+							
+							
+					for(ii = 0; ii<2; ii++)
+					{
+							
+						if(ii == 0)
+							iLab = iSample;
+						else
+							iLab = 0;
+								   
+								   
+						// --- set sequence ---
+			               
+						SetChanInt_DB(DupDB,DupLn,DupSeqCh,iDup,iSeq);
+											              			               
+						// --- set duplicate order ---
+			               
+						SetChanInt_DB(DupDB,DupLn,DupDupOrderCh,iDup,iDup);
+								
+			               
+						// --- add required non-assay channels if they exist ---
+			               
+			         if(ii==1)
+			         { 
+							MOVE_STR_DATA(LabDupCh   ,DupDupCh )      
+						}
+						MOVE_STR_DATA(LabSampleCh,DupSampleCh)
+						MOVE_INT_DATA(LabOrderCh ,DupOrderCh )      
+						MOVE_STR_DATA(LabLabCh   ,DupLabCh   )      
+						MOVE_STR_DATA(LabBatchCh ,DupBatchCh )      
+						MOVE_REAL_DATA(LabWeightCh,DupWeightCh)
+			                        
+						// --- move assay data ---
+			               
+						for (i=0;i<iChans;i++) {
+							LabCh = (DB_SYMB)iGetInt_VV(LabChVV,i);
+							if (LabCh != NULLSYMB) {
+								DupCh = (DB_SYMB)iGetInt_VV(DupChVV,i);
+								MOVE_REAL_DATA(LabCh,DupCh)
+							}
+						}
+								
+			         iDup++;
+					}
+						
+						
+					// --- Add to the output list ---
+						
+					SetString_VV(OutputSampleVV, iLineDup, sSample);
+					SetString_VV(OutputSampleVV, iLineDup+1, sDupSample);
+
+
+					// --- remove the duplicate record ---
+				      
+					rFidStart = rGetFidStart_DB(LabDB, LabLn, LabDupCh);
+					rFidIncr  = rGetFidIncr_DB(LabDB, LabLn, LabDupCh);
+					ModFidRange_DU(LabDB,LabLn,rFidStart,rFidIncr,0,1,DU_MODFID_DELETE);
+
+					iLineDup+=2;
+					iTotDup++;												
+
+						
+					// --- get the next Duplicate ---
+							
+					GetChanStr_DB(LabDB,LabLn,LabDupCh,iLab,sDupSample, sizeof(sDupSample));				               
+					GetChanStr_DB(LabDB,LabLn,LabSampleCh,iLab,sSample, sizeof(sSample));	 
+					TrimSpace_STR(sDupSample, STR_TRIMBOTH);           							
+				}						
+			}				
+			
+		}  // End if Sample Number duplicates
+
+
+		// --- Output duplicates extracted ---
+
+		if(iBlank == 0)
+			NewLine_WA(Wa);
+		Puts_WA(Wa, sLine);
+		NewLine_WA(Wa);
+		for(j=iLineDup-1; j>0; j-=2)
+		{
+			if(iDuplicateMethod == 0)
+			{
+				GetString_VV(OutputSampleVV, j, sSample);
+				GetString_VV(OutputSampleVV, j-1, sDupSample);
+				iValDup = iGetInt_VV(OutputDuplicateVV, j);
+		 		Printf_STR(sLabel, sizeof(sLabel), _("Sample: %4d %16s"), iValDup, sSample);
+				Printf_STR(sLabel2, sizeof(sLabel2), _("  Duplicate: %4d %16s"), iValDup+1, sDupSample);
+				Strcat_STR(sLabel, sLabel2);
+			}
+			else
+			{
+				GetString_VV(OutputSampleVV, j, sDupSample);
+				GetString_VV(OutputSampleVV, j-1, sSample);
+		 		Printf_STR(sLabel, sizeof(sLabel), _("Sample: %16s  Duplicate: %16s"), sSample, sDupSample);
+			}
+			Puts_WA(Wa, sLabel);
+			NewLine_WA(Wa);
+		}
+
+
+      // --- Output number of duplicates extracted ---
+
+		iLineDup /= 2;		// convert to pairs
+      FormatI_STR(iLineDup, sVal, 10);
+      if(iLineDup==1) 
+         Printf_STR(sLabel, sizeof(sLabel), _("%s pair of duplicates extracted."), sVal);
+      else
+         Printf_STR(sLabel, sizeof(sLabel), _("%s pairs of duplicates extracted."), sVal);
+      Puts_WA(Wa, sLabel);
+      NewLine_WA(Wa);
+      NewLine_WA(Wa);
+		iBlank = 1;
+         
+   
+      // --- Advance to Next Line ---    
+
+      UnLockSymb_DB(LabDB,LabLn);
+
+   }
+
+
+   // --- clean up ---
+      
+   UnLockSymb_DB(LabDB,LabDupCh);
+   UnLockSymb_DB(LabDB,LabSampleCh);
+   UnLockSymb_DB(LabDB,LabOrderCh );
+   UnLockSymb_DB(LabDB,LabLabCh   );
+   UnLockSymb_DB(LabDB,LabBatchCh );
+   UnLockSymb_DB(LabDB,LabWeightCh);
+   UnLock_EDB(ELabDB);
+      
+   Destroy_VV(LabChVV);
+   Destroy_VV(DupChVV);
+
+
+   // --- Anything done? ---
+
+   if(iTotDup==0)
+	{
+		if(iInteractive)
+			DisplayMessage_SYS(_("Removing Duplicates"), _("No duplicate samples removed."));
+	}
+   else {
+      
+      // --- display data ---
+               
+	   UnLock_EDB(EDupDB);
+      UnLoadAllChans_EDB(EDupDB);
+      LoadChan_EDB(EDupDB,"Sample");
+      LoadChan_EDB(EDupDB,"Duplicate" );
+      LoadChan_EDB(EDupDB,"Seq" );
+      LoadChan_EDB(EDupDB,"DupOrder" );
+		for(i=0; i<iChans;i++)
+		{
+			GetString_VV(DupChNameVV, i, sTemp);
+			if(iStrlen_STR(sTemp))
+				LoadChan_EDB(EDupDB, sTemp);
+		}
+      LoadChan_EDB(EDupDB,"Batch" );
+      LoadChan_EDB(EDupDB,"Order" );
+      LoadChan_EDB(EDupDB,"Lab_ID");
+      LoadChan_EDB(EDupDB,"Weight");
+      LoadAllChans_EDB(EDupDB);
+
+
+		if (iDuplicateMethod == 0)
+		{
+			// --- re-sort duplicate database by sequence and duplicate ---
+	         
+			EDupDB = Load_EDB(sDupDB);
+			SetString_SYS("SORTALL2","CHANNEL1","Seq");
+			SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+			SetString_SYS("SORTALL2","CHANNEL2","DupOrder");
+			SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+			SetString_SYS("SORTALL2","READONLY","YES");
+			if (iRunGX_SYS("sortal2") != 0) 
+				Abort_SYS(_("Final sort of duplicate samples database failed"));
+		}
+   }
+      
+
+   // --- re-sort database by the "ORDER" channel if it exists, or by "SAMPLE", 
+   //     except if it is a Wholeplot-type database with a "DH_FROM" channel in it,
+   //     in which case sort by that ---
+
+   Load_EDB(sLabDB);
+   LabDB  = Lock_EDB(ELabDB);
+
+   if(iExistChan_DB(LabDB, "Order"))
+      Strcpy_STR(sChan, _n("Order"));
+   else   
+      Strcpy_STR(sChan, _n("Sample"));
+   Strcpy_STR(sChan2, "");
+
+   if(iExistChan_DB(LabDB, "DH_FROM"))
+      Strcpy_STR(sChan, "DH_FROM");
+   if(iExistChan_DB(LabDB, "STANDARD"))
+      Strcpy_STR(sChan2, "STANDARD");
+
+   UnLock_EDB(ELabDB);
+
+   MakeCurrent_EDB(ELabDB);
+   if(iStrlen_STR(sChan2)) {
+
+      SetString_SYS("SORTALL2","CHANNEL1",sChan);
+      SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+      SetString_SYS("SORTALL2","CHANNEL2",sChan2);
+      SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+      SetString_SYS("SORTALL2","READONLY","YES");
+      if (iRunGX_SYS("sortal2") != 0) 
+         Abort_SYS(_("Final re-sort of lab database failed"));
+   }
+   else {
+
+      SetString_SYS("SORTALL","CHANNEL",sChan);
+      SetString_SYS("SORTALL","ORDER","ASCENDING");
+      SetString_SYS("SORTALL","READONLY","YES");
+      if (iRunGX_SYS("sortal") != 0) 
+         Abort_SYS(_("Final re-sort of lab database failed"));
+   }
+
+
+   // --- Bring the duplicates database back to the front ---
+
+   if(iTotDup>0)
+      MakeCurrent_EDB(EDupDB);
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+   
+
+   // --- Display log file, if warnings were issued. ---
+
+   Destroy_WA(Wa);
+
+
+   if (iInteractive) {      
+     
+      // --- Anything to display ---
+
+      if (iFileSize_SYS("chdup.log")>3) // 3 characters could be UTF-8 BOM only
+      {
+             
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE","chdup.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }      
+   } 
+}

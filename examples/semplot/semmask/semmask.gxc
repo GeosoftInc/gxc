@@ -1,0 +1,162 @@
+//===========================================================================
+NAME          = "Set current mask channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data"
+
+DESCRIPTION   = "
+   Select Data from Map using a allangle
+   
+"
+// Revision History
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+// v5.1.7: New GX for Semplot upgrade.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semmask.gr"
+#include "semmask.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+LST         List;
+DGW         Diag;
+DB_SYMB     MaskCh;
+ITR         Itr;
+
+int iRet, iAutoRedraw;
+string(STR_DB_SYMBOL) sMaskCh, sClass;
+string(STR_DEFAULT_SHORT) sVal;
+string(STR_DEFAULT_LONG) sMsg;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   if(iInteractive_SYS()) {
+
+
+      Diag = Create_DGW("SEMMASK");
+
+
+      // --- Create Lists ---
+
+      List = GetList_DGW(Diag,_SEMMASK_0);
+      ClassChanLST_DB(Data,List,"MASK");
+      Sort_LST(List,0,0);
+
+      SetInfoSYS_DGW(Diag,_SEMMASK_0,DGW_TEXT,"SEMPLOT","MASK");                  
+
+      iRet = iRunDialogue_DGW(Diag);
+      if (iRet == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_SEMMASK_0,DGW_TEXT,"SEMPLOT","MASK");
+      
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("SEMPLOT", "MASK", sMaskCh);
+   
+   
+   // --- Default to "Mask" for the mask channel name ---
+   
+   if(!iStrlen_STR(sMaskCh))
+   {
+      Strcpy_STR(sMaskCh, _("Mask"));
+      SetString_SYS("SEMPLOT", "MASK", sMaskCh);
+   }
+
+
+   // --- Create mask channel if it does not exist ---
+
+   MaskCh = FindChan_DB(Data, sMaskCh);
+   if(MaskCh==NULLSYMB) {
+
+      // --- Create a new mask channel ---
+
+      MaskCh = CreateSymb_DB(Data,sMaskCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+     
+      // --- Set the mask channel class to "MASK" ---
+
+      SetChanClass_DB(Data, MaskCh, "MASK");
+
+
+      // --- Create ITR to put into the Mask channel. This
+      //     will make "0" values black and "1" values red. ---
+
+      Itr = Create_ITR();
+      SetSize_ITR(Itr, 2);
+      SetZoneValue_ITR(Itr, 0, 0.5);
+      SetZoneColor_ITR(Itr, 0, C_BLACK);
+      SetZoneColor_ITR(Itr, 1, C_RED);
+
+      SetITR_DB(Data, MaskCh, Itr);
+
+
+      // --- Associate the new channel ---
+
+      AssociateClass_DB(Data, MaskCh, "Semplot");
+      UnLockSymb_DB(Data, MaskCh);
+   }
+   else {
+
+      // --- Cannot make a mask channel of a channel which already has
+      //     a class which is not "MASK" ---
+
+      GetChanClass_DB(Data, MaskCh, sClass);
+      if(iStrlen_STR(sClass) && iStrcmp_STR(sClass, "MASK", STR_CASE_TOLERANT)!=0) {
+         Printf_STR(sMsg, sizeof(sMsg), _("The %s channel already has the class \"%s\". You cannot make it a mask channel."), sMaskCh, sClass);
+         
+         Abort_SYS(sMsg);
+      }
+   }
+
+
+   // --- Reset the mask channel ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Setting Mask Channel"), 1);
+   SetMask_SEMPLOT(Data, sMaskCh, "", "", 0, 1);
+   Progress_SYS(0);
+
+
+   // --- Release the database --
+
+   UnLock_EDB(EData);
+
+
+   if(iInteractive_SYS()) {
+   
+      // --- Auto replot of data? ---
+
+      iGlobal_SYS("SEMPLOT.AUTOREDRAW",sVal);
+      iAutoRedraw = iScanI_STR(sVal);
+
+      if(iAutoRedraw==1)
+         iRunGX_SYS("semreplotmaps");
+   }
+
+}

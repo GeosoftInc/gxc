@@ -1,0 +1,280 @@
+//===========================================================================
+NAME          = "Export data to an ASEG-GDF file."
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Export data to an ASEG-GDF file.  Either displayed
+   data channels or all data channels may be exported, and either
+   the displayed line/group, selected lines/groups or all lines may be exported.
+	
+  EXPASEG.DEFN   Output DEFN file name
+         .DATA   Output Data file name
+         .PROJ   Output Projection file name
+         .CHPROJ Channel containing projection information
+
+         .CHAN   \"D\" for displayed channels.
+                 \"A\" for all channels.
+
+         .LINE   \"D\" for the displayed line only.
+                 \"S\" for selected lines.
+                 \"A\" for all lines
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
+
+// Revision History:
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "expaseg.gr"
+#include "expaseg.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sDefn, sData, sProj,sDes,sDesTemp;
+string(STR_DB_SYMBOL) sLine, sChan, sChProj;
+string(STR_DB_SYMBOL) sCurLine;
+string(4096) sRALine;
+
+int         i;
+int         iLine;         // Output line selections
+int         iChan;         // Output channel selections
+
+EDB         EData;         // database handle
+DB          Data;          // database handle
+DGW         Diag;          // dialogue box
+VV          DispChanVV;    // Displayed channels
+DB_SELECT   Select;        // current selection mode
+DB_SYMB     ChProj;
+LST         List;
+IPJ         hIPJ;
+RA          inputDes;
+WA          outputDes;
+
+int iDone,iRALines,iIndex;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   EData = Current_EDB();
+
+   if (iInteractive_SYS())
+   {
+
+      iDone = FALSE;
+      while(!iDone) {
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("EXPASEG");
+
+
+         // --- Set up lists ---
+
+         Data = Lock_EDB(EData);
+         List = GetList_DGW(Diag,_EXPASEG_4);
+         SymbLST_DB(Data,List,DB_SYMB_CHAN);
+         Sort_LST(List,0,0);
+         UnLock_EDB(EData);
+
+
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_EXPASEG_0,DGW_FILEPATH,"EXPASEG","DEFN");     
+         SetInfoSYS_DGW(Diag,_EXPASEG_1,DGW_FILEPATH,"EXPASEG","DATA");     
+         SetInfoSYS_DGW(Diag,_EXPASEG_2,DGW_FILEPATH,"EXPASEG","DES");     
+         SetInfoSYS_DGW(Diag,_EXPASEG_3,DGW_FILEPATH,"EXPASEG","PROJ");     
+         SetInfoSYS_DGW(Diag,_EXPASEG_4,DGW_TEXT,    "EXPASEG","CHPROJ");    
+         SetInfoSYS_DGW(Diag,_EXPASEG_5,DGW_LISTALIAS,"EXPASEG","CHAN");    
+         SetInfoSYS_DGW(Diag,_EXPASEG_6,DGW_LISTALIAS,"EXPASEG","LINE");     
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+         // --- Get the Strings ---
+
+         GetInfoSYS_DGW(Diag,_EXPASEG_0,DGW_FILEPATH,"EXPASEG","DEFN");     
+         GetInfoSYS_DGW(Diag,_EXPASEG_1,DGW_FILEPATH,"EXPASEG","DATA");     
+         GetInfoSYS_DGW(Diag,_EXPASEG_2,DGW_FILEPATH,"EXPASEG","DES");     
+         GetInfoSYS_DGW(Diag,_EXPASEG_3,DGW_FILEPATH,"EXPASEG","PROJ");     
+         GetInfoSYS_DGW(Diag,_EXPASEG_4,DGW_TEXT,    "EXPASEG","CHPROJ");    
+         GetInfoSYS_DGW(Diag,_EXPASEG_5,DGW_LISTALIAS,"EXPASEG","CHAN");    
+         GetInfoSYS_DGW(Diag,_EXPASEG_6,DGW_LISTALIAS,"EXPASEG","LINE");     
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+
+         // --- Verify parameters ---
+
+         GetString_SYS("EXPASEG","DEFN",sDefn);
+         GetString_SYS("EXPASEG","DATA",sData);
+
+         // --- At least one file name must be defined ---
+
+         if(!iStrlen_STR(sDefn) && !iStrlen_STR(sData)) {
+            DisplayMessage_SYS(_("File name error"), _("At least one DEFN or Data file name must be defined"));
+            continue;
+         }
+
+         if(!iStrcmp_STR(sDefn, sData, STR_CASE_TOLERANT)) {
+            DisplayMessage_SYS(_("File name error"), _("Export file names must be different"));
+            continue;
+         }
+
+         iDone = TRUE;
+      }
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("EXPASEG","DEFN",sDefn);
+   GetString_SYS("EXPASEG","DATA",sData);
+   GetString_SYS("EXPASEG","DES",sDes);
+   GetString_SYS("EXPASEG","PROJ",sProj);
+   GetString_SYS("EXPASEG","CHPROJ",sChProj);
+   GetString_SYS("EXPASEG","LINE",sLine);
+   GetString_SYS("EXPASEG","CHAN",sChan);
+
+   if(!iStrlen_STR(sDefn) && !iStrlen_STR(sData))
+      Abort_SYS(_("At least one DEFN or Data file name must be defined"));
+
+   if(!iStrcmp_STR(sDefn, sData, STR_CASE_TOLERANT))
+      Abort_SYS(_("Export file names must be different"));
+
+   if (iStrlen_STR(sProj)) {
+      if(!iStrcmp_STR(sDefn, sProj, STR_CASE_TOLERANT))
+         Abort_SYS(_("Projection file name is the same as the DEFN file name."));
+      if(!iStrcmp_STR(sData, sProj, STR_CASE_TOLERANT))
+         Abort_SYS(_("Projection file name is the same as the Data file name."));
+   }
+
+   if (iChar_STR(sLine) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLine) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLine) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+   if (iChar_STR(sChan) == iChar_STR("D")) 
+      iChan = DU_CHANNELS_DISPLAYED;
+   else if (iChar_STR(sChan) == iChar_STR("A")) 
+      iChan = DU_CHANNELS_ALL;
+   else
+      Abort_SYS(_("Channel selection invalid"));
+
+
+
+   // --- Get currently selected line ---
+
+   GetCurLine_EDB(EData,sCurLine);
+
+   // --- Get currently displayed channels ---
+
+   DispChanVV = Create_VV(INT,0);
+   iDispChanList_EDB(EData, DispChanVV);
+
+
+   // --- Get DB handle ---
+
+   Data = Lock_EDB(EData);
+
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+
+   // --- Creat IPJ ---
+   
+   hIPJ = Create_IPJ();
+   
+                               
+   // --- Get Proj channel ---
+   
+   if (iStrlen_STR(sChProj) > 0) {
+      if (!iExistChan_DB(Data,sChProj))  
+         Abort_SYS(_("Channel containing projection parameters does not exist."));
+      ChProj = FindChan_DB(Data,sChProj);
+      LockSymb_DB(Data,ChProj,DB_LOCK_READONLY,DB_WAIT_NONE);
+   
+      GetIPJ_DB(Data,  ChProj, hIPJ);
+      UnLockSymb_DB(Data,ChProj);
+   }   
+
+
+   // --- export data ---
+
+   Progress_SYS(1);
+   ExportAsegProj_DU(Data,sCurLine,DispChanVV,iChan,sDefn,sData,sProj,hIPJ);
+   Progress_SYS(0);
+
+   Destroy_VV(DispChanVV);
+   Destroy_IPJ(hIPJ);
+
+   // --- reset starting selections
+
+   if (iLine != DU_LINES_SELECTED)
+      SetSelect_DB(Data,Select);
+   
+   //export metadata description 
+   if(iStrlen_STR(sDes)>0)
+   {
+       i=iInteractive_SYS(); 
+       SetInteractive_SYS(0);
+       ITempFileExt_SYS(_n("des"),sDesTemp,STR_FILE);
+       SetString_SYS("GDBFILEPUTANDGET","OPERATION", "UO");
+       SetString_SYS("GDBFILEPUTANDGET","TEXTFILE", sDesTemp);
+       iRunGX_SYS("geogxnet.dll(Geosoft.GX.Database.FileToAndFromGDB;Run)");
+       
+       //open the temporary file
+       
+       inputDes = Create_RA(sDesTemp);
+       outputDes = Create_WA(sDes,WA_NEW);
+       iRALines = iLen_RA(inputDes);
+       while(IiGets_RA(inputDes,sRALine,sizeof(sRALine))==0)
+       {
+            
+            
+            iIndex = iStrStr_STR(sRALine,"COMM",STR_CASE_SENSITIVE);
+            if(iIndex!=0)
+            {
+                IStrins_STR(sRALine,0,"COMM",4096);
+            }
+            _Puts_WA(outputDes,sRALine);
+            iRALines--;
+            if(iRALines>0)
+                NewLine_WA(outputDes);
+              
+       }
+       Destroy_RA(inputDes);
+       Destroy_WA(outputDes);
+       iDeleteFile_SYS(sDesTemp);
+       SetInteractive_SYS(i);
+   }
+
+}

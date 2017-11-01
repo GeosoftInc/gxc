@@ -1,0 +1,97 @@
+//===========================================================================
+NAME          = "Set up a new editor"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/Amira"
+
+DESCRIPTION   = "
+
+   Set up a new editor inside montaj.  This only runs interactively.
+
+"                                                                   
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "newedit.gr"
+#include "newedit.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW      NewEditDiag; 
+
+string(STR_FILE) sDefEdit;
+string(STR_FILE) sDefEditAbsolute;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- get the dialogue ---         
+
+      NewEditDiag = Create_DGW("editor");
+
+
+      // --- get current editor name ---
+
+      if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit)) {
+         GetWindowsDir_SYS(sDefEdit);
+         Strcat_STR(sDefEdit,"\\notepad.exe");
+      }
+
+
+      // --- Set name ---
+
+      SetInfo_DGW(NewEditDiag,_EDITOR_0,DGW_FILEPATH,sDefEdit);
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(NewEditDiag) == 0) {
+
+
+         // --- Set name ---
+
+         GetInfo_DGW(NewEditDiag,_EDITOR_0,DGW_FILEPATH,sDefEdit);
+
+         AbsoluteFileName_SYS(sDefEdit, sDefEditAbsolute);
+         if (iFileExist_SYS(sDefEditAbsolute))
+            Strcpy_STR(sDefEdit, sDefEditAbsolute);
+
+         GlobalSet_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit);
+         GlobalWrite_SYS("");
+         GlobalReset_SYS("");
+
+      }
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(NewEditDiag);
+
+   } else
+   
+      Abort_SYS(_("Error: This GX can only run interactively"));
+
+}
+
+

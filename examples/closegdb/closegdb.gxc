@@ -1,0 +1,28 @@
+//===========================================================================
+NAME          = "Close current database"
+#include <version.gxh>
+DESCRIPTION   = "Close current database.
+"
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database"
+
+#include <all.gxh>     // system
+
+EDB         EData;
+DB          Data;
+string(STR_FILE) sGDB;
+
+{
+
+   // --- Get the database ---
+   
+   if (!iHaveCurrent_EDB()) Abort_SYS(_("No current database."));
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   GetName_DB(Data,DB_NAME_FILE,sGDB);
+   UnLock_EDB(EData);
+   if (iInteractive_SYS())
+      UnLoadVerify_EDB(sGDB,EDB_UNLOAD_SINGLE_PROMPT);
+   else
+      UnLoad_EDB(sGDB);
+}

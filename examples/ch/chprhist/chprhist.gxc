@@ -1,0 +1,604 @@
+//===========================================================================
+
+NAME          = "Print Histogram on Map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+
+      CHPRHIST.TITLE       Histogram Title
+              .WIDTH       Box size in mm (width = height)
+              .X           X location of bottom left corner of boxes (mm)
+              .Y           Y location of bottom left corner of boxes (mm)
+              .SUMM        Draw summary statistics: 0 for NO and 1 for YES
+              .CHAN        Channel to compute the histogram
+              .MASKCHAN    Mask Channel to mask the computing channel
+              .DB          Database
+              .LOG         Log option: 0 for Raw and 1 for Log, 2 for Lambda
+              .MIN         Minimum value to compute the histogram
+              .MAX         Maximum value to compute the histogram
+              .DIV         Number of divisions
+              .SUMWIDTH    Width of the box for summary stats (mm).
+                           Default is 3/5 of the Box width defined above.
+              .BOXWHISKER  Plot box Whisker?
+              .PROBABILITY Plot % on probability scale
+              .LAMBDA      Lambda value for lambda transform.
+                             
+"
+// Revision History:
+// v6.3.1: Added "Below detection limit" label if all data is below detection limit.
+// v6.3.0: If input CHPRHIST.TITLE is "Channel_Label", set the channel label.
+// v6.2.0: Tweak to automatic data range.
+// v6.0.0: Make map current active object.
+//         Fix locking problems with locate function.
+// v5.1.8: Turn off progress info when called from another GX (CHPRHIST.DIALOG = 0)
+//         Add support for lambda transform.
+// v5.1.7: Using exact statistics for histogram.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE="chprhist.gr"
+#include "chprhist.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+ST    hST,hSTHist,hSTBox;
+ITR   hITR;
+VV    hVV,hMaskVV;
+REG   hREG;
+EDB   EData;
+DB    Data;
+DB_SYMB  Ch,Line,MCh;
+DGW   Diag;
+
+int   i,iLog,iDiv,iLine,iTotLines,iBoxWhisker,iProb,iBelowDetection;
+int   iSumm,iDecimal,iDialog,iMask;
+real  rHeight,rWidth,rX1,rY1,rMin,rMax,rMaxCount;
+real  rDataMin,rDataMax,rSumWidth, rDataMinActual, rDataMaxActual;
+real  rInc, rDetLimit, rOutlierLimit, rTmp, rLambda, rBit, rX, rY;
+int iPow;
+string(STR_DB_SYMBOL) sChan,sMaskChan;
+string(STR_FILE) sDB;
+string(STR_DEFAULT_LONG) sTitle,sTemp;
+string(STR_DEFAULT) sLabel;
+string(STR_FILE) sFont,sMap;
+string(STR_GROUP) sGrpName;
+string(STR_DEFAULT_SHORT) sUnit;
+string(STR_VIEW) sView;
+
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Get Non-Dialog parameters set by CHHISTO ---
+
+   GetString_SYS("CHPRHIST","CHAN",sChan);
+   GetString_SYS("CHPRHIST","DB",sDB);
+   GetString_SYS("CHPRHIST","VIEW",sView);
+   SetString_SYS("CHPRHIST","VIEW","");
+   if (iExistInt_SYS("CHPRHIST","LOG")) {
+      iLog  = iGetInt_SYS("CHPRHIST","LOG");
+      if (iLog == iDUMMY) iLog = -1;
+   } else
+      iLog = -1;   
+   rMin  = rGetReal_SYS("CHPRHIST","MIN");
+   SetString_SYS("CHPRHIST","MIN","");
+   rMax  = rGetReal_SYS("CHPRHIST","MAX");
+   SetString_SYS("CHPRHIST","MAX","");
+   if (iExistInt_SYS("CHPRHIST","DIV")) {
+      iDiv  = iGetInt_SYS("CHPRHIST","DIV");
+      if (iDiv == iDUMMY) iDiv = 50;
+   } else   
+      iDiv = 50;
+
+   if (iExistString_SYS("CHPRHIST","DIALOG")) {
+      iDialog = iGetYesNo_SYS("CHPRHIST","DIALOG");
+      SetString_SYS("CHPRHIST","DIALOG","");
+   } else 
+      iDialog = TRUE;
+      
+   rLambda = rGetReal_SYS("CHPRHIST","LAMBDA");
+   SetReal_SYS("CHPRHIST","LAMBDA", rDUMMY);    // must be set every time.
+
+      
+   // --- Get Database ---
+
+   EData = Load_EDB(sDB);
+   Data = Lock_EDB(EData);
+
+   GetString_SYS("CHPRHIST","DB",sDB);
+   GetString_SYS("CHPRHIST","TITLE",sTitle);
+   
+   
+   // --- If the title is "Channel_Label", replace it with the channel label ---
+   
+   if(iStrcmp_STR(sTitle, "Channel_Label", STR_CASE_TOLERANT)==0)
+   {
+      if (!iExistChan_DB(Data,sChan))  
+         Abort_SYS(_("Input channel does not exist."));
+      Ch = FindChan_DB(Data,sChan);
+      LOCK_RW(Data,Ch);
+      GetChanLabel_DB(Data, Ch, sTitle);
+      SetString_SYS("CHPRHIST","TITLE",sTitle);
+      UNLOCK(Data, Ch);
+   }
+
+
+   // --- set iMask ---
+
+   iMask = 0;       // mask function need more work!
+         
+
+   // --- set the base view ---
+
+   if (iDialog) {
+   
+      // --- Get the current map and make it the current active object ---
+   
+      EMap = Current_EMAP();
+      GetName_EMAP(EMap, sMap);
+      MakeCurrent_EMAP(EMap);
+   
+      if (iStrMin_STR(sView) == 0) 
+         Strcpy_STR(sView,"*base");
+      Map = Lock_EMAP(EMap);
+      if (!iExistView_MAP(Map,sView)) {
+   
+         // --- create a base view ---
+      
+         Strcpy_STR(sView,_n("Base"));
+         View = Create_MVIEW(Map,sView,MVIEW_WRITENEW);
+         Destroy_MVIEW(View);
+      
+      }
+      UnLock_EMAP(EMap);
+      iSetCurrentView_EMAP(EMap,sView);
+      
+      
+      // --- Are we running interactively ? ---
+
+      if (iInteractive_SYS()) {
+
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("CHPRHIST");
+
+         
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_CHPRHIST_0,DGW_TEXT,"CHPRHIST","TITLE");
+         SetInfoSYS_DGW(Diag,_CHPRHIST_1,DGW_TEXT,"CHPRHIST","WIDTH");
+         SetInfoSYS_DGW(Diag,_CHPRHIST_2,DGW_TEXT,"CHPRHIST","X");
+         SetInfoSYS_DGW(Diag,_CHPRHIST_3,DGW_TEXT,"CHPRHIST","Y");
+         SetInfoSYS_DGW(Diag,_CHPRHIST_4,DGW_LISTALIAS,"CHPRHIST","SUMM");
+         SetInfoSYS_DGW(Diag,_CHPRHIST_5,DGW_LISTALIAS,"CHPRHIST","BOXWHISKER");
+         SetInfoSYS_DGW(Diag,_CHPRHIST_6,DGW_LISTALIAS,"CHPRHIST","PROBABILITY");
+
+
+         // --- Run the Dialogue ---
+
+         rX1 = 0.0;     // prevents warning message on compile
+         rY1 = 0.0;
+         do {
+            i = iRunDialogue_DGW(Diag);
+            if(i==-1)   Cancel_SYS(); 
+            if(i==2)    {
+               
+               // --- Get the coordinates of a user selected box ---
+
+               DisplayMessage_SYS(_("Locate Histogram"),_("Locate the lower left corner of the histogram plot..."));
+               if (iGetPoint_EMAP(EMap,_("Locate Histogram..."),rX1,rY1))  Cancel_SYS();
+               
+               Map = Lock_EMAP(EMap);
+               View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+               
+               UserToView_MVIEW(View,rX1,rY1);
+               ViewToPlot_MVIEW(View,rX1,rY1);
+               
+               Destroy_MVIEW(View);
+               UnLock_EMAP(EMap);
+
+               SetReal_SYS("CHPRHIST","X",rX1);
+               SetReal_SYS("CHPRHIST","Y",rY1);
+
+               SetInfoSYS_DGW(Diag,_CHPRHIST_2,DGW_TEXT,"CHPRHIST","X");
+               SetInfoSYS_DGW(Diag,_CHPRHIST_3,DGW_TEXT,"CHPRHIST","Y");
+
+            }
+            
+         } while (i!=0);
+         
+         
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag,_CHPRHIST_0,DGW_TEXT,"CHPRHIST","TITLE");
+         GetInfoSYS_DGW(Diag,_CHPRHIST_1,DGW_TEXT,"CHPRHIST","WIDTH");
+         GetInfoSYS_DGW(Diag,_CHPRHIST_2,DGW_TEXT,"CHPRHIST","X");
+         GetInfoSYS_DGW(Diag,_CHPRHIST_3,DGW_TEXT,"CHPRHIST","Y");
+         GetInfoSYS_DGW(Diag,_CHPRHIST_4,DGW_LISTALIAS,"CHPRHIST","SUMM");
+         GetInfoSYS_DGW(Diag,_CHPRHIST_5,DGW_LISTALIAS,"CHPRHIST","BOXWHISKER");
+         GetInfoSYS_DGW(Diag,_CHPRHIST_6,DGW_LISTALIAS,"CHPRHIST","PROBABILITY");
+         
+      }
+      
+      Map = Lock_EMAP(EMap);
+      
+   } else {
+      
+      GetString_SYS("CHPRHIST","MAP",sMap);
+      UnLoad_EMAP(sMap);
+      Map  = Create_MAP(sMap,MAP_WRITEOLD);
+      
+   }
+   
+
+   GetString_SYS("CHPRHIST","TITLE",sTitle);
+   rWidth   = rGetReal_SYS("CHPRHIST","WIDTH");
+   rX1  = rGetReal_SYS("CHPRHIST","X");
+   rY1  = rGetReal_SYS("CHPRHIST","Y");
+   iSumm = iGetInt_SYS("CHPRHIST","SUMM");
+   rSumWidth   = rGetReal_SYS("CHPRHIST","SUMWIDTH");
+   iBoxWhisker = iGetInt_SYS("CHPRHIST","BOXWHISKER");
+   iProb = iGetInt_SYS("CHPRHIST","PROBABILITY");
+
+
+   // --- Validate parameters ---
+
+   rHeight = rWidth;
+   if (rWidth <= 0.0)
+      Abort_SYS(_("Histogram width must be greater than 0.0"));
+   if (rHeight <= 0.0)
+      Abort_SYS(_("Histogram height must be greater than 0.0"));
+   if (iDiv <= 0)
+      Abort_SYS(_("Division number must be greater than 0"));
+   if ((iSumm < 0) || (iSumm > 1)) iSumm = 0;
+   if ((iBoxWhisker < 0) || (iBoxWhisker > 1)) iBoxWhisker = 0;
+   if ((iProb < 0) || (iProb > 1)) iProb = 0;
+
+   if ((rSumWidth <= 0.0) || (rSumWidth == rDUMMY))
+      rSumWidth = 3.0/5.0*rHeight;
+
+
+   // --- Lock the chan ---
+
+   if (!iExistChan_DB(Data,sChan))  
+      Abort_SYS(_("Input channel does not exist."));
+   Ch = FindChan_DB(Data,sChan);
+   LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   iDecimal = iGetChanDecimal_DB(Data,Ch);
+   if (iLog == -1) {
+      GetRegSymbSetting_DB(Data,Ch,"LOG",sUnit,sizeof(sUnit));
+      iLog = iCharComp_STR(sUnit,_n("Y")) || iCharComp_STR(sUnit,_n("y"));
+   }
+
+
+   // --- Lambda must be defined if iLog==2 ---
+
+   if(iLog==2 && rLambda==rDUMMY)
+      Abort_SYS(_("Lambda not defined for lambda transform."));
+
+
+   GetRegSymbSetting_DB(Data,Ch,"UNITS",sUnit,sizeof(sUnit));
+
+   if(iMask) {
+      MCh = FindChan_DB(Data,sMaskChan);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
+
+  
+   // --- calculate statistics ---
+
+   hST = CreateExact_ST();
+   hSTHist = CreateExact_ST();
+   
+   hVV  = Create_VV(REAL,0);
+   hMaskVV  = Create_VV(INT,0);
+
+   if (iBoxWhisker)
+      hSTBox  = CreateExact_ST();
+   else   
+      hSTBox  = (ST)-1;
+
+   // --- Get the channel's ITR ---
+
+   hITR = Create_ITR();
+   GetITR_DB(Data, Ch, hITR);
+
+
+   // --- Prepare to do the work ---
+
+   iTotLines = iCountSelLines_DB(Data);
+   if(iDialog) Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   if(iDialog) ProgName_SYS(_("Computing Data Range"),1);
+   iLine = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+   
+      // --- Update the Progress Bar ---
+
+      if(iDialog) {
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Accumulate stats on line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLine,iTotLines);
+      }
+
+
+      // --- get data ---
+
+      GetChanVV_DB(Data,Line,Ch,hVV);
+
+      if(iMask) {
+         GetChanVV_DB(Data,Line,MCh,hMaskVV);
+         _Mask_VV (hVV,hMaskVV);
+      }
+
+
+      // --- stat ---
+
+      Statistics_VV(hST,hVV);
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   // --- Start histogram for median ---
+   
+   rDataMinActual = rGetInfo_ST(hST, ST_MIN);
+   rDataMin = rDataMinActual;    // working value
+
+
+   // --- Get default limits if rMin and rMax are not defined on input. ---
+   // ---- NOTE: This code parallels code in the Histogram GeoTool ---
+
+   // --- ensure that the max is larger than the biggest data value,
+   //     because histogram bins use exclusive maxima.
+      
+   rDataMaxActual = rGetInfo_ST(hST, ST_MAX);
+   rDataMax = rDataMaxActual;    // working value
+   rBit = 0.0001*(rDataMax - rDataMin);
+   if(rBit<=0.0) rBit = 0.0001*rDataMax;
+   if(rBit<=0.0) rBit = 1.0;
+   
+   rDataMax += rBit;
+
+   if(rDataMin == rDUMMY) {      
+      if (iLog)
+         rDataMin = 1.0;
+      else   
+         rDataMin = 0.0;
+      rDataMax = rDataMin + 1.0;
+   }
+   else {
+      if (rDataMax <= rDataMin)
+         rDataMax = rDataMin + 1.0;
+
+      // --- Get nicer range values, but for log scales only
+      //     for the maximum ---
+
+      rTmp = rDataMin;
+      NicerScale_MATH(rTmp, rDataMax, rInc, iPow);
+      if(!iLog) rDataMin = rTmp;
+
+      if(iLog && rDataMin <= 0.0) rDataMin = 0.001;
+
+   }
+   
+
+
+   // --- Adjust for detection and outlier limits ---
+
+   hREG = Create_REG(128);
+   GetRegSymb_DB(Data,Ch,hREG);
+   GetReal_REG(hREG, "DETECTLIMIT",rDetLimit);
+   GetReal_REG(hREG, "OUTLIERLIMIT",rOutlierLimit);
+   Destroy_REG(hREG);
+
+   iBelowDetection = 0;
+   if(rDetLimit!=rDUMMY) {
+      if(rDetLimit > rDataMin) 
+         rDataMin = rDetLimit;
+      if(rDetLimit > rDataMaxActual)
+         iBelowDetection = 1;
+   }
+   if(rOutlierLimit!=rDUMMY) {
+      if(rOutlierLimit < rDataMax) 
+         rDataMax = rOutlierLimit;
+   }
+
+   // --- Another check in case detection or outliers are screwed up ---
+
+   if (rDataMax <= rDataMin)
+      rDataMax = rDataMin + 1.0;
+
+   
+   // --- Set actual limits from defaults if they are not yet set. ---
+
+   if (rMin == rDUMMY) rMin = rDataMin;
+   if (rMax == rDUMMY) rMax = rDataMax;
+   if (rMin >= rMax) {
+      rMin = rDataMin;
+      rMax = rDataMax;
+   }
+
+   // --- Finally, ensure that if it is logarithmic, that the minimum is not 0 ---
+   
+   if (iLog) {
+      if (rMax <= 0.0) {
+         rMin = 1.0;
+         rMax = 2.0;
+      }
+      else if (rMin <= 0.0) 
+         rMin = rMax / 10.0;
+   }
+
+   Reset_ST(hST);
+   Histogram2_ST(hST,4098,rDataMin,rDataMax);
+   
+
+   // --- Setup for histogram ---
+
+   if (iLog==1)
+      Histogram2_ST(hSTHist,iDiv+2,rLog10_MATH(rMin),rLog10_MATH(rMax));
+   else if(iLog==2)
+      Histogram2_ST(hSTHist,iDiv+2,rLambdaTrans_MATH(rMin, rLambda),rLambdaTrans_MATH(rMax, rLambda));
+   else
+      Histogram2_ST(hSTHist,iDiv+2,rMin,rMax);
+
+   if (iBoxWhisker)
+   {
+      if(iLog==1)   
+        Histogram2_ST(hSTBox,4098,rLog10_MATH(rMin),rLog10_MATH(rMax));
+      else if(iLog==2)
+         Histogram2_ST(hSTBox,4098,rLambdaTrans_MATH(rMin, rLambda),rLambdaTrans_MATH(rMax, rLambda));
+      else
+        Histogram2_ST(hSTBox,4098,rMin,rMax);
+   }
+   
+   
+   // --- Go through all selected Lines ---
+
+   if(iDialog) ProgName_SYS(_("Accumulating statistics"),1);
+   iLine = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      if(iDialog) {
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Accumulate stats on line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLine,iTotLines);
+      }
+
+
+      // --- get data ---
+
+      GetChanVV_DB(Data,Line,Ch,hVV);
+
+      if(iMask) {
+         GetChanVV_DB(Data,Line,MCh,hMaskVV);
+         _Mask_VV (hVV,hMaskVV);
+      }
+
+
+      // --- stat ---
+
+      Statistics_VV(hST,hVV);
+      if(iLog==1)  
+         Log_VV(hVV,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,rMin);
+      else if(iLog==2)
+         BoxCox_VVU(hVV, rLambda);  
+
+      Statistics_VV(hSTHist,hVV);
+      if (iBoxWhisker)
+         Statistics_VV(hSTBox,hVV);
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   // --- Get base view ---
+  
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+
+
+   // --- Set a title group ---
+
+   GetString_SYS("CHPRHIST","GROUP",sGrpName);
+   SetString_SYS("CHPRHIST","GROUP","");
+   if (iStrMin_STR(sGrpName) == 0) {
+      GenGroupName_STR("HIST",sChan,"",sGrpName);
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+   } else   
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_APPEND);
+
+
+   // --- Set attributes ---
+   
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   FillColor_MVIEW(View,iColor_MVIEW("k100"));
+   TextAngle_MVIEW(View,0.0);
+
+
+   // --- Draw Histogram ---
+
+   rMaxCount = rGetInfo_ST(hSTHist, ST_HIST_MAXCOUNT); 
+   if (rMaxCount == 0.0) rMaxCount = 1.0;
+   Histogram5_MVU(View,hST,hSTHist,sTitle,sUnit,rLambda,
+                 rX1,rY1,rWidth,rHeight,
+                 rMin,0.0,rMax-rMin,rMaxCount,
+                 rSumWidth,iLog,iSumm,iProb,iColor_MVIEW("k100"),iDecimal,-4,hSTBox,hITR);
+                 
+                 
+   // --- Add "Below detection limit" label ---
+   
+   if(iBelowDetection)
+   {
+      TextRef_MVIEW(View, TEXT_REF_BOTTOM_CENTER);
+      TextColor_MVIEW(View,iColor_MVIEW("K"));
+      TextSize_MVIEW(View, rHeight*rScaleMM_MVIEW(View)/20.0);
+      rX = rX1 + rWidth*0.5;
+      rY = rY1 + rHeight*0.5;
+      Text_MVIEW(View, _("Below"), rX, rY);
+      rY -= 1.5*rHeight*rScaleYMM_MVIEW(View)/20.0;
+      Text_MVIEW(View, _("Detection"), rX, rY);
+      rY -= 1.5*rHeight*rScaleYMM_MVIEW(View)/20.0;
+      Text_MVIEW(View, _("Limit"), rX, rY);
+   }                 
+   
+
+   // --- add the maker ---
+
+   if (iDialog)
+      Maker_MVIEW(View,0,1,"CHPRHIST",MAKER_GX,_("Histogram..."),"CHPRHIST;");
+
+
+   // --- done ---
+
+   if(iDialog) Progress_SYS(0);
+   UnLockSymb_DB(Data,Ch);
+   if(iMask)
+      UnLockSymb_DB(Data,MCh);
+   Destroy_MVIEW(View);
+   UnLock_EDB(EData);
+   
+   if (iDialog)
+      UnLock_EMAP(EMap);
+      
+}

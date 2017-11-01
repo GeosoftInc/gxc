@@ -1,0 +1,344 @@
+//===========================================================================
+NAME          = "Import ASEG-GDF data"
+#include <version.gxh>
+DESCRIPTION   = "
+Import ASEG-GDF data.
+
+    IMPASEG.DEFN     : Input DEFN file name
+           .DATA     : Input Data file name
+           .FLC      : Flight Line Channel name
+           .TEMPLATE : Import template file name (.I4 assumed)
+           .PROJ     : Input Projection file name (optional)
+           .XCH      : Channel pair to associate with projection
+           .YCH      : Channel pair to associate with projection
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/ASEG-GDF"
+
+// Revision History:
+// v5.1.8: Set current X and Y channels only if these values are defined.
+// v5.1.7: Delete line 0, channel loading should be done in script mode, too.
+// v5.1.3: Added projection setting if enabled.
+// v5.1.7: Projection channels set as current X, Y channels.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "impaseg.gr"
+#include "impaseg.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+
+int         i;                // Utility 
+int         iLines;           
+int         iChannels;        
+int         iBlobs;           
+int         iErase;           
+
+string(STR_FILE) sDefn, sFile, sDB;
+string(STR_DEFAULT_LONG) sPr;
+string(STR_FILE) sDes,sData, sProj;
+string(STR_FILE) sFLC;
+string(STR_FILE) sTemplate;
+string(STR_DEFAULT_SHORT) sExt;
+string(STR_DB_SYMBOL)   sXCh,sYCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database, if running in OM ---
+   if (iCheckIntrinsic_SYS(100,"OasisMontaj"))
+	{   	
+	   EData = Current_EDB();
+	   Data = Lock_EDB(EData);
+	}
+	
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IMPASEGForm");
+
+
+      // --- Get defaults from SCANASEG ---
+   
+      GetString_SYS("SCANASEG","DEFN",sDefn);
+      GetString_SYS("IMPASEG","DEFN",sFile);
+      if(!iStrlen_STR(sFile) && iStrlen_STR(sDefn))
+         SetString_SYS("IMPASEG","DEFN",sDefn);
+         
+      GetString_SYS("SCANASEG","DATA",sData);
+      GetString_SYS("IMPASEG","DATA",sFile);
+      if(!iStrlen_STR(sFile) && iStrlen_STR(sData))
+         SetString_SYS("IMPASEG","DATA",sData);
+
+      GetString_SYS("SCANASEG","FLC",sFLC);
+      GetString_SYS("IMPASEG","FLC",sFile);
+      if(!iStrlen_STR(sFile) && iStrlen_STR(sFLC))
+         SetString_SYS("IMPASEG","FLC",sFLC);
+
+      GetString_SYS("SCANASEG","TEMPLATE",sTemplate);
+      GetString_SYS("IMPASEG","TEMPLATE",sFile);
+      if(!iStrlen_STR(sFile) && iStrlen_STR(sTemplate))
+         SetString_SYS("IMPASEG","TEMPLATE",sTemplate);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_0,DGW_FILEPATH,"IMPASEG","DEFN");
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_1,DGW_FILEPATH,"IMPASEG","DATA");
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_2,DGW_FILEPATH,"IMPASEG","DES");
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_3,DGW_TEXT,"IMPASEG","FLC");
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_4,DGW_FILEPATH,"IMPASEG","TEMPLATE");
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_5,DGW_FILEPATH,"IMPASEG","PROJ");
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_6,DGW_TEXT,"IMPASEG","XCH");
+      SetInfoSYS_DGW(Diag,_IMPASEGFORM_7,DGW_TEXT,"IMPASEG","YCH");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_0,DGW_FILEPATH,"IMPASEG","DEFN");
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_1,DGW_FILEPATH,"IMPASEG","DATA");
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_2,DGW_FILEPATH,"IMPASEG","DES");
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_3,DGW_TEXT,"IMPASEG","FLC");
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_4,DGW_FILEPATH,"IMPASEG","TEMPLATE");
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_5,DGW_FILEPATH,"IMPASEG","PROJ");
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_6,DGW_TEXT,"IMPASEG","XCH");
+      GetInfoSYS_DGW(Diag,_IMPASEGFORM_7,DGW_TEXT,"IMPASEG","YCH");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("IMPASEG","DEFN",sDefn);
+   GetString_SYS("IMPASEG","DATA",sData);
+   GetString_SYS("IMPASEG","DES",sDes);
+   
+   GetString_SYS("IMPASEG","FLC",sFLC);
+   GetString_SYS("IMPASEG","TEMPLATE",sTemplate);
+
+   GetString_SYS("IMPASEG","PROJ",sProj);
+   GetString_SYS("IMPASEG","XCH", sXCh);
+   GetString_SYS("IMPASEG","YCH", sYCh);
+
+   // --- At least one of Data, Defn or Template file names is necessary ---
+
+   if(!iStrlen_STR(sDefn) && !iStrlen_STR(sData) && !iStrlen_STR(sTemplate))
+      Abort_SYS(_("At least one of the header file, data file or template files must be specified."));
+
+   // --- Validate Projection channels ---
+
+   iStrMin_STR(sYCh);
+   iStrMin_STR(sYCh);
+   i= iStrMin_STR(sProj);
+   if (!iStrcmp_STR(sXCh, sYCh, STR_CASE_TOLERANT) && i)
+      Abort_SYS(_("Two channels to associate with projection must be different"));
+
+
+   
+   // --- Create database, if running in OM Viewer ---
+   if (!iCheckIntrinsic_SYS(100,"OasisMontaj"))
+   {
+   	// --- check file name ---
+   
+	   FileNamePart_STR(sDefn,sExt,STR_FILE_PART_EXTENSION);
+	   
+	   
+	   // --- GDF of GDB? ---
+	   
+	   if (iStrcmp_STR(sExt,"DFN",STR_CASE_TOLERANT)==0) 
+	   {
+	      // --- create database ---
+	   
+	      FileExt_STR(sDefn,"gdb",sDB,FILE_EXT_FORCE);
+	      if (iFileExist_SYS(sDB)) {
+	      
+	         Printf_STR(sPr, sizeof(sPr), _("The GDF file will be opened in a new GDB file named <%s>. This file already exists. Overwrite?"), sDB);
+	         if (!iDisplayQuestion_SYS(_("GDB file exists"),sPr))
+	            Cancel_SYS();
+	            
+	         UnLoad_EDB(sDB);            
+	      }
+	
+	      // --- Ask for Database Size ---
+	
+	      if (iInteractive_SYS()) 
+	      {
+	          // --- Create the Dialogue ---
+	
+	          Diag = Create_DGW("CreateDB");
+	
+	
+	          // --- Set any Defaults ---
+	                            
+	          SetInfoSYS_DGW(Diag,_CREATEDB_0,DGW_TEXT,"IMPASEGOMV","LINES");
+	          SetInfoSYS_DGW(Diag,_CREATEDB_1,DGW_TEXT,"IMPASEGOMV","CHANNELS");
+	
+	
+	          // --- Run the Dialogue ---
+	
+	          i = iRunDialogue_DGW(Diag);
+	          if (i==-1) Cancel_SYS();
+	
+	
+	          // --- Get the Strings ---
+	
+	          GetInfoSYS_DGW(Diag,_CREATEDB_0,DGW_TEXT,"IMPASEGOMV","LINES");
+	          GetInfoSYS_DGW(Diag,_CREATEDB_1,DGW_TEXT,"IMPASEGOMV","CHANNELS");
+	
+	          Destroy_DGW(Diag);
+	      }
+	      
+	      
+	      // --- Get Lines and Channels ---
+	      
+	      iLines    = iGetInt_SYS("IMPASEGOMV","LINES");
+	      iChannels = iGetInt_SYS("IMPASEGOMV","CHANNELS");
+	      
+	      if ( (iLines <= 0) || (iLines == iDUMMY) )
+	         iLines = 500;
+	        
+	      if ( (iChannels <= 0) || (iChannels == iDUMMY) )
+	         iChannels = 128;
+	      
+	      iBlobs = iLines+iChannels+100;
+	      iErase = (int)(  ((real)(iLines*iChannels)) *0.05 );
+	      if (iErase < 100)   iErase = 100;
+	      if (iErase > 10000) iErase = 10000;
+	
+	
+	      // --- Create Database ---
+	      
+	      CreateComp_DB(sDB,
+	                    iLines,
+	                    iChannels,
+	                    iBlobs,
+	                    10,
+	                    iErase,
+	                    "SUPER",
+	                    "",
+	                    1024,
+	                    DB_COMP_SIZE);
+	
+	
+	      // --- Load Database ---
+	
+	      EData = Load_EDB(sDB);
+	      Data = Lock_EDB(EData);
+   	} 
+   	else
+   	{
+      	Abort_SYS(_("File must be a *.dfn file."));
+      }
+   }
+   
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import ASEG-GDF"),1);
+
+   // --- import ---
+
+   ImportAsegProj_DU(Data,sTemplate,sDefn,sData,sFLC,64,sProj,sXCh,sYCh);
+
+
+   // --- Set the X and Y channels as current ---
+
+   if(iStrlen_STR(sXCh) && iStrlen_STR(sYCh)) {
+      SetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      SetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   }
+
+
+   // --- Finally, if the current X and Y channels do not exist, then look for "EASTING", "EAST"
+   //     or "NORTHING", "NORTH" etc. ---
+
+   if(GetXYZChanSymb_DB(Data, DB_CHAN_X)==NULLSYMB) {
+      
+      if(iExistChan_DB(Data, "EAST"))
+         SetXYZChan_DB(Data, DB_CHAN_X, "EAST");
+      else if(iExistChan_DB(Data, "EASTING"))
+         SetXYZChan_DB(Data, DB_CHAN_X, "EASTING");
+      else if(iExistChan_DB(Data, "LESTE"))
+         SetXYZChan_DB(Data, DB_CHAN_X, "LESTE");
+      else if(iExistChan_DB(Data, "ESTE"))
+         SetXYZChan_DB(Data, DB_CHAN_X, "ESTE");
+      else if(iExistChan_DB(Data, "EST"))
+         SetXYZChan_DB(Data, DB_CHAN_X, "EST");
+   }
+
+   if(GetXYZChanSymb_DB(Data, DB_CHAN_Y)==NULLSYMB) {
+
+      if(iExistChan_DB(Data, "NORTH"))
+         SetXYZChan_DB(Data, DB_CHAN_Y, "NORTH");
+      else if(iExistChan_DB(Data, "NORTHING"))
+         SetXYZChan_DB(Data, DB_CHAN_Y, "NORTHING");
+      else if(iExistChan_DB(Data, "NORTE"))
+         SetXYZChan_DB(Data, DB_CHAN_Y, "NORTE");
+      else if(iExistChan_DB(Data, "NORD"))
+         SetXYZChan_DB(Data, DB_CHAN_Y, "NORD");
+   }
+
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+   //store the meta data file in the gdb
+   if(iStrlen_STR(sDes)>0)
+   {
+        i=iInteractive_SYS(); 
+        SetInteractive_SYS(0);
+        SetString_SYS("GDBFILEPUTANDGET","OPERATION", "UI");
+        SetString_SYS("GDBFILEPUTANDGET","TEXTFILE", sDes);
+        iRunGX_SYS("geogxnet.dll(Geosoft.GX.Database.FileToAndFromGDB;Run)");
+        SetInteractive_SYS(i);
+   }
+
+   
+
+
+   // --- display data ---
+      
+   DelLine0_EDB(EData);
+   LoadAllChans_EDB(EData);
+   
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+
+}

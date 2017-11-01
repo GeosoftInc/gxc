@@ -1,0 +1,200 @@
+//===========================================================================
+NAME          = "Average rows or columns of an array channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/RPS/256 Channel"
+
+DESCRIPTION   = "\
+
+   VAAVERAGE.VA       Original array channel
+            .VV       Output average channel
+            .ROWCOL   \"R\" for rows of \"C\" for columns
+        
+"
+// Revision History:
+// v5.1.5:  Fixed a bug in getting the string sRowCol.
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "vaAverage.gr"
+#include "vaAverage.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;            // Channel Names
+string(STR_DB_SYMBOL) sOutCh;           // Channel Names
+string(STR_DEFAULT_SHORT) sRowCol;
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     InCh;             // Channel Handle
+DB_SYMB     OutCh;            // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+VA          hVA;
+VV          hVV;
+
+int         iType,iRowCol;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("VAAVERAGE");
+
+     List = GetList_DGW(Diag,_VAAVERAGE_0);
+     ArrayLST_DB(Data,List);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_VAAVERAGE_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     
+     SetInfoSYS_DGW(Diag,_VAAVERAGE_0,DGW_TEXT,"VAAVERAGE","VA");     
+     SetInfoSYS_DGW(Diag,_VAAVERAGE_1,DGW_TEXT,"VAAVERAGE","VV");     
+     SetInfoSYS_DGW(Diag,_VAAVERAGE_2,DGW_TEXT,"VAAVERAGE","ROWCOL");     
+
+     if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+     GetInfoSYS_DGW(Diag,_VAAVERAGE_0,DGW_TEXT,"VAAVERAGE","VA");    
+     GetInfoSYS_DGW(Diag,_VAAVERAGE_1,DGW_TEXT,"VAAVERAGE","VV");    
+     GetInfoSYS_DGW(Diag,_VAAVERAGE_2,DGW_TEXT,"VAAVERAGE","ROWCOL");     
+     
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VAAVERAGE","VA",sInCh);
+   GetString_SYS("VAAVERAGE","VV",sOutCh);
+   GetString_SYS("VAAVERAGE","ROWCOL",sRowCol);
+   if (iCharComp_STR(sRowCol,_n("C")) || iCharComp_STR(sRowCol,_n("c")))
+      iRowCol = VA_AVERAGE_COLUMNS;
+   else   
+      iRowCol = VA_AVERAGE_ROWS;
+   
+
+   // --- Do the Input Channels Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+
+   // --- create VV and VA ---
+   
+   iType = iGetChanType_DB(Data,InCh);
+   GS_SIMPLE_TYPE(iType)
+   hVA = Create_VA(iType,0,iGetColVA_DB(Data,InCh));      
+   hVV = Create_VV(REAL,0);
+
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) {
+      OutCh = CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      GetChanUnit_DB(Data,InCh,sLabel);
+      SetChanUnit_DB(Data,OutCh,sLabel);
+      SetChanFormat_DB(Data,OutCh,iGetChanFormat_DB(Data,InCh));
+      SetChanWidth_DB(Data,OutCh,iGetChanWidth_DB(Data,InCh));
+      SetChanDecimal_DB(Data,OutCh,iGetChanDecimal_DB(Data,InCh));
+      UnLockSymb_DB(Data,OutCh);
+   } else {
+      if (InCh == OutCh) Abort_SYS(_("Output channel cannot be the same as the input channel."));
+      OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+   }
+      
+      
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Subset VA line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- get VA/VV and write to new channel ---
+
+      GetChanVA_DB(Data,Line,InCh,hVA);
+      Average_VA(hVA,hVV,iRowCol);
+      PutChanVV_DB(Data,Line,OutCh,hVV);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Average VA..."),"VAAVERAGE;");
+   
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+   Destroy_VA(hVA);
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+}

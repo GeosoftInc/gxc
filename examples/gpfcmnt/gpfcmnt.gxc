@@ -1,0 +1,78 @@
+//===========================================================================
+NAME          = "Edit the project comment block"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Edit the comment block of a project.  The comment block is an RTF 
+   file which can be edited with the Windows Wordpad application.
+
+"
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/File/Project"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+BF          File;                      // temporary file
+BF          hBF;
+SBF         hSBF;
+
+int i;
+
+#define GPFCMNT_RTF "_gpf_comments.rtf"
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   Progress_SYS(1);
+   
+
+   // --- Create temporary RTF file from current comments ---
+
+   File = Create_BF(GPFCMNT_RTF,BF_READWRITE_NEW);
+   hSBF = hGetSYS_SBF();
+   if (iExistFile_SBF(hSBF,GPFCMNT_RTF)) {
+      hBF = CreateSBF_BF(hSBF,GPFCMNT_RTF,BF_READ);
+      Copy_BF(hBF,File);
+      DestroyEx_BF(hBF);
+   }
+   DestroyEx_BF(File);
+   
+   
+   // --- Allow editing of file ---
+   
+   SetString_SYS("EDIT","FILE",GPFCMNT_RTF);
+   SetString_SYS("EDIT","WAIT","Wait");
+   SetString_SYS("EDIT","CHILD","Yes");
+   i = iRunGX_SYS("edit");
+   if (i < 0) Cancel_SYS();
+   if (i > 0) Abort_SYS(_("Unable to edit file."));
+   
+   
+   // --- Put file back into project ---
+
+   File = Create_BF(GPFCMNT_RTF,BF_READ);
+   hBF = CreateSBF_BF(hSBF,GPFCMNT_RTF,BF_READWRITE_NEW);
+   Copy_BF(File,hBF);
+   DestroyEx_BF(hBF);
+   SetDestroyStatus_BF(File,BF_DELETE);
+   DestroyEx_BF(File);
+   
+   iDeleteFile_SYS(GPFCMNT_RTF);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+}

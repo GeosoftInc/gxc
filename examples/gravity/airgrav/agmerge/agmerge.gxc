@@ -1,0 +1,388 @@
+//===========================================================================
+NAME          = "Merge GPS data into gravity database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   MGMERGE.GRAV      Name of the gravity database
+          .GPS       Name of the GPS database
+
+"
+// Revision History:
+// v6.4.2  Use DU_LOOKUP_INTERPOLATE_DUMMYOUTSIDE to reproduce previous behaviour
+//         after fix for Data/Time interpolation resulted in DU_LOOKUP_INTERPOLATE
+//         (correctly for the method, but incorrectly here) extrapolating beyond 
+//         the first and last GPS times.
+// v6.3 New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "agmerge.gr"
+#include "agmerge.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;                         // Dialogue handle
+EDB         ENData,EGData;                // GPS and gravity edited database handles
+DB          NData,GData;                  // GPS and gravity database handles
+DB_SYMB     LGpsData,Line;                // Line handle
+DB_SYMB     DateCh,TimeCh,LatCh,LongCh,HeightCh;
+VV          DateVV,TimeVV,LatVV,LongVV,HeightVV;
+WA          hWA;                          // Handle to table file
+TB          hTB;                          // Table Handle
+
+int         i,iLenVV,iLine,iTotLines;
+
+string(STR_FILE)     sGrav,sGps;
+string(STR_DEFAULT)  sDate,sTime,sLat,sLong,sHeight;
+string(STR_DEFAULT)  sTemp,sLabel;
+   
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGMERGE");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_AGMERGE_0,DGW_FILEPATH,"AGMERGE","GRAV");
+      SetInfoSYS_DGW(Diag,_AGMERGE_1,DGW_FILEPATH,"AGMERGE","GPS");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_AGMERGE_0,DGW_FILEPATH,"AGMERGE","GRAV");
+      GetInfoSYS_DGW(Diag,_AGMERGE_1,DGW_FILEPATH,"AGMERGE","GPS");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("AGMERGE","GRAV",sGrav);
+   GetString_SYS("AGMERGE","GPS",sGps);            
+         
+
+   // --- Turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Merging gravity and GPS data"),1);
+
+   
+   // --- Get GPS database and LGpsData line handle ---
+   
+   ENData = Load_EDB(sGps);
+   NData = Lock_EDB(ENData);
+
+   if (iExistSymb_DB(NData,"LGpsData",DB_SYMB_LINE) == 0)
+      Abort_SYS(_("The \"LGpsData\" line is missing from the GPS database."));
+   else
+      LGpsData = FindSymb_DB(NData,"LGpsData",DB_SYMB_LINE);
+
+
+   // --- Get channel handles ---
+
+   if (iExistChan_DB(NData,"Date") == 0)
+      Abort_SYS(_("The \"Date\" channel is missing from the GPS database."));
+   else
+      DateCh = FindChan_DB(NData,"Date");
+
+   if (iExistChan_DB(NData,"Time") == 0)
+      Abort_SYS(_("The \"Time\" channel is missing from the GPS database."));
+   else
+      TimeCh = FindChan_DB(NData,"Time");
+
+   if (iExistChan_DB(NData,"Latitude") == 0)
+      Abort_SYS(_("The \"Latitude\" channel is missing from the GPS database."));
+   else
+      LatCh = FindChan_DB(NData,"Latitude");
+
+   if (iExistChan_DB(NData,"Longitude") == 0)
+      Abort_SYS(_("The \"Longitude\" channel is missing from the GPS database."));
+   else
+      LongCh = FindChan_DB(NData,"Longitude");
+
+   if (iExistChan_DB(NData,"Height") == 0)
+      Abort_SYS(_("The \"Height\" channel is missing from the GPS database."));
+   else
+      HeightCh = FindChan_DB(NData,"Height");
+
+
+   // --- Lock channels ---
+
+   LockSymb_DB(NData,DateCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(NData,TimeCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(NData,LatCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(NData,LongCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(NData,HeightCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+
+   // --- Create VV's ---
+
+   DateVV = Create_VV(REAL,0);
+   TimeVV = Create_VV(REAL,0);
+   LatVV = Create_VV(REAL,0);
+   LongVV = Create_VV(REAL,0);
+   HeightVV = Create_VV(REAL,0);
+
+
+   // --- Fill VV's ---
+
+   GetChanVV_DB(NData,LGpsData,DateCh,DateVV);
+   GetChanVV_DB(NData,LGpsData,TimeCh,TimeVV);
+   GetChanVV_DB(NData,LGpsData,LatCh,LatVV);
+   GetChanVV_DB(NData,LGpsData,LongCh,LongVV);
+   GetChanVV_DB(NData,LGpsData,HeightCh,HeightVV);
+
+   iLenVV = iLength_VV(DateVV);
+
+
+   // --- Unlock channels ---
+
+   UnLockSymb_DB(NData,DateCh);
+   UnLockSymb_DB(NData,TimeCh);
+   UnLockSymb_DB(NData,LatCh);
+   UnLockSymb_DB(NData,LongCh);
+   UnLockSymb_DB(NData,HeightCh);
+
+
+   // --- Create lookup table ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Create lookup table from GPS data"),1);
+
+   hWA = Create_WA("_lookup.tbl",0);
+   Puts_WA(hWA,_n("/Geosoft table file for merging airborne gravity and GPS data."));
+   NewLine_WA(hWA);
+   Puts_WA(hWA,"/");
+   NewLine_WA(hWA);
+   Puts_WA(hWA,_n("/= Date:real:I"));
+   NewLine_WA(hWA);
+   Puts_WA(hWA,_n("/= Time:real:I"));
+   NewLine_WA(hWA);
+   Puts_WA(hWA,_n("/= Latitude:real"));
+   NewLine_WA(hWA);
+   Puts_WA(hWA,_n("/= Longitude:real"));
+   NewLine_WA(hWA);
+   Puts_WA(hWA,_n("/= Height:real"));
+   NewLine_WA(hWA);
+   Puts_WA(hWA,"/");
+   NewLine_WA(hWA);
+   Puts_WA(hWA,_n("/  Date                 Time               Latitude            Longitude           Height"));
+   NewLine_WA(hWA);
+
+   for (i=0;i<iLenVV;i++) {
+      
+      ProgUpdateL_SYS(i,iLenVV);
+      
+      FormatR_STR(rGetReal_VV(DateVV,i),sDate,22,22);
+      //FormatReal_STR(rGetReal_VV(DateVV,i),sDate,FORMAT_DATE_YYYYMMDD,12,0);
+      Strcpy_STR(sTemp,sDate);
+      Strcat_STR(sTemp,"   ");
+      FormatR_STR(rGetReal_VV(TimeVV,i),sTime,22,22);
+      //FormatReal_STR(rGetReal_VV(TimeVV,i),sTime,FORMAT_TIME_COLON,12,2);
+      Strcat_STR(sTemp,sTime);
+      Strcat_STR(sTemp,"   ");
+      FormatR_STR(rGetReal_VV(LatVV,i),sLat,22,22);
+      Strcat_STR(sTemp,sLat);
+      Strcat_STR(sTemp,"   ");
+      FormatR_STR(rGetReal_VV(LongVV,i),sLong,22,22);
+      Strcat_STR(sTemp,sLong);
+      Strcat_STR(sTemp,"   ");
+      FormatR_STR(rGetReal_VV(HeightVV,i),sHeight,12,12);
+      Strcat_STR(sTemp,sHeight);
+
+      Puts_WA(hWA,sTemp);
+      NewLine_WA(hWA);
+   }
+   Progress_SYS(0);
+  
+
+   // --- Destroy lookup table ---
+
+   Destroy_WA(hWA);
+
+
+   // --- Destroy VV's ---
+
+   Destroy_VV(DateVV);
+   Destroy_VV(TimeVV);
+   Destroy_VV(LatVV);
+   Destroy_VV(LongVV);
+   Destroy_VV(HeightVV);
+
+
+   // --- Release GPS database ---
+
+   UnLock_EDB(ENData);
+
+
+   // --- Get gravity database and GravData group handle ---
+   
+   EGData = Load_EDB(sGrav);
+   GData = Lock_EDB(EGData);
+
+   // --- Get channel handles ---
+
+   if (iExistChan_DB(GData,"Date") == 0)
+      Abort_SYS(_("The \"Date\" channel is missing from the gravity database."));
+   else
+      DateCh = FindChan_DB(GData,"Date");
+
+   if (iExistChan_DB(GData,"Time") == 0)
+      Abort_SYS(_("The \"Time\" channel is missing from the gravity database."));
+   else
+      TimeCh = FindChan_DB(GData,"Time");
+
+
+   // --- Lock reference channels ---
+
+   LockSymb_DB(GData,DateCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(GData,TimeCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   
+
+   // --- Create output channels ---
+    
+   if (iExistChan_DB(GData,"Latitude") == 0) {
+      LatCh = DupSymb_DB(GData,DateCh,"Latitude");
+      SetChanUnit_DB(GData,LatCh,"");   
+      SetChanLabel_DB(GData,LatCh,_("Latitude"));
+   } else {    
+      LatCh = FindChan_DB(GData,"Latitude");
+      LockSymb_DB(GData,LatCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(GData,LatCh,DB_CHAN_UNPROTECTED);
+   }
+
+   if (iExistChan_DB(GData,"Longitude") == 0) {
+      LongCh = DupSymb_DB(GData,DateCh,"Longitude");
+      SetChanUnit_DB(GData,LongCh,"");   
+      SetChanLabel_DB(GData,LongCh,_("Longitude"));
+   } else {    
+      LongCh = FindChan_DB(GData,"Longitude");
+      LockSymb_DB(GData,LongCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(GData,LongCh,DB_CHAN_UNPROTECTED);
+   }
+
+   if (iExistChan_DB(GData,"Height") == 0) {
+      HeightCh = DupSymb_DB(GData,DateCh,"Height");
+      SetChanUnit_DB(GData,HeightCh,_("m"));   
+      SetChanLabel_DB(GData,HeightCh,_("Height"));
+   } else {    
+      HeightCh = FindChan_DB(GData,"Height");
+      LockSymb_DB(GData,HeightCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(GData,HeightCh,DB_CHAN_UNPROTECTED);
+   }
+
+
+   // --- Load the Table into Memory ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Table lookup"),1);
+   hTB = Create_TB("_lookup.tbl");
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Merge GPS data into gravity database"),1);
+
+   iLine=0;
+   iTotLines = iCountSelLines_DB(GData);
+   Line = FirstSelLine_DB(GData);
+   while (iIsLineValid_DB(GData,Line))
+   {
+      LockSymb_DB(GData,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(GData,Line,sTemp);
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);
+      
+      // --- Perform lookup ---
+
+      TableLook2_DU(GData,Line,DateCh,TimeCh,LatCh,"Date","Time","Latitude",DU_LOOKUP_INTERPOLATE_DUMMYOUTSIDE,0.0,hTB);
+      TableLook2_DU(GData,Line,DateCh,TimeCh,LongCh,"Date","Time","Longitude",DU_LOOKUP_INTERPOLATE_DUMMYOUTSIDE,0.0,hTB);
+      TableLook2_DU(GData,Line,DateCh,TimeCh,HeightCh,"Date","Time","Height",DU_LOOKUP_INTERPOLATE_DUMMYOUTSIDE,0.0,hTB);
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(GData,Line);
+      Line = NextSelLine_DB(GData, Line );
+      iLine++;
+   }
+   Progress_SYS(0);      
+
+   // --- Destroy table ---
+
+   Destroy_TB(hTB);
+   
+
+   // --- Set channel formats, widths, decimals and protection ---
+
+   SetXYZChan_DB(GData,DB_CHAN_X,"Longitude");
+   SetXYZChan_DB(GData,DB_CHAN_Y,"Latitude");
+
+   SetChanFormat_DB(GData,LatCh,DB_CHAN_FORMAT_GEOGR);
+   SetChanFormat_DB(GData,LongCh,DB_CHAN_FORMAT_GEOGR);   
+   SetChanFormat_DB(GData,HeightCh,DB_CHAN_FORMAT_NORMAL);   
+   SetChanWidth_DB(GData,LatCh,12);
+   SetChanWidth_DB(GData,LongCh,12);  
+   SetChanWidth_DB(GData,HeightCh,12);  
+   SetChanDecimal_DB(GData,LatCh,2);
+   SetChanDecimal_DB(GData,LongCh,2);
+   SetChanDecimal_DB(GData,HeightCh,2);
+   SetChanProtect_DB(GData,LatCh,DB_CHAN_PROTECTED);
+   SetChanProtect_DB(GData,LongCh,DB_CHAN_PROTECTED);
+   SetChanProtect_DB(GData,HeightCh,DB_CHAN_PROTECTED);
+
+
+   // --- Unlock channels ---
+
+   UnLockSymb_DB(GData,DateCh);
+   UnLockSymb_DB(GData,TimeCh);
+   UnLockSymb_DB(GData,LatCh);
+   UnLockSymb_DB(GData,LongCh);
+   UnLockSymb_DB(GData,HeightCh);
+
+
+   // --- Release GPS database ---
+
+   UnLock_EDB(EGData);
+
+
+   // --- Load output channels ---
+
+   LoadChan_EDB(EGData,"Latitude");
+   LoadChan_EDB(EGData,"Longitude");
+   LoadChan_EDB(EGData,"Height");
+
+}

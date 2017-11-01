@@ -1,0 +1,269 @@
+//===========================================================================
+NAME          = "SEMPLOT Proportional Symbol Plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+
+   SEMPROPSYMB.TEMPLATE  - XYplot or Triplot template
+           .CHANNEL      - channel name
+           .LOGLIN       - log or linear scaling
+           .BASE         - zero base level.
+           .SCALE        - symbol size units/mm.
+           .SYMBOL       - symbol number
+           .WEIGHT       - symbol weight
+           .LINE_COLOR   - symbol color 
+           .FILL_COLOR   - fill color (ie. R127 or Y127M255)
+
+"
+// Revision History
+// v6.3.1: Added check and error message if attempt is made to plot to a regular map.
+// v6.3.0: Retrieves current mineral channel
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+//         Modified behaviour checking for available maps.
+//===========================================================================
+
+RESOURCE = "SEMPROPSYMB.gr"
+#include "SEMPROPSYMB.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP     EMap;
+MAP      Map;
+EDB      EData;
+DB       Data;
+DGW      Diag;
+LST      List;
+LST      MapLST, ViewLST;
+REG      Reg;
+
+int   iSymb,iWeight,iLog,iMap;
+real  rBase,rScale;
+
+int i, iN, iM, iMaps, iLegend, iPlotted;
+string(STR_FILE) sMap, sDB;
+string(STR_VIEW) sView;
+string(1024) sMsg, sBuff;
+
+string(STR_DEFAULT_SHORT) sLcolor,sFcolor;
+string(STR_DB_SYMBOL) sChan, sMaskCh, sMineralCh;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Must have at least one map available ---
+
+   EMap = Current_EMAP();
+
+
+   // --- get current database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SEMPROPSYMB");
+
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_SEMPROPSYMB_0);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Mask Channel list ---
+                     
+      List = GetList_DGW(Diag,_SEMPROPSYMB_1);
+      ClassChanLST_DB(Data, List, _("Mask"));
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_0,DGW_TEXT,     "SEMPROPSYMB","CHANNEL");
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_1,DGW_TEXT,     "SEMPLOT",    "MASK");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_2,DGW_LISTALIAS,"SEMPROPSYMB","LOGLIN");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_3,DGW_TEXT,     "SEMPROPSYMB","BASE");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_4,DGW_TEXT,     "SEMPROPSYMB","SCALE");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_5,DGW_LISTALIAS,"SEMPROPSYMB","SYMBOL");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_6,DGW_LISTALIAS,"SEMPROPSYMB","WEIGHT");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_7,DGW_TEXT,"SEMPROPSYMB","LINE_COLOR");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_8,DGW_TEXT,"SEMPROPSYMB","FILL_COLOR");     
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_9,DGW_LISTALIAS,"SEMPROPSYMB","LEGEND");
+      SetInfoSYS_DGW(Diag,_SEMPROPSYMB_10,DGW_LISTALIAS,"SEMPROPSYMB","MAP");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_0,DGW_TEXT,     "SEMPROPSYMB","CHANNEL");
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_1,DGW_TEXT,     "SEMPLOT",    "MASK");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_2,DGW_LISTALIAS,"SEMPROPSYMB","LOGLIN");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_3,DGW_TEXT,     "SEMPROPSYMB","BASE");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_4,DGW_TEXT,     "SEMPROPSYMB","SCALE");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_5,DGW_LISTALIAS,"SEMPROPSYMB","SYMBOL");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_6,DGW_LISTALIAS,"SEMPROPSYMB","WEIGHT");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_7,DGW_TEXT,"SEMPROPSYMB","LINE_COLOR");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_8,DGW_TEXT,"SEMPROPSYMB","FILL_COLOR");     
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_9,DGW_LISTALIAS,"SEMPROPSYMB","LEGEND");
+      GetInfoSYS_DGW(Diag,_SEMPROPSYMB_10,DGW_LISTALIAS,"SEMPROPSYMB","MAP");
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("SEMPROPSYMB","CHANNEL",sChan);    
+   iLog = iGetInt_SYS("SEMPROPSYMB","LOGLIN");    
+   rBase = rGetReal_SYS("SEMPROPSYMB","BASE");     
+   rScale = rGetReal_SYS("SEMPROPSYMB","SCALE");     
+   iSymb = iGetInt_SYS("SEMPROPSYMB","SYMBOL");    
+   iWeight = iGetInt_SYS("SEMPROPSYMB","WEIGHT");    
+   GetString_SYS("SEMPROPSYMB","LINE_COLOR",sLcolor);
+   GetString_SYS("SEMPROPSYMB","FILL_COLOR",sFcolor);
+   GetString_SYS("SEMPLOT","MASK",sMaskCh);
+   iLegend = iGetInt_SYS("SEMPROPSYMB","LEGEND");
+   if(iLegend!=1) iLegend = 0;
+   iMap = iGetInt_SYS("SEMPROPSYMB","MAP");
+   if(iMap!=1) iMap = 0;
+
+
+   //--- Validate ---
+
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("Proportional channel not specified"));
+   if(iLog!=1) iLog=0;
+   if(rBase==rDUMMY) rBase = 0.0;
+   if(rScale==rDUMMY) 
+      Abort_SYS(_("No scale factor is defined"));
+   if(iSymb==iDUMMY) iSymb = 20; // circles
+   if(iWeight==iDUMMY) iWeight = MVIEW_FONT_WEIGHT_LIGHT;
+
+
+   // --- Get the mineral channel ---
+   
+   GetMineralChannelName_SEMPLOT(Data, sMineralCh);
+   
+
+   // --- Replot all maps, or just the current one? ---
+
+   MapLST = Create_LST(256);
+   ViewLST = Create_LST(256);
+
+   if(iMap==1)
+      iGetMapsLST_EMAP(MapLST, EMAP_PATH_FULL);
+   else {
+      GetName_EMAP(EMap,sMap);
+      AddItem_LST(MapLST, sMap, sMap);
+   }
+   iMaps = iSize_LST(MapLST);
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Plotting"),1);
+
+   iPlotted = 0;
+   for(iM=0; iM<iMaps; iM++) {
+
+      GetItem_LST(MapLST, 0, iM, sMap);
+
+      Strcpy_STR(sMsg, _("Plotting "));
+      FileNamePart_STR(sMap,sBuff,STR_FILE_PART_NAME_EXTENSION);
+      Strcat_STR(sMsg, sBuff);
+
+      ProgName_SYS(sMsg, 0);
+      ProgUpdateL_SYS(iM, iMaps);
+      if(iCheckStop_SYS())
+         Cancel_SYS();
+
+      EMap = Load_EMAP(sMap);
+      Map = Lock_EMAP(EMap);
+
+      Reg = GetREG_MAP(Map);
+
+      Get_REG(Reg, "SEMPLOT_MAP_SOURCE", sDB, sizeof(sDB));     // the actual DB doesn't matter
+      if(!iStrlen_STR(sDB)) {
+         UnLock_EMAP(EMap);
+         continue;
+      }
+
+      // --- Replot all the relevant views ---
+
+      Clear_LST(ViewLST);
+      ViewList_MAP(Map, ViewLST);
+
+      iN = iSize_LST(ViewLST);
+      for(i=0;i<iN;i++) {
+
+         GetItem_LST(ViewLST,0,i,sView);
+         if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT)==0 ||
+            iStrncmp_STR(sView, "Triplot_", 7, STR_CASE_TOLERANT)==0) {
+
+            // --- Set to this view ---
+                  
+            UnLock_EMAP(EMap);
+            if (!iScript_SYS())
+               iSetCurrentView_EMAP(EMap, sView);
+            Map = Lock_EMAP(EMap);
+
+            // --- Replot the map ---
+
+            PropSymb_SEMPLOT(Data, Map, sView, sChan, sMaskCh, sMineralCh, iLog, 0, rBase,
+                            rScale, iSymb, iWeight, iColor_MVIEW(sLcolor), iColor_MVIEW(sFcolor), iLegend); 
+
+         }
+      }
+
+      UnLock_EMAP(EMap);
+      
+      
+      // --- Count the number of plotted maps ---
+      
+      iPlotted++;
+
+   }
+
+   Progress_SYS(0);
+   
+   
+   // --- Give user an warning/error if some maps could not be plotted (non-SEMPLOT) ---
+   
+   if(iPlotted<iMaps)
+   {
+      Strcpy_STR(sMsg, _("Unable to plot proportional symbols to one or more maps.\r\n"));
+      Strcat_STR(sMsg, _("This GX requires that the maps be created using the Semplot system.\r\n"));
+      Strcat_STR(sMsg, _("To plot proportional symbols to a regular map, use the\r\nPROPSYMB.GX, found under \"Mapping->Symbols->Proportional size...\""));
+      Abort_SYS(sMsg);
+   }
+   
+   
+   // --- done ---
+
+   UnLock_EDB(EData);
+
+   Destroy_LST(MapLST);
+   Destroy_LST(ViewLST);
+   
+}

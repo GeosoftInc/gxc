@@ -1,0 +1,263 @@
+//===========================================================================
+NAME          = "Digitize a new trend line"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Gridding/Trend Enforcement"
+
+DESCRIPTION   = "
+
+Interactively digitize a trend line from a grid and add it to the
+end of the current database line.  The trend line may be resampled to
+a specified sample interval.  A dummy point will be added at the end of
+the new trend line.
+"
+// Revision History:
+// v6.0.0: Handle channel protection.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "trnddigi.gr"
+#include "trnddigi.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sZ;               // Channel Names
+string(STR_FILE) sGrid;    // Filter file name
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh;               // Channel handles
+DB_SYMB    YCh;               // Channel handles
+DB_SYMB    ZCh;               // Channel handles
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+VV         hVVx,hVVy,hVVz,hVVd;
+VV         hVVdx,hVVdy,hVVdz;
+int        i,iLen,iProtX,iProtY,iProtZ;
+real       rInt;
+IMG        hIMG;
+EMAP       EMap;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) 
+      Abort_SYS(_("This GX must be run interactively."));
+   
+
+   // --- Get the Database, line ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Create the Dialogue ---
+
+   Diag = Create_DGW("TRNDDIGI");
+
+
+   // --- Set up lists ---
+
+   List = GetList_DGW(Diag,_TRNDDIGI_1);
+   SymbLST_DB(Data,List,DB_SYMB_CHAN);
+   Sort_LST(List,0,0);
+
+
+   // --- Set any Defaults from INI ---
+
+   SetInfoSYS_DGW(Diag,_TRNDDIGI_0,DGW_FILEPATH,"TRNDDIGI","GRID");    
+   SetInfoSYS_DGW(Diag,_TRNDDIGI_1,DGW_TEXT,"TRNDDIGI","CHAN");     
+   SetInfoSYS_DGW(Diag,_TRNDDIGI_2,DGW_TEXT,"TRNDDIGI","INTERVAL");     
+
+
+   // --- Run the Dialogue ---
+
+   i = iRunDialogue_DGW(Diag);
+   if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+   // --- Get the Strings and replace in INI ---
+
+   GetInfoSYS_DGW(Diag,_TRNDDIGI_0,DGW_FILEPATH,"TRNDDIGI","GRID");    
+   GetInfoSYS_DGW(Diag,_TRNDDIGI_1,DGW_TEXT,"TRNDDIGI","CHAN");     
+   GetInfoSYS_DGW(Diag,_TRNDDIGI_2,DGW_TEXT,"TRNDDIGI","INTERVAL");     
+
+
+   // --- Destroy the Dialogue ---
+
+   Destroy_DGW(Diag);
+   
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("TRNDDIGI","GRID",sGrid);
+   GetString_SYS("TRNDDIGI","CHAN",sZ);
+   rInt = rGetReal_SYS("TRNDDIGI","INTERVAL");
+
+
+   // --- get working VV's ---
+   
+   hVVx = Create_VV(REAL,0);
+   hVVy = Create_VV(REAL,0);
+   hVVz = Create_VV(REAL,0);
+   hVVd = Create_VV(REAL,0);
+   
+   
+   // --- get X,Y points ---
+   
+   DisplayMessage_SYS(_("Digitize to database"),_("Select points, right mouse when done..."));
+   EMap = Current_EMAP();
+   i = iGetPolyLine_EMAP(EMap,_("Select points, right mouse when done..."),hVVx,hVVy);
+   
+   
+   // --- if have points, sample grid ---
+   
+   iLen = iLength_VV(hVVx);
+   if ((i == 0) && iLen) {
+   
+   
+      // --- get grid values ---
+      
+      hIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
+      ProfileVV_IMU(hIMG,hVVx,hVVy,hVVz);
+      Destroy_SYS(hIMG);
+      
+      
+      // --- resample ---
+      
+      if (rInt > 0.0) {
+      
+         Distance_VVU(hVVx,hVVy,hVVd,0.0,1.0,0.0,1.0);
+         i = (int)(rGetReal_VV(hVVd,iLen-1)/rInt + 0.999999999);
+         Spline_VVU(hVVd,hVVx,hVVx,i,
+                     0.0,rInt,1.0e20,1,VVU_SPL_CUBIC);
+         Spline_VVU(hVVd,hVVy,hVVy,i,
+                     0.0,rInt,1.0e20,1,VVU_SPL_CUBIC);
+         Spline_VVU(hVVd,hVVz,hVVz,i,
+                     0.0,rInt,1.0e20,1,VVU_SPL_CUBIC);
+                     
+         iLen = iLength_VV(hVVx);
+         
+      }
+      
+      
+      // --- get/create line channel ---
+      
+      Line = FindSymb_DB(Data,"R2",DB_SYMB_LINE);
+      if (Line == NULLSYMB)
+         Line = CreateSymb_DB(Data,"R2",DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_FLIGHT);
+         
+      
+      // --- add a dummy to the end ---
+      
+      SetReal_VV(hVVx,iLen,rDUMMY);
+      SetReal_VV(hVVy,iLen,rDUMMY);
+      SetReal_VV(hVVz,iLen,rDUMMY);
+      
+      
+      // --- Do the reference channels exist ? ---
+
+      XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+      if (XCh==NULLSYMB)
+         Abort_SYS(_("The current X channel does not exist."));
+
+      YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+      if (YCh==NULLSYMB)
+         Abort_SYS(_("The current Y channel does not exist."));
+      
+      ZCh = FindChan_DB(Data,sZ);
+      if (ZCh==NULLSYMB)
+         Abort_SYS(_("The data channel does not exist."));
+
+      LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(Data,ZCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      
+      
+      // --- Handle protection ---
+      
+      iProtX = iGetChanProtect_DB(Data, XCh);
+      iProtY = iGetChanProtect_DB(Data, YCh);
+      iProtZ = iGetChanProtect_DB(Data, ZCh);
+      SetChanProtect_DB(Data, XCh, DB_CHAN_UNPROTECTED);
+      SetChanProtect_DB(Data, YCh, DB_CHAN_UNPROTECTED);
+      SetChanProtect_DB(Data, ZCh, DB_CHAN_UNPROTECTED);
+      
+      
+      // --- get data VV's ---
+      
+      hVVdx = Create_VV(REAL,0);
+      hVVdy = Create_VV(REAL,0);
+      hVVdz = Create_VV(REAL,0);
+      
+      
+      // --- get the Data VV's ---
+      
+      GetChanVV_DB(Data,Line,XCh,hVVdx);
+      GetChanVV_DB(Data,Line,YCh,hVVdy);
+      GetChanVV_DB(Data,Line,ZCh,hVVdz);
+      
+      
+      // --- resample to X ---
+      
+      ReFidVV_VV(hVVdy,hVVdx);
+      ReFidVV_VV(hVVdz,hVVdx);
+      
+      
+      // --- append digitized data ---
+      
+      Append_VV(hVVdx,hVVx);
+      Append_VV(hVVdy,hVVy);
+      Append_VV(hVVdz,hVVz);
+      
+      
+      // --- write back to database ---
+      
+      PutChanVV_DB(Data,Line,XCh,hVVdx);
+      PutChanVV_DB(Data,Line,YCh,hVVdy);
+      PutChanVV_DB(Data,Line,ZCh,hVVdz);
+      
+
+      // --- Handle protection ---
+            
+      SetChanProtect_DB(Data, XCh, iProtX);
+      SetChanProtect_DB(Data, YCh, iProtY);
+      SetChanProtect_DB(Data, ZCh, iProtZ);
+      
+      
+      // --- unlock ---
+      
+      UnLockSymb_DB(Data,XCh);
+      UnLockSymb_DB(Data,YCh);
+      UnLockSymb_DB(Data,ZCh);
+      
+      Destroy_SYS(hVVdx); 
+      Destroy_SYS(hVVdy); 
+      Destroy_SYS(hVVdz); 
+
+   }
+   
+   // --- done ---
+
+   Destroy_SYS(hVVx); 
+   Destroy_SYS(hVVy); 
+   Destroy_SYS(hVVz); 
+   UnLock_EDB(EData);
+   GotoLine_EDB(EData,Line);
+   Progress_SYS(0);
+      
+}

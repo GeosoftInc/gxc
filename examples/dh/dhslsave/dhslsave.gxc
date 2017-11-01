@@ -1,0 +1,97 @@
+//===========================================================================
+NAME          = "Drill Hole - Save Selections"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Plot/Select Holes"
+
+DESCRIPTION   = "\
+\r\n\
+Save current hole selections to a file.\r\n\
+\r\n\
+      DHSLSAVE.FILE  -  Selection file, .SEL assumed.\r\n\
+\r\n\
+\r\n"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhslsave.gr"
+#include "dhslsave.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;                 // File string;
+
+EDB         EData;
+DH          Drill;
+
+DGW         Diag;                      // Dialogue handle
+
+string(STR_FILE) sDB;
+int         i;
+
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData,sDB);
+   Drill = Create_DH(sDB);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("DHSLSAVEForm");
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_DHSLSAVEFORM_0,DGW_FILEPATH,"DHSLSAVE","FILE");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- SAVE the Strings ---
+
+     GetInfoSYS_DGW(Diag,_DHSLSAVEFORM_0,DGW_FILEPATH,"DHSLSAVE","FILE");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DHSLSAVE","FILE",sFile);
+
+
+   // --- Create the Expression ---
+
+   SaveSelect_DH(Drill,sFile);
+
+   Destroy_DH(Drill);
+}

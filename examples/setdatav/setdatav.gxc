@@ -1,0 +1,185 @@
+//===========================================================================
+NAME          = "Change the default data drawing view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map Tools"
+
+DESCRIPTION   = "
+
+      SETDATAV.MAP      Map file name
+              .VIEW     New default data view
+              .PLANE    New default drawing plane in a 3D data view.
+"
+// Revision History
+// v6.3.1  Fixed infinite loop for 3D view with a single plane.
+//===========================================================================
+
+RESOURCE="setdatav.gr"
+#include "setdatav.grh"
+
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+
+string(STR_MAX_PATH) sMap;
+string(STR_VIEW) sView,sPlane;
+
+EMAP   EMap;
+MAP    Map;
+LST    hViewLST,hPlaneLST;
+MVIEW  View;
+DGW    hDGW;
+
+int    i,iPlanes;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   if (iInteractive_SYS()) {
+   
+      if (!iHaveCurrent_EMAP())
+         Abort_SYS(_("A current map is required."));
+
+      EMap  = Current_EMAP();
+      Map  = Lock_EMAP(EMap);
+      GetFileName_MAP(Map,sMap);
+      SetString_SYS("SETDATAV","MAP",sMap);
+      SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+
+
+	   // --- get view list ---
+
+      hViewLST = Create_LST(256);
+	   ViewList_MAP(Map,hViewLST);
+      
+      
+      // --- remove the base view from the list ---
+      
+      GetClassName_MAP(Map,"Base",sView);
+      i = iFindItem_LST(hViewLST,0,sView);
+      if (i != -1)
+         DelItem_LST(hViewLST,i);
+      
+      i = 0;
+      while (i != 99) 
+      {
+         switch (i) 
+         {
+      
+            case 0:
+      
+               hDGW = Create_DGW("SETVIEW");
+               Copy_LST(GetList_DGW(hDGW,_SETVIEW_0),hViewLST);
+      
+               // --- if current default is in the list, display it ---
+      
+               GetClassName_MAP(Map,"Data",sView);
+               if (iFindItem_LST(hViewLST,0,sView) != -1)
+                  SetInfo_DGW(hDGW,_SETVIEW_0,DGW_TEXT,sView);
+      
+               i = iRunDialogue_DGW(hDGW);
+               if (i==-1) Cancel_SYS(); 
+      
+               GetInfoSYS_DGW(hDGW,_SETVIEW_0,DGW_TEXT,"SETDATAV","VIEW");
+               Destroy_DGW(hDGW);
+      
+			      break;
+
+            case 1:
+
+               // --- is this a 3D view? ---
+      
+               GetString_SYS("SETDATAV","VIEW",sView);
+               View = Create_MVIEW(Map,sView,MVIEW_READ);
+               if (iIsView3D_MVIEW(View)) 
+               {
+               
+                  hPlaneLST = Create_LST(256);
+                  ListPlanes_MVIEW(View,hPlaneLST);
+               
+                  iPlanes = iSize_LST(hPlaneLST);
+                  if (iPlanes <= 0)
+                     Abort_SYS(_("There are no drawing planes in this view."));
+                  
+           
+                  // --- only one plane - it's the default ---
+                 
+                  if (iPlanes == 1) 
+                  {
+                     GetItem_LST(hPlaneLST,0,0,sPlane);
+                     i = 99;
+                  }
+                  else 
+                  {
+        
+                     // --- ask the user to select a default plane ---
+
+                     hDGW = Create_DGW("SETPLANE");
+                     Copy_LST(GetList_DGW(hDGW,_SETPLANE_1),hPlaneLST);
+                     SetInfo_DGW(hDGW,_SETPLANE_0,DGW_TEXT,sView);
+                  
+
+                     // --- if current default is in the list, display it ---
+
+                     GetClassName_MAP(Map,"Plane",sPlane);
+                     if (iFindItem_LST(hPlaneLST,0,sPlane) != -1)
+                     SetInfo_DGW(hDGW,_SETPLANE_1,DGW_TEXT,sPlane);
+
+                     i = iRunDialogue_DGW(hDGW);
+                     if (i==-1) Cancel_SYS(); 
+
+                     GetInfoSYS_DGW(hDGW,_SETPLANE_1,DGW_TEXT,"SETDATAV","PLANE");
+                     Destroy_DGW(hDGW);        
+                  } 
+                                           
+               } else
+                  i = 99;
+            
+               Destroy_MVIEW(View);
+         }                       
+      }           
+      
+   
+      // --- set the default data view ---
+   
+      SetClassName_MAP(Map,"Data",sView);
+      SetString_SYS("SETDATAV","VIEW",sView);
+   
+      UnLock_EMAP(EMap);
+      
+   }      
+   
+   // --- script process ---
+
+   GetString_SYS("SETDATAV","MAP",sMap);
+   GetString_SYS("SETDATAV","VIEW",sView);
+   GetString_SYS("SETDATAV","PLANE",sPlane);
+   
+   if (iLoaded_EMAP(sMap)) {
+   
+      Load_EMAP(sMap);
+      EMap = Current_EMAP();
+	  iChangeCurrentView_EMAP(EMap, sView); 
+      Map = Lock_EMAP(EMap);
+      
+   } else {
+      EMap = (EMAP)0;
+      Map = Create_MAP(sMap,MAP_WRITEOLD);
+   }
+      
+   SetClassName_MAP(Map,"Data",sView);
+   View = Create_MVIEW(Map,sView,MVIEW_READ);
+   if (iIsView3D_MVIEW(View))
+      SetClassName_MAP(Map,"Plane",sPlane);
+   Destroy_MVIEW(View);
+  
+   if (EMap)
+      UnLock_EMAP(EMap);   
+   else
+      Destroy_MAP(Map);      
+}

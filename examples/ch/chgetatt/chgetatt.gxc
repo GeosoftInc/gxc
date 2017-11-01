@@ -1,0 +1,263 @@
+//===========================================================================
+NAME          = "CHGETATT GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport/Assay Attributes"
+
+DESCRIPTION   = "
+"
+
+// Revision History:
+// v7.0.1: QA 13330 "Y" channel not having attributes set.
+// v5.1.6: Fixed recognition of symbol scaling attribute.
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+//                                 RESOURCES
+
+RESOURCE = "CHGETATT.gr"
+#include "CHGETATT.grh"
+
+//===========================================================================
+
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Chan;
+DGW         Diag;              // dialogue handle
+LTB         Ltb;
+REG         Reg;
+LST         List, ChLST;
+
+
+string(GS_MAX_PATH)        sFile,sList;
+string(STR_DB_SYMBOL) sChan;
+string(256) sUnits,sLabel,sDetLim,sOutlierLim,sMethod,sLog;
+string(256) sStdMin,sStdMax,sClass,sSymbScl;
+string(64)  sProg;
+
+int         i, iX, iY;
+int         iN;
+int         iSet;
+int         iChanName;
+int         iUnits,iLabel,iDetLim,iOutLim,iMethod,iLog;
+int         iStdMin,iStdMax,iSymbScl;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+
+   // --- Method list file ---
+
+   Strcpy_STR(sList,"ch_assay_method");
+   
+
+   // --- Current EDB ---
+
+   EData = Current_EDB();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the 1st dialogue ---
+
+      Diag = Create_DGW("CHGETATT");
+      SetInfoSYS_DGW(Diag,_CHGETATT_0,DGW_FILEPATH,"CHGETATT","FILE");
+      if (iRunDialogue_DGW(Diag) == -1) Cancel_SYS();   
+      GetInfoSYS_DGW(Diag,_CHGETATT_0,DGW_FILEPATH,"CHGETATT","FILE");
+      Destroy_DGW(Diag);
+   }
+   
+   // --- Get parameters ---
+
+   GetString_SYS("CHGETATT","FILE",sFile);
+   
+   
+   // --- Load Table ---
+      
+   Ltb       = CreateCSV_LTB(sFile);
+
+   iChanName   = iFindField_LTB(Ltb,"Channel");
+   iUnits      = iFindField_LTB(Ltb,"Units");
+   iLabel      = iFindField_LTB(Ltb,"Label");
+   iDetLim     = iFindField_LTB(Ltb,"Detection");
+   iOutLim     = iFindField_LTB(Ltb,"Outlier");
+   iStdMin     = iFindField_LTB(Ltb,"StdMin");
+   iStdMax     = iFindField_LTB(Ltb,"StdMax");
+   iLog        = iFindField_LTB(Ltb,"Log");
+   iSymbScl    = iFindField_LTB(Ltb,"SymbScl");
+   iMethod     = iFindField_LTB(Ltb,"Method");
+
+
+
+   // --- Table must have Channel name column ---
+   
+   if (iChanName == -1) 
+      Abort_SYS(_("The [Channel] column was not found in the specified CSV file."));
+   
+
+   // --- Get channel symbol list ---   
+
+   Data = Lock_EDB(EData);
+	ChLST = Create_LST(2*STR_DB_SYMBOL);
+	ChanLST_DB(Data, ChLST);
+   iN = iSize_LST(ChLST);
+   
+   
+   // --- Remove X,Y from the list only if they are consecutive, because
+   //     they would be the locations, not assay channels ---
+   
+   iX = iFindItem_LST(ChLST, LST_ITEM_NAME, "X");
+   iY = iFindItem_LST(ChLST, LST_ITEM_NAME, "Y");
+   if(iX!=-1 && iY!=-1 && iY == iX+1)
+   {
+		DelItem_LST(ChLST, iY);
+		DelItem_LST(ChLST, iX);
+	}
+
+ 
+   // --- Go through each channel ---
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Set channel parameters"),1);
+   for (i = 0; i < iN; i++)
+   {
+   
+      // --- Get channel name ---
+      
+      GetSymbItem_LST(ChLST, i, sChan, Chan);
+   
+   
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sProg,_("Set parameters for channel: "));
+      Strcat_STR(sProg,sChan);
+      ProgName_SYS(sProg,0);
+      ProgUpdateL_SYS(i, iN);
+      
+
+      // --- Get parameters from CSV file ---
+      
+      iSet = 0;
+      iSet = iFindKey_LTB(Ltb,sChan);
+      if (iSet < 0) continue;
+
+      
+      // --- Get the current channel class. If the class is already set to
+      //     something other than "ASSAY", then continue. ---
+
+      GetRegSymbSetting_DB(Data,Chan,"CLASS",sClass,sizeof(sClass));
+      
+      if(iStrlen_STR(sClass) &&
+         iStrcmp_STR(sClass, "ASSAY", STR_CASE_TOLERANT)!=0) {
+         continue;
+      }
+      
+      
+      Strcpy_STR(sUnits,      "");
+      Strcpy_STR(sLabel,      "");
+      Strcpy_STR(sDetLim,     "");
+      Strcpy_STR(sOutlierLim, "");
+      Strcpy_STR(sStdMin,     "");
+      Strcpy_STR(sStdMax,     "");
+      Strcpy_STR(sLog,        "");
+      Strcpy_STR(sSymbScl,    "");
+      Strcpy_STR(sMethod,     "");
+      
+      
+      if (iUnits     > 0)
+         GetString_LTB(Ltb,iSet,iUnits    ,sUnits    );
+      if (iLabel     > 0)
+         GetString_LTB(Ltb,iSet,iLabel    ,sLabel    );
+      if (iDetLim    > 0)
+         GetString_LTB(Ltb,iSet,iDetLim   ,sDetLim   );
+      if (iOutLim    > 0)
+         GetString_LTB(Ltb,iSet,iOutLim   ,sOutlierLim);
+      if (iLog       > 0)
+         GetString_LTB(Ltb,iSet,iLog      ,sLog      );
+      if (iStdMin    > 0)
+         GetString_LTB(Ltb,iSet,iStdMin   ,sStdMin   );
+      if (iStdMax    > 0)
+         GetString_LTB(Ltb,iSet,iStdMax   ,sStdMax   );
+      if (iSymbScl   > 0)
+         GetString_LTB(Ltb,iSet,iSymbScl  ,sSymbScl  );
+      if (iMethod    > 0)
+         GetString_LTB(Ltb,iSet,iMethod   ,sMethod   );
+
+      
+         
+         
+         
+      // --- Set parameters to Channel ---
+      
+      Reg = Create_REG(256);
+   
+      if(iStrlen_STR(sUnits))
+         Set_REG(Reg,"UNITS",sUnits);        
+      if(iStrlen_STR(sLabel))
+         Set_REG(Reg,"LABEL",sLabel);        
+      if(iStrlen_STR(sDetLim))
+         Set_REG(Reg,"DETECTLIMIT",sDetLim); 
+      if(iStrlen_STR(sOutlierLim))
+         Set_REG(Reg,"OUTLIERLIMIT",sOutlierLim);
+      if(iStrlen_STR(sStdMin))
+         Set_REG(Reg,"STANDARDMIN",sStdMin);
+      if(iStrlen_STR(sStdMax))
+         Set_REG(Reg,"STANDARDMAX",sStdMax);
+      if(iStrlen_STR(sLog))
+         Set_REG(Reg,"LOG",sLog);
+      if(iStrlen_STR(sSymbScl))
+         Set_REG(Reg,"SYMBOL_SCALING",sSymbScl);
+      if(iStrlen_STR(sMethod))
+         Set_REG(Reg,"ASSAYMETHOD",sMethod);
+
+      Set_REG(Reg,"CLASS","ASSAY");		// --- class is always set to ASSAY ---
+         
+      SetRegSymb_DB(Data,Chan,Reg);
+      
+      
+      // --- Add new method to the list ---
+      
+      if (iStrlen_STR(sMethod) > 0) {        
+      
+         List = Create_LST(128); 
+         LoadFile_LST(List,sList);
+      
+         if (iFindItem_LST(List,0,sMethod) == -1) {
+            AddItem_LST(List,sMethod,"");
+            SaveFile_LST(List,sList);
+         }
+         
+         Destroy_LST(List);
+      }
+      
+      Destroy_REG(Reg);
+   }
+   Progress_SYS(0);
+   
+   
+   // ---- Done ---
+   
+   UnLock_EDB(EData);
+   Destroy_LTB(Ltb);
+   Destroy_LST(ChLST);
+ 
+}

@@ -1,0 +1,196 @@
+//===========================================================================
+NAME          = "UBC 3D Model & MSH file import into VOX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Imports a UBC MeshTools format MOD model file using the header MSH file.
+
+   IMPUBCVOX.MOD:  One or more MOD files, delimited with \"|\".
+   IMPUBCVOX.MSH:  Mesh file
+   IMPUBCVOX.DUMMY: Value to use as NULL (dummy).
+            .IPJ_NAME        projection name
+            .IPJ_DATUM       datum (name, major axis, ellipticity)
+            .IPJ_METHOD      projection method (name,p1,p2,... see GXF)
+            .IPJ_UNITS       distance units (name,m/unit)
+            .IPJ_LOCALDATUM  local datum (name,dx,dy,dz,rx,ry,rz,scale)
+
+"
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v6.3.0: Enabled ArcGIS specific functionality
+// v6.1.0: First version
+//===========================================================================
+
+RESOURCE = "impubcvox.gr"
+#include "impubcvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW         hDGW;   
+IPJ         hIPJ;
+
+string(STR_FILE) sVox,sMod,sMsh;
+string(STR_GXF)  s1,s2,s3,s4,s5,sTemp;
+int i;
+real rDummy;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Create IPJ ---
+
+   hIPJ = Create_IPJ();
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+     // --- Start ---
+     
+     i = 0;
+   
+
+     // --- Read Previous Projection ---
+    
+     GetString_SYS("IMPUBCVOX","IPJ_NAME",s1);
+     if (iStrlen_STR(s1)) {
+        GetString_SYS("IMPUBCVOX","IPJ_DATUM",s2);
+        GetString_SYS("IMPUBCVOX","IPJ_METHOD",s3);
+        GetString_SYS("IMPUBCVOX","IPJ_UNITS",s4);
+        GetString_SYS("IMPUBCVOX","IPJ_LOCALDATUM",s5);
+        SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+     }
+   
+
+     // --- Start Loop ---
+
+     do {
+     
+        switch(i)
+        {
+           case 0 : 
+        
+              // --- Create the Dialogue ---
+
+              hDGW = Create_DGW("IMPUBCVOX");
+
+        
+              // --- Set any Defaults ---
+
+              SetInfoSYS_DGW(hDGW,_IMPUBCVOX_0,DGW_FILEPATH,"IMPUBCVOX","VOX");     
+              SetInfoSYS_DGW(hDGW,_IMPUBCVOX_1,DGW_FILEPATH,"IMPUBCVOX","MOD");     
+              SetInfoSYS_DGW(hDGW,_IMPUBCVOX_2,DGW_FILEPATH,"IMPUBCVOX","MSH");     
+              SetInfoSYS_DGW(hDGW,_IMPUBCVOX_3,DGW_TEXT,"IMPUBCVOX","DUMMY");     
+
+        
+              // --- Run the Dialogue ---
+
+              i = iRunDialogue_DGW(hDGW);
+              if (i == -1) Cancel_SYS();    // The user hit cancel
+
+        
+              // --- Get the Strings ---
+
+              GetInfoSYS_DGW(hDGW,_IMPUBCVOX_0,DGW_FILEPATH,"IMPUBCVOX","VOX");    
+              GetInfoSYS_DGW(hDGW,_IMPUBCVOX_1,DGW_FILEPATH,"IMPUBCVOX","MOD");    
+              GetInfoSYS_DGW(hDGW,_IMPUBCVOX_2,DGW_FILEPATH,"IMPUBCVOX","MSH");  
+              GetInfoSYS_DGW(hDGW,_IMPUBCVOX_3,DGW_TEXT,"IMPUBCVOX","DUMMY");     
+        
+        
+              // --- Destroy the Dialogue ---
+
+              Destroy_DGW(hDGW);
+              break;
+       
+       
+           case 1 : 
+        
+              // --- Get the 
+       
+              hDGW = Create_DGW("IMPUBCVOX1");
+              GetName_IPJ(hIPJ,IPJ_NAME_PCS,sTemp);         
+              SetInfo_DGW(hDGW,_IMPUBCVOX1_0,DGW_TEXT,sTemp);
+              GetName_IPJ(hIPJ,IPJ_NAME_UNIT_FULL,sTemp);         
+              SetInfo_DGW(hDGW,_IMPUBCVOX1_1,DGW_TEXT,sTemp);
+              i = iRunDialogue_DGW(hDGW);
+              if (i == -1)  Cancel_SYS();
+              Destroy_DGW(hDGW);
+              break;
+           
+           case 2 : 
+       
+              // --- Edit/modify the IPJ ---
+              
+              GetString_SYS("IMPUBCVOX","MOD",sMod);
+              iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("UBC file"), sMod);
+              i = 1;
+              break;
+          }
+        
+      } while (i != 3);
+      
+      
+      // --- Save Projection ---
+      
+      GetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+      SetString_SYS("IMPUBCVOX","IPJ_NAME",s1);
+      SetString_SYS("IMPUBCVOX","IPJ_DATUM",s2);
+      SetString_SYS("IMPUBCVOX","IPJ_METHOD",s3);
+      SetString_SYS("IMPUBCVOX","IPJ_UNITS",s4);
+      SetString_SYS("IMPUBCVOX","IPJ_LOCALDATUM",s5);
+   }
+   
+   
+   
+   // --- Get and verify parameters ---
+
+   GetString_SYS("IMPUBCVOX","VOX",sVox);
+   GetString_SYS("IMPUBCVOX","MOD",sMod);
+   GetString_SYS("IMPUBCVOX","MSH",sMsh);
+   rDummy = rGetReal_SYS("IMPUBCVOX","DUMMY");
+   if(!iStrlen_STR(sMod))
+      Abort_SYS(_("No MOD file specified."));   
+   if(!iStrlen_STR(sMsh))
+      Abort_SYS(_("No MSH file specified."));  
+   if(rDummy==rDUMMY) rDummy = -9.0;      
+
+
+   // --- Read Projection ---
+
+   GetString_SYS("IMPUBCVOX","IPJ_NAME",s1);
+   if (iStrlen_STR(s1)) {
+      GetString_SYS("IMPUBCVOX","IPJ_DATUM",s2);
+      GetString_SYS("IMPUBCVOX","IPJ_METHOD",s3);
+      GetString_SYS("IMPUBCVOX","IPJ_UNITS",s4);
+      GetString_SYS("IMPUBCVOX","IPJ_LOCALDATUM",s5);
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   }
+
+   
+   // --- Create the VOX ---
+   
+   Progress_SYS(1);
+   GenerateUBC_VOX(sVox,sMsh, sMod, rDummy,hIPJ); 
+   Progress_SYS(0);
+   
+   
+	// --- Display the Voxel ? ---
+    if (!iScript_SYS()) 
+	{
+		SetString_SYS("VOXEL_UTILS","DISPLAY_VOXEL",sVox);
+		iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.VoxelGxUtils;DisplayNewVoxel)");
+	}	
+}

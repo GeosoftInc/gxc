@@ -1,0 +1,338 @@
+//===========================================================================
+NAME          = "Drill Hole - Convert old Wholeplot database"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Converts the old-style Wholeplot single-database into the
+new-style multi-database drill-hole project.
+   
+      DHCONVERT.OLDGDB     Old Wholeplot gdb.
+               .PROJECT    Project tag.
+
+Parameters: 
+
+"
+// Revision History:
+// v6.3.0: Eliminate dependence on DH object because DH no longer
+//         will open old-style Wholeplot (single) databases.
+//         Removed Associate_DB function.
+// v5.1.7: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dhconvert.gr"
+#include "dhconvert.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                  MACROS
+//===========================================================================
+
+#define DELETE_CHAN(OLD, NEW, CUR) \
+   OldCh = FindChan_DB(Data, OLD);  \
+   NewCh = FindChan_DB(Data, NEW);  \
+   if(OldCh!=NULLSYMB && NewCh!=NULLSYMB) \
+   {  \
+      LOCK_RW(Data, OldCh);   \
+      SetChanProtect_DB(Data, OldCh, DB_CHAN_UNPROTECTED);  \
+      DeleteSymb_DB(Data, OldCh);   \
+      SetXYZChan_DB(Data, CUR, NEW); \
+   }  
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData, EData2;            // Database handle
+
+DGW         Diag;
+DB_SELECT   Select;
+DB          Data, Data2;
+DB_SYMB     Collar, OldCh, NewCh;
+LST         LineLST, LineLST2, OutLST;
+
+int i, iLen, iLoc, iN, iType, iNTypes;
+string(STR_FILE) sGDB, sNewGDB, sCollarGDB, sProject;
+string(STR_DB_SYMBOL) sGroup, sType, sVal;
+
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+   
+      // --- Create the dialogue ---
+
+      Diag = Create_DGW("DHCONVERT");
+      
+
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_DHCONVERT_0,DGW_FILEPATH, "DHCONVERT","OLDGDB");
+      SetInfoSYS_DGW(Diag,_DHCONVERT_1,DGW_TEXT,     "DHCONVERT","PROJECT");
+      
+
+      // --- Run the dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == -1) Cancel_SYS();
+         
+
+      // --- Get the strings ---
+
+      GetInfoSYS_DGW(Diag,_DHCONVERT_0,DGW_FILEPATH, "DHCONVERT","OLDGDB");
+      GetInfoSYS_DGW(Diag,_DHCONVERT_1,DGW_TEXT,     "DHCONVERT","PROJECT");
+
+     
+      // --- Destroy the dialogue ---
+
+      Destroy_DGW(Diag);
+               
+   }
+   
+
+   // --- get parameters ---
+   
+   GetString_SYS("DHCONVERT","OLDGDB",sGDB);
+   GetString_SYS("DHCONVERT","PROJECT",sProject);
+
+
+   if(!iStrlen_STR(sGDB))
+      Abort_SYS(_("No database file specified"));
+   if(!iStrlen_STR(sProject))
+      Abort_SYS(_("No project name specified"));
+
+
+   // --- Project names cannot have underscores ---
+
+   if(iStriMask_STR("*_*", sProject)) {
+      Abort_SYS(_("The project name cannot contain underscore '_' characters."));
+   }
+   Strcat_STR(sProject, "_");
+
+
+   // --- Open the database ---
+   
+   EData = Load_EDB(sGDB);
+   Data = Lock_EDB(EData);
+   
+   
+   // --- Must have "DH_Collar" group ---
+   
+   if(!iExistSymb_DB(Data, "DH_Collar", DB_SYMB_LINE))
+      Abort_SYS(_("The current database does not contain a collar table."));
+      
+      
+   // --- Determine all the data types by scanning the group line names. ---
+   
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SymbLST_DB(Data, LineLST, DB_SYMB_LINE);      
+   iN = iSize_LST(LineLST);
+
+   OutLST = Create_LST(2*STR_DB_SYMBOL);
+   LineLST2 = Create_LST(2*STR_DB_SYMBOL);
+
+   for(i=0;i<iN;i++)
+   {
+      GetItem_LST(LineLST, 0, i, sGroup);
+      iLoc = iStrStr_STR(sGroup, ".", STR_CASE_TOLERANT);
+      if(iLoc!=-1) {
+         iLen = iStrlen_STR(sGroup);
+         Substr_STR(sType, sGroup, iLoc+1, iLen-iLoc-1);
+         GetItem_LST(LineLST, 1, i, sVal);
+         AddUniqueItem_LST(OutLST, sType, sVal);
+      }
+   }
+         
+
+   // --- Collar table ---
+
+   Select = GetSelect_DB(Data);
+   Select_DB(Data, "", DB_LINE_SELECT_EXCLUDE);
+
+   Collar = FindSymb_DB(Data, "DH_COLLAR", DB_SYMB_LINE);
+   GetSymbName_DB(Data,Collar,sGroup);
+
+   Select_DB(Data, sGroup, DB_LINE_SELECT_INCLUDE);   
+   UnLock_EDB(EData);
+
+   Strcpy_STR(sCollarGDB, sProject);
+   Strcat_STR(sCollarGDB, _n("Collar"));
+   FileExt_STR(sCollarGDB, "gdb", sCollarGDB, FILE_EXT_FORCE);
+
+   SetString_SYS("DBSUBSET","NAME",sCollarGDB);
+   SetString_SYS("DBSUBSET","LINES","Selected");
+   SetString_SYS("DBSUBSET","CHANNELS","All");
+   SetString_SYS("DBSUBSET","MASK","");
+   SetString_SYS("DBSUBSET","DIALOG","NO");
+   SetInt_SYS("DBSUBSET","COMPRESSION",DB_COMP_SIZE);
+
+   SetInteractive_SYS(0);
+
+   if (iRunGX_SYS("dbsubset") != 0) Abort_SYS(_("Failed to create new database."));
+   
+   MakeCurrent_EDB(EData);
+
+
+   // --- Extract all the data types in a loop ---
+
+   iNTypes = iSize_LST(OutLST);
+   for(iType=0;iType<iNTypes;iType++)
+   {
+      
+      GetItem_LST(OutLST, 0, iType, sType);
+      
+      
+      // --- Select the lines to export ---
+      
+      Data = Lock_EDB(EData);
+      Select_DB(Data, "", DB_LINE_SELECT_EXCLUDE);
+      
+      for(i=0;i<iN;i++)
+      {
+         GetItem_LST(LineLST, 0, i, sGroup);
+         iLoc = iStrStr_STR(sGroup, ".", STR_CASE_TOLERANT);
+         if(iLoc!=-1) {
+            iLen = iStrlen_STR(sGroup);
+            Substr_STR(sVal, sGroup, iLoc+1, iLen-iLoc-1);
+            
+            if(iStrcmp_STR(sType, sVal, STR_CASE_TOLERANT)==0)
+               Select_DB(Data, sGroup, DB_LINE_SELECT_INCLUDE);
+         }
+      }
+      UnLock_EDB(EData);
+
+      Strcpy_STR(sNewGDB, sProject);
+      Strcat_STR(sNewGDB, sType);
+      FileExt_STR(sNewGDB, "gdb", sNewGDB, FILE_EXT_FORCE);
+
+      SetString_SYS("DBSUBSET","NAME",sNewGDB);
+
+      MakeCurrent_EDB(EData);
+      if (iRunGX_SYS("dbsubset") != 0) Abort_SYS(_("Failed to create new database."));
+      
+      
+      // --- Convert line names to just use the hole names ---
+      
+      EData2 = Load_EDB(sNewGDB);
+      Data2 = Lock_EDB(EData2);
+
+      SymbLST_DB(Data2, LineLST2, DB_SYMB_LINE);      
+      ConvertOldLineNames_DH(Data2, LineLST2);
+      
+      UnLock_EDB(EData2);
+   }
+ 
+ 
+   // --- Reset original selection in the original database, then unload it. ---
+
+   MakeCurrent_EDB(EData);
+   Data = Lock_EDB(EData);
+   SetSelect_DB(Data, Select);
+   UnLock_EDB(EData);
+   UnLoad_EDB(sGDB);
+
+
+   // --- Make the new collar table current ---
+      
+   EData = Load_EDB(sCollarGDB);
+   MakeCurrent_EDB(EData);
+ 
+
+   // --- Refresh XYZ. This also converts old DH_X, DH_Y and DH_Z channels
+   //     to DH_East, DH_North and DH_RL ---
+   
+   iRunGX_SYS("dhxyz.gx");
+   
+   
+   // --- Remove the X, Y and Z channels in the collar table ---
+   
+
+   EData = Load_EDB(sCollarGDB);
+   Data = Lock_EDB(EData);
+
+   Collar = FindSymb_DB(Data, "DH_COLLAR", DB_SYMB_LINE);
+   
+   DELETE_CHAN("X", "DH_EAST",  DB_CHAN_X)
+   DELETE_CHAN("Y", "DH_NORTH", DB_CHAN_Y)
+   DELETE_CHAN("Z", "DH_ELEV",  DB_CHAN_Z)
+//   DELETE_CHAN("MASK", "DH_MASK",  DB_CHAN_Z);
+   
+
+   // --- Rename the DH_ELEV channel to DH_RL ---
+   
+   OldCh = FindChan_DB(Data, "DH_ELEV");
+   NewCh = FindChan_DB(Data, "DH_RL");
+   if(OldCh!=NULLSYMB) {
+      LOCK_RW(Data, OldCh);
+      SetChanProtect_DB(Data, OldCh, DB_CHAN_UNPROTECTED);
+      if(NewCh==NULLSYMB)  // rename to DH_RL
+      {
+         SetChanName_DB(Data, OldCh, "DH_RL");    
+         SetXYZChan_DB(Data, DB_CHAN_Z, "DH_RL");
+         UNLOCK(Data, OldCh);
+      }
+      else  // just delete the DH_ELEV
+      {
+         DeleteSymb_DB(Data, OldCh);
+      }
+   }
+   UnLock_EDB(EData);
+   LoadChan_EDB(EData, "DH_RL");
+   
+   
+   // --- Need to load the DH_East, DH_North, and DH_RL channels in the non-collar databases ---
+   
+   for(iType=0;iType<iNTypes;iType++)
+   {
+      
+      GetItem_LST(OutLST, 0, iType, sType);
+      
+      
+      Strcpy_STR(sNewGDB, sProject);
+      Strcat_STR(sNewGDB, sType);
+      FileExt_STR(sNewGDB, "gdb", sNewGDB, FILE_EXT_FORCE);
+
+      EData = Load_EDB(sNewGDB); 
+      LoadChan_EDB(EData, "DH_East");
+      LoadChan_EDB(EData, "DH_North");
+      LoadChan_EDB(EData, "DH_RL");
+      LoadChan_EDB(EData, "Mask");     // try both variations.. not problem if one doesn't exist
+      LoadChan_EDB(EData, "DH_Mask");
+   }      
+      
+   
+   // --- Finally, make the collar table current ---
+   
+   EData = Load_EDB(sCollarGDB);
+   MakeCurrent_EDB(EData);   
+
+
+   // --- Exit ---
+
+   SetInteractive_SYS(1);
+   
+   
+   // --- Cleanup ---
+   
+   Destroy_LST(LineLST);
+   Destroy_LST(LineLST2);
+   Destroy_LST(OutLST);
+}
+
+

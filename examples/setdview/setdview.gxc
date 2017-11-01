@@ -1,0 +1,121 @@
+//===========================================================================
+NAME          = "Set the default drawing view and default drawing plane"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map Tools"
+
+DESCRIPTION   = "\
+
+Interactive ONLY.
+
+"
+
+//===========================================================================
+
+RESOURCE="setdview.gr"
+#include "setdview.grh"
+
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+
+string(STR_MAX_PATH) sMap;
+string(STR_VIEW) sView,sPlane;
+
+EMAP   EMap;
+MAP    Map;
+LST    hPlaneLST;
+MVIEW  View;
+DGW    hDGW;
+
+int    i,iPlanes;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   if (!iInteractive_SYS()) {
+
+      GetString_SYS("SETDVIEW","MAP",sMap);
+      GetString_SYS("SETDVIEW","VIEW",sView);
+      GetString_SYS("SETDVIEW","PLANE",sPlane);
+      
+      Map = Create_MAP(sMap,MAP_WRITEOLD);
+      SetClassName_MAP(Map,"Data",sView);
+      SetClassName_MAP(Map,"Plane",sPlane);
+      
+   } else {
+   
+      if (!iHaveCurrent_EMAP())
+         Abort_SYS(_("A current map is required."));
+
+      EMap  = Current_EMAP();
+      GetCurrentView_EMAP(EMap,sView);
+      Map  = Lock_EMAP(EMap);
+      GetFileName_MAP(Map,sMap);
+      SetString_SYS("SETDVIEW","MAP",sMap);
+      SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   
+   
+      // --- is this a 3D view? ---
+   
+      View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+      if (iIsView3D_MVIEW(View)) {
+   
+         // --- get list of planes ---
+      
+         hPlaneLST = Create_LST(256);
+         ListPlanes_MVIEW(View,hPlaneLST);
+         iPlanes = iSize_LST(hPlaneLST);
+         if (iPlanes <= 0)
+            Abort_SYS(_("There are no drawing planes in this view."));
+         
+         // --- only one plane - it's the default ---
+               
+         if (iPlanes == 1)
+         
+            GetItem_LST(hPlaneLST,0,0,sPlane);
+         
+         else {
+      
+            // --- ask the user to select a default plane ---
+      
+            hDGW = Create_DGW("SETDVIEW");
+            Copy_LST(GetList_DGW(hDGW,_SETDVIEW_0),hPlaneLST);
+         
+            // --- if current default is in the list, display it ---
+         
+            GetDefPlane_MVIEW(View,sPlane);
+            if (iFindItem_LST(hPlaneLST,0,sPlane) != -1)
+               SetInfo_DGW(hDGW,_SETDVIEW_0,DGW_TEXT,sPlane);
+         
+            i = iRunDialogue_DGW(hDGW);
+            if (i==-1) Cancel_SYS(); 
+         
+            GetInfoSYS_DGW(hDGW,_SETDVIEW_0,DGW_TEXT,"SETDVIEW","PLANE");
+            GetInfo_DGW(hDGW,_SETDVIEW_0,DGW_TEXT,sPlane);
+            Destroy_DGW(hDGW);
+         
+         } 
+                  
+   
+         // --- set the default plane ---
+   
+         SetDefPlane_MVIEW(View,sPlane);
+      
+      }
+   
+      // --- set the default data view ---
+   
+      SetClassName_MAP(Map,"Data",sView);
+      SetString_SYS("SETDVIEW","VIEW",sView);
+   
+      UnLock_EMAP(EMap);
+      
+   }      
+   
+}

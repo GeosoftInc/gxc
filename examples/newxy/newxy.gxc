@@ -1,0 +1,621 @@
+//===========================================================================
+NAME          = "Create a new projected coordinate channels."
+#include <version.gxh>
+DESCRIPTION   = "
+
+   NEWXY.OLDX              Input X and Y channels
+        .OLDY              (See the USE_CURRENT_XY parameter below)
+        .PROCESS           \"All\" or \"Selected\" lines or groups
+        .NEWX              Output X and Y channels
+        .NEWY
+        .OLDIPJ_NAME       Input coordinate system
+        .OLDIPJ_DATUM
+        .OLDIPJ_METHOD
+        .OLDIPJ_UNITS
+        .OLDIPJ_LOCALDATUM 
+        .NEWIPJ_NAME       Output coordinate system
+        .NEWIPJ_DATUM
+        .NEWIPJ_METHOD
+        .NEWIPJ_UNITS
+        .NEWIPJ_LOCALDATUM
+        .ACCEPT_NO_LOCAL_DATUM \"Yes\" to allow transformations when a local
+                               datum transform is not defined, \"No\" to not
+                               allow such transformations.
+        .USE_INPUT_XY    \"No\" by default. Set to \"Yes\" to accept the
+                           input .OLDX and .OLDY parameters on input in 
+                           interactive mode.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
+
+//===========================================================================
+// Revision History:
+//
+// v7.0.1: QA 13264 - Improve titles to distinguish current and new CS.
+// v7.0.0: QA 7711 - When checking for same datum but different LDT, skip
+//                   warning if we are going from datum *AMMP/SAMMP (silent No) 
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v6.3.1: Restored ability to accept input OLDX and OLDY parameters.
+// v6.3.0: SJC Init old X and Y channels to be the current X, Y.
+// v6.2.0: INM Added a check for LDT translation on the same datum.
+// v6.0.0: Added a check for translation across datums without local datum info
+// v6.0.0: Removed elevation/geoid correction because it is out of context
+// v5.1.7: Better line selection method used.
+// v5.1.4: Fixed bug in checking for backup channels.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "newxy.gr"
+#include "newxy.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sOldXCh,sOldYCh;   // Channel Names
+string(STR_DB_SYMBOL) sNewXCh,sNewYCh;   // Channel Names
+string(STR_DB_SYMBOL) sXCh,sYCh,sXBackCh,sYBackCh;
+string(STR_DEFAULT) sTemp,sLabel,sProcess;
+string(STR_DEFAULT_LONG) s1,s2,s3,s4,s5;
+
+EDB         EData;                  // database handle
+DB          Data;                   // database handle
+
+DB_SYMB     OldXCh,OldYCh;          // Channel Handles
+DB_SYMB     NewXCh,NewYCh;          // Channel Handles
+DB_SYMB     Line;                   // Channel Handles
+DGW         Diag;                   // Dialogue handle
+LST         List, LineLST;          // List handle
+IPJ         hOldIPJ,hNewIPJ;
+PJ          hPJ;
+
+int i,iR,iLines,iNew;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   
+   if (iInteractive_SYS()) 
+   {
+      
+      // --- Use input OLDX and OLDY?  (No by default) ---
+      
+      GetString_SYS("NEWXY", "OLDX", sXCh);
+      GetString_SYS("NEWXY", "OLDY", sYCh);
+      if(iGetYesNo_SYS("NEWXY", "USE_INPUT_XY")==0 ||
+         !iStrlen_STR(sXCh) || !iStrlen_STR(sYCh))
+      {
+         // --- Get the current X, Y channels ---
+         
+         GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+         GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+                  
+         SetString_SYS("NEWXY", "OLDX", sXCh);
+         SetString_SYS("NEWXY", "OLDY", sYCh);         
+      }
+      SetString_SYS("NEWXY", "USE_INPUT_XY", "");     // must set every time
+      
+      
+      i = 0;
+      while (i != 99) {
+      
+         switch (i) {
+      
+            case 0:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("NEWXY0");
+               List = GetList_DGW(Diag,_NEWXY0_0);
+               SymbLST_DB(Data,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+               List = GetList_DGW(Diag,_NEWXY0_1);
+               SymbLST_DB(Data,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+
+
+               // --- Run the Dialogue ---
+
+               SetInfoSYS_DGW(Diag,_NEWXY0_0,DGW_TEXT,"NEWXY","OLDX");
+               SetInfoSYS_DGW(Diag,_NEWXY0_1,DGW_TEXT,"NEWXY","OLDY");
+               SetInfoSYS_DGW(Diag,_NEWXY0_2,DGW_TEXT,"NEWXY","PROCESS");
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+               GetInfoSYS_DGW(Diag,_NEWXY0_0,DGW_TEXT,"NEWXY","OLDX");    
+               GetInfoSYS_DGW(Diag,_NEWXY0_1,DGW_TEXT,"NEWXY","OLDY");
+               GetInfoSYS_DGW(Diag,_NEWXY0_2,DGW_TEXT,"NEWXY","PROCESS");
+               Destroy_DGW(Diag);
+            
+
+               // --- Get Parameters ---
+
+               GetString_SYS("NEWXY","OLDX",sOldXCh);
+               GetString_SYS("NEWXY","OLDY",sOldYCh);
+            
+            
+               // --- channels must be different ---
+            
+               if (iStrcmp_STR(sOldXCh,sOldYCh,STR_CASE_TOLERANT) == 0) {
+                   DisplayMessage_SYS(_("Channel error"),_("Coordinate channels must be different."));
+                   i = 0;
+                   break;
+               }
+            
+            
+               // --- Do Channels Exist ? ---
+
+               if (!iExistChan_DB(Data,sOldXCh))  
+                  Abort_SYS(_("X channel does not exist."));
+               OldXCh = FindChan_DB(Data,sOldXCh);
+
+               if (!iExistChan_DB(Data,sOldYCh))  
+                  Abort_SYS(_("Y channel does not exist."));
+               OldYCh = FindChan_DB(Data,sOldYCh);
+            
+            
+               // --- get the X channel IPJ ---
+            
+               LockSymb_DB(Data,OldXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+               hOldIPJ = Create_IPJ();
+               GetIPJ_DB(Data,OldXCh,hOldIPJ);
+               UnLockSymb_DB(Data,OldXCh);
+            
+               i = 1;
+               break;
+            
+            
+            case 1:
+
+               UnLock_EDB(EData);
+
+            
+               // --- Edit/modify the IPJ ---
+               
+               Strcpy_STR(sTemp,sOldXCh);            
+               Strcat_STR(sTemp,",");            
+               Strcat_STR(sTemp,sOldYCh);            
+               iR = iCoordSysWizard_GUI(hOldIPJ, TRUE, COORDSYS_MODE_ALL, _("Current/Existing channels"), sTemp);
+
+               if (iR == 0) 
+               {               
+                  // --- set the new IPJ in the channels ---
+               
+                  Data = Lock_EDB(EData);
+                  LockSymb_DB(Data,OldXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  LockSymb_DB(Data,OldYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  SetIPJ_DB(Data,OldXCh,OldYCh,hOldIPJ);
+                  UnLockSymb_DB(Data,OldXCh);
+                  UnLockSymb_DB(Data,OldYCh);
+               
+                  i = 2;               
+               } 
+               else  // user cancelled
+                  Cancel_SYS();
+            
+               break;      
+   
+   
+            case 2:
+
+               // --- Create the Dialogue ---
+
+               Diag = Create_DGW("NEWXY3");
+               List = GetList_DGW(Diag,_NEWXY3_0);
+               SymbLST_DB(Data,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+               List = GetList_DGW(Diag,_NEWXY3_1);
+               SymbLST_DB(Data,List,DB_SYMB_CHAN);
+               Sort_LST(List,0,0);
+
+
+               // --- Run the Dialogue ---
+
+               SetInfoSYS_DGW(Diag,_NEWXY3_0,DGW_TEXT,"NEWXY","NEWX");
+               SetInfoSYS_DGW(Diag,_NEWXY3_1,DGW_TEXT,"NEWXY","NEWY");
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+               GetInfoSYS_DGW(Diag,_NEWXY3_0,DGW_TEXT,"NEWXY","NEWX");    
+               GetInfoSYS_DGW(Diag,_NEWXY3_1,DGW_TEXT,"NEWXY","NEWY");
+               Destroy_DGW(Diag);
+               if (i == 0) { i = 1; break; }
+            
+
+               // --- Get Parameters ---
+
+               GetString_SYS("NEWXY","NEWX",sNewXCh);
+               GetString_SYS("NEWXY","NEWY",sNewYCh);
+            
+            
+               // --- channels must be different ---
+            
+               if (iStrcmp_STR(sNewXCh,sNewYCh,STR_CASE_TOLERANT) == 0) {
+                   DisplayMessage_SYS(_("Channel error"), _("Coordinate channels must be different."));
+                   i = 2;
+                   break;
+               }
+            
+            
+               // --- channels cannot match input ---
+            
+               if ((iStrcmp_STR(sNewXCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+                   (iStrcmp_STR(sNewXCh,sOldYCh,STR_CASE_TOLERANT) == 0) ||
+                   (iStrcmp_STR(sNewYCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+                   (iStrcmp_STR(sNewYCh,sOldYCh,STR_CASE_TOLERANT) == 0)) {
+                   DisplayMessage_SYS(_("Channel error"),_("New channels must be different than input channels."));
+                   i = 2;
+                   break;
+               }
+            
+            
+               // --- Do Channels Exist ? ---
+
+               iNew = FALSE;
+               if (!iExistChan_DB(Data,sNewXCh))  {
+                  LockSymb_DB(Data,OldXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  if (iGetChanType_DB(Data,OldXCh) < 0)
+                     DisplayMessage_SYS(_("X/Longitude Channel Data Type Warning"), _("Coordinate channel(s) of type STRING could cause unwanted rounding errors. To avoid this use numeric datatype."));
+                  UnLockSymb_DB(Data,OldXCh);
+                  NewXCh = DupSymbNoLock_DB(Data,OldXCh,sNewXCh); // Create it 
+                  iNew = TRUE;
+               } else
+                  NewXCh = FindChan_DB(Data,sNewXCh);
+
+               if (!iExistChan_DB(Data,sNewYCh))  {
+                  LockSymb_DB(Data,OldYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  if (iGetChanType_DB(Data,OldYCh) < 0)
+                     DisplayMessage_SYS(_("Y/Latitude Channel Data Type Warning"), _("Coordinate channel(s) of type STRING could cause unwanted rounding errors. To avoid this use numeric datatype."));
+                  UnLockSymb_DB(Data,OldYCh);
+                  NewYCh = DupSymbNoLock_DB(Data,OldYCh,sNewYCh); // Create it 
+                  iNew = TRUE;
+               } else
+                  NewYCh = FindChan_DB(Data,sNewYCh);
+               
+            
+               // --- get the X channel IPJ ---
+            
+               if (iNew) {
+                  hNewIPJ = Create_IPJ();
+                  Copy_IPJ(hOldIPJ,hNewIPJ);
+                  ClearWarp_IPJ(hNewIPJ);
+               } else {   
+                  LockSymb_DB(Data,NewXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  hNewIPJ = Create_IPJ();
+                  GetIPJ_DB(Data,NewXCh,hNewIPJ);
+                  UnLockSymb_DB(Data,NewXCh);
+               }
+            
+               if (i == 0) 
+                  i = 0;
+               else if (i == 1)
+                  i = 3;
+               
+               break;
+            
+            
+            case 3:
+            
+               // --- Edit/modify the IPJ ---
+               
+               Strcpy_STR(sTemp,sNewXCh);            
+               Strcat_STR(sTemp,",");            
+               Strcat_STR(sTemp,sNewYCh);     
+               UnLock_EDB(EData);
+               iR = iCoordSysWizard_GUI(hNewIPJ, TRUE, COORDSYS_MODE_ALL, _("New/Destination channels") , sTemp);
+               if(iR==0)
+               {
+                  // --- set the new IPJ in the channels ---
+               
+                  Data = Lock_EDB(EData);
+                  LockSymb_DB(Data,NewXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  LockSymb_DB(Data,NewYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+                  SetIPJ_DB(Data,NewXCh,NewYCh,hNewIPJ);
+                  UnLockSymb_DB(Data,NewXCh);
+                  UnLockSymb_DB(Data,NewYCh);
+               
+                  i = 99;
+                }
+                else    // user cancelled               
+                  Cancel_SYS();
+            
+               break;      
+   
+   
+            default:
+         
+               DisplayInt_SYS(_("I'm lost"),i);
+               i = 99;
+         }           
+      
+      }
+      
+      // --- save old and new projections for script processing ---
+      
+      GetGXF_IPJ(hOldIPJ,s1,s2,s3,s4,s5);
+      SetString_SYS("NEWXY","OLDIPJ_NAME",s1);
+      SetString_SYS("NEWXY","OLDIPJ_DATUM",s2);
+      SetString_SYS("NEWXY","OLDIPJ_METHOD",s3);
+      SetString_SYS("NEWXY","OLDIPJ_UNITS",s4);
+      SetString_SYS("NEWXY","OLDIPJ_LOCALDATUM",s5);
+      
+      GetGXF_IPJ(hNewIPJ,s1,s2,s3,s4,s5);
+      SetString_SYS("NEWXY","NEWIPJ_NAME",s1);
+      SetString_SYS("NEWXY","NEWIPJ_DATUM",s2);
+      SetString_SYS("NEWXY","NEWIPJ_METHOD",s3);
+      SetString_SYS("NEWXY","NEWIPJ_UNITS",s4);
+      SetString_SYS("NEWXY","NEWIPJ_LOCALDATUM",s5);
+      
+      if (iWarped_IPJ(hOldIPJ) || iWarped_IPJ(hNewIPJ))
+         SetString_SYS("NEWXY","WARPED","Yes");
+      else   
+         SetString_SYS("NEWXY","WARPED","No");
+         
+   } else {
+   
+      // --- can't script a warp ---
+      
+      if (iGetYesNo_SYS("NEWXY","WARPED"))
+         Abort_SYS(_("NEWXY cannot process a warp from a script."));
+         
+         
+      // --- get old x,y,z channels ---
+               
+      GetString_SYS("NEWXY","OLDX",sOldXCh);
+      if (!iExistChan_DB(Data,sOldXCh))  
+         Abort_SYS(_("X channel does not exist."));
+      OldXCh = FindChan_DB(Data,sOldXCh);
+
+      GetString_SYS("NEWXY","OLDY",sOldYCh);
+      if (!iExistChan_DB(Data,sOldYCh))  
+         Abort_SYS(_("Y channel does not exist."));
+      OldYCh = FindChan_DB(Data,sOldYCh);
+      
+         
+      // --- get new x,y,z channels ---
+      
+      GetString_SYS("NEWXY","NEWX",sNewXCh);
+      GetString_SYS("NEWXY","NEWY",sNewYCh);
+      
+
+      // --- channels must be different ---
+      
+      if (iStrcmp_STR(sNewXCh,sNewYCh,STR_CASE_TOLERANT) == 0) {
+         Abort_SYS(_("Coordinate channels must be different."));
+      }
+      
+      
+      // --- channels cannot match input ---
+      
+      if ((iStrcmp_STR(sNewXCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+          (iStrcmp_STR(sNewXCh,sOldYCh,STR_CASE_TOLERANT) == 0) ||
+          (iStrcmp_STR(sNewYCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+          (iStrcmp_STR(sNewYCh,sOldYCh,STR_CASE_TOLERANT) == 0)) {
+         Abort_SYS(_("New channels must be different than input channels."));
+      }
+      
+      
+      // --- Do Channels Exist ? ---
+
+      iNew = FALSE;
+      if (!iExistChan_DB(Data,sNewXCh))  {
+         NewXCh = DupSymbNoLock_DB(Data,OldXCh,sNewXCh); // Create it 
+         iNew = TRUE;
+      } else
+         NewXCh = FindChan_DB(Data,sNewXCh);
+
+      if (!iExistChan_DB(Data,sNewYCh))  {
+         NewYCh = DupSymbNoLock_DB(Data,OldYCh,sNewYCh); // Create it 
+         iNew = TRUE;
+      } else
+         NewYCh = FindChan_DB(Data,sNewYCh);
+               
+         
+      // --- script - get projections from settings ---
+         
+      GetString_SYS("NEWXY","OLDIPJ_NAME",s1);
+      GetString_SYS("NEWXY","OLDIPJ_DATUM",s2);
+      GetString_SYS("NEWXY","OLDIPJ_METHOD",s3);
+      GetString_SYS("NEWXY","OLDIPJ_UNITS",s4);
+      GetString_SYS("NEWXY","OLDIPJ_LOCALDATUM",s5);
+      hOldIPJ = Create_IPJ();
+      SetGXF_IPJ(hOldIPJ,s1,s2,s3,s4,s5);
+      LockSymb_DB(Data,OldXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(Data,OldYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetIPJ_DB(Data,OldXCh,OldYCh,hOldIPJ);
+      UnLockSymb_DB(Data,OldXCh);
+      UnLockSymb_DB(Data,OldYCh);
+               
+      
+      GetString_SYS("NEWXY","NEWIPJ_NAME",s1);
+      GetString_SYS("NEWXY","NEWIPJ_DATUM",s2);
+      GetString_SYS("NEWXY","NEWIPJ_METHOD",s3);
+      GetString_SYS("NEWXY","NEWIPJ_UNITS",s4);
+      GetString_SYS("NEWXY","NEWIPJ_LOCALDATUM",s5);
+      hNewIPJ = Create_IPJ();
+      SetGXF_IPJ(hNewIPJ,s1,s2,s3,s4,s5);
+      LockSymb_DB(Data,NewXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(Data,NewYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetIPJ_DB(Data,NewXCh,NewYCh,hNewIPJ);
+      UnLockSymb_DB(Data,NewXCh);
+      UnLockSymb_DB(Data,NewYCh);
+      
+   }
+   
+
+   // --- Get current X, Y channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   
+   // --- Get names of backups to current X, Y channels ---
+   
+   Strcpy_STR(sXBackCh, "__");
+   Strcat_STR(sXBackCh, sXCh);
+   Strcpy_STR(sYBackCh, "__");
+   Strcat_STR(sYBackCh, sYCh);
+   
+   
+   // --- if output is current X and Y and no backups exist, make them ---
+   
+   if ( (iStrcmp_STR(sNewXCh,sXCh,STR_CASE_TOLERANT) == 0) && (iStrcmp_STR(sNewYCh,sYCh,STR_CASE_TOLERANT) == 0) &&
+        (!iExistChan_DB(Data,sXBackCh)) && (!iExistChan_DB(Data,sYBackCh)) ) 
+   {
+      UnLock_EDB(EData);
+      iRunGX_SYS("xysave");
+      Data = Lock_EDB(EData);
+   }         
+   
+   // --- check if local datum transform required/supported ---
+   
+   if (iSupportDatumTransform_IPJ(hOldIPJ,hNewIPJ) == 0) {
+      if (iInteractive_SYS()) {
+         if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between coordinate systems may be inaccurate because the local datum transform for one or both systems is not defined.  Do want to continue?")) == 0)
+            Exit_SYS();
+      } else {
+         if (iGetYesNo_SYS("NEWXY","ACCEPT_NO_LOCAL_DATUM") == 0)
+            Exit_SYS();
+            
+         // --- reset to NO to force script to be written to have to set this to Yes ---
+         SetString_SYS("NEWXY","ACCEPT_NO_LOCAL_DATUM","No");
+      }
+   }
+   
+   
+   // --- check for same datum transform ---
+
+   SetString_SYS("NEWXY","TRANSFORM_ACROSS_LOCAL_DATUM","No");
+
+   GetGXF_IPJ(hOldIPJ, s1, s2, s3, s4, s5);
+   
+   if (iInteractive_SYS() && (iCompareDatums_IPJ(hOldIPJ,hNewIPJ)==1) && 0 != iStrncmp_STR(s2, "\"*AMMP/SAMMP", 11, STR_CASE_TOLERANT)) {
+   
+      // --- same datum, different local datums ---
+         
+      if (iDisplayQuestion_SYS(_("WARNING: Transform on the same datum"), _("You are tranforming coordinates on the same datum but with different Local Datum Transforms.  Do you want to transform between Local Datum transforms?")))
+         SetString_SYS("NEWXY","TRANSFORM_ACROSS_LOCAL_DATUM","Yes");
+      else   
+         SetString_SYS("NEWXY","TRANSFORM_ACROSS_LOCAL_DATUM","No");
+         
+   }         
+         
+   // --- Create the Projection ---
+
+   hPJ = CreateIPJ_PJ(hOldIPJ,hNewIPJ);
+   if (iGetYesNo_SYS("NEWXY","TRANSFORM_ACROSS_LOCAL_DATUM"))
+      SetupLDT_PJ(hPJ);
+      
+   
+   
+   // --- Lock the Symbols ---
+
+   LockSymb_DB(Data,OldXCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OldYCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,NewXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,NewYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- Set Ouput format ---
+   
+   if (iIsOutputLL_PJ(hPJ))
+   {
+     SetChanFormat_DB(Data,NewXCh,DB_CHAN_FORMAT_GEOGR);
+     SetChanFormat_DB(Data,NewYCh,DB_CHAN_FORMAT_GEOGR);
+   } else { 
+     SetChanFormat_DB(Data,NewXCh,DB_CHAN_FORMAT_NORMAL);
+     SetChanFormat_DB(Data,NewYCh,DB_CHAN_FORMAT_NORMAL);
+   }  
+   
+
+   // --- Make a LST of lines to process ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   GetString_SYS("NEWXY","PROCESS",sProcess);
+   if (iCharComp_STR(sProcess,"A"))  
+      SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
+   else
+      SelectedLineLST_DB(Data, LineLST);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = iSize_LST(LineLST);
+   if(iLines==0)
+      Abort_SYS(_("No lines selected for processing"));
+
+
+   // --- Go through all selected Lines ---
+
+   Progress_SYS(1);
+   for(i=0;i<iLines;i++) 
+   {
+
+      // --- Line name and symbol ---
+
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, i);
+      GetItem_LST(LineLST, 0, i, sTemp);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel, _("Project line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(i,iLines);
+
+      if(iCheckStop_SYS())
+         Cancel_SYS();
+
+
+      // --- Apply the Correction ---
+
+      ProjectData_DU(Data,Line,OldXCh,OldYCh,NewXCh,NewYCh,hPJ);
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,NewXCh,_("New coordinate"),"NEWXY;");
+   EasyMakerSymb_DB(Data,NewYCh,_("New coordinate"),"NEWXY;");
+
+
+   // --- Unlock the Symbol ---
+
+   UnLockSymb_DB(Data,OldXCh);
+   UnLockSymb_DB(Data,OldYCh);
+   UnLockSymb_DB(Data,NewXCh);
+   UnLockSymb_DB(Data,NewYCh);
+   
+   
+   // --- display channels ---
+
+   UnLock_EDB(EData);
+   if (iInteractive_SYS())
+   {
+      LoadChan_EDB(EData,sNewXCh);
+      LoadChan_EDB(EData,sNewYCh);
+   }
+   
+
+   // --- Done ---
+
+   Destroy_PJ(hPJ);
+   Progress_SYS(0);
+
+}

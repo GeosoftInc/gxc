@@ -1,0 +1,136 @@
+//===========================================================================
+NAME          = "Import data from a grid file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP/Import"
+
+DESCRIPTION   = "
+               Import data from a grid file.
+"
+// Revision History
+// v6.0.0: Flag in the channel REG that this channel has a maker.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPIMPGRID.gr"
+#include "IPIMPGRID.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+DB_SYMB     Ch;               // Channel;
+
+int         i;                // Utility 
+
+string(STR_FILE) sFile;
+string(STR_DB_SYMBOL) sChan;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();   
+   Data = Lock_EDB(EData);
+
+
+   if(iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPIMPGRID");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPIMPGRID_0,DGW_FILEPATH,"IP","IMPGRID");
+      SetInfoSYS_DGW(Diag,_IPIMPGRID_1,DGW_TEXT,"IP","IMPGRIDCHAN");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPIMPGRID_0,DGW_FILEPATH,"IP","IMPGRID");
+      GetInfoSYS_DGW(Diag,_IPIMPGRID_1,DGW_TEXT,"IP","IMPGRIDCHAN");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   } 
+      
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","IMPGRID",sFile);
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("No input grid file defined."));
+   if(!iFileExist_SYS(sFile))
+      Abort_SYS(_("Input file does not exist"));
+   GetString_SYS("IP","IMPGRIDCHAN",sChan);
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("No channel name defined."));
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing grid file"),1);
+
+
+   // --- import ---
+
+   ImportGrid_IP(Ip, Data, sFile, sChan);
+
+   // --- Create a maker (only for interactive sessions) ---
+
+   if(iInteractive_SYS()) {
+
+      Ch = FindSymb_DB(Data, sChan, DB_SYMB_CHAN);
+
+      LockSymb_DB(Data, Ch, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+      EasyMakerSymb_DB(Data, Ch, _("Import grid data..."), "IP;");
+
+      
+      // --- Register this IP channel as having a maker ---
+
+      SetRegSymbSetting_DB(Data, Ch, "HAS_MAKER", "IPIMPGRID");
+
+      UnLockSymb_DB(Data, Ch);
+   }
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   LoadChan_EDB(EData,sChan);
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+}   

@@ -1,0 +1,207 @@
+//===========================================================================
+NAME          = "Set channel colours"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/PopupSelChan/List"
+
+DESCRIPTION   = "
+
+   Set channel ITR colours.
+                 
+   If no ITR exists in the channel, a search is made for an ITR file of the
+   form \"_Ch.itr\". The colour zone tool is then called, and the resulting
+   ITR is embedded in the channel.
+
+"
+// Revision History:
+// v6.3.0: Upgrade tool to show 12 colours and load/save buttons.
+// v5.1.7: New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+#define MAX_RANGES 6
+
+string(STR_DB_SYMBOL) sCh, sLine;      // Symbol Names
+
+EDB         EData;                     // database handle
+DB          Data;
+
+DB_SYMB     Line, Ch;                  // DB Symbol Handles
+LST         hLST;                      // List handle
+ITR         hITR;
+ST          hST;
+VV          hVV;
+VM          sCol_VM;
+
+int         i, iLines;
+real        rItems;
+string(STR_FILE) sITR;
+string(STR_DEFAULT) sCol;
+real(MAX_RANGES) rMaxVal;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+
+   
+   // --- Get and lock the current channel ---
+
+   GetCurChan_EDB(EData,sCh);
+   Ch = GetCurChanSymb_EDB(EData); 
+   if(Ch==NULLSYMB) Abort_SYS(_("There is no channel currently selected."));     
+
+   Data = Lock_EDB(EData);
+
+   
+   // --- Lock the channel ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   
+   
+   // --- Get the default file name for the channel ITR ---
+   
+   GetChanName_DB(Data,Ch,sCh);
+   Strcpy_STR(sITR, "_");
+   Strcat_STR(sITR, sCh);
+   FileExt_STR(sITR,"itr",sITR,FILE_EXT_FORCE);
+
+   
+   // --- Does the channel have an ITR defined? ---
+
+   hITR = Create_ITR();
+   GetITR_DB(Data, Ch, hITR);
+
+
+   // --- If the ITR is empty, look for a file with the name "_Ch.itr" ---
+
+   if(iGetSize_ITR(hITR)==0) {
+
+      if(iFileExist_SYS(sITR)) {
+
+         Destroy_ITR(hITR);
+         hITR = CreateFile_ITR(sITR);
+      }
+   }
+
+
+   //--- Get the channel statistics ---
+
+   hST = CreateExact_ST();
+   hVV = Create_VV(REAL, 0);
+
+
+   hLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, hLST);
+
+   iLines = iSize_LST(hLST);
+   if(iLines==0) {
+      UnLockSymb_DB(Data,Ch);
+      Abort_SYS(_("One or more lines must be selected to compile statistics."));
+   }
+
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Compiling channel statistics"), 1);
+   for(i=0;i<iLines;i++) 
+   {
+
+      ProgUpdateL_SYS(i, iLines);
+      if(iCheckStop_SYS()) Cancel_SYS();
+
+      GetItem_LST(hLST, 0, i, sLine);
+      Line = (DB_SYMB)iGetInt_LST(hLST, 1, i);
+
+      GetChanVV_DB(Data, Line, Ch, hVV);
+
+      DataVV_ST(hST, hVV);
+   }
+   Progress_SYS(0);
+
+
+   // --- Any valid items? ---
+
+   rItems = rGetInfo_ST(hST, ST_ITEMS);
+   if(rItems==0.0) {
+      UnLockSymb_DB(Data,Ch);
+      Abort_SYS(_("There are no valid data items in the selected lines for the current channel."));
+   }
+
+
+   // --- If it is still empty, create default zones ---
+
+   if(iGetSize_ITR(hITR)==0) {
+   
+
+      // --- Allocate VMs ---
+
+      sCol_VM = Create_VM(-32, MAX_RANGES);
+
+
+      // --- Load the starting variables with defaults ---
+
+      for(i=0; i<MAX_RANGES-1; i++) rMaxVal[i] = 0.0;
+
+       
+      // --- Use the CMY model to set colours... define 6 ranges ---
+
+      SetString_VM(sCol_VM, 0, "K");
+      SetString_VM(sCol_VM, 1, "CM");
+      SetString_VM(sCol_VM, 2, "CY");
+      SetString_VM(sCol_VM, 3, "M80Y");
+      SetString_VM(sCol_VM, 4, "MY");
+      SetString_VM(sCol_VM, 5, "M");
+      
+      SetSize_ITR(hITR, MAX_RANGES);
+
+      for(i=0; i<MAX_RANGES; i++) {
+         GetString_VM(sCol_VM, i, sCol);
+         SetZoneColor_ITR(hITR, i, iColor_MVIEW(sCol));
+      }
+      SetColorModel_ITR(hITR, ITR_COLOR_MODEL_RGB);
+      
+      EqualArea_ITR(hITR, hST, rDUMMY);
+   }
+
+
+   // --- Call the color transform tool ---
+
+   if(iColorTransformEx_GUI(hITR, hST, 12, TRUE, sITR)) {
+      UnLockSymb_DB(Data,Ch);
+      Cancel_SYS();
+   }
+
+
+   // --- Set the resulting ITR into the channel ---
+
+   SetITR_DB(Data, Ch, hITR);
+
+
+   // --- Unlock the channel ---
+
+   UnLockSymb_DB(Data,Ch);
+   
+   
+   // --- Done ---
+
+   Destroy_ITR(hITR);
+   Destroy_ST(hST);
+   Destroy_VV(hVV);
+   Destroy_LST(hLST);
+
+   UnLock_EDB(EData);
+   
+}

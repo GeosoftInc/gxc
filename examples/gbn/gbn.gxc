@@ -1,0 +1,164 @@
+//===========================================================================
+NAME          = "Import GBN binary flight data"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Import Geosoft Binary Format data.
+
+     GBN.DATA           : Input data file name
+     GBN.LOADCHANNELS:  : Load channels after import?
+
+   See HELP \"VIEWGX GBN -h\" for a description of the binary format.
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import"
+
+// Revision History:
+// v6.3.0: Allow creation of new database prior to import.
+// v5.1.6: Made channel loading optional in interactive mode.
+// v5.1.3: Using "Current" X and Y channels
+//         Added projection setting if enabled.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "gbn.gr"
+#include "gbn.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+
+int         i, iLoadChannels;
+
+string(STR_FILE) sData;
+string(STR_DB_SYMBOL) sXCh, sYCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Allow creation of new database first ---
+
+   if (iHaveCurrent_EDB())
+   {
+      if (iInteractive_SYS())
+      {
+         if (iDisplayQuestion_SYS(_("Import"),_("Import data into the current database ?")) == 0)
+         {
+            if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) 
+               Cancel_SYS();    
+         }
+      }  
+   }
+   else
+   {
+     if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")) 
+         Cancel_SYS();    
+   }  
+
+
+   // --- get the database ---
+      
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GBNForm");
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_GBNFORM_0,DGW_FILEPATH,"GBN","DATA");
+      SetInfoSYS_DGW(Diag,_GBNFORM_1,DGW_LISTALIAS ,"GBN","LOADCHANNELS");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_GBNFORM_0,DGW_FILEPATH,"GBN","DATA");
+      GetInfoSYS_DGW(Diag,_GBNFORM_1,DGW_LISTALIAS ,"GBN","LOADCHANNELS");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+    
+   // --- Get Parameters ---
+
+   GetString_SYS("GBN","DATA",sData);
+   iLoadChannels = iGetInt_SYS("GBN","LOADCHANNELS");
+   if(iLoadChannels!=0) iLoadChannels = 1;
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Import GBN"),1);
+   
+
+   // --- import ---
+
+   ImportGBN_DU(Data,sData);
+   
+
+   // --- Get X and Y channel names ---
+      
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);      
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);      
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);   
+
+
+   // --- unlock and delete line 0 ---
+
+   if (iInteractive_SYS()) {
+      
+      DelLine0_EDB(EData);
+
+      if(iLoadChannels) {
+         LoadChan_EDB(EData,sXCh);
+         LoadChan_EDB(EData,sYCh);
+         LoadAllChans_EDB(EData);
+      }      
+   }
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+
+   // --- Set projection if not set already. ---
+
+   iRunGX_SYS("impsetprj");
+
+}

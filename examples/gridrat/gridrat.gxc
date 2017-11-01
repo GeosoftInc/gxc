@@ -1,0 +1,190 @@
+//===========================================================================
+NAME          = "GRIDRAT"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+Compute the ratio of two grids.
+
+Parameters: 
+
+        GRIDRAT.NUM     Numerator grid.
+               .DEN     Denominator grid.                          
+               .RAT     Output (Numerator/Denominator) grid.
+               .ADD     Constant to add to denominator grid
+               .MAX     Maximum value to allow in output grid
+               .MIN     Minimum value to allow in output grid
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+RESOURCE = "gridrat.gr"
+#include "gridrat.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;        // Dialogue handle
+
+int        i;           // utility int
+
+string(STR_FILE)  sNum;      // Name of first input grid 
+string(STR_FILE)  sDen;      // Name of second input grid 
+string(STR_FILE)  sRat;      // Name of output grid
+
+string(STR_DEFAULT_SHORT) sAdd;       // Constant to add to denominator grid
+real        rAdd;
+
+string(STR_DEFAULT_SHORT) sMax;       // Max. value to allow in output grid     
+real        rMax;
+
+string(STR_DEFAULT_SHORT) sMin;       // Min. value to allow in output grid
+real        rMin;
+
+IMG         IMGIN1;     // Image for the first input grid
+IMG         IMGIN2;     // Image for the second input grid
+IMG         IMGOUT;     // Image for the output grid
+IEXP        IEXP0;      // Image expression to divide IN1 by IN2
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDRATForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDRATFORM_0,DGW_FILEPATH,"GRIDRAT","NUM");     
+      SetInfoSYS_DGW(Diag,_GRIDRATFORM_1,DGW_FILEPATH,"GRIDRAT","DEN");     
+      SetInfoSYS_DGW(Diag,_GRIDRATFORM_2,DGW_FILEPATH,"GRIDRAT","RAT");    
+      SetInfoSYS_DGW(Diag,_GRIDRATFORM_3,DGW_TEXT,"GRIDRAT","ADD");     
+      SetInfoSYS_DGW(Diag,_GRIDRATFORM_4,DGW_TEXT,"GRIDRAT","MAX");     
+      SetInfoSYS_DGW(Diag,_GRIDRATFORM_5,DGW_TEXT,"GRIDRAT","MIN");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0)  Cancel_SYS();    // User hit cancel
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDRATFORM_0,DGW_FILEPATH,"GRIDRAT","NUM");     
+      GetInfoSYS_DGW(Diag,_GRIDRATFORM_1,DGW_FILEPATH,"GRIDRAT","DEN");     
+      GetInfoSYS_DGW(Diag,_GRIDRATFORM_2,DGW_FILEPATH,"GRIDRAT","RAT");    
+      GetInfoSYS_DGW(Diag,_GRIDRATFORM_3,DGW_TEXT,"GRIDRAT","ADD");     
+      GetInfoSYS_DGW(Diag,_GRIDRATFORM_4,DGW_TEXT,"GRIDRAT","MAX");     
+      GetInfoSYS_DGW(Diag,_GRIDRATFORM_5,DGW_TEXT,"GRIDRAT","MIN");    
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDRAT","NUM",sNum);
+   GetString_SYS("GRIDRAT","DEN",sDen);
+   GetString_SYS("GRIDRAT","RAT",sRat);
+   GetString_SYS("GRIDRAT","ADD",sAdd);
+   GetString_SYS("GRIDRAT","MAX",sMax);
+   GetString_SYS("GRIDRAT","MIN",sMin);
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sNum))
+      Abort_SYS(_("Numerator Grid Not Specified!"));
+
+   if (!iStrlen_STR(sDen))
+      Abort_SYS(_("Denominator Grid Not Specified!"));
+      
+   if (!iStrlen_STR(sRat))
+      Abort_SYS(_("Output Grid File Name Not Specified!"));   
+
+   if (iStrlen_STR(sAdd))
+      rAdd=rGetReal_SYS("GRIDRAT","ADD");
+   else
+      rAdd=0.0;
+   
+   if (iStrlen_STR(sMax))
+      rMax=rGetReal_SYS("GRIDRAT","MAX");
+   
+   if (iStrlen_STR(sMin))
+      rMin=rGetReal_SYS("GRIDRAT","MIN");
+    
+   
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   IMGIN1 = CreateFile_IMG(GS_DOUBLE,sNum,IMG_FILE_READONLY);
+   IMGIN2 = CreateFile_IMG(GS_DOUBLE,sDen,IMG_FILE_READONLY);
+   IMGOUT = CreateOutFile_IMG(GS_DOUBLE,sRat,IMGIN1); 
+   InheritIMG_IMG(IMGIN2,IMGIN1);
+
+   ProgName_SYS(_("Dividing grids..."),1);
+
+   // --- Divide grids ---
+
+   IEXP0 = Create_IEXP();
+   AddGrid_IEXP(IEXP0,IMGIN1,"In1");
+   AddGrid_IEXP(IEXP0,IMGIN2,"In2");
+   AddGrid_IEXP(IEXP0,IMGOUT,"Out");
+
+   if (iStrlen_STR(sMax))
+   {   
+      if (iStrlen_STR(sMin))
+         DoFormula_IEXP(IEXP0,"Out=CLIP(In1/(In2+$rAdd),$rMin,$rMax);",1024);
+      else
+         DoFormula_IEXP(IEXP0,"Out=Min(In1/(In2+$rAdd),$rMax);",1024);
+   }
+   else
+   {
+      if (iStrlen_STR(sMin))
+         DoFormula_IEXP(IEXP0,"Out=Max(In1/(In2+$rAdd),$rMin);",1024);
+      else
+         DoFormula_IEXP(IEXP0,"Out=In1/(In2+$rAdd);",1024);
+   }
+
+   // --- Destroy the Images ---
+   
+   Destroy_IEXP(IEXP0);
+   Destroy_IMG(IMGIN1);
+   Destroy_IMG(IMGIN2);
+   Destroy_IMG(IMGOUT);
+        
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sRat,"Grid",1);
+   
+}

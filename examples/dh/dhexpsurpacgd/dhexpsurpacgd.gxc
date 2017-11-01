@@ -1,0 +1,149 @@
+//===========================================================================
+NAME          = "Drill Hole - Export data to a Surpac Geological Database (Microsoft Access MDB)."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Export"
+
+DESCRIPTION   = "
+
+   Export a Drill Hole project to a Microsoft Access database file (MDB),
+   using the Surpac Geological Database model.  
+	
+   DHEXPSURPACGD.FILE      MDB file name, .mdb assumed.
+                 .SELECTED  SELECTED, ALL or LIST
+                 .LIST      CSV separated hole list, used with
+                            the \"LIST\" option of DHEXPSURPACGD.SELECTED 
+"
+// Revision History:
+// v6.2.0: New GX based on DHEXPDB.GX
+//===========================================================================
+
+RESOURCE = "dhexpsurpacgd.gr"
+#include "dhexpsurpacgd.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sSelected;
+string(STR_FILE) sDB, sFile;
+string(STR_DH_HOLES) sHoles;
+
+int         i;
+
+EDB         EData;         // database handle
+DH          Drill;
+DGW         Diag;          // dialogue box
+LST         HoleLST;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DHEXPSURPACGD");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DHEXPSURPACGD_0,DGW_FILEPATH,"DHEXPSURPACGD","FILE");     
+      SetInfoSYS_DGW(Diag,_DHEXPSURPACGD_1,DGW_LISTALIAS,"DHEXPSURPACGD","SELECTED");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DHEXPSURPACGD_0,DGW_FILEPATH,"DHEXPSURPACGD","FILE");     
+      GetInfoSYS_DGW(Diag,_DHEXPSURPACGD_1,DGW_LISTALIAS,"DHEXPSURPACGD","SELECTED");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("DHEXPSURPACGD","FILE",sFile);
+   AbsoluteFileName_SYS(sFile, sFile);
+
+   GetString_SYS("DHEXPSURPACGD","SELECTED",sSelected);
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("DHHOLELST","DATA",sSelected);
+   SetString_SYS("DHHOLELST","GX","DHEXPSURPACGD");
+   
+   if(iRunGX_SYS("DHHOLELST.GX")) Cancel_SYS();
+
+   GetString_SYS("DHHOLELST","HOLES", sHoles);
+   
+
+   // --- Get current database and open Drill project ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+   
+   
+   // --- A Dip-Azimuth Survey database is required for the Surpac export ---
+   
+   if(hDipAzSurveyDB_DH(Drill)==DB_NULL)
+      Abort_SYS(_("A dip-azimuth survey database must be loaded in order to create a Surpac Geological Database."));
+
+   
+   // --- create LSTs to hold hole lists ---
+   
+   HoleLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   
+   // --- Get all the holes ---
+
+   HoleLST2_DH(Drill, HoleLST);
+
+
+   // --- Retrieve available selected holes ---
+
+   SelectCSVStringItems_LST(HoleLST, sHoles, HoleLST);
+
+   if(iSize_LST(HoleLST)==0)
+      Abort_SYS(_("No holes have been selected for export."));
+
+   
+   // --- export data ---
+
+   Progress_SYS(1);
+
+   ExportLST_DH(Drill, HoleLST, sFile, DH_EXP_SURPAC);
+  
+   Destroy_DH(Drill);
+
+
+   // --- Put the current database back on top ---
+
+   MakeCurrent_EDB(EData);
+   
+   Progress_SYS(0);
+
+   Destroy_LST(HoleLST);
+}

@@ -1,0 +1,174 @@
+//===========================================================================
+NAME          = "Copy/convert grids"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/DAP Prep"
+
+DESCRIPTION   = "
+
+      AGGGRID.AGG  Nmae of the aggregate on the current map.
+             .REF  Reference grid at which to sample the aggregate.
+             .OUT  Output colour grid.
+
+"
+
+//===========================================================================
+
+RESOURCE = "agggrid.gr"
+#include "agggrid.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+IMG        hIMG;
+IPJ        hIPJ;
+
+EMAP       EMap;
+MAP        Map;
+LST        List;          // List handle
+AGG        Agg;
+
+string(STR_FILE)  sAgg; 
+string(STR_FILE)  sRef,sOut,sQualifier,sDrive,sDirectory,sName,sExtension;
+real              rCellX,rCellY,rOrigX,rOrigY,rAngle;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+
+   // --- Current Map ---
+
+   EMap = Current_EMAP();
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGGGRID");
+
+      
+      // --- Set up lists ---
+  
+      List = GetList_DGW(Diag,_AGGGRID_0);
+      Map  = Lock_EMAP(EMap);
+      AGGList_MAP(Map,List,0);
+      UnLock_EMAP(EMap);
+      Sort_LST(List,0,0);
+
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_AGGGRID_0,DGW_TEXT,"AGGGRID","AGG");     
+      SetInfoSYS_DGW(Diag,_AGGGRID_1,DGW_FILEPATH,"AGGGRID","REF");     
+      SetInfoSYS_DGW(Diag,_AGGGRID_2,DGW_FILEPATH,"AGGGRID","OUT");     
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();   
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_AGGGRID_0,DGW_TEXT,"AGGGRID","AGG");     
+      GetInfoSYS_DGW(Diag,_AGGGRID_1,DGW_FILEPATH,"AGGGRID","REF");
+      GetInfoSYS_DGW(Diag,_AGGGRID_2,DGW_FILEPATH,"AGGGRID","OUT");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGGGRID","AGG",sAgg);
+   GetString_SYS("AGGGRID","REF",sRef);
+   GetString_SYS("AGGGRID","OUT",sOut);
+
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sAgg))
+      Abort_SYS(_("Input Aggregate Not Specified!"));   
+      
+   if (!iStrlen_STR(sOut))
+      Abort_SYS(_("Output Grid Not Specified!")); 
+
+
+   // --- check to see if we have a default qualifier, if not then switch it to colour grid ---
+
+   FileNamePart_STR(sOut, sQualifier, STR_FILE_PART_QUALIFIERS);
+   if (iStrcmp_STR(sQualifier, "GRD", STR_CASE_TOLERANT) == 0)
+   {
+      FileNamePart_STR(sOut, sDrive, STR_FILE_PART_VOLUME);
+      FileNamePart_STR(sOut, sDirectory, STR_FILE_PART_DIRECTORY);
+      FileNamePart_STR(sOut, sName, STR_FILE_PART_NAME);
+      FileNamePart_STR(sOut, sExtension, STR_FILE_PART_EXTENSION);	
+      FileCombineParts_STR(sDrive, sDirectory, sName, sExtension, "GRD;Type=color", sOut);
+   }
+
+
+   // --- Lock Map ---
+
+   Map  = Lock_EMAP(EMap);
+   
+          
+   // --- Create Images tied to the grids ---  
+   
+   Agg = CreateMap_AGG(Map,sAgg);
+
+
+   // --- Open Reference Grid ---
+
+   hIMG = CreateFile_IMG(GS_LONG,sRef,IMG_FILE_READONLY);
+
+
+   // --- Get the Grid Projection and Cell Size ---
+
+   hIPJ = Create_IPJ();
+   GetInfo_IMG(hIMG,rCellX,rCellY,rOrigX,rOrigY,rAngle);
+   GetIPJ_IMG(hIMG,hIPJ);
+
+
+   // --- Produce Image ---
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Copy/convert grids..."),1); 
+    
+   AggToGeoColor_IMU(Agg,sOut,hIPJ,rCellX);
+   
+   Destroy_IMG(hIMG);
+   Destroy_AGG(Agg);
+   Destroy_IPJ(hIPJ);
+
+
+   // --- If the progress bar is turned off before the hIMG is
+   //     destroyed, the progress of the write to the output hIMG
+   //     is not tracked! ---
+
+   Progress_SYS(0);
+
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sOut,"Grid",1);
+      
+}

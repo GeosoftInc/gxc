@@ -1,0 +1,245 @@
+//===========================================================================
+NAME          = "Create a subset VA array channel from a VA"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/RPS/256 Channel"
+
+DESCRIPTION   = "\
+
+Given an array channel, this GX will create a subset array channel from a window
+of the original VA channel.
+
+Parameters: 
+
+   VA2VA.IN       Original array channel
+        .OUT      New subset array channel
+        .START    Start element for the subset
+        .END      End elemtnt in the window
+        
+"
+// V8.2: Added support for Array Base Properties
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "va2va.gr"
+#include "va2va.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;            // Channel Names
+string(STR_DB_SYMBOL) sOutCh;           // Channel Names
+
+EDB         eDB;            // Database handle
+DB          hDB;             // Database handle
+DB_SYMB     InCh;             // Channel Handle
+DB_SYMB     OutCh;            // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         hDGW;             // Dialogue handle
+LST         List;             // List handle
+VA          hVA,hVAs;         // VA handles
+VV          hVVb;             // Base properties
+
+int         i,iType,iStart,iSize,iCol,iLen,iBaseType;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+real        rOffset;          // base property offset/base freq.
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel, sUnits;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   eDB = Current_EDB();
+   hDB = Lock_EDB(eDB);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     hDGW = Create_DGW("VA2VA");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(hDGW,_VA2VA_0);
+     ArrayLST_DB(hDB,List);
+     Sort_LST(List,0,0);
+     Copy_LST(GetList_DGW(hDGW,_VA2VA_1),List);
+     
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(hDGW,_VA2VA_0,DGW_TEXT,"VA2VA","IN");     
+     SetInfoSYS_DGW(hDGW,_VA2VA_1,DGW_TEXT,"VA2VA","OUT");     
+     SetInfoSYS_DGW(hDGW,_VA2VA_2,DGW_TEXT,"VA2VA","START");     
+     SetInfoSYS_DGW(hDGW,_VA2VA_3,DGW_TEXT,"VA2VA","END");     
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(hDGW);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(hDGW,_VA2VA_0,DGW_TEXT,"VA2VA","IN");    
+     GetInfoSYS_DGW(hDGW,_VA2VA_1,DGW_TEXT,"VA2VA","OUT");    
+     GetInfoSYS_DGW(hDGW,_VA2VA_2,DGW_TEXT,"VA2VA","START");     
+     GetInfoSYS_DGW(hDGW,_VA2VA_3,DGW_TEXT,"VA2VA","END");     
+     
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(hDGW);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VA2VA","IN",sInCh);
+   GetString_SYS("VA2VA","OUT",sOutCh);
+   iStart = iGetInt_SYS("VA2VA","START");
+   iSize  = iGetInt_SYS("VA2VA","END");
+   iSize  = iSize - iStart + 1;
+   
+
+   // --- Do the Input Channels Exist ? ---
+
+   if (!iExistSymb_DB(hDB,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("channel does not exist."));
+   InCh = FindSymb_DB(hDB,sInCh,DB_SYMB_CHAN);
+   
+   
+   // --- check start and size ---
+   
+   iCol = iGetColVA_DB(hDB,InCh);
+   if (iStart < 0 || iStart >= iCol) 
+      Abort_SYS(_("Start element is not within VA size."));
+   if ((iStart + iSize) > iCol) 
+      iSize = iCol - iStart;
+   if (iSize <= 0)      
+      Abort_SYS(_("Output VA size is less than 1."));
+   
+
+   // --- create VA's ---
+   
+   iType = iGetChanType_DB(hDB,InCh);
+   GS_SIMPLE_TYPE(iType)
+   hVA  = Create_VA(iType,0,iCol);
+   hVAs = Create_VA(iType,0,iSize);
+   
+   
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (iExistSymb_DB(hDB,sOutCh,DB_SYMB_CHAN)) {
+      OutCh = FindSymb_DB(hDB,sOutCh,DB_SYMB_CHAN);
+      if (InCh == OutCh) Abort_SYS(_("Cannot subset a VA channel to itself."));
+      LOCK_RW(hDB,OutCh);
+      DeleteSymb_DB(hDB,OutCh);
+   }
+   OutCh = CreateSymbEx_DB(hDB,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,iGetChanType_DB(hDB,InCh),iSize);
+
+   // --- Lock the channel symbols ---
+
+   LOCK_R(hDB,InCh);
+   LOCK_RW(hDB,OutCh);
+
+   GetChanUnit_DB(hDB,InCh,sUnits);
+   SetChanUnit_DB(hDB,OutCh,sUnits);
+   SetChanFormat_DB(hDB,OutCh,iGetChanFormat_DB(hDB,InCh));
+   SetChanWidth_DB(hDB,OutCh,iGetChanWidth_DB(hDB,InCh));
+   SetChanDecimal_DB(hDB,OutCh,iGetChanDecimal_DB(hDB,InCh));
+
+	hVVb = Create_VV(REAL, 0);
+	_GetVABaseCoordinateInfo_DB(hDB, InCh, iBaseType, rOffset, hVVb, sUnits);
+	if(iBaseType != DB_ARRAY_BASETYPE_NONE)
+	{
+		if(iBaseType == DB_ARRAY_BASETYPE_TIME_WINDOWS)
+		{
+			for (i=0; i<iStart; i++)
+			{
+				rOffset += rGetReal_VV(hVVb, i);
+			}
+		}
+		Copy2_VV(hVVb, 0, hVVb, iStart, iSize);
+		SetLen_VV(hVVb, iSize);
+		SetVABaseCoordinateInfo_DB(hDB, OutCh, iBaseType, rOffset, hVVb, sUnits, 1);
+	}
+     
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(hDB);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(hDB);
+   while (iIsLineValid_DB(hDB,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(hDB,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(hDB,Line,sTemp);
+      UnLockSymb_DB(hDB,Line);
+      Strcpy_STR(sLabel,_("Subset VA->VA line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- get VA/VV and write to new channel ---
+
+      GetChanVA_DB(hDB,Line,InCh,hVA);
+      iLen = iLen_VA(hVA);
+      SetLn_VA(hVAs,iLen);
+      Copy2_VA(hVAs,0,0,hVA,0,iStart,iLen,iSize);
+      PutChanVA_DB(hDB,Line,OutCh,hVAs);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(hDB, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(hDB,OutCh,_("Subset VA channel"),"VA2VA;");
+   
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(hDB,InCh);
+   UnLockSymb_DB(hDB,OutCh);
+   UnLock_EDB(eDB);
+   LoadChan_EDB(eDB,sOutCh);
+   Destroy_VA(hVA);
+   Destroy_VA(hVAs);
+   
+   Progress_SYS(0);
+   
+}

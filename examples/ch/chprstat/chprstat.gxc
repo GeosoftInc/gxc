@@ -1,0 +1,322 @@
+
+//===========================================================================
+NAME          = "Save Assay Statistics to a CSV file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = " 
+
+         CHPRSTAT.MASK     - Name of mask channel (optional)
+         CHPRSTAT.CHANNELS - One of ASSAY, DISPLAYED_ASSAY or LIST
+
+"
+// Revision History:
+// v6.0.0: QA 2824 - Stats not being reset for each channel.
+//         Removed redundant loop.
+// v5.1.8: Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+//         Using exact statistics.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "CHPRSTAT.gr"
+#include "CHPRSTAT.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch,MCh,Line;
+DGW         Diag;
+LST         List, ChLST;
+ST          St;
+WA          Wa;
+
+
+VV          VVd, VVm;
+
+string(STR_DEFAULT_LONG) sStr, sChOpt, sMsg, sTemp;
+string(STR_DB_SYMBOL) sChan, sMask;
+string(STR_FILE) sVol, sDir, sName, sData;
+string(32768) sChannels;
+
+real        rPos, rItems, rDummies, rMin, rMax, rRange, rMean, rMedian, rSum;
+real        rGeoMean, rSumSq, rVariance, rStdDev, rStdErr, rMode;
+real        rSkewness, rKurtosis;
+
+int i,iChans,iMask,iRet;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Open current database ---
+
+   EData = Current_EDB();
+
+
+   // --- Get the name of the database ---
+
+   GetName_EDB(EData,sData);
+   Data = Lock_EDB(EData);
+
+   
+   // --- Get Default Mask Channel if required, and if it exists or is "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 &&
+            (iExistChan_DB(Data,sMask) || 
+             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
+
+            SetString_SYS("CHPRSTAT","MASK",sMask);
+         }
+      }
+   }
+
+
+   if(iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHPRSTAT");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_CHPRSTAT_0);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+      SetInfoSYS_DGW(Diag,_CHPRSTAT_0,DGW_TEXT,"CHPRSTAT","MASK");     
+      SetInfoSYS_DGW(Diag,_CHPRSTAT_1,DGW_LISTALIAS,"CHPRSTAT","CHANNELS");     
+
+      iRet = iRunDialogue_DGW(Diag);
+      if(iRet==-1) Cancel_SYS();
+      
+      GetInfoSYS_DGW(Diag,_CHPRSTAT_0,DGW_TEXT,"CHPRSTAT","MASK");     
+      GetInfoSYS_DGW(Diag,_CHPRSTAT_1,DGW_LISTALIAS,"CHPRSTAT","CHANNELS");
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHPRSTAT","CHANNELS",sChOpt);
+   GetString_SYS("CHPRSTAT","MASK",sMask);
+
+   UnLock_EDB(EData);
+
+   
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChOpt);
+   SetString_SYS("CHCHANLST","GX","CHPRSTAT");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+   iChans = iSize_LST(ChLST);
+   if(iChans==0)
+      Abort_SYS(_("No assay channels found."));
+
+
+   // --- Set up mask channel ---
+
+   iMask = 0;
+   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (!iExistChan_DB(Data,sMask))  
+         Abort_SYS(_("Mask channel does not exist."));
+      MCh = FindChan_DB(Data,sMask);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+      iMask = 1;
+   }
+
+
+   // --- Make a new file with a name like "Database_Stats.csv" ---
+
+   FileNamePart_STR(sData, sVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sData, sDir, STR_FILE_PART_DIRECTORY);
+   FileNamePart_STR(sData, sName, STR_FILE_PART_NAME);
+   Strcat_STR(sName,"_stats");
+
+   
+   // --- Create output file name ---
+
+   FileCombineParts_STR(sVol,sDir,sName,"csv","",sName);
+
+   
+   // --- get objects ---
+
+   VVd  = Create_VV(REAL,0);
+   VVm = Create_VV(INT,0);
+   St = CreateExact_ST();   
+   Wa = Create_WA(sName, WA_NEW);
+
+   
+   // --- Output the first line of column headers ---
+
+   Puts_WA(Wa,"Channel,NumValid,Num>0,Dummies,Min,Max,Range,Mean,StdDev,");
+   Puts_WA(Wa,"Var,Sum,SumSq,GeoMean,Median,Mode,StdErr,Skewness,Kurtosis\r\n");
+
+
+   Progress_SYS(1);  
+
+   for (i=0;i<iChans;i++) {
+                        
+      Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetItem_LST(ChLST,0,i,sChan);
+
+      LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+      Strcpy_STR(sMsg,_("Saving Statistics: "));
+      Strcat_STR(sMsg,sChan);
+      ProgName_SYS(sMsg, 0);
+      ProgUpdateL_SYS(i,iChans);
+
+
+      // --- Init stats ---
+      
+      Reset_ST(St);
+      
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+
+           // --- get data ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+           GetChanVV_DB(Data,Line,Ch,VVd);
+
+         if(iMask) {
+
+           GetChanVV_DB(Data,Line,MCh,VVm);
+            ReFidVV_VV(VVm,VVd);
+            Mask_VVU(VVd,VVm);
+        }
+
+
+         // --- stat ---
+
+         Statistics_VV(St,VVd);
+
+         UnLockSymb_DB(Data,Line);
+         Line = NextSelLine_DB(Data, Line);
+      }
+
+
+      // --- Unlock the channel ---
+
+      UnLockSymb_DB(Data,Ch);
+
+      
+      // --- Get the stats ---
+
+      rItems   = rGetInfo_ST(St, ST_ITEMS);
+      rPos     = rGetInfo_ST(St, ST_NPOS);
+      rDummies = rGetInfo_ST(St, ST_DUMMIES);
+      rMin     = rGetInfo_ST(St, ST_MIN); 
+      rMax     = rGetInfo_ST(St, ST_MAX);   
+      rRange   = rGetInfo_ST(St, ST_RANGE);
+      rMean    = rGetInfo_ST(St, ST_MEAN);  
+      rStdDev  = rGetInfo_ST(St, ST_STDDEV);
+
+      rVariance = rGetInfo_ST(St, ST_VARIANCE);   
+      rSum      = rGetInfo_ST(St, ST_SUM);
+      rSumSq    = rGetInfo_ST(St, ST_SUM2);          
+      rGeoMean  = rGetInfo_ST(St, ST_GEOMEAN);
+      rMedian   = rGetInfo_ST(St, ST_MEDIAN);
+      rMode     = rGetInfo_ST(St, ST_MODE);
+      rStdErr   = rGetInfo_ST(St, ST_STDERR);
+      rSkewness = rGetInfo_ST(St, ST_SKEW);
+      rKurtosis = rGetInfo_ST(St, ST_KURTOSIS);
+
+      // --- Output the stats line ---
+
+      Puts_WA(Wa,sChan); Puts_WA(Wa,","); 
+
+      FormatR_STR(rItems,sStr,20,19);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rPos,sStr,20,19);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rDummies,sStr,20,19);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rMin,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rMax,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rRange,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rMean,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rStdDev,sStr,20,6);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+
+      FormatR_STR(rVariance,sStr,20,6);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rSum,sStr,20,17);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rSumSq,sStr,20,17);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rGeoMean,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rMedian,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rMode,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rStdErr,sStr,20,10);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rSkewness,sStr,20,6);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,","); 
+      FormatR_STR(rKurtosis,sStr,20,6);
+      Puts_WA(Wa,sStr);  Puts_WA(Wa,"\r\n");
+
+   }
+
+   Destroy_WA(Wa);
+
+   if(iMask)
+      UnLockSymb_DB(Data,MCh);
+
+
+   Strcpy_STR(sMsg,_("Statistics have been written to the file:\r\n"));
+   Strcat_STR(sMsg,sName);
+   DisplayMessage_SYS(_("Save Statistics"),sMsg);
+
+
+   Progress_SYS(0);  
+
+   Destroy_SYS(VVd);
+   Destroy_SYS(VVm);
+   Destroy_ST(St);
+
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+}

@@ -1,0 +1,156 @@
+//===========================================================================
+NAME          = "Edit a file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   EDIT.FILE   file to edit
+       .WAIT   \"Wait\" to wait until editing is done.
+       .CHILD  if not blank, file is edited directly without a dialog.
+
+"
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Edit"
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "edit.gr"
+#include "edit.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW      Diag;        
+int      i;
+
+string(STR_FILE) sFile;
+string(STR_DEFAULT_LONG) sDefEdit,sTitle,sName;
+string(STR_DEFAULT_SHORT) sWait,sChild;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+   
+      // --- get editor first ---
+      
+      if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit))
+         iRunGX_SYS("newedit");
+         
+         
+      // --- get parameters ---
+
+      GetString_SYS("EDIT","CHILD",sChild);
+      SetString_SYS("EDIT","CHILD","");
+      GetString_SYS("EDIT","FILE",sFile);
+      
+      if ((iStrlen_STR(sChild) == 0) ||
+          (iStrlen_STR(sFile) == 0)) {
+      
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("edit");
+         SetInfoSYS_DGW(Diag,_EDIT_0,DGW_FILEPATH,"EDIT","FILE");
+         
+         
+
+
+         i = 2;
+         while (i == 2) {
+
+
+            // --- get editor name ---
+
+            iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sName);
+            FileNamePart_STR(sName,sName,STR_FILE_PART_NAME_EXTENSION);
+            Strcpy_STR(sTitle,_("Edit file using "));
+            Strcat_STR(sTitle,sName);
+            SetTitle_DGW(Diag,sTitle);
+            
+         
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+
+
+            // --- New editor? ---
+        
+            if (i == 2)
+
+               iRunGX_SYS("newedit");
+
+            else if (i != 0) 
+            
+               Cancel_SYS();
+
+         }
+
+
+         // --- Get the file name ---
+
+         GetInfoSYS_DGW(Diag,_EDIT_0,DGW_FILEPATH,"EDIT","FILE");
+
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+         
+         
+         // --- Get file name ---
+
+         GetString_SYS("EDIT","FILE",sFile);
+
+
+      }
+
+
+      // --- get windows wait ---
+      
+      GetString_SYS("EDIT","WAIT",sWait);
+      SetString_SYS("EDIT","WAIT","");
+      if (iCharComp_STR(sWait,"W"))
+         i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_WAIT;
+      else   
+         i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_NOWAIT;
+         
+      
+         iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit);
+         Strcpy_STR(sName,sDefEdit);
+         FileNamePart_STR(sName,sName,STR_FILE_PART_NAME_EXTENSION);
+         Strcpy_STR(sTitle,_n("Edit file using "));
+         Strcat_STR(sTitle,sName);
+         
+         
+      // --- edit ---
+
+      iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit);
+      if (iRun_SYS(sDefEdit,sFile,i)) {
+
+         Strcpy_STR(sFile,_("Unable to run "));
+         Strcat_STR(sFile,sDefEdit);
+         Abort_SYS(sFile);
+
+      }
+
+   } else
+   
+      Abort_SYS(_("Error: This GX can only run interactively"));
+
+}
+

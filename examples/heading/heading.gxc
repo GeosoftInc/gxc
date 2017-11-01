@@ -1,0 +1,230 @@
+//===========================================================================
+NAME          = "Correct a channel for heading error"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Corrections"
+
+DESCRIPTION   = "\
+
+HEADING corrects data channels for base level shifts that are function of
+the line direction.  The shifts must be entered into a heading table, which
+must include a \"direction\" index and a \"correction\" field.
+
+   HEADING.TABLE  - Heading table name
+          .IN     - channel to be corrected
+          .OUT    - output corrected channel
+\r\n"
+
+//--------------------------
+// Revision History
+// 8.5.0:  Modified heading function to get heading along the line instead of a single value for the whole line.
+//         Removed X and Y channels as inputs and now use current X and Y.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "heading.gr"
+#include "heading.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh, sOutCh;         // Channel Name
+string(STR_FILE) sTable;                // table name
+int         iLines, iTotLines;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     XCh, YCh;              // Channel Handles
+DB_SYMB     InCh, OutCh;           // Channel Handles
+TB          Table;                 // Table Handle
+DB_SYMB     Line;
+DGW         Diag;
+LST         List;                  // list handle
+int         i;                     // utility int
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("HEADINGForm");
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_HEADINGFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_HEADINGFORM_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_HEADINGFORM_0,DGW_FILEPATH,"HEADING","TABLE");
+     SetInfoSYS_DGW(Diag,_HEADINGFORM_1,DGW_TEXT,"HEADING","IN");
+     SetInfoSYS_DGW(Diag,_HEADINGFORM_2,DGW_TEXT,"HEADING","OUT");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_HEADINGFORM_0,DGW_FILEPATH,"HEADING","TABLE");     
+     GetInfoSYS_DGW(Diag,_HEADINGFORM_1,DGW_TEXT,"HEADING","IN");
+     GetInfoSYS_DGW(Diag,_HEADINGFORM_2,DGW_TEXT,"HEADING","OUT");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("HEADING","TABLE",sTable);
+   GetString_SYS("HEADING","IN",sInCh);
+   GetString_SYS("HEADING","OUT",sOutCh);
+
+   // --- Do the Input & heading Channels Exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh == NULLSYMB) 
+		Abort_SYS(_("The current X channel does not exist."));
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+	if (YCh == NULLSYMB) 
+		Abort_SYS(_("The current Y channel does not exist."));
+   
+	if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN)) 
+      Abort_SYS(_("Input data channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+         
+   // --- Create and output channel if it does not exist ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data, InCh, sOutCh);
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+
+
+   // --- Load the Table into Memory ---
+
+   Printf_STR(sLabel, sizeof(sLabel), _("Loading \"%s\""), sTable);
+   ProgName_SYS(sLabel,1);
+   Table = Create_TB(sTable);
+
+   // --- Ensure channels are different ---
+
+   if (XCh == YCh)
+      Abort_SYS(_("X and Y Reference Channels must be different."));
+
+   if ((XCh == InCh) || (YCh == InCh))
+      Abort_SYS(_("Input Channel must be different from BOTH Reference Channels."));
+
+   if ((XCh == OutCh) || (YCh == OutCh))
+      Abort_SYS(_("Output Channel must be different from BOTH Reference Channels."));
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   if (InCh != OutCh) LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+   // --- Prepare to do the work ---
+                           
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   ProgName_SYS(_("Heading"),1);
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+
+   while (iIsLineValid_DB(Data,Line))  {
+
+      // --- Update the Progress Bar ---
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("heading line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+		// --- Apply the heading correction. Set direction to DUMMY so it applies
+		//     a correction based on the heading as it changes along the line. ---
+
+      Head_DU(Data,Line,InCh,OutCh,Table,rDUMMY);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Heading"),"HEADING;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("HEADING GX (Correct heading error)"), FALSE);
+   AddComment_DB(Data, "Heading table", sTable, TRUE);
+   AddComment_DB(Data, "Input channel", sInCh, TRUE);
+   AddComment_DB(Data, "Output channel", sOutCh, TRUE);
+
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+
+	// --- Load the new channel ---
+
+	LoadChan_EDB(EData, sOutCh);
+
+}

@@ -1,0 +1,292 @@
+//===========================================================================
+
+NAME          = "Resample a channel to a distance base"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D/Advanced Usage"
+
+DESCRIPTION   = "
+
+Create a distance-based channel from a fiducial-based channel.
+
+PARAMETERS:
+
+   DISTFID.IN       - fiducial-based channel to be re-sampled.
+          .OUT      - new re-sampled channel.
+          .METHOD   - \"Linear\", \"Min. Curvature\", \"Akima\"
+          .INCR     - required distance increment.
+          .GAP      - gaps in the data larger than this will not be
+                      interpolated.
+"
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "distfid.gr"
+#include "distfid.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sIn,sOut,sFid;         // Channel names
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT) sTemp;                 
+
+EDB         EData;
+DB          Data;                  // Database
+DGW         Diag;                  // Dialogue handle
+DB_SYMB     InCh,OutCh,DisCh,FidCh;// Channel Handles
+DB_SYMB     XCh,YCh;               // X and Y channels for distance
+DB_SYMB     Line;                  // Line Handle
+LST         List;                  // List handle
+
+real        rIncr,rGap;            // parameters
+int         iMethod;               // interpolation method
+int         iDist;                 // iTRUE if "_Distance" exists
+int         i;                     // utility
+int         iLines;                // Number of Lines Processed
+int         iTotLines;             // Total Number of Lines to Process
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("distfid");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_DISTFID_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_DISTFID_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DISTFID_0,DGW_TEXT,"DISTFID","IN");     
+      SetInfoSYS_DGW(Diag,_DISTFID_1,DGW_TEXT,"DISTFID","OUT");
+      SetInfoSYS_DGW(Diag,_DISTFID_2,DGW_TEXT,"DISTFID","INCR");
+      SetInfoSYS_DGW(Diag,_DISTFID_3,DGW_TEXT,"DISTFID","GAP");
+      SetInfoSYS_DGW(Diag,_DISTFID_4,DGW_LISTALIAS,"DISTFID","METHOD");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DISTFID_0,DGW_TEXT,"DISTFID","IN");     
+      GetInfoSYS_DGW(Diag,_DISTFID_1,DGW_TEXT,"DISTFID","OUT");     
+      GetInfoSYS_DGW(Diag,_DISTFID_2,DGW_TEXT,"DISTFID","INCR");
+      GetInfoSYS_DGW(Diag,_DISTFID_3,DGW_TEXT,"DISTFID","GAP");
+      GetInfoSYS_DGW(Diag,_DISTFID_4,DGW_LISTALIAS,"DISTFID","METHOD");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DISTFID","IN",sIn);
+   GetString_SYS("DISTFID","OUT",sOut);
+   if (iExistReal_SYS("DISTFID","INCR"))
+      rIncr  = rGetReal_SYS("DISTFID","INCR");
+   else
+      rIncr = rDUMMY;
+   if (iExistReal_SYS("DISTFID","GAP"))
+      rGap   = rGetReal_SYS("DISTFID","GAP");
+   else
+      rGap = rDUMMY;
+   
+
+   // --- method ---
+   
+   GetString_SYS("DISTFID","METHOD",sTemp);
+   if (iStrcmp_STR(sTemp,_n("Linear"),0) == 0)
+      iMethod = DU_REFID_LINEAR;
+   else if (iStrcmp_STR(sTemp,_n("Minimum Curvature"),0) == 0)
+      iMethod = DU_REFID_MINCUR;
+   else if (iStrcmp_STR(sTemp,_n("Akima"),0) == 0)
+      iMethod = DU_REFID_AKIMA;
+   else 
+      Abort_SYS(_("Invalid interpolation method."));
+
+
+   // --- Does the input channel exist ? ---
+
+   if (!iExistSymb_DB(Data,sIn,DB_SYMB_CHAN))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sIn,DB_SYMB_CHAN);
+
+
+   // --- Does the Output Channel ---
+
+   if (!iExistSymb_DB(Data,sOut,DB_SYMB_CHAN)) {
+      OutCh = DupSymb_DB(Data,InCh,sOut);       // Create it 
+      UnLockSymb_DB(Data,OutCh);
+   } else   
+      OutCh = FindSymb_DB(Data,sOut,DB_SYMB_CHAN);
+
+   if (OutCh == InCh)
+      Abort_SYS(_("Input and output channels must be different."));
+
+
+   // --- Check for an existing "_Distance" channel. ---
+
+   iDist = iExistSymb_DB(Data,"_Distance",DB_SYMB_CHAN);
+
+
+   // --- Prepare distance and fid channels of the original data ---
+
+   if (!iDist) {
+
+
+      // --- X and Y channels must exist ---
+
+      XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+      YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+      if (XCh==NULLSYMB || YCh==NULLSYMB)
+         Abort_SYS(_("X and Y channels are required for distance calculation."));
+
+
+      // --- Create distance channel ---
+
+      if (!iExistSymb_DB(Data,"_Distance",DB_SYMB_CHAN))
+         CreateSymb_DB(Data,"_Distance",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+
+   }
+
+
+   // --- get distance channel ---
+
+   DisCh = FindSymb_DB(Data,"_Distance",DB_SYMB_CHAN);
+
+
+   // --- Create fiducial channel ---
+
+   Strcpy_STR(sFid,sOut);
+   Strcat_STR(sFid,"_fid");
+   if (!iExistSymb_DB(Data,sFid,DB_SYMB_CHAN))
+      CreateSymb_DB(Data,sFid,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+   FidCh = FindSymb_DB(Data,sFid,DB_SYMB_CHAN);
+
+
+   // --- Lock the channel symbols ---
+
+   if (!iDist) {
+      LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,DisCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,FidCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   // --- Go through all selected Lines ---
+
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Process line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Create distance channel ---
+
+      if (!iDist)
+         Distance_DU(Data,Line,XCh,YCh,DisCh);
+
+
+      // --- Create fiducial channel ---
+
+      MakeFid_DU(Data,Line,DisCh,FidCh);
+
+
+      // --- Refid the data ---
+
+      ReFid_DU(Data,Line,InCh,DisCh,OutCh,iMethod,rDUMMY,rIncr,rGap);
+      ReFid_DU(Data,Line,FidCh,DisCh,FidCh,iMethod,rDUMMY,rIncr,rGap);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Distance fiducial"),"DISTFID;");
+
+
+   // --- Unlock ---
+
+   if (!iDist) {
+      UnLockSymb_DB(Data,XCh);
+      UnLockSymb_DB(Data,YCh);
+   }
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,DisCh);
+   UnLockSymb_DB(Data,FidCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

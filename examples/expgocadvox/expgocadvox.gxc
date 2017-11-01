@@ -1,0 +1,317 @@
+//===========================================================================
+NAME          = "Voxel export to GOCAD 3D Voxet"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Exports a Geosoft VOXEL into a GOCAD voxet
+
+   EXPGOCADVOX.VOXEL:     Voxel File.
+   EXPGOCADVOX.GOCAD:     GOCAD file
+
+"
+// Revision History:
+// v7.3.0   Changed workflow to always provide user choice of output voxel, and not always show the voxel viewer.
+// v6.2.0   First version
+//===========================================================================
+
+RESOURCE = "expgocadvox.gr"
+#include "expgocadvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW  hDGW;   
+BF   hBF;
+VOX  hVOX;
+WA   hWA;
+PG   hPG;
+ST   hST;
+EDOC hEDOC;
+
+
+string(STR_FILE) sVoxel,sNew,sGOCAD,sHead,sFProp,sProp,sPropName,sTmp,sName;
+int              i,iType,iArray,iX,iY,iZ,iTotal;
+real             rMinX,rMinY,rMinZ;
+real             rMaxX,rMaxY,rMaxZ;
+real             rCx,rCy,rCz;
+real             rOriginX,rOriginY,rOriginZ;
+real             rVectUx,rVectUy,rVectUz;
+real             rVectVx,rVectVy,rVectVz;
+real             rVectWx,rVectWy,rVectWz;
+real             rMin,rMax,rVar,rMean; 
+
+string(64)       sLicClass;
+int              iArcGIS;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, _n("ArcGIS"), STR_CASE_TOLERANT) == 0;
+ 
+   
+	// --- Are we running interactively ? ---
+
+	Strcpy_STR(sVoxel, "");
+   if (iInteractive_SYS())
+   {
+		// --- Set the defaults from the voxel in the voxel viewer, if present ---
+
+		if (!iArcGIS && iHaveCurrent_EDOC(EDOC_TYPE_VOXEL))
+		{
+			hEDOC = Current_EDOC(EDOC_TYPE_VOXEL);
+			GetName_EDOC(hEDOC, sVoxel);				
+			
+			FileNamePart_STR(sVoxel, sNew, STR_FILE_PART_NAME);
+			FileExt_STR(sNew, ".vo", sNew, FILE_EXT_FORCE);
+			SetString_SYS("EXPGOCADVOX", "VOXEL", sVoxel);		
+			SetString_SYS("EXPGOCADVOX", "GOCAD", sNew);				
+		}
+
+	   
+		// --- Create the Dialogue ---
+
+	   hDGW = Create_DGW("EXPGOCADVOX");
+
+	     
+	   // --- Set any Defaults ---
+
+	   SetInfoSYS_DGW(hDGW,_EXPGOCADVOX_0,DGW_FILEPATH,"EXPGOCADVOX","VOXEL");     
+	   SetInfoSYS_DGW(hDGW,_EXPGOCADVOX_1,DGW_FILEPATH,"EXPGOCADVOX","GOCAD");     
+	     
+	   // --- Run the Dialogue ---
+
+	   i = iRunDialogue_DGW(hDGW);
+	   if (i == -1) Cancel_SYS();    // The user hit cancel
+
+	     
+	   // --- Get the Strings ---
+
+	   GetInfoSYS_DGW(hDGW,_EXPGOCADVOX_0,DGW_FILEPATH,"EXPGOCADVOX","VOXEL");     
+	   GetInfoSYS_DGW(hDGW,_EXPGOCADVOX_1,DGW_FILEPATH,"EXPGOCADVOX","GOCAD");     
+	     
+	     
+	   // --- Destroy the Dialogue ---
+
+	   Destroy_DGW(hDGW);
+	}
+
+
+   // --- Get and verify parameters ---
+
+   GetString_SYS("EXPGOCADVOX","VOXEL",sVoxel);
+   GetString_SYS("EXPGOCADVOX","GOCAD",sGOCAD);
+   
+   
+   // --- Generate Names ---
+   
+   FileExt_STR(sGOCAD,".vo",sHead,FILE_EXT_FORCE);
+   Strcpy_STR(sFProp,sGOCAD);
+   Strcat_STR(sFProp,"_data");
+   RelativeFileName_SYS(sFProp,sProp);
+   IFileNamePart_STR(sProp, sPropName, STR_FILE, STR_FILE_PART_NAME_EXTENSION);
+   
+   // --- Progress ---
+   
+   Progress_SYS(1);
+   
+   
+   // --- Open the Voxel ---
+   
+   hVOX = Create_VOX(sVoxel);   
+   
+   
+   // --- Get Voxel Information ---
+   
+   GetInfo_VOX(hVOX,iType,iArray,iX,iY,iZ);
+   GetSimpleLocation_VOX(hVOX,rMinX,rMinY,rMinZ,rCx,rCy,rCz);
+   
+   
+   // --- Stats ---
+   
+   hST = Create_ST();
+   CalcStats_VOX(hVOX,hST);
+   
+   
+   // --- Compute the Max ---
+   
+   rMaxX = rMinX + (rCx*(real)(iX-1));
+   rMaxY = rMinY + (rCy*(real)(iY-1));
+   rMaxZ = rMinZ + (rCz*(real)(iZ-1));
+   
+
+   // --- Get the GOCAD location of the Voxel ---
+   
+   GetGOCADLocation_VOX(hVOX,rOriginX,rOriginY,rOriginZ,rVectUx,rVectUy,rVectUz,rVectVx,rVectVy,rVectVz,rVectWx,rVectWy,rVectWz);
+      
+   
+   // --- Tests ---
+   
+   if (rCx == rDUMMY || rCy == rDUMMY || rCz == rDUMMY) Abort_SYS(_("Voxel is not uniform and cannot be exported to GOCAD."));
+   if (iArray != 1)                                     Abort_SYS(_("Only single value Voxels can be exported to GOCAD."));
+   
+   
+   // --- Create the Header file ---
+   
+   hWA = Create_WA(sHead,WA_NEW);
+
+   Puts_WA(hWA,_n("GOCAD Voxet 1"));   NewLine_WA(hWA);
+   
+   
+   Puts_WA(hWA,_n("HEADER {"));        NewLine_WA(hWA);
+
+   FileNamePart_STR (sHead,sName,STR_FILE_PART_NAME);
+   MakeAlpha_STR(sName);
+   
+   Puts_WA(hWA,_n("name:"));
+   Puts_WA(hWA,sName);
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,_n("*painted:on"));                    NewLine_WA(hWA);
+   Puts_WA(hWA,_n("*smoothed:true"));                 NewLine_WA(hWA);
+   Puts_WA(hWA,_n("*sections:3 1 1 0 2 1 0 3 1 0"));  NewLine_WA(hWA);
+   Puts_WA(hWA,_n("*connectivity*color:1 1 1 1"));    NewLine_WA(hWA);
+   Puts_WA(hWA,_n("*connectivity*width:2"));          NewLine_WA(hWA);
+   Puts_WA(hWA,_n("*connectivity:true"));             NewLine_WA(hWA);
+   Puts_WA(hWA,_n("*regions_section:false"));         NewLine_WA(hWA);
+   
+   Puts_WA(hWA,"}");        NewLine_WA(hWA);
+
+   
+   // --- UVW Coordiantes ---
+   
+   Puts_WA(hWA,"AXIS_MIN ");
+   FormatReal_STR(rMinX,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMinY,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMinZ,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,"AXIS_MAX ");
+   FormatReal_STR(rMaxX,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMaxY,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMaxZ,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,"AXIS_N ");
+   FormatI_STR(iX,sTmp,20); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatI_STR(iY,sTmp,20); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatI_STR(iZ,sTmp,20); Puts_WA(hWA,sTmp); 
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,"AXIS_D ");
+   FormatReal_STR(rCx,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rCy,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rCz,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   
+   // --- Real World Coordiantes ---
+   
+   Puts_WA(hWA,"AXIS_O ");
+   FormatReal_STR(rOriginX,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rOriginY,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rOriginZ,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,"AXIS_U ");
+   FormatReal_STR(rVectUx,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rVectUy,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rVectUz,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,"AXIS_V ");
+   FormatReal_STR(rVectVx,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rVectVy,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rVectVz,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,"AXIS_W ");
+   FormatReal_STR(rVectWx,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rVectWy,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rVectWz,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   
+   // --- Write Property ---
+   
+   Puts_WA(hWA,_n("PROPERTY 1 Data"));                  NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROPERTY_CLASS 1 \"default\""));     NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROP_UNIT 1 none"));                 NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROP_NO_DATA_VALUE 1 -99999"));      NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROP_ESIZE 1 4"));                   NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROP_SIGNED 1 0"));                  NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROP_ETYPE 1 IEEE"));                NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROP_OFFSET 1 0"));                  NewLine_WA(hWA);
+   Puts_WA(hWA,_n("PROP_FILE 1 ")); Puts_WA(hWA,sPropName); NewLine_WA(hWA);
+   
+   
+   // --- Stats ---
+   
+   rMin = rGetInfo_ST(hST,ST_MIN);
+   rMax = rGetInfo_ST(hST,ST_MAX);
+   rVar = rGetInfo_ST(hST,ST_VARIANCE);
+   rMean = rGetInfo_ST(hST,ST_MEAN);
+   iTotal = iX * iY * iZ;
+   
+   Puts_WA(hWA,_n("PROP_LEGAL_RANGE 1 "));
+   FormatReal_STR(rMin,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMax,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,_n("PROP_SAMPLE_STATS 1 "));
+   FormatI_STR(iTotal,sTmp,20); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMean,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rVar,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMin,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rMax,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   NewLine_WA(hWA);
+   
+   Puts_WA(hWA,_n("PROPERTY_CLASS_HEADER 1 \"default\" {"));  NewLine_WA(hWA);
+   Puts_WA(hWA,"*low_clip:"); FormatReal_STR(rMin,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); NewLine_WA(hWA);
+   Puts_WA(hWA,"*high_clip:"); FormatReal_STR(rMax,sTmp,FORMAT_DECIMAL,20,10); Puts_WA(hWA,sTmp); NewLine_WA(hWA);
+   Puts_WA(hWA,"*pclip:99");  NewLine_WA(hWA);
+   Puts_WA(hWA,"}");  NewLine_WA(hWA);
+   
+   
+   Puts_WA(hWA,"END");                              NewLine_WA(hWA);
+   
+   Destroy_WA(hWA);
+   Destroy_ST(hST);
+   
+
+   // --- Write the Properties file ---
+   
+   hBF = Create_BF(sProp,BF_READWRITE_NEW);
+   
+   
+   // --- Load VOX Into a pager ---
+   
+   hPG = CreateTypePG_VOX(hVOX,GS_FLOAT);
+   
+   
+   // --- Write Pager to File ---
+   
+   WriteBFEx_PG(hPG, hBF, PG_3D_DIR_ZYX, PG_BF_CONV_SWAP, GS_FALSE, GS_FALSE, GS_FALSE, -99999.0);
+   
+   
+   // --- Destroy Objects ---
+   Destroy_PG(hPG);
+   DestroyEx_BF(hBF);
+   
+   
+   // --- Done ---
+   
+   Progress_SYS(0);
+}

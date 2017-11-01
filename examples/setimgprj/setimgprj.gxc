@@ -1,0 +1,160 @@
+//===========================================================================
+NAME          = "Set the projection of one or more grids"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Utilities"
+
+DESCRIPTION   = "\
+     SETIMGPRJ.GRIDS       list of grids \"|\" delimited
+     SETIMGPRJ.XGD         XGD type decoration (ie. \"(GRD)\" or \"(ERM)\")
+           IPJ.NAME        projection name
+           IPJ.DATUM       datum (name, major axis, ellipticity)
+           IPJ.METHOD      projection method (name,p1,p2,... see GXF)
+           IPJ.UNITS       distance units (name,m/unit)
+           IPJ.LOCALDATUM  local datum (name,dx,dy,dz,rx,ry,rz,scale)
+              
+   The IPJ. parameters conform to GXF projection syntax.
+   Projections are applied to the current database.
+
+"
+
+// Revision History:
+// v7.2.1: Fixed bug (MYTEN-52) that was seeting the warp or orientation from the first grid to the other grids.
+// v7.0.0: Switch to new GX.Net projection wizard.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "setimgprj.gr"
+#include "setimgprj.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+IMG         hIMG; 
+DGW         Diag;                      // Dialogue handle
+IPJ         hIPJ;
+
+int         i,iGrids;
+string(STR_MULTI_FILE) sGrids;
+string(STR_FILE) sGrid;
+string(STR_FILE) sXGD;
+string(STR_FILE) s1,s2,s3,s4,s5;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   hIPJ = Create_IPJ();
+   
+   if (iInteractive_SYS()) 
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SETIMGPRJ");
+   
+      SetInfoSYS_DGW(Diag,_SETIMGPRJ_0,DGW_FILEPATH,"SETIMGPRJ","GRIDS");
+      SetInfoSYS_DGW(Diag,_SETIMGPRJ_1,DGW_LISTALIAS,"SETIMGPRJ","XGD");
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+      GetInfoSYS_DGW(Diag,_SETIMGPRJ_0,DGW_FILEPATH,"SETIMGPRJ","GRIDS");    
+      GetInfoSYS_DGW(Diag,_SETIMGPRJ_1,DGW_LISTALIAS,"SETIMGPRJ","XGD");    
+
+      Destroy_DGW(Diag);
+      
+      
+      // --- get default IPJ from first grid ---
+      
+      GetString_SYS("SETIMGPRJ","GRIDS",sGrids);
+      GetString_SYS("SETIMGPRJ","XGD",sXGD);
+      GetMFile_STR(sGrids,sGrid,0);  
+      Strcat_STR(sGrid,sXGD);
+      hIMG = CreateFile_IMG(GS_TYPE_DEFAULT,sGrid,IMG_FILE_READONLY);
+      GetIPJ_IMG(hIMG,hIPJ);
+      Destroy_IMG(hIMG);
+      
+      
+      // --- Edit/modify the IPJ ---
+      
+      iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Grids"), sGrids);
+		
+      // --- Export IPJ parameters as GXF strings for scripting. ---
+      
+      GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+      
+      SetString_SYS("IPJ", "NAME", s1);
+      SetString_SYS("IPJ", "DATUM", s2);
+      SetString_SYS("IPJ", "METHOD", s3);
+      SetString_SYS("IPJ", "UNITS", s4);
+      SetString_SYS("IPJ", "LOCALDATUM", s5);
+      
+      
+      // --- Read them back in - this will ensure they are used for lineage ---
+      
+      GetString_SYS("IPJ", "NAME", s1);
+      GetString_SYS("IPJ", "DATUM", s2);
+      GetString_SYS("IPJ", "METHOD", s3);
+      GetString_SYS("IPJ", "UNITS", s4);
+      GetString_SYS("IPJ", "LOCALDATUM", s5);
+   } 
+   else 
+   {
+   
+      GetString_SYS("IPJ","NAME",s1);
+      GetString_SYS("IPJ","DATUM",s2);
+      GetString_SYS("IPJ","METHOD",s3);
+      GetString_SYS("IPJ","UNITS",s4);
+      GetString_SYS("IPJ","LOCALDATUM",s5);
+      
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("SETIMGPRJ","GRIDS",sGrids);
+   GetString_SYS("SETIMGPRJ","XGD",sXGD);
+
+
+   // --- set projections ---
+      
+   iGrids = iCountTokens_STR(sGrids,"|");
+   
+   for (i=0;i<iGrids;i++) {
+   
+      GetMFile_STR(sGrids,sGrid,i);  
+      Strcat_STR(sGrid,sXGD);
+      //DisplayMessage_SYS(_("Grid"),sGrid);
+      hIMG = CreateFile_IMG(GS_TYPE_DEFAULT,sGrid,IMG_FILE_READORWRITE);
+      
+      
+      // --- Get the exiting IPJ from the grid ---
+      
+      GetIPJ_IMG(hIMG,hIPJ);
+      
+      
+      // --- Set the PCS or GCS using the GXF strings, because this leaves
+      //     any existing warp or orientation unchanged ---
+      
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+      SetIPJ_IMG(hIMG, hIPJ);
+      Destroy_IMG(hIMG);
+      
+   }      
+
+   
+   // --- Done ---
+
+   Destroy_IPJ(hIPJ);
+   
+}

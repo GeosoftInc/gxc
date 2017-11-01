@@ -1,0 +1,245 @@
+//===========================================================================
+NAME          = "Set Mask Channel to 1"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+ CHCLEARMASK.MASK 	Mask channel - default is \"ChemMask\"
+"
+// Revision History
+// v6.4.2 Set the global setting if not already set.
+// v5.1.8 Use "Mask" as default mask channel only if user is not licenced for CHIMERA
+// v5.1.4 Refids Mask channel to Sample channel.
+//        Changes to accomodate new Geophysical Stats licence.
+// v5.1.3 Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "CHCLEARMASK.gr"
+#include "CHCLEARMASK.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+
+EDB        EData;
+DB         Data;
+DB_SYMB    MCh, XCh;   // Channel handles
+DB_SYMB    Line;       // Line handle
+DGW   Diag;
+VV    VVm, VVx;
+LST   List;
+
+string(STR_DB_SYMBOL) sLine,sMask;
+string(STR_DEFAULT_LONG) sLabel;
+string(STR_DEFAULT_SHORT) sTemp;
+int i, iLines, iTotLines;
+
+
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- get current database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get Default Mask Channel if required, and if it exists, and if it is
+   //     not set to "None" ---
+
+   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0 &&
+      iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 && iExistChan_DB(Data,sMask))
+            SetString_SYS("CHCLEARMASK","MASK",sMask);
+      }
+   }
+   
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHCLEARMASK");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_CHCLEARMASK_0);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+      // --- Remove "None" from the list ---
+
+      i = iFindItem_LST(List,0, "None");
+      if(i!=-1) DelItem_LST(List, i);
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CHCLEARMASK_0,DGW_TEXT, "CHCLEARMASK","MASK");
+     
+      
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CHCLEARMASK_0,DGW_TEXT,     "CHCLEARMASK","MASK");
+      
+    }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHCLEARMASK","MASK",sMask); 
+      
+
+   // --- Mask channel must be specified ---
+
+   if(!iStrlen_STR(sMask) || !iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))
+      Abort_SYS(_("A Mask Channel must be specified."));
+
+
+   // --- Create or open mask channel ---
+      
+   if (!iExistChan_DB(Data,sMask)) {
+
+      // --- Now create the mask channel ---
+
+      MCh = CreateSymb_DB(Data,sMask,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      SetRegSymbSetting_DB(Data,MCh,"CLASS","MASK");
+   }
+   else 
+      MCh = FindChan_DB(Data,sMask);
+
+   LockSymb_DB(Data,MCh,DB_LOCK_READWRITE,DB_WAIT_NONE);     
+
+
+   // --- Must set the lengths to current data lengths,
+   //     so get Sample channel ---
+
+   if(!iExistChan_DB(Data,"Sample"))
+   {
+      // --- or try the X channel ---
+      
+      if(!iExistSymb_DB(Data,"X",DB_SYMB_CHAN))
+      {
+         // --- the Y channel? ---
+      
+         if(!iExistSymb_DB(Data,"Y",DB_SYMB_CHAN))
+         {
+            // --- I give up ---
+        
+            Abort_SYS(_("There are no channels (X, Y, or Sample) in the database from which to get length of mask channel."));
+         }
+         else
+            XCh = FindSymb_DB(Data, "Y", DB_SYMB_CHAN);
+      }   
+      else
+         XCh = FindSymb_DB(Data, "X", DB_SYMB_CHAN);
+   }
+   else
+      XCh = FindChan_DB(Data,"Sample");
+   LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);     
+
+
+   // --- get some VV's ---
+
+   VVm = Create_VV(INT,0);
+   VVx = Create_VV(-16,0);
+
+
+   // --- process lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,MCh,VVm);
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      ReFidVV_VV(VVm,VVx);
+
+
+      // --- Set mask values to "1" ---
+
+      SetIntN_VV(VVm, 0, -1, 1);
+
+
+      // --- Replace the data ---
+
+      PutChanVV_DB(Data,Line,MCh,VVm);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+
+   }
+
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,MCh);
+   UnLockSymb_DB(Data,XCh);
+
+
+   // --- done ---
+
+   Destroy_SYS(VVm);
+   Destroy_SYS(VVx);
+   
+   Progress_SYS(0);
+   
+   
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);   
+   LoadChan_EDB(EData, sMask);  
+   
+   
+   // --- Set the Global setting if not already set ---
+   
+   if (iGlobal_SYS("CHIMERA.MASK",sTemp) == 1)
+      GlobalSet_SYS("CHIMERA.MASK",sMask);
+
+}

@@ -1,0 +1,235 @@
+//===========================================================================
+NAME          = "Create a pre-processed channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/FFT1D/Advanced Usage"
+
+DESCRIPTION   = "
+
+Parameters:
+
+     FFTPREP.IN       - Name of the Input Channel
+            .OUT      - Name of the Ouput pre-processed channel
+"
+// Revision History:
+// v5.1.6: Added a message "1D-FFT does not support array channel filtering!"
+
+//===========================================================================
+
+RESOURCE = "fftprep.gr"
+#include "fftprep.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sOutCh;      // Channel Names
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh,OutCh;        // Channel handles
+DB_SYMB    Line;              // Line handle
+DGW        Diag;              // Dialogue handle
+LST        List;              // List handle
+real       rInterval;         // Space interval of input channel data
+real       rFstart;           // Fiducial start of input VV
+real       rFinc;             // Fiducial increment of input VV
+
+int        i;                 // utility int
+int        iLine;             // Number of Lines Processed
+int        iTotLines;         // Total Number of Lines to Process
+int        iVVlen;            // Length of input VV
+int        iDum;              // Flags if input VV is all dummy
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+VV         hVVin;             // VV for input channel
+VV         hVVout;            // VV for output channel
+
+FFT        hFFT;              // FFT for data processing
+
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFTPREP");
+
+
+      // --- Set up lists ---
+  
+      List = GetList_DGW(Diag,_FFTPREP_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_FFTPREP_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFTPREP_0,DGW_TEXT,"FFTPREP","IN");     
+      SetInfoSYS_DGW(Diag,_FFTPREP_1,DGW_TEXT,"FFTPREP","OUT");     
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFTPREP_0,DGW_TEXT,"FFTPREP","IN");     
+      GetInfoSYS_DGW(Diag,_FFTPREP_1,DGW_TEXT,"FFTPREP","OUT");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FFTPREP","IN",sInCh);
+   GetString_SYS("FFTPREP","OUT",sOutCh);
+
+   // --- Check for null input and output channel strings ---
+
+   if (!iStrlen_STR(sInCh))
+      Abort_SYS(_("Input Channel Name not specified"));
+
+   if (!iStrlen_STR(sOutCh))
+      Abort_SYS(_("Output Channel Name not specified"));   
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+   if(iGetColVA_DB(Data, InCh) > 1)
+      Abort_SYS(_("1D-FFT does not support array channel filtering!"));
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN))
+      DupSymbNoLock_DB(Data,InCh,sOutCh);       // Create it 
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh)
+      LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+   // --- create input and output VV's ---
+
+   hVVin = Create_VV(REAL,0);
+   hVVout = Create_VV(REAL,0);
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Filter line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);       
+
+      // --- Get the current channel data into input VV ---
+
+      GetChanVV_DB(Data,Line,InCh,hVVin);
+
+      iVVlen = iLength_VV(hVVin);
+      rFstart = rGetFidStart_VV(hVVin);
+      rFinc   = rGetFidIncr_VV(hVVin);
+      rInterval = rGetFidIncr_VV(hVVin);
+      SetFidStart_VV(hVVout,rFstart);
+      SetFidIncr_VV(hVVout,rFinc);
+
+      if (iVVlen)
+         iDum = iFindDum_VV(hVVin,0,(iVVlen-1),1,0);
+
+      if ((iVVlen) && (iDum != -1)) {
+
+         // --- Put the VV data into an FFT ---
+
+         hFFT = Create_FFT(hVVin,rInterval,FFT_DETREND_ALL);
+
+         // --- perform inverse function, NULL mask ---
+
+         Inverse_FFT(hFFT,hVVout,(VV)0);
+
+         Destroy_FFT(hFFT);
+
+      } else SetLen_VV(hVVout,iVVlen);
+
+
+      // --- Write the output VV back to database ---
+
+      PutChanVV_DB(Data,Line,OutCh,hVVout);
+
+
+      // --- Advance to Next Line ---    
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   // --- Clean up the VV's and FFT for next line ---
+
+   Destroy_VV(hVVin);
+   Destroy_VV(hVVout);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("FFT create preprocessed channel"),"FFTPREP;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh)
+      UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

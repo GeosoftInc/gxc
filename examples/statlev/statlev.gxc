@@ -1,0 +1,308 @@
+//===========================================================================
+NAME          = "Statistically level lines."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/LevTieLine/Simple Levelling"
+
+DESCRIPTION   = "
+
+  Calculates a least-squares trend line through an error channel to derive
+  a trend error curve, which is then added to a channel to be levelled.
+  The trend curve can be saved for later inspection.
+
+   STATLEV.IN    - Unleveled data channel
+          .OUT   - Ouput leveled channel
+          .ERROR - Leveling error (difference) channel
+          .TYPE  - process \"LINE\", \"TIE\" or \"SELECTED\" lines.
+          .TREND - Order of error trend polynomial
+          .OUTTR - Output trend channel (optional)
+"
+// Revision History:
+// v7.1.0: Load the output channels.
+//         Automatically switch current database from intersection database to flight database.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "statlev.gr"
+#include "statlev.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;                 // channel names
+string(STR_DB_SYMBOL) sOutCh;
+string(STR_DB_SYMBOL) sOutTCh;
+string(STR_DB_SYMBOL) sErrCh;
+string(STR_DEFAULT_SHORT) sType;                 // Type
+string(STR_FILE) sDB;
+
+int         iOrder;                // Trend Order
+int         iLines, iTotLines;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     InCh;                  // Channel Handles
+DB_SYMB     OutCh;       
+DB_SYMB     OutTCh;       
+DB_SYMB     ErrCh;       
+DB_SYMB     Line;
+DB_SELECT   Select;
+DGW         Diag;
+LST         List;                  // list handle
+int         i;                     // utility int
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+	// --- See if this is an intersection database and make the original database current. ---
+
+	GetRegSymbSetting_DB(Data, NULLSYMB, "Levelling.Database", sDB, sizeof(sDB)); 
+	if(iStrlen_STR(sDB) > 0)
+	{
+		UnLock_EDB(EData);
+		
+		EData = Load_EDB(sDB);		
+		Data = Lock_EDB(EData);
+	}		
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("STATLEVForm");
+
+     // --- Set up input and output lists ---
+
+     List = GetList_DGW(Diag,_STATLEVFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_STATLEVFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_STATLEVFORM_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_STATLEVFORM_5);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_STATLEVFORM_0,DGW_TEXT,"STATLEV","IN");
+     SetInfoSYS_DGW(Diag,_STATLEVFORM_1,DGW_TEXT,"STATLEV","OUT");
+     SetInfoSYS_DGW(Diag,_STATLEVFORM_2,DGW_TEXT,"STATLEV","ERROR");
+     SetInfoSYS_DGW(Diag,_STATLEVFORM_3,DGW_LISTALIAS,"STATLEV","TYPE");
+     SetInfoSYS_DGW(Diag,_STATLEVFORM_4,DGW_TEXT,"STATLEV","TREND");
+     SetInfoSYS_DGW(Diag,_STATLEVFORM_5,DGW_TEXT,"STATLEV","OUTTR");
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_STATLEVFORM_0,DGW_TEXT,"STATLEV","IN");  
+     GetInfoSYS_DGW(Diag,_STATLEVFORM_1,DGW_TEXT,"STATLEV","OUT");
+     GetInfoSYS_DGW(Diag,_STATLEVFORM_2,DGW_TEXT,"STATLEV","ERROR");
+     GetInfoSYS_DGW(Diag,_STATLEVFORM_3,DGW_LISTALIAS,"STATLEV","TYPE");
+     GetInfoSYS_DGW(Diag,_STATLEVFORM_4,DGW_TEXT,"STATLEV","TREND");
+     GetInfoSYS_DGW(Diag,_STATLEVFORM_5,DGW_TEXT,"STATLEV","OUTTR");
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("STATLEV","IN",sInCh);
+   GetString_SYS("STATLEV","OUT",sOutCh);
+   GetString_SYS("STATLEV","ERROR",sErrCh);
+   GetString_SYS("STATLEV","TYPE",sType);
+   iOrder = iGetInt_SYS("STATLEV","TREND");
+   GetString_SYS("STATLEV","OUTTR",sOutTCh);
+
+
+   // --- check channels to be different ---
+
+   if (  (iStrcmp_STR(sInCh,sErrCh,0) == 0) ||
+         (iStrcmp_STR(sErrCh,sOutCh,0) == 0) )
+         Abort_SYS(_("All channels must be different."));
+
+
+   // --- Do the Input & Error Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sInCh)) 
+      Abort_SYS(_("Input data channel does not exist."));
+   InCh = FindChan_DB(Data,sInCh);
+         
+   if (!iExistChan_DB(Data,sErrCh)) 
+      Abort_SYS(_("Input error channel does not exist."));
+   ErrCh = FindChan_DB(Data,sErrCh);
+         
+
+   // --- Create an output channel if it does not exist ---
+
+   if (!iExistChan_DB(Data,sOutCh))
+      DupSymbNoLock_DB(Data, InCh, sOutCh);
+   OutCh = FindChan_DB(Data,sOutCh);
+   
+      
+   // --- Create a temporary trend error channel name ---
+
+   if (iStrlen_STR(sOutTCh) == 0) Strcpy_STR(sOutTCh,"_TREND");
+
+
+   // --- if trend channel exists, delete it ---
+
+   if (iExistChan_DB(Data,sOutTCh)) {
+      OutTCh = FindChan_DB(Data,sOutTCh);
+      LockSymb_DB(Data,OutTCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(Data,OutTCh);
+      }
+
+   // --- make a trend channel ---
+      
+   OutTCh = DupSymbNoLock_DB(Data, ErrCh, sOutTCh);
+
+         
+   // --- work out the selection ---
+
+   ToUpper_STR(sType);
+   if (!iCharComp_STR(sType,"S")) {
+
+      Select = GetSelect_DB(Data);
+      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+
+      if (iCharComp_STR(sType,"L"))
+         Select_DB(Data,"L",DB_LINE_SELECT_INCLUDE);
+      else if (iCharComp_STR(sType,"T"))
+         Select_DB(Data,"T",DB_LINE_SELECT_INCLUDE);
+      else
+         Abort_SYS(_("TYPE must be \"Line\", \"Tie\" or \"Selected\""));
+   }
+
+
+   //----------------------------------------------------------------------
+   // Calculate the trend
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh != OutCh) 
+      LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,ErrCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutTCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+                           
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))  {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Statistical level line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Calculate the error trend ---
+
+      Trend_DU( Data, Line, ErrCh, OutTCh, iOrder );
+
+      Move_DU ( Data, Line, InCh, OutTCh, OutCh, DU_MOVE_PLUS );
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line);
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Statistical leveling"),"STATLEV;");
+   EasyMakerSymb_DB(Data,OutTCh,_("Statistical leveling"),"STATLEV;");
+
+   // --- Unlock the channel symbol ---
+
+   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLockSymb_DB(Data,ErrCh);
+   UnLockSymb_DB(Data,OutTCh);
+
+
+   // --- return selections if not statistical levelling ---
+
+   if (!iCharComp_STR(sType,"S"))
+      SetSelect_DB(Data,Select);
+
+ 
+   // --- delete temporary channel ---
+  
+   if (iStrcmp_STR(sOutTCh,"_TREND",0)==0) {
+      LockSymb_DB(Data,OutTCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(Data,OutTCh);
+      }
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+   
+   
+   // --- Load the output channels ---
+   
+   LoadChan_EDB(EData, sOutCh);
+   if(iStrlen_STR(sOutTCh))
+		LoadChan_EDB(EData, sOutTCh);
+   
+}

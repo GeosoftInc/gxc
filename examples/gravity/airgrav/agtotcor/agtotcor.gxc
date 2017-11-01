@@ -1,0 +1,344 @@
+//===========================================================================
+NAME          = "Calculate total (Vacc,Eotvos,tide(optional),Lat,Freeair) corrected Free-air anomaly"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   AGTOTCOR.LAT     Latitude channel
+           .LONG    Longitude channel 
+           .HEIGHT  Height channel
+           .GMT     Hours to GMT (+ in West)
+           .INCH    Input absolute gravity channel
+           .OUTCH   Output Free-air anomaly channel
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.3: New GX.
+    
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "agtotcor.gr"
+#include "agtotcor.grh"
+
+//===========================================================================
+//                                INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DB          Data;                   // Database handle
+EDB         EData;                  // Edited database handle
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // Channel list handle
+EXP         Exp;
+VV          hVV;
+
+DB_SYMB     Line,LatCh,LongCh,HeightCh,HTDCh,InCh,OutCh,LatDCh,LongDCh,TimeCh,TimeDCh,DateCh,TideCh;
+
+int         i,iTideCor;                      // Utility
+real        rGMT;
+
+string(STR_DEFAULT)  sLatCh,sLongCh,sHeightCh,sHTDCh,sInCh,sOutCh,sLatDCh,sLongDCh,sTimeDCh,sTideCh,sGMT;
+string(1024)         sFormula;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGTOTCOR");
+                                                 
+
+      // --- Set up channel lists ---
+      
+      List = GetList_DGW(Diag,_AGTOTCOR_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGTOTCOR_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+      List = GetList_DGW(Diag,_AGTOTCOR_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+      List = GetList_DGW(Diag,_AGTOTCOR_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+      List = GetList_DGW(Diag,_AGTOTCOR_5);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+  
+      //GetString_SYS("AGTOTCOR","LAT",sTemp);
+      //if (iStrMin_STR(sTemp) == 0)    SetInfo_DGW(Diag,_AGTOTCOR_0,DGW_TEXT,"Latitude");
+      //GetString_SYS("AGTOTCOR","LONG",sTemp);
+      //if (iStrMin_STR(sTemp) == 0)    SetInfo_DGW(Diag,_AGTOTCOR_1,DGW_TEXT,"Longitude");
+      //GetString_SYS("AGTOTCOR","HEIGHT",sTemp);
+      //if (iStrMin_STR(sTemp) == 0)    SetInfo_DGW(Diag,_AGTOTCOR_2,DGW_TEXT,"Height");
+         
+      SetInfoSYS_DGW(Diag,_AGTOTCOR_0,DGW_TEXT,"AGTOTCOR","LAT");
+      SetInfoSYS_DGW(Diag,_AGTOTCOR_1,DGW_TEXT,"AGTOTCOR","LONG");
+      SetInfoSYS_DGW(Diag,_AGTOTCOR_2,DGW_TEXT,"AGTOTCOR","HEIGHT");
+      SetInfoSYS_DGW(Diag,_AGTOTCOR_3,DGW_TEXT,"AGTOTCOR","GMT");
+      SetInfoSYS_DGW(Diag,_AGTOTCOR_4,DGW_TEXT,"AGTOTCOR","INCH");
+      SetInfoSYS_DGW(Diag,_AGTOTCOR_5,DGW_TEXT,"AGTOTCOR","OUTCH");
+
+     
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();           // They hit cancel
+                                                 
+     
+      // --- Read inputs from the dialogue box ---
+      
+      GetInfoSYS_DGW(Diag,_AGTOTCOR_0,DGW_TEXT,"AGTOTCOR","LAT");
+      GetInfoSYS_DGW(Diag,_AGTOTCOR_1,DGW_TEXT,"AGTOTCOR","LONG");
+      GetInfoSYS_DGW(Diag,_AGTOTCOR_2,DGW_TEXT,"AGTOTCOR","HEIGHT");
+      GetInfoSYS_DGW(Diag,_AGTOTCOR_3,DGW_TEXT,"AGTOTCOR","GMT");
+      GetInfoSYS_DGW(Diag,_AGTOTCOR_4,DGW_TEXT,"AGTOTCOR","INCH");
+      GetInfoSYS_DGW(Diag,_AGTOTCOR_5,DGW_TEXT,"AGTOTCOR","OUTCH");
+     
+      // --- Destroy the Dialogue ---
+     
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGTOTCOR","LAT",sLatCh);
+   GetString_SYS("AGTOTCOR","LONG",sLongCh);
+   GetString_SYS("AGTOTCOR","HEIGHT",sHeightCh);
+   GetString_SYS("AGTOTCOR","GMT",sGMT);
+   GetString_SYS("AGTOTCOR","INCH",sInCh);
+   GetString_SYS("AGTOTCOR","OUTCH",sOutCh);
+    
+   if(iStrlen_STR(sGMT)>0)  {
+      rGMT = rGetReal_SYS("AGTOTCOR","GMT");
+      if(rGMT==rDUMMY)
+         Abort_SYS(_("Invalid GMT value!"));
+      iTideCor = 1;
+   } else
+      iTideCor = 0;
+
+   
+   // --- Get handles to the input data channels ---
+
+   if (!iExistChan_DB(Data,sLatCh))
+      Abort_SYS(_("The latitude channel does not exist."));
+   if (!iExistChan_DB(Data,sLongCh))
+      Abort_SYS(_("The longitude channel does not exist."));
+   if (!iExistChan_DB(Data,sHeightCh)) 
+      Abort_SYS(_("The height channel does not exist."));
+   if (!iExistChan_DB(Data,sInCh)) 
+      Abort_SYS(_("The input gravity channel does not exist."));
+   if (!iExistChan_DB(Data,"Time")) 
+      Abort_SYS(_("The Time channel does not exist."));
+
+   LatCh  = FindChan_DB(Data,sLatCh);
+   LongCh = FindChan_DB(Data,sLongCh);
+   HeightCh = FindChan_DB(Data,sHeightCh);
+   InCh = FindChan_DB(Data,sInCh);                       
+   TimeCh = FindChan_DB(Data,"Time");                       
+   LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,LongCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,HeightCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   if(iTideCor) {
+      if (!iExistChan_DB(Data,"Date")) 
+         Abort_SYS(_("The Date channel does not exist."));
+      DateCh = FindChan_DB(Data,"Date");                       
+      LockSymb_DB(Data,DateCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+  
+      Strcpy_STR(sTideCh,_n("TideCor"));
+      if (iExistChan_DB(Data,sTideCh)) {
+         TideCh = FindChan_DB(Data,sTideCh);
+         LockSymb_DB(Data,TideCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+      } else
+         TideCh = DupSymb_DB(Data,DateCh,sTideCh);        
+      SetChanProtect_DB(Data,TideCh,DB_CHAN_UNPROTECTED);     
+   }
+
+
+   // --- Get handle to the output channel ---
+
+   if (!iExistChan_DB(Data,sOutCh)) 
+      OutCh = DupSymb_DB(Data,InCh,sOutCh);
+   else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+      SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);     
+   }   
+                         
+
+   // --- Create First derivative of Lat,Long,Time,Height channels ---
+
+   Strcpy_STR(sLatDCh,"Lat_Deriv");
+   if (iExistChan_DB(Data,sLatDCh)) {
+      LatDCh = FindChan_DB(Data,sLatDCh);
+      LockSymb_DB(Data,LatDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   } else
+      LatDCh = DupSymb_DB(Data,LatCh,sLatDCh);        
+
+   Strcpy_STR(sLongDCh,"Long_Deriv");
+   if (iExistChan_DB(Data,sLongDCh)) {
+      LongDCh = FindChan_DB(Data,sLongDCh);
+      LockSymb_DB(Data,LongDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   } else
+      LongDCh = DupSymb_DB(Data,LongCh,sLongDCh);        
+
+   Strcpy_STR(sTimeDCh,"Time_Deriv");
+   if (iExistChan_DB(Data,sTimeDCh)) {
+      TimeDCh = FindChan_DB(Data,sTimeDCh);
+      LockSymb_DB(Data,TimeDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   } else
+      TimeDCh = DupSymb_DB(Data,TimeCh,sTimeDCh);        
+
+   Strcpy_STR(sHTDCh,"Height_Deriv2");
+   if (iExistChan_DB(Data,sHTDCh)) {
+      HTDCh = FindChan_DB(Data,sHTDCh);
+      LockSymb_DB(Data,HTDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   } else
+      HTDCh = DupSymb_DB(Data,HeightCh,sHTDCh);        
+
+
+   // --- Create expression ---
+
+   Strcpy_STR(sFormula,_n("@r2d=57.29578;@a=6378137.0; @f=1/298.2572221; @w=0.000072921151467; @ha=1+$sHeightCh/@a;"));
+   Strcat_STR(sFormula,"@lat=$sLatCh/@r2d;@long=$sLongCh/@r2d;@slat2=sin(@lat)**2;@clat2=cos(@lat)**2;");
+   Strcat_STR(sFormula,"@td=$sTimeDCh*3600;@latd=$sLatDCh/@r2d/@td;@longd=$sLongDCh/@r2d/@td;@latd2=@latd**2;@longd2=@longd**2;");
+   
+   Strcat_STR(sFormula,"@eotvos=100000.0*((@a*@latd2)*((3*@slat2-2)*@f+@ha)+(@a*@clat2*(@longd2+2*@w*@longd))*(@ha+@f*@slat2));");
+
+   Strcat_STR(sFormula,"@vaccor=100000.0*$sHTDCh/@td/@td;");
+
+   Strcat_STR(sFormula,"@latcor=978031.85*(1+0.005278895*@slat2+0.000023462*(@slat2**2));");
+
+   Strcat_STR(sFormula,"@facor=$sHeightCh*0.3086;");
+
+   if(iTideCor)
+      Strcat_STR(sFormula,"$sOutCh=$sInCh-(@vaccor-@eotvos+@latcor-@facor-$sTideCh);");
+   else
+      Strcat_STR(sFormula,"$sOutCh=$sInCh-(@vaccor-@eotvos+@latcor-@facor);");
+
+   Exp = Create_EXP(Data,sFormula,1024);
+
+   hVV = Create_VV(REAL,0);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating total corrected Free-air anomaly"),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, InCh) > 0) {
+
+         GetChanVV_DB(Data,Line,TimeCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,TimeDCh,hVV);
+
+         GetChanVV_DB(Data,Line,LatCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,LatDCh,hVV);
+
+         GetChanVV_DB(Data,Line,LongCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,LongDCh,hVV);
+
+         GetChanVV_DB(Data,Line,HeightCh,hVV);
+         Diff_VV(hVV,2);
+         PutChanVV_DB(Data,Line,HTDCh,hVV);
+
+
+         // --- Tide correction ---
+
+         if(iTideCor)
+            GravTide_DU(Data,Line,LatCh,LongCh,DateCh,TimeCh,rGMT,TideCh);
+
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Total corrected Free-air anomaly"),"AGTOTCOR;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Free-air anomaly"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   UnLockSymb_DB(Data,LatCh);
+   UnLockSymb_DB(Data,LongCh);
+   UnLockSymb_DB(Data,HeightCh);
+   UnLockSymb_DB(Data,HTDCh);
+   UnLockSymb_DB(Data,LatDCh);
+   UnLockSymb_DB(Data,LongDCh);
+   UnLockSymb_DB(Data,TimeCh);
+   UnLockSymb_DB(Data,TimeDCh);
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   if(iTideCor)   {
+      UnLockSymb_DB(Data,DateCh);
+      UnLockSymb_DB(Data,TideCh);
+   }
+
+   UnLock_EDB(EData);
+
+
+   // --- Load output channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);      
+}
+

@@ -1,0 +1,455 @@
+//===========================================================================
+
+NAME          = "Grid Histogram"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image"
+
+DESCRIPTION   = "
+
+      GRIDHIST.AGG         view/agg/layer name to get ITR from.
+              .TITLE       Grid histogram Title
+              .SUBTITLE    Grid histogram Sub Title
+              .ANNSIZE     Annotation size
+              .HEIGHT      Box height
+              .WIDTH       Box width
+              .MAXHEIGHT   Maximum grid histogram height
+              .BINS        Number of histogram bins
+              .X           X location of bottom left corner of boxes
+              .Y           Y location of bottom left corner of boxes
+              .STYLE       Options of Histogram Style: None, Post Min/Max
+"
+// Revision History:
+// v6.4.1: Exlude AGGs in the Base view from the dialog list.
+// v6.0.1: New GX.
+//===========================================================================
+
+RESOURCE="gridhist.gr"
+#include "gridhist.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+MVIEW BaseView, DataView;
+ITR   hITR;
+ST    hST, hSTHist, hSTBox;
+VV    GridNameVV, hVV;
+IMG   Img;
+
+int   i, iN, iLog, iProb, iSumm, iNV;
+int   iBins, iDummies, iNValid, iDecimal, iBoxW, iPow;
+real  rAnn, rHeight, rWidth, rX, rY, rMaxCount, rTmp, rInc;
+real  rMin, rMax, rMean, rStdDev, rLambda, rSumWidth;
+string(STR_DEFAULT_LONG) sAgg, sTmp;
+string(STR_GROUP) sGroup, sVal1, sVal2, sView;
+string(STR_DEFAULT_LONG) sTitle,sSubTitle,sFont;
+string(STR_DEFAULT) sName;
+string(STR_GROUP) sGrpName;
+string(STR_DEFAULT_SHORT) sStyle;
+string(STR_DEFAULT_LONG) sX,sY;
+string(STR_FILE) sGrid;
+
+DGW   Diag;
+LST   AggLST, List;          // List handle
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Set default parameters ---
+   
+   DefaultInt_SYS("GRIDHIST","BINS",50);
+   DefaultReal_SYS("GRIDHIST","ANNSIZE",2.0);
+   DefaultReal_SYS("GRIDHIST","HEIGHT",50.0);
+   DefaultReal_SYS("GRIDHIST","WIDTH",50.0);
+   DefaultString_SYS("GRIDHIST","STYLE","None");
+   DefaultInt_SYS("GRIDHIST","LOG",0);
+   DefaultInt_SYS("GRIDHIST","SUMM",0);
+   DefaultInt_SYS("GRIDHIST","PROB",0);
+   DefaultInt_SYS("GRIDHIST","BOXWISK",0);
+
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+   // --- Get the map ---
+   
+   EMap = Current_EMAP();
+
+   // --- check for base view ---
+
+   Map = Lock_EMAP(EMap);
+   
+   if (!iExistView_MAP(Map,"*Base"))
+      Abort_SYS(_("A base view is required to use this GX."));
+
+   AggLST = Create_LST(2*STR_GROUP);
+   AGGListEx_MAP(Map,AggLST,1,MAP_LIST_MODE_NOT3D);
+
+
+   // --- Remove any colour-shaded AGGs from the list
+
+   iN = iSize_LST(AggLST);
+   for(i=iN-1;i>0;i--) 
+   {
+      // --- If an item is the same as the previous item with an "_s" appended, then the two
+      //     are a pair of AGGS, with the second being the colour shading ---
+               
+      GetItem_LST(AggLST, 0, i, sVal1);
+      GetItem_LST(AggLST, 0, i-1, sVal2);
+
+      Strcat_STR(sVal2, "_s");
+
+      if(iStrcmp_STR(sVal1, sVal2, STR_CASE_TOLERANT)==0)
+         DelItem_LST(AggLST, i);
+   }
+         
+   
+   // --- Remove any BASE group AGGs from the list ---
+
+   iN = iSize_LST(AggLST);
+   for(i=iN-1;i>=0;i--) 
+   {               
+      GetItem_LST(AggLST, 0, i, sVal1);
+
+      if(iStrncmp_STR(sVal1, _n("Base"), 4, STR_CASE_TOLERANT)==0)
+         DelItem_LST(AggLST, i);
+   }
+         
+   UnLock_EMAP(EMap);   
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("Gridhist");
+
+      
+      // --- Set up lists ---
+  
+      List = GetList_DGW(Diag,_GRIDHIST_0);
+      Copy_LST(List, AggLST);
+      Sort_LST(List,0,0);
+     
+
+      // --- If only one Agg is in the list, make it the default ---
+
+      if(iSize_LST(List)==1) {
+         GetItem_LST(List,0,0,sAgg);         
+         SetString_SYS("GRIDHIST","AGG",sAgg);
+      }
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDHIST_0,DGW_TEXT,"GRIDHIST","AGG");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_1,DGW_TEXT,"GRIDHIST","TITLE");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_2,DGW_TEXT,"GRIDHIST","ANNSIZE");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_3,DGW_TEXT,"GRIDHIST","BINS");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_4,DGW_TEXT,"GRIDHIST","HEIGHT");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_5,DGW_TEXT,"GRIDHIST","WIDTH");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_6,DGW_TEXT,"GRIDHIST","X");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_7,DGW_TEXT,"GRIDHIST","Y");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_8,DGW_LISTALIAS,"GRIDHIST","LOG");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_9,DGW_LISTALIAS,"GRIDHIST","SUMM");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_10,DGW_LISTALIAS,"GRIDHIST","BOXWISK");
+      SetInfoSYS_DGW(Diag,_GRIDHIST_11,DGW_LISTALIAS,"GRIDHIST","PROB");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==-1) Cancel_SYS(); 
+      while (i==0)  {
+         GetInfoSYS_DGW(Diag,_GRIDHIST_6,DGW_TEXT,"GRIDHIST","X");
+         GetInfoSYS_DGW(Diag,_GRIDHIST_7,DGW_TEXT,"GRIDHIST","Y");
+         GetString_SYS("GRIDHIST","X",sX);
+         GetString_SYS("GRIDHIST","Y",sY);
+         if (iStrMin_STR(sX) <=0 || iStrMin_STR(sY) <=0) {
+            DisplayMessage_SYS(_("Histogram"),_("Please Click the Locate Button to set X/Y Values"));
+            i = iRunDialogue_DGW(Diag);
+            if (i==-1) Cancel_SYS(); 
+         } else
+            break;
+      }
+      while (i == 2) {
+      
+         // --- Get the coordinates of a user selected box ---
+
+         iSetCurrentView_EMAP(EMap,"*Base");
+         rX=rY=0.0;
+         if (iGetPoint_EMAP(EMap,_("Locate bottom left corner..."),rX,rY)) Cancel_SYS(); 
+
+         SetReal_SYS("GRIDHIST","X",rX);
+         SetReal_SYS("GRIDHIST","Y",rY);
+         SetInfoSYS_DGW(Diag,_GRIDHIST_6,DGW_TEXT,"GRIDHIST","X");
+         SetInfoSYS_DGW(Diag,_GRIDHIST_7,DGW_TEXT,"GRIDHIST","Y");
+            
+         i = iRunDialogue_DGW(Diag);
+         if (i==-1) Cancel_SYS(); 
+         
+         while (i==0)  {
+            GetInfoSYS_DGW(Diag,_GRIDHIST_6,DGW_TEXT,"GRIDHIST","X");
+            GetInfoSYS_DGW(Diag,_GRIDHIST_7,DGW_TEXT,"GRIDHIST","Y");
+            GetString_SYS("GRIDHIST","X",sX);
+            GetString_SYS("GRIDHIST","Y",sY);
+            if (iStrMin_STR(sX) <=0 || iStrMin_STR(sY) <=0) {
+               DisplayMessage_SYS(_("Histogram"),_("Please Click the Locate Button to set X/Y Values"));
+               i = iRunDialogue_DGW(Diag);
+               if (i==-1) Cancel_SYS(); 
+            } else
+               break;
+         }
+      }         
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDHIST_0,DGW_TEXT,"GRIDHIST","AGG");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_1,DGW_TEXT,"GRIDHIST","TITLE");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_2,DGW_TEXT,"GRIDHIST","ANNSIZE");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_3,DGW_TEXT,"GRIDHIST","BINS");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_4,DGW_TEXT,"GRIDHIST","HEIGHT");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_5,DGW_TEXT,"GRIDHIST","WIDTH");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_6,DGW_TEXT,"GRIDHIST","X");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_7,DGW_TEXT,"GRIDHIST","Y");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_8,DGW_LISTALIAS,"GRIDHIST","LOG");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_9,DGW_LISTALIAS,"GRIDHIST","SUMM");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_10,DGW_LISTALIAS,"GRIDHIST","BOXWISK");
+      GetInfoSYS_DGW(Diag,_GRIDHIST_11,DGW_LISTALIAS,"GRIDHIST","PROB");
+   }
+
+   GetString_SYS("GRIDHIST","AGG",sAgg);
+   GetString_SYS("GRIDHIST","TITLE",sTitle);
+   GetString_SYS("GRIDHIST","SUBTITLE",sSubTitle);
+   GetString_SYS("GRIDHIST","STYLE",sStyle);
+   iBins    = iGetInt_SYS("GRIDHIST","BINS");
+   rAnn     = rGetReal_SYS("GRIDHIST","ANNSIZE");
+   rHeight  = rGetReal_SYS("GRIDHIST","HEIGHT");
+   rWidth   = rGetReal_SYS("GRIDHIST","WIDTH");
+   rX       = rGetReal_SYS("GRIDHIST","X");
+   rY       = rGetReal_SYS("GRIDHIST","Y");
+   iLog     = iGetInt_SYS("GRIDHIST","LOG");
+   iProb    = iGetInt_SYS("GRIDHIST","PROB");
+   iSumm    = iGetInt_SYS("GRIDHIST","SUMM");
+   iBoxW    = iGetInt_SYS("GRIDHIST","BOXWISK");
+   rLambda = 0.0; //--- Not used ---
+   rSumWidth = 50.0;
+   
+
+   // --- Validate parameters ---
+
+   if (iBins < 2 || iBins>1000)
+      Abort_SYS(_("The number of histogram bins must be in the range 2-1000"));
+   if (rAnn <= 0.0)
+      Abort_SYS(_("Annotation size must be greater than 0.0"));
+   if (rHeight <= 0.0)
+      Abort_SYS(_("Histogram height must be greater than 0.0"));
+   if (rWidth <= 0.0)
+      Abort_SYS(_("Histogram width must be greater than 0.0"));
+      
+
+      
+
+   // --- get the map ---
+   
+   Map  = Lock_EMAP(EMap);
+   
+   
+   // --- open the data view ---
+
+   BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+
+   // --- create histogram group ---
+
+   Strcpy_STR(sName,sAgg);
+   i = iTokens_STR(sName,"\\");
+   GetToken_STR(sGroup,sName,(i-1));
+
+   GenGroupName_STR("GRIDHIST",sGroup,"",sGrpName);
+   Strcpy_STR(sName,sGrpName);
+   StartGroup_MVIEW(BaseView,sName,MVIEW_GROUP_NEW);
+
+
+   // --- add the maker ---
+
+   Maker_MVIEW(BaseView,0,1,"gridhist",MAKER_GX,_("Grid histogram..."),"GRIDHIST;");
+
+
+   // --- set font characteristics --- 
+
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Arial"));
+   TextFont_MVIEW(BaseView,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(BaseView,C_BLACK);
+   TextSize_MVIEW(BaseView,rAnn);
+
+
+   // --- set line style ---
+
+   LineColor_MVIEW(BaseView,C_BLACK);
+   LineStyle_MVIEW(BaseView,0,0.0);
+   LineThick_MVIEW(BaseView,rAnn/10.0);
+
+
+   // --- get ITR's and draw bar ---
+   
+   hITR = CreateMap_ITR(Map,sAgg);
+   
+   
+   // --- Get the IMGs from the AGG ---
+
+   Strcpy_STR(sTmp, sAgg);
+   
+   i = iStrStr_STR(sTmp, "\\", STR_CASE_TOLERANT);
+   Substr_STR (sView, sTmp, 0, i);      
+   Substr_STR (sAgg, sTmp, i+1, iStrlen_STR(sAgg)-i);      
+   
+   DataView = Create_MVIEW(Map,sView,MVIEW_READ);
+
+   GridNameVV = Create_VV(-STR_FILE, 0);                    
+   
+   // --- Extract just the Agg name from the full string ---
+   
+   Strcpy_STR(sTmp, sAgg);   
+   i = iStrStr_STR(sTmp, "\\", STR_CASE_TOLERANT);
+   if(i!=-1)
+      Substr_STR (sAgg, sTmp, 0, i);
+   
+   GetAGGFileNames_MVIEW(DataView, sAgg, GridNameVV);
+   
+   GetString_VV(GridNameVV, 0, sGrid);
+   
+   
+   // --- Get the Grid stats ---
+   
+   GridStatExt_IMU(sGrid, IMU_STAT_FORCED_NO, iNValid, iDummies,
+                    rMin, rMax, rMean, rStdDev);
+
+   
+   // --- Check values ---
+   
+   if(iNValid==0)
+      Abort_SYS(_("There are no valid items in the grid."));   
+      
+   if(rMin==rMax)
+      Abort_SYS(_("The grid is a constant value."));
+      
+   rMax = 1.0001*rMax;
+      
+
+   // --- Get nicer range values, but for log scales only
+   //     for the maximum ---
+
+   rTmp = rMin;
+   NicerScale_MATH(rTmp, rMax, rInc, iPow);
+   if(!iLog) rMin = rTmp;
+
+   if(iLog && rMin <= 0.0) rMin = 0.001;
+      
+
+   // --- Finally, ensure that if it is logarithmic, that the 
+   //     minimum is not 0 ---
+   
+   if (iLog) {
+      if (rMax <= 0.0) {
+         rMin = 1.0;
+         rMax = 2.0;
+      }
+      else if (rMin <= 0.0) 
+         rMin = rMax / 10.0;
+   }
+      
+   hST = CreateExact_ST();
+   hSTHist = CreateExact_ST();
+   if (iBoxW)
+      hSTBox  = CreateExact_ST();
+   else   
+      hSTBox  = (ST)-1;
+
+   
+   // --- Set up the histogram ---
+   
+   if(iLog==1)   
+      Histogram2_ST(hSTHist, iBins+2, rLog10_MATH(rMin), rLog10_MATH(rMax));
+   else
+      Histogram2_ST(hSTHist, iBins+2, rMin, rMax);
+
+
+   if (iBoxW)
+   {
+      if(iLog==1)   
+        Histogram2_ST(hSTBox,4098,rLog10_MATH(rMin),rLog10_MATH(rMax));
+      else
+        Histogram2_ST(hSTBox,4098,rMin,rMax);
+   }
+
+
+   // --- Scan the grid ---
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Scanning grid"), 1);
+
+   hVV = Create_VV(REAL, 0);      
+   Img = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READONLY);
+   iNV = iNV_IMG(Img);
+   for(i=0;i<iNV;i++) {
+      
+      ProgUpdateL_SYS(i,iNV);
+      if(iCheckStop_SYS()) Cancel_SYS();
+               
+      ReadV_IMG(Img, i, 0, 0, hVV);
+      
+      Statistics_VV(hST,hVV);
+      
+      if(iLog==1)
+         Log_VV(hVV,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,rMin);
+      Statistics_VV(hSTHist,hVV);
+         
+      if(iBoxW)            
+         Statistics_VV(hSTBox,hVV);
+   }
+   Destroy_IMG(Img);
+   ProgUpdate_SYS(100);
+   Progress_SYS(0);
+   
+   
+   // --- Expand a bit because histograms have exclusive maxima ---
+   
+   rMax = 1.0001*rMax;
+   if(rMax == 0.0) rMax = 1.0;
+   
+   
+   // --- Get the biggest count for scaling ---
+   
+   rMaxCount = rGetInfo_ST(hSTHist, ST_HIST_MAXCOUNT); 
+   if (rMaxCount == 0.0) rMaxCount = 1.0;
+   
+   
+   // --- Plot the histogram ---
+   
+   iDecimal = -4;
+   
+   Histogram5_MVU(BaseView, hST, hSTHist, sTitle, "", rLambda,
+                  rX, rY, rWidth, rHeight, rMin, 0.0, rMax-rMin, rMaxCount,
+                  rSumWidth,iLog,iSumm,iProb,iColor_MVIEW("k100"),iDecimal,-4,hSTBox,hITR);
+   
+   
+   UnLock_EMAP(EMap);
+}

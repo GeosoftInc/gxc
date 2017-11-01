@@ -1,0 +1,199 @@
+//===========================================================================
+
+NAME          = "Create a new SEMPLOT overlay group"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Plot"
+
+DESCRIPTION   = "
+
+   SEMNEWGROUP.VIEW  existing view name
+              .GROUP new group name 
+
+"
+// Revision History
+// v6.4.0: Modifications to detect and allow OMS processing.
+// v6.3.0 Fix bug when no current view set.
+// v5.1.7 New GX for Semplot upgrade.
+//===========================================================================
+
+RESOURCE = "semnewgroup.gr"
+#include "semnewgroup.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+LST   ViewList, Lst;
+
+int   i, iN, iExists;
+real  rMinX,rMinY,rMaxX,rMaxY;
+string(STR_VIEW) sView, sCurView;
+string(STR_GROUP) sGroup;
+string(STR_VIEW_GROUP) sViewGroup;
+string(STR_DEFAULT_LONG) sMsg;
+
+//===========================================================================
+//                             MAP CODE
+//===========================================================================
+
+{
+
+   EMap = Current_EMAP();
+   if (!iScript_SYS())
+      GetCurrentView_EMAP(EMap, sCurView);
+   Map = Lock_EMAP(EMap);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create a LST of all XYPLOT and TRIPLOT type views ---
+
+      Lst = Create_LST(128);
+      ViewList_MAP(Map, Lst);
+
+
+      // --- Remove all views that are not XYPLOT or TRIPLOT views ---
+
+      iN = iSize_LST(Lst);
+      for(i=iN-1;i>=0;i--) {
+
+         GetItem_LST(Lst,0,i,sView);
+         if(iStrncmp_STR(sView, "XYplot_", 7, STR_CASE_TOLERANT) != 0 &&
+            iStrncmp_STR(sView, "Triplot_", 7, STR_CASE_TOLERANT) != 0)
+         {
+            DelItem_LST(Lst, i);
+         }
+      }
+      iN = iSize_LST(Lst);
+
+      if(iN==0) {
+         Abort_SYS(_("The current map does not appear to contain any XYPlot or TriPlot views."));
+      }
+
+      
+      // --- If the current view is not on the list, reset the current view ---
+
+      if(iFindItem_LST(Lst, 0, sCurView)==-1) {
+         GetItem_LST(Lst,0,0,sCurView);
+   
+         UnLock_EMAP(EMap);
+         iSetCurrentView_EMAP(EMap, sCurView);
+         Map = Lock_EMAP(EMap);
+      }
+
+
+      while(1) {
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("semnewgroup");
+
+
+         // --- Set up lists ---
+
+         ViewList = GetList_DGW(Diag,_SEMNEWGROUP_0);
+         Copy_LST(ViewList,Lst);
+         Sort_LST(ViewList, 0, 0);
+
+         SetString_SYS("SEMNEWGROUP", "VIEW", sCurView);
+
+
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_SEMNEWGROUP_0,DGW_TEXT,"SEMNEWGROUP","VIEW");
+         SetInfoSYS_DGW(Diag,_SEMNEWGROUP_1,DGW_TEXT,"SEMNEWGROUP","GROUP");
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == 1)
+            Cancel_SYS();
+
+
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag,_SEMNEWGROUP_0,DGW_TEXT,"SEMNEWGROUP","VIEW");
+         GetInfoSYS_DGW(Diag,_SEMNEWGROUP_1,DGW_TEXT,"SEMNEWGROUP","GROUP");
+
+         Destroy_DGW(Diag);
+
+      
+         // --- Does the group already exist? ---
+
+         GetString_SYS("SEMNEWGROUP","VIEW",sView);
+         GetString_SYS("SEMNEWGROUP","GROUP",sGroup);
+
+         View = Create_MVIEW(Map,sView,MVIEW_READ);
+         iExists = iExistGroup_MVIEW(View, sGroup);
+         Destroy_MVIEW(View);
+
+         if(iExists) {
+
+            Printf_STR(sMsg, sizeof(sMsg), _("The selected group \"%s\" already exists.\r\nDo you wish to continue?"), sGroup);
+
+            if(!iDisplayQuestion_SYS(_("New Map Group"), sMsg)) continue;
+         }
+         break;
+      }
+   }
+
+
+   // --- get parameters ---
+
+   GetString_SYS("SEMNEWGROUP","VIEW",sView);
+   GetString_SYS("SEMNEWGROUP","GROUP",sGroup);
+
+   
+   // --- open the view ---
+
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+
+
+   // --- create new group ---
+
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- add invisible rectangle ---
+
+   rMinX = rMinY = rMaxX = rMaxY = 0.0;
+   Extent_MVIEW(View,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_VIEW,
+                rMinX,rMinY,rMaxX,rMaxY);
+   LineColor_MVIEW(View,C_TRANSPARENT);
+   FillColor_MVIEW(View,C_TRANSPARENT);
+   Rectangle_MVIEW(View,rMinX,rMinY,rMaxX,rMaxY);
+   LineColor_MVIEW(View,C_BLACK);
+   
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+      
+
+   // --- activate the group ---
+   
+   if (!iScript_SYS()) {
+      Strcpy_STR(sViewGroup,sView);
+      Strcat_STR(sViewGroup,"/");
+      Strcat_STR(sViewGroup,sGroup);
+      ActivateGroup_EMAP(EMap,sViewGroup);
+   }
+
+
+   // --- Set input group for SEMOVERLAY GX ---
+
+   SetString_SYS("SEMOVERLAY","GROUP",sGroup);
+
+
+}

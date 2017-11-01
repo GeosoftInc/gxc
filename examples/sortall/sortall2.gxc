@@ -1,0 +1,102 @@
+//===========================================================================
+NAME          = "Sort all channels on two reference channels"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   SORTALL2.CHANNEL1   Primary channel name
+           .ORDER1      \"ASCENDING\" or \"DESCENDING\"
+           .CHANNEL1   Secondary channel name
+           .ORDER1      \"ASCENDING\" or \"DESCENDING\"
+           .READONLY   sort read-only channels \"Yes\" or \"No\"
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "sortall2.gr"
+#include "sortall2.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DB          Data;         // Database handle
+EDB         EData;        // Database handle
+DGW         Diag;
+LST         List;               // list handle
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SORTALL2");
+
+
+      // --- Set up input and output lists ---
+
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+      List = GetList_DGW(Diag,_SORTALL2_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      Copy_LST(GetList_DGW(Diag,_SORTALL2_2),List);
+      UnLock_EDB(EData);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_SORTALL2_0,DGW_TEXT,"SORTALL2","CHANNEL1");
+      SetInfoSYS_DGW(Diag,_SORTALL2_1,DGW_TEXT,"SORTALL2","ORDER1");
+      SetInfoSYS_DGW(Diag,_SORTALL2_2,DGW_TEXT,"SORTALL2","CHANNEL2");
+      SetInfoSYS_DGW(Diag,_SORTALL2_3,DGW_TEXT,"SORTALL2","ORDER2");
+      SetInfoSYS_DGW(Diag,_SORTALL2_4,DGW_TEXT,"SORTALL2","READONLY");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();    
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_SORTALL2_0,DGW_TEXT,"SORTALL2","CHANNEL1");
+      GetInfoSYS_DGW(Diag,_SORTALL2_1,DGW_TEXT,"SORTALL2","ORDER1");
+      GetInfoSYS_DGW(Diag,_SORTALL2_2,DGW_TEXT,"SORTALL2","CHANNEL2");
+      GetInfoSYS_DGW(Diag,_SORTALL2_3,DGW_TEXT,"SORTALL2","ORDER2");
+      GetInfoSYS_DGW(Diag,_SORTALL2_4,DGW_TEXT,"SORTALL2","READONLY");
+
+      GetInfoSYS_DGW(Diag,_SORTALL2_4,DGW_LISTALIAS,"SORTALL2","READONLY_ALIAS");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- sort ---
+
+   iRunGX_SYS("sortal2");
+
+
+}

@@ -1,0 +1,288 @@
+//===========================================================================
+NAME          = "GRIDFILL"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GMSYS-3D Tools/Manual FFT Preparation"
+
+DESCRIPTION   = "\Interpolate a grid to fill all dummy areas.\r\n\
+Parameters: 
+\r\n\
+       GRIDFILL.GRDIN   File Name of the Input Grid.
+                          (.grd file)
+               .GRDOUT  File Name of the Filled Output Grid.
+                          (.grd file)
+               .ROLLOPT Option for Roll-Off:
+               .DIST    Distance in grid cells at which to
+                          roll to 0.
+               .MXF     Maximum prediction filter length.
+               .MXA     Maximum area used to define filter.
+               .RBASE   Roll-off base value 
+               .ALIMIT  Maximum amplitude to allow in grid.
+               .ELIMIT  Maximum amplitude to allow on the
+                          EDGE of the grid.
+               .EWIDTH  Width from edge to start limiting 
+                          from.
+               .PASS    Number of convolution passes to make
+                          over the filled grid.\r\n"
+
+//===========================================================================
+
+RESOURCE = "gridfill.gr"
+#include "gridfill.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+int        iRopt;             // Roll off option
+int        iRdist;            // Roll off distance
+int        iMxf;              // Max. prediction filter length
+int        iMxa;              // Max. area defining filter
+int        iWidth;            // Width from grid edge to start limiting
+                              // the edge amplitude
+int        iPass;             // Number of convolution passes
+
+int        iRollOpt;          // Roll off option
+
+real       rRbase;            // Base roll off
+real       rAlimit;           // Max. grid amplitude allowed
+real       rElimit;           // Max. grid edge amplitude allowed
+
+string(STR_FILE) sGrdi;            // Name of input grid
+string(STR_FILE) sGrdo;            // Name of output grid
+
+string(STR_DEFAULT) sTemp;            // Temp. string 
+
+
+IMG         IMGi;             // Image tied to the input grid
+IMG         IMGo;             // Image for the output grid
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDFILLForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_0,DGW_FILEPATH,"GRIDFILL","GRDIN");     
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_1,DGW_FILEPATH,"GRIDFILL","GRDOUT");     
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_2,DGW_LISTALIAS,"GRIDFILL","ROLLOPT");
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_3,DGW_TEXT,"GRIDFILL","DIST");    
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_4,DGW_TEXT,"GRIDFILL","MXF");    
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_5,DGW_TEXT,"GRIDFILL","MXA");    
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_6,DGW_TEXT,"GRIDFILL","RBASE");    
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_7,DGW_TEXT,"GRIDFILL","ALIMIT");    
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_8,DGW_TEXT,"GRIDFILL","ELIMIT");    
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_9,DGW_TEXT,"GRIDFILL","EWIDTH");    
+      SetInfoSYS_DGW(Diag,_GRIDFILLFORM_10,DGW_TEXT,"GRIDFILL","PASS");    
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_0,DGW_FILEPATH,"GRIDFILL","GRDIN");     
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_1,DGW_FILEPATH,"GRIDFILL","GRDOUT");     
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_2,DGW_LISTALIAS,"GRIDFILL","ROLLOPT");
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_3,DGW_TEXT,"GRIDFILL","DIST");    
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_4,DGW_TEXT,"GRIDFILL","MXF");    
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_5,DGW_TEXT,"GRIDFILL","MXA");    
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_6,DGW_TEXT,"GRIDFILL","RBASE");    
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_7,DGW_TEXT,"GRIDFILL","ALIMIT");    
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_8,DGW_TEXT,"GRIDFILL","ELIMIT");    
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_9,DGW_TEXT,"GRIDFILL","EWIDTH");    
+      GetInfoSYS_DGW(Diag,_GRIDFILLFORM_10,DGW_TEXT,"GRIDFILL","PASS");    
+
+      
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDFILL","GRDIN",sGrdi);
+   GetString_SYS("GRIDFILL","GRDOUT",sGrdo); 
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrdi))
+      Abort_SYS(_("Input Grid Not Specified!")); 
+      
+   if (!iStrlen_STR(sGrdo))
+      Abort_SYS(_("Output Filled Grid Not Specified!"));   
+
+
+   // --- Check for null parameter strings and set to 
+   //     default values if blank ---
+   iRollOpt = iGetInt_SYS("GRIDFILL", "ROLLOPT");
+
+   if (iRollOpt == 0)
+      iRopt = IMU_FILL_ROLLOPT_SQUARE;
+   else if (iRollOpt == 1)
+      iRopt = IMU_FILL_ROLLOPT_LINEAR;
+   else
+      Abort_SYS(_("Invalid Roll off Option! Must be 'SQUARE' or 'LINEAR'."));
+      
+
+   GetString_SYS("GRIDFILL","DIST",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iRdist = -1;
+   else
+   {
+      iRdist = iDUMMY;
+      iRdist = iGetInt_SYS("GRIDFILL","DIST");
+      if ((iRdist == iDUMMY) || (iRdist < 0))
+         Abort_SYS(_("Invalid Roll to 0 value! Must be 0 (no roll), integer from 1 to 2147483647, or blank."));
+   }      
+
+   GetString_SYS("GRIDFILL","MXF",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iMxf = 0;
+   else
+   {
+      iMxf = iDUMMY;
+      iMxf = iGetInt_SYS("GRIDFILL","MXF");
+      if ((iMxf == iDUMMY) || (iMxf < -1))
+         Abort_SYS(_("Invalid Maximum Filter Length! Must be an integer from 1 to 2147483647, or blank."));
+   }
+   
+   GetString_SYS("GRIDFILL","MXA",sTemp);
+      
+   if (!iStrlen_STR(sTemp))
+      iMxa = 0;
+   else
+   {
+      iMxa = iDUMMY;
+      iMxa = iGetInt_SYS("GRIDFILL","MXA");
+      if ((iMxa == iDUMMY) || (iMxa < 0))
+         Abort_SYS(_("Invalid Maximum Filter Area! Must be an integer from 1 to 2147483647, or blank."));
+   }
+
+      
+   GetString_SYS("GRIDFILL","RBASE",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      rRbase = rDUMMY;
+   else
+   {
+      rRbase = rDUMMY;
+      rRbase = rGetReal_SYS("GRIDFILL","RBASE");
+      if (rRbase == rDUMMY)
+         Abort_SYS(_("Invalid Base Roll off! Must be a number from -1e31 to 1e32, or blank."));
+   }
+
+   
+   GetString_SYS("GRIDFILL","ALIMIT",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      rAlimit = -1.0;
+   else
+   {
+      rAlimit = rDUMMY;
+      rAlimit = rGetReal_SYS("GRIDFILL","ALIMIT");
+      if (rAlimit == rDUMMY)
+         Abort_SYS(_("Invalid Maximum Amplitude! Must be a number from -1e31 to 1e32, or blank."));
+   }
+
+   GetString_SYS("GRIDFILL","ELIMIT",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      rElimit = -1.0;
+   else
+   {
+      rElimit = rDUMMY;
+      rElimit = rGetReal_SYS("GRIDFILL","ELIMIT");
+      if (rElimit == rDUMMY)
+         Abort_SYS(_("Invalid Maximum Edge Amplitude! Must be a number from -1e31 to 1e32, or blank."));
+   }
+   
+   GetString_SYS("GRIDFILL","EWIDTH",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iWidth = 0;
+   else
+   {
+      iWidth = iDUMMY;
+      iWidth = iGetInt_SYS("GRIDFILL","EWIDTH");
+      if (iWidth == iDUMMY)
+         Abort_SYS(_("Invalid Edge Width! Must be an integer from -2147483646 to 2147483647, or blank."));
+   }
+         
+   // --- Reset width if the Edge limit was unlimited ---
+
+   if (rElimit < 0.0)
+      iWidth = -1;
+
+   
+   GetString_SYS("GRIDFILL","PASS",sTemp);     
+   
+   if (!iStrlen_STR(sTemp))
+      iPass = 0;
+   else
+   {
+      iPass = iDUMMY;
+      iPass = iGetInt_SYS("GRIDFILL","PASS");
+      if ((iPass == iDUMMY) || (iPass < 0))
+         Abort_SYS(_("Invalid Number of Convolution Passes! Must be an integer from 0 to 2147483647, or blank."));
+   }
+
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   IMGi = CreateFile_IMG(GS_FLOAT,sGrdi,IMG_FILE_READONLY);
+
+   IMGo = CreateOutFile_IMG(GS_FLOAT,sGrdo,IMGi); 
+
+   ProgName_SYS(_("Filling Grid..."),1);
+
+   // --- Fill the grid ---
+
+   GridFill_IMU(IMGi,IMGo,iRopt,iRdist,iMxf,iMxa,rRbase,rAlimit,
+                    rElimit,iWidth,iPass);      
+   
+   // --- Destroy the Images ---
+   
+   Destroy_IMG(IMGi);   
+   Destroy_IMG(IMGo);
+                     
+   // --- done ---
+
+   Progress_SYS(0);
+   
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sGrdo,"Grid",PROJ_DISPLAY_YES);
+   
+}

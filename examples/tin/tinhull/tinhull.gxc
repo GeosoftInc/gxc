@@ -1,0 +1,181 @@
+//===========================================================================
+
+NAME          = "Plot a TIN Convex Hull"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Tinning"
+
+DESCRIPTION   = "
+
+        TINDB.FILE               Name of TIN file.
+        TINVORONOI.EDGECOLOR     Colour of convex hull
+        TINVORONOI.THICKNESS     Line Thickness
+        TINVORONI.CLIP           Clip cells to convex hull (0:No, 1:Yes)?
+"
+// Revision History:
+// v6.3.0:  Export hull as PLY file.
+//===========================================================================
+
+RESOURCE = "TINHULL.gr"
+#include "TINHULL.grh"
+
+//===========================================================================
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sEdgeColor;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+TIN   Tin;
+BF    Bf;
+VV    VVx, VVy;
+PLY   Ply;
+IPJ   hIPJ;
+
+int   i;
+real  rScale;
+real  rThickness;
+string(GS_MAX_PATH) sFile, sPly;
+string(GS_MAX_PATH) sGroup;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TINHULL");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TINHULL_0,DGW_FILEPATH,"TINDB","FILE");     
+      SetInfoSYS_DGW(Diag,_TINHULL_1,DGW_TEXT,"TINVORONOI","EDGECOLOR");
+      SetInfoSYS_DGW(Diag,_TINHULL_2,DGW_TEXT,"TINVORONOI","THICKNESS");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TINHULL_0,DGW_FILEPATH,"TINDB","FILE");     
+      GetInfoSYS_DGW(Diag,_TINHULL_1,DGW_TEXT,"TINVORONOI","EDGECOLOR");
+      GetInfoSYS_DGW(Diag,_TINHULL_2,DGW_TEXT,"TINVORONOI","THICKNESS");
+
+      Destroy_DGW(Diag);
+      
+   }      
+
+   // --- get database and map ---
+   
+   EMap   = Current_EMAP();
+   Map    = Lock_EMAP(EMap);   
+
+   GetString_SYS("TINDB","FILE",sFile); 
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("No TIN file specified"));   
+
+   rThickness = rGetReal_SYS("TINVORONOI","THICKNESS");
+   if(rThickness==rDUMMY) rThickness = 0.1;
+
+   GetString_SYS("TINVORONOI","EDGECOLOR",sEdgeColor); 
+   if(!iStrlen_STR(sEdgeColor))
+      Abort_SYS(_("No line color specified"));   
+
+   // --- Get TIN ---
+
+   Bf = Create_BF(sFile, BF_READ);
+   Tin = CreateS_TIN(Bf);
+
+   // --- Get the Convex Hull ---
+
+   Ply = Create_PLY();
+   GetConvexHull_TIN(Tin, Ply);
+   
+   
+   // --- Export the PLY as a file ---
+   
+   FileNamePart_STR(sFile, sPly, STR_FILE_PART_NAME);
+   Strcat_STR(sPly, "_ConvexHull");
+   FileExt_STR(sPly, "ply", sPly, FILE_EXT_FORCE);
+   SaveTable_PLY(Ply, sPly);
+   
+   
+   // --- Extract and plot the PLY ---
+
+   VVx = CreateExt_VV(GS_DOUBLE, 0);
+   VVy = CreateExt_VV(GS_DOUBLE, 0);
+
+   GetPolygon_PLY(Ply, VVx, VVy, 0);
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+
+   // --- set the working IPJ ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_TIN(Tin,hIPJ);
+   SetWorkingIPJ_MVIEW(View,hIPJ);
+   Destroy_IPJ(hIPJ);
+
+   Progress_SYS(1);
+
+   // --- set plotting parameters ---
+
+   SetThinRes_MVIEW(View,0.02);
+   rScale = rScaleMM_MVIEW(View);
+
+   // --- Plot the convex hull ---
+
+   Strcpy_STR(sGroup,"TIN_");
+   FileNamePart_STR(sFile,sFile,STR_FILE_PART_NAME);
+   Strcat_STR(sGroup,sFile);
+   Strcat_STR(sGroup,"_Convex_Hull");
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+   LineColor_MVIEW(View,iColor_MVIEW(sEdgeColor));
+   LineThick_MVIEW(View,rThickness*rScale);
+   LineStyle_MVIEW(View,0,0.0);
+
+   PolyLine_MVIEW(View, MVIEW_DRAW_POLYGON, VVx, VVy);
+
+   
+   // --- Add maker object ---
+
+   EasyMaker_MVIEW(View,_("TIN Convex Hull Plot"),"TINHULL;TINDB");
+
+
+   // --- done ---
+
+   DestroyEx_BF(Bf);
+   Destroy_TIN(Tin);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   
+}

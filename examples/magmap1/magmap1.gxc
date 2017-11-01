@@ -1,0 +1,739 @@
+//===========================================================================
+NAME          = "Magmap1 Processing"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP"
+
+DESCRIPTION   = "\
+
+Creates a Grid file with FFT2 processing.
+
+Parameters: 
+
+     MAGMAP1.INGRD     - Name of Old Grid file\r\n\
+            .OUTGRD    - Name of New Grid file\r\n\
+            .OUTPRPGRD - Optional name of the output preprocessed grid file\r\n\
+            .OUTTRNGRD - Optional name of the output transform grid file\r\n\
+            .CONFIL    - Name of the filter control file\r\n\
+            .PREP      - Option to output the pre-processing grid file\r\n\
+            .TORDER    - Order of trend surface to remove\r\n\
+            .TBASE     - Trend based on (edge points/all points)\r\n\
+            .PEX       - % expansion\r\n\
+            .TEX       - Square or rectangular expansion\r\n\
+            .FILL      - Grid fill method\r\n\
+            .ZDIST     - Roll off to zero at distance of (cells)\r\n\
+            .ALIM      - Limit all amplitudes to be less than\r\n\
+            .ELIM      - Edge amplitude limit\r\n\
+            .ADDTOPROJECT - If 0, no files will be added to the project. Default is 1, and is reset to 1 after execution
+"
+//===========================================================================
+// Revision History:
+//
+// v7.1.1   Force creation of TRN grid if any of the trend, fill, expand parameters change.
+// v6.3.0   Added optional scriptable parameters for out TRN and PRP grid files
+// v6.0.0   Add output grid to the grid explorer
+// v6.0.0   One more check to see if it is necessary to recreate the TRN 
+//          grid.
+// v5.1.8   Fixed a date & time check of sTrnGrd file for comparing with 
+//          sInGrd file.
+//===========================================================================
+
+RESOURCE = "magmap1.gr"
+#include "magmap1.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sInGrd,sInGrd_;       // Name of old grid file
+string(STR_FILE) sOutGrd;              // Name of new grid file
+string(STR_FILE) sConFil;              // Name of filter control file
+string(STR_FILE) sTrnGrd;              // Name of transform grid file (_trn.grd)
+string(STR_FILE) sPrpGrd,sPrpGrd_;     // Name of Pre-processing grid file (_prp.grd)
+string(STR_FILE) sRefFil;              // Name of reference file (_ref.bin)
+//string(STR_FILE) sTrn;               // Name of transform grid file (old .trn file)
+string(STR_DEFAULT) sPrep, sAliasFlag;             //    .
+string(STR_DEFAULT) sTOrder,sTOrder_;  //    .
+string(STR_DEFAULT) sTBase,sTBase_;    //    .
+string(STR_DEFAULT) sPEx,sPEx_;        //    .
+string(STR_DEFAULT) sTEx,sTEx_;        //  optional parameters
+string(STR_DEFAULT) sFill,sFill_;      //    .
+string(STR_DEFAULT) sZDist,sZDist_;    //    .
+string(STR_DEFAULT) sALim,sALim_;      //    .
+string(STR_DEFAULT) sELim,sELim_;      //    .
+                                           
+IMG         IMGi;         //
+IMG         IMGo;         //  grid images
+
+PG          PG1;
+PG          PG2;
+PG          PGt;
+TR          TR1; 
+IPJ         IPJ1;
+
+DGW         Diag;         // Dialogue handle
+int         i,iInter;     // utility int
+
+int         iNX,iNY,iNXe,iNYe,iXo,iYo;     // grid size
+real        rDx,rDy,rXo,rYo,rRot;          // grid info
+real        rXoe,rYoe;
+
+int iNX2, iNY2, iX2, iY2;
+int         iTOrder, iTBase, iTOpt;                       // grid trend parameters
+
+real        rPEx;                                         // grid expansion parameters
+int         iTEx, iXX, iXY;
+                          
+real        rALim, rELim, rRollBase;                      // grid fill parameters
+int         iZDist, iRollOpt, iMxf, iMxp, iWLim, iNPass;
+
+int         iTrn;               // 1 - trn file exist, 0 - not
+int         iPrep;              // 1 - _prep.grd file output, 0 - not
+
+
+int iTBase1, iTex1, iZDist1, iWLim1, iForceTrn;
+real rPEx1, rALim1;
+string(STR_DEFAULT) sFill1;
+string(STR_FILE) sName, sParm, sTmpFile;
+
+//===========================================================================
+//                           MAGMAP CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS()) 
+   {
+      i = 0;
+      while(i!=99) {
+      
+         switch(i) {
+         
+            case 0:
+   
+               // --- Run the Dialogue ---
+
+               Diag = Create_DGW("MAGMAP1");
+
+               SetInfoSYS_DGW(Diag,_MAGMAP1_0,DGW_FILEPATH,"MAGMAP1","INGRD");
+               SetInfoSYS_DGW(Diag,_MAGMAP1_1,DGW_FILEPATH,"MAGMAP1","OUTGRD");
+               SetInfoSYS_DGW(Diag,_MAGMAP1_2,DGW_FILEPATH,"MAGMAP1","CONFIL");
+               SetInfoSYS_DGW(Diag,_MAGMAP1_3,DGW_TEXT,"MAGMAP1","PREP");
+
+               i = iRunDialogue_DGW(Diag);
+               if (i==-1)   Cancel_SYS(); 
+                  
+               GetInfoSYS_DGW(Diag,_MAGMAP1_0,DGW_FILEPATH,"MAGMAP1","INGRD");
+               GetInfoSYS_DGW(Diag,_MAGMAP1_1,DGW_FILEPATH,"MAGMAP1","OUTGRD");
+               GetInfoSYS_DGW(Diag,_MAGMAP1_2,DGW_FILEPATH,"MAGMAP1","CONFIL");
+               GetInfoSYS_DGW(Diag,_MAGMAP1_3,DGW_TEXT,"MAGMAP1","PREP");
+        
+               GetInfo_DGW(Diag,_MAGMAP1_3,DGW_LISTALIAS,sAliasFlag);
+
+               Destroy_DGW(Diag);
+               
+               break;
+
+            case 1:
+            
+               // --- Make/edit control file:         
+               
+               GetString_SYS("MAGMAP1","CONFIL",sConFil);
+               SetString_SYS("FFT2CON","CONFILE",sConFil);
+               if (iStrlen_STR(sConFil) <=0)
+                  SetString_SYS("FFT2CON","MODE","");
+               else   
+                  SetString_SYS("FFT2CON","MODE","magmap");
+                  
+				   GetString_SYS("MAGMAP1","INGRD",sInGrd);
+				   SetString_SYS("FFT2CON","INPUT_GRID",sInGrd);
+
+               if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.FFT2D.FFT2DControlFile;RunWithPrespecifiedFilterControlFile)")==1)  
+                  Abort_SYS(_("Error in making/editing control file!"));
+
+               GetString_SYS("FFT2CON","CONFILE",sConFil);
+               SetString_SYS("MAGMAP1","CONFIL",sConFil);
+
+				   GetString_SYS("FFT2CON","INPUT_GRID",sInGrd);
+				   SetString_SYS("MAGMAP1","INGRD",sInGrd);
+               i = 0;
+
+               break;
+            
+            case 2:
+   
+               // --- Run the Dialogue ---
+
+               Diag = Create_DGW("MAGMAP2");
+
+               SetInfoSYS_DGW(Diag,_MAGMAP2_0,DGW_LISTALIAS,"MAGMAP1","TORDER");
+               SetInfoSYS_DGW(Diag,_MAGMAP2_1,DGW_LISTALIAS,"MAGMAP1","TBASE");
+
+               i = iRunDialogue_DGW(Diag);
+                  
+               if (i!=-1)  {
+                  GetInfoSYS_DGW(Diag,_MAGMAP2_0,DGW_LISTALIAS,"MAGMAP1","TORDER");
+                  GetInfoSYS_DGW(Diag,_MAGMAP2_1,DGW_LISTALIAS,"MAGMAP1","TBASE");
+               }
+               Destroy_DGW(Diag);
+               i = 0;
+               
+               break;
+           
+            case 3:
+   
+               // --- Run the Dialogue ---
+
+               Diag = Create_DGW("MAGMAP3");
+
+               SetInfoSYS_DGW(Diag,_MAGMAP3_0,DGW_TEXT,"MAGMAP1","PEX");
+               SetInfoSYS_DGW(Diag,_MAGMAP3_1,DGW_LISTALIAS,"MAGMAP1","TEX");
+
+               i = iRunDialogue_DGW(Diag);
+                  
+               if (i!=-1)  {
+                  GetInfoSYS_DGW(Diag,_MAGMAP3_0,DGW_TEXT,"MAGMAP1","PEX");
+                  GetInfoSYS_DGW(Diag,_MAGMAP3_1,DGW_LISTALIAS,"MAGMAP1","TEX");
+               }
+               Destroy_DGW(Diag);
+               i = 0;
+               
+               break;
+           
+            case 4:
+   
+               // --- Run the Dialogue ---
+
+               Diag = Create_DGW("MAGMAP4");
+
+               SetInfoSYS_DGW(Diag,_MAGMAP4_0,DGW_LISTALIAS,"MAGMAP1","FILL");
+               SetInfoSYS_DGW(Diag,_MAGMAP4_1,DGW_TEXT,"MAGMAP1","ZDIST");
+               SetInfoSYS_DGW(Diag,_MAGMAP4_2,DGW_TEXT,"MAGMAP1","ALIM");
+               SetInfoSYS_DGW(Diag,_MAGMAP4_3,DGW_TEXT,"MAGMAP1","ELIM");
+
+               i = iRunDialogue_DGW(Diag);
+                  
+               if (i!=-1)  {
+                  GetInfoSYS_DGW(Diag,_MAGMAP4_0,DGW_LISTALIAS,"MAGMAP1","FILL");
+                  GetInfoSYS_DGW(Diag,_MAGMAP4_1,DGW_TEXT,"MAGMAP1","ZDIST");
+                  GetInfoSYS_DGW(Diag,_MAGMAP4_2,DGW_TEXT,"MAGMAP1","ALIM");
+                  GetInfoSYS_DGW(Diag,_MAGMAP4_3,DGW_TEXT,"MAGMAP1","ELIM");
+               }
+               Destroy_DGW(Diag);
+               i = 0;
+               
+               break;
+           
+         } // end switch
+      } // end while
+   } // end if
+
+   // --- Get Parameters ---
+
+   GetString_SYS("MAGMAP1","INGRD",sInGrd);
+   GetString_SYS("MAGMAP1","OUTGRD",sOutGrd);
+   GetString_SYS("MAGMAP1","CONFIL",sConFil);
+   GetString_SYS("MAGMAP1","PREP",sPrep);
+   GetString_SYS("MAGMAP1","TORDER",sTOrder);
+   GetString_SYS("MAGMAP1","TBASE",sTBase);
+   GetString_SYS("MAGMAP1","PEX",sPEx);
+   GetString_SYS("MAGMAP1","TEX",sTEx);
+   GetString_SYS("MAGMAP1","FILL",sFill);
+   GetString_SYS("MAGMAP1","ZDIST",sZDist);
+   GetString_SYS("MAGMAP1","ALIM",sALim);
+   GetString_SYS("MAGMAP1","ELIM",sELim);
+
+   
+   // --- Validate required parameters ---
+   
+   if (iStrlen_STR(sInGrd) <=0 || !iFileExist_SYS(sInGrd))
+      Abort_SYS(_("Old grid file is invalid"));
+
+   if (iStrlen_STR(sOutGrd) <=0)
+      Abort_SYS(_("New grid file name is invalid"));
+
+   if (iStrlen_STR(sConFil) <=0 || !iFileExist_SYS(sConFil))
+      Abort_SYS(_("Filter control file is invalid"));
+
+
+   // --- Set input/output file name ---
+
+   if (iExistString_SYS("MAGMAP1","OUTTRNGRD"))
+      GetString_SYS("MAGMAP1","OUTTRNGRD",sTrnGrd);
+   else
+   {
+      FileNamePart_STR(sInGrd,sTrnGrd,STR_FILE_PART_NAME);
+      Strcat_STR(sTrnGrd,"_trn.grd(GRD;TYPE=FLOAT;COMP=SIZE)");
+   }
+   
+   FileNamePart_STR(sInGrd,sRefFil,STR_FILE_PART_NAME);
+   Strcat_STR(sRefFil,"_ref.bin");
+
+   if (iStrcmp_STR(sPrep,_n("yes"),0)==0 || !iStrcmp_STR(sAliasFlag,"1",STR_CASE_TOLERANT))  iPrep=1;
+   else iPrep=0;
+   
+   if (iExistString_SYS("MAGMAP1","OUTPRPGRD"))
+      GetString_SYS("MAGMAP1","OUTPRPGRD",sPrpGrd);
+   else
+   {
+      FileNamePart_STR(sInGrd,sPrpGrd,STR_FILE_PART_NAME);
+      Strcat_STR(sPrpGrd,"_prp.grd(GRD;TYPE=FLOAT;COMP=SIZE)");
+   }
+
+   rDx = 1.0;
+   rDy = 1.0;
+   rXo = 0.0;
+   rYo = 0.0;
+   rRot= 0.0;
+   rXoe = 0.0;
+   rYoe = 0.0;
+   
+   
+   // --- Set grid trend parameters ---
+
+   if (iStrcmp_STR(sTOrder,_n("remove mean"),0)==0)  iTOrder=0;
+   else if (iStrcmp_STR(sTOrder,_n("second order"),0)==0)  iTOrder=2;
+   else if (iStrcmp_STR(sTOrder,_n("third order"),0)==0)  iTOrder=3;
+   else iTOrder=1;
+
+   if (iStrcmp_STR(sTBase,_n("all points"),0)==0)  iTBase=0;   // PGU_TREND_ALL    0
+   else iTBase=1;                                          // PGU_TREND_EDGE   1
+
+
+   // --- Set grid expansion parameters ---
+
+   if (iStrlen_STR(sPEx)>0)
+      rPEx=rScanR_STR(sPEx);
+   else 
+      rPEx=10.0;
+   if (rPEx < 0.0)  rPEx=0.0;
+
+   if (iStrcmp_STR(sTEx,_n("rectangular"),0)==0)  iTEx=0;   // PGU_EXPAND_SHAPE_RECTANGLE  0
+   else iTEx=1;                                         // PGU_EXPAND_SHAPE_SQUARE     1
+
+   iXX   =0;
+   iXY   =0;
+
+   // --- Set grid fill parameters --- 
+
+   if (iStrcmp_STR(sFill,_n("inverse distance"),0)==0)
+   {
+      iMxf=-1;
+      iMxp=0;
+   } else {
+      iMxf=0;
+      iMxp=0;
+   }
+
+   if (iStrlen_STR(sZDist)>0) 
+      iZDist=iScanI_STR(sZDist);
+   else
+      iZDist=-1;
+   if(iZDist<0 && iZDist!=-1)  iZDist=0;   
+
+   if (iStrlen_STR(sALim)>0)
+      rALim=rScanR_STR(sALim);
+   else
+      rALim=0.0;
+
+   if (iStrlen_STR(sELim)>0)
+   {
+      rELim=rScanR_STR(sELim);
+      iWLim=0;
+   } else {
+      rELim=-1.0;
+      iWLim=-1;
+   }
+
+   rRollBase=0.0;
+   iRollOpt=2;     // PGU_FILL_ROLLWT_LINEAR  1
+                   // PGU_FILL_ROLLWT_SQUARE  2
+   iNPass=1;
+
+
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- Get pager(PG1) from input grid ---
+
+   IMGi = CreateFile_IMG(GS_FLOAT,sInGrd,IMG_FILE_READONLY);
+   GetInfo_IMG(IMGi,rDx,rDy,rXo,rYo,rRot);
+   iNX = iNX_IMG(IMGi);
+   iNY = iNY_IMG(IMGi);
+   TR1 = Create_TR(iTOrder);
+   PG1 = Create_PG(iNY,iNX,GS_FLOAT);
+   GetPG_IMG(IMGi,PG1);
+   IPJ1 = Create_IPJ();
+   GetIPJ_IMG(IMGi,IPJ1);
+   Destroy_IMG(IMGi);
+   
+
+   // --- check the existance of TrnGrd file and newer than InGrd file, and none of the trend, fill, expand
+   //     parameters have changed. ---
+
+   iTrn = 0;
+      
+   if(iFileExist_SYS(sTrnGrd) && (rFileDate_SYS(sInGrd) < rFileDate_SYS(sTrnGrd)))     iTrn = 1;
+   
+   if(iFileExist_SYS(sTrnGrd) && (rFileDate_SYS(sInGrd) == rFileDate_SYS(sTrnGrd)) && 
+      (rFileTime_SYS(sInGrd) < rFileTime_SYS(sTrnGrd)) )                               iTrn = 1;
+      
+      
+   // --- Retreive previous trend, fill, expand options for this grid. If any change, force re-calc ---
+   
+   FileNamePart_STR(sInGrd, sName, STR_FILE_PART_NAME);
+   Strcpy_STR(sParm, sName);
+   Strcat_STR(sParm, "_TBASE");
+   iTBase1 = iGetInt_SYS("MAGMAP1", sParm);
+   
+   Strcpy_STR(sParm, sName);
+   Strcat_STR(sParm, "_PEX");
+   rPEx1 = rGetReal_SYS("MAGMAP1", sParm);
+   
+   Strcpy_STR(sParm, sName);
+   Strcat_STR(sParm, "_TEX");
+   iTex1 = iGetInt_SYS("MAGMAP1", sParm);
+
+   Strcpy_STR(sParm, sName);
+   Strcat_STR(sParm, "_FILL");
+   GetString_SYS("MAGMAP1", sParm, sFill1);
+
+   Strcpy_STR(sParm, sName);
+   Strcat_STR(sParm, "_ZDIST");
+   iZDist1 = iGetInt_SYS("MAGMAP1", sParm);
+
+   Strcpy_STR(sParm, sName);
+   Strcat_STR(sParm, "_ALIM");
+   rALim1 = rGetReal_SYS("MAGMAP1", sParm);
+   
+   Strcpy_STR(sParm, sName);
+   Strcat_STR(sParm, "_ELIM");
+   iWLim1 = iGetInt_SYS("MAGMAP1", sParm);      
+   
+	iForceTrn = 0;
+   if(iTBase1 != iTBase) iForceTrn = 1;
+   if(rPEx1 != rPEx) iForceTrn = 1;
+   if(iStrcmp_STR(sFill1, sFill, STR_CASE_TOLERANT)!=0) iForceTrn = 1;
+   if(iZDist1 != iZDist) iForceTrn = 1;
+   if(rALim1 != rALim) iForceTrn = 1;
+   if(iWLim1 != iWLim) iForceTrn = 1;
+      
+	if(iForceTrn) iTrn = 0;
+
+
+   //if(!iTrn && !iForceTrn) 
+   //{
+   //   FileExt_STR(sInGrd,"trn",sTrn,FILE_EXT_FORCE);   
+   //   if(iFileExist_SYS(sTrn) && (rFileDate_SYS(sInGrd) < rFileDate_SYS(sTrn)))     iTrn = 1;
+   //   if(iFileExist_SYS(sTrn) && (rFileDate_SYS(sInGrd) == rFileDate_SYS(sTrn)) && 
+   //      (rFileTime_SYS(sInGrd) < rFileTime_SYS(sTrn)) )                            iTrn = 1;
+   //
+   //   if(iTrn) 
+   //      IMGi = CreateFile_IMG(GS_FLOAT,sTrn,IMG_FILE_READONLY);
+   //}
+
+   if(iTrn) {   // See if size of TRN grid is greater than or equal to the input grid
+   
+      IMGi = CreateFile_IMG(GS_FLOAT,sTrnGrd,IMG_FILE_READONLY);
+      GetInfo_IMG(IMGi,rDx,rDy,rXoe,rYoe,rRot);
+      iNXe = iNX_IMG(IMGi)-2;
+      iNYe = iNY_IMG(IMGi);
+      iYo = (iNYe-iNY)/2;
+      iXo = (iNXe-iNX)/2;
+      Destroy_IMG(IMGi);
+      
+      if(iYo<0 || iXo<0) {   // Still a mismatch - force recreation.
+         iTrn = 0;
+      }
+   }
+   
+   // --- if user asked for a pre-processed grid and one does not exist ---
+   
+   if (iPrep && !iFileExist_SYS(sPrpGrd)) 
+      iTrn = 0;
+   
+   if (iTrn) {  // Skip grid trend, expand, fill and forward FFT transform
+      
+      PG2 = Create_PG(iNYe,iNXe,GS_FLOAT);
+      Dummy_PG(PG2);
+      CopySubset_PG(PG2,PG1,iYo,iXo,0,0,iNY,iNX);
+      RefFile_PGU(PG2,sRefFil);
+      Destroy_PG(PG2);
+
+      ReAllocate_PG(PG1,iNYe,iNXe+2);
+   
+      IMGi = CreateFile_IMG(GS_FLOAT,sTrnGrd,IMG_FILE_READONLY);
+      GetPG_IMG(IMGi,PG1);
+      GetTR_IMG(IMGi,TR1);
+      Destroy_IMG(IMGi);
+   
+   } else {
+   
+      // --- Grid Expand and Fill ---
+
+      if (iStrcmp_STR(sFill,_n("multistep expansion"),0)==0)	{
+
+         GetString_SYS("FFT2PREP","INGRD",sInGrd_);
+         GetString_SYS("FFT2PREP","OUTGRD",sPrpGrd_);
+         GetString_SYS("FFT2PREP","TORDER",sTOrder_);
+         GetString_SYS("FFT2PREP","TBASE",sTBase_);
+         GetString_SYS("FFT2PREP","PEX",sPEx_);
+         GetString_SYS("FFT2PREP","TEX",sTEx_);
+         GetString_SYS("FFT2PREP","FILL",sFill_);
+         GetString_SYS("FFT2PREP","ZDIST",sZDist_);
+         GetString_SYS("FFT2PREP","ALIM",sALim_);
+         GetString_SYS("FFT2PREP","ELIM",sELim_);
+		  iInter = iInteractive_SYS();
+
+         SetString_SYS("FFT2PREP","INGRD",sInGrd);
+         SetString_SYS("FFT2PREP","OUTGRD",sPrpGrd);
+         SetString_SYS("FFT2PREP","TORDER",sTOrder);
+         SetString_SYS("FFT2PREP","TBASE",sTBase);
+         SetString_SYS("FFT2PREP","PEX",sPEx);
+         SetString_SYS("FFT2PREP","TEX",sTEx);
+         SetString_SYS("FFT2PREP","FILL",sFill);
+         SetString_SYS("FFT2PREP","ZDIST",sZDist);
+         SetString_SYS("FFT2PREP","ALIM",sALim);
+         SetString_SYS("FFT2PREP","ELIM",sELim);
+
+         SetInteractive_SYS(0);
+         if (iRunGX_SYS("fft2prep.gx")) Cancel_SYS();
+         SetInteractive_SYS(iInter);
+
+         SetString_SYS("FFT2PREP","INGRD",sInGrd_);
+         SetString_SYS("FFT2PREP","OUTGRD",sPrpGrd_);
+         SetString_SYS("FFT2PREP","TORDER",sTOrder_);
+         SetString_SYS("FFT2PREP","TBASE",sTBase_);
+         SetString_SYS("FFT2PREP","PEX",sPEx_);
+         SetString_SYS("FFT2PREP","TEX",sTEx_);
+         SetString_SYS("FFT2PREP","FILL",sFill_);
+         SetString_SYS("FFT2PREP","ZDIST",sZDist_);
+         SetString_SYS("FFT2PREP","ALIM",sALim_);
+         SetString_SYS("FFT2PREP","ELIM",sELim_);
+
+         // --- Create RefFile ---
+
+         PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+         if(Expand_PGU(PG1,PG2,rPEx,iTEx,iXX,iXY))
+            Abort_SYS(_("Error executing Expand_PGU"));
+         Destroy_PG(PG1);
+
+
+         // --- Get pager(PG1) from prep grid ---
+         
+         IMGi = CreateFile_IMG(GS_FLOAT,sPrpGrd,IMG_FILE_READONLY);
+         iNXe = iNX_IMG(IMGi);
+         iNYe = iNY_IMG(IMGi);
+         PG1 = Create_PG(iNYe,iNXe,GS_FLOAT);
+         GetPG_IMG(IMGi,PG1);
+         GetTR_IMG(IMGi,TR1);
+         Destroy_IMG(IMGi);
+
+         iYo = (iNYe-iNY)/2;
+         iXo = (iNXe-iNX)/2;
+
+
+			// --- Copy a subset of PG2 into a temp PG that is the same size as PG1 in order
+			//     to make a proper RefFile (See ISSUE-1562) ---
+
+			PGt = Create_PG(iNYe,iNXe,GS_FLOAT);
+			Dummy_PG(PGt);
+			iNX2 = iNCols_PG(PG2);
+			iNY2 = iNRows_PG(PG2);
+			iX2 = (iNX2 - iNXe)/2;
+			iY2 = (iNY2 - iNYe)/2;
+			CopySubset_PG(PGt, PG2, 0, 0, iY2, iX2, iNYe, iNXe);
+			RefFile_PGU(PGt,sRefFil);
+			Destroy_PG(PG2);
+			Destroy_PG(PGt);
+
+      } else {
+
+         // --- Grid Trend Remove ---
+
+         iTOpt = 0;   // trend calculate and remove
+         PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+         if(Trend_PGU(PG1,PG2,TR1,iTOpt,iTBase,rXo,rYo,rDx,rDy))
+            Abort_SYS(_("Error executing Trend_PGU"));
+
+         //FormatR_STR(rXo,sMessage,16,10);
+         //DisplayMessage_SYS(_("rXo"),sMessage);
+
+
+         // --- Grid Expand ---
+
+         if(Expand_PGU(PG2,PG1,rPEx,iTEx,iXX,iXY))
+            Abort_SYS(_("Error executing Expand_PGU"));
+         Destroy_PG(PG2);
+
+         iNYe = iNRows_PG(PG1);
+         iNXe = iNCols_PG(PG1);
+         iYo = (iNYe-iNY)/2;
+         iXo = (iNXe-iNX)/2;
+
+
+         // --- Grid Fill ---
+
+         RefFile_PGU(PG1,sRefFil);
+
+         if(Fill_PGU(PG1,iRollOpt,rRollBase,iZDist,iMxf,iMxp,rALim,rELim,iWLim,iNPass,sRefFil))
+            Abort_SYS(_("Error executing Fill_PGU")); 
+
+
+         if(iPrep)  {   // --- Output pre-processing grid _prp.grd ---
+         
+            IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNXe,iNYe,sPrpGrd);
+            rXoe = rXo - (real)iXo * rDx;
+            rYoe = rYo - (real)iYo * rDy;
+            SetInfo_IMG(IMGo,rDx,rDy,rXoe,rYoe,rRot);
+            SetTR_IMG(IMGo,TR1);
+            SetPG_IMG(IMGo,PG1);
+            SetIPJ_IMG(IMGo,IPJ1);
+            Destroy_IMG(IMGo);
+         }
+      }
+      
+
+      // --- FFT2 forward transform ---
+
+      ReAllocate_PG(PG1,iNYe,iNXe+2);
+      TransPG_FFT2(PG1,0);                    // FFT2_PG_FORWARD  0
+                                               
+
+      // --- Output transform grid _trn.grd ---
+      
+      AbsoluteFileName_SYS(sTrnGrd,sTmpFile);
+      if(iFileExist_SYS(sTmpFile))
+         iDeleteFile_SYS(sTmpFile);
+      IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNXe+2,iNYe,sTrnGrd);
+      rXoe = rXo - (real)iXo * rDx;
+      rYoe = rYo - (real)iYo * rDy;
+      SetInfo_IMG(IMGo,rDx,rDy,rXoe,rYoe,rRot);
+      SetTR_IMG(IMGo,TR1);
+      SetPG_IMG(IMGo,PG1);
+      SetIPJ_IMG(IMGo,IPJ1);
+      Destroy_IMG(IMGo);
+      
+      
+      // --- Save trend, fill, expand options for this grid. If any change, force re-calc ---
+      
+      Strcpy_STR(sParm, sName);
+      Strcat_STR(sParm, "_TBASE");
+      SetInt_SYS("MAGMAP1", sParm, iTBase);
+      
+      Strcpy_STR(sParm, sName);
+      Strcat_STR(sParm, "_PEX");
+      SetReal_SYS("MAGMAP1", sParm, rPEx);
+      
+      Strcpy_STR(sParm, sName);
+      Strcat_STR(sParm, "_TEX");
+      SetInt_SYS("MAGMAP1", sParm, iTEx);
+
+      Strcpy_STR(sParm, sName);
+      Strcat_STR(sParm, "_FILL");
+      SetString_SYS("MAGMAP1", sParm, sFill);
+
+      Strcpy_STR(sParm, sName);
+      Strcat_STR(sParm, "_ZDIST");
+      SetInt_SYS("MAGMAP1", sParm, iZDist);
+
+      Strcpy_STR(sParm, sName);
+      Strcat_STR(sParm, "_ALIM");
+      SetReal_SYS("MAGMAP1", sParm, rALim);
+      
+      Strcpy_STR(sParm, sName);
+      Strcat_STR(sParm, "_ELIM");
+      SetInt_SYS("MAGMAP1", sParm, iWLim);      
+   }
+   
+
+   // --- FFT2 Filter ---
+
+   FilterPG_FFT2(PG1,sConFil,TR1,rDx,rDy,rRot);
+
+
+   // --- Inverse FFT ---
+   
+   TransPG_FFT2(PG1,1);                       // FFT2_PG_INVERSE  1
+   ReAllocate_PG(PG1,iNYe,iNXe);
+
+
+   // --- Grid Bool ---
+
+   if(Bool_PGU(PG1,sRefFil))
+      Abort_SYS(_("Error executing Bool_PGU")); 
+
+   PG2 = Create_PG(iNY,iNX,GS_FLOAT);
+   CopySubset_PG(PG2,PG1,0,0,iYo,iXo,iNY,iNX);
+
+
+   // --- Grid Trend replace back---
+
+   ReAllocate_PG(PG1,iNY,iNX);
+   iTOpt = 2;   // trend replace back
+   if(Trend_PGU(PG2,PG1,TR1,iTOpt,iTBase,rXo,rYo,rDx,rDy))
+      Abort_SYS(_("Error executing Trend_PGU"));
+       
+
+   // --- Output grid ---
+
+   IMGo = CreateNewFile_IMG(GS_FLOAT,1,iNX,iNY,sOutGrd);
+   SetInfo_IMG(IMGo,rDx,rDy,rXo,rYo,rRot);
+   SetTR_IMG(IMGo,TR1);
+   SetPG_IMG(IMGo,PG1);
+   SetIPJ_IMG(IMGo,IPJ1);
+   Destroy_IMG(IMGo);
+
+
+	// --- Done ---
+
+	Progress_SYS(0);
+
+	Destroy_PG(PG1);
+	Destroy_PG(PG2);
+	Destroy_TR(TR1);
+	Destroy_IPJ(IPJ1);
+
+	if (iFileExist_SYS(sRefFil))
+		iDeleteFile_SYS(sRefFil);
+
+
+	// --- Set parameter values for fft2 gxes ---
+
+	SetString_SYS("FFT2PREP","INGRD",sInGrd);
+	SetString_SYS("FFT2PREP","OUTGRD",sPrpGrd);
+
+	SetString_SYS("FFT2IN","IN",sPrpGrd);
+
+	SetString_SYS("FFT2FLT","IN",sTrnGrd);
+	SetString_SYS("FFT2FLT","OUT",sOutGrd);
+	SetString_SYS("FFT2FLT","CON",sConFil);
+	SetString_SYS("FFT2FLT","REF",sInGrd);
+
+
+	// --- Add this grid to the current project ---
+
+	if (iInteractive_SYS())
+	{
+		DefaultInt_SYS("MAGMAP1", "ADDTOPROJECT", 1);
+		i = iGetInt_SYS("MAGMAP1","ADDTOPROJECT");
+		SetInt_SYS("MAGMAP1", "ADDTOPROJECT", 1);
+
+		if (i != 0)
+		{
+			if (iPrep)
+				iAddDocument_PROJ(sPrpGrd,"Grid",0);
+
+			iAddDocument_PROJ(sOutGrd,"Grid",1);
+		}
+	}
+}

@@ -1,0 +1,111 @@
+//===========================================================================
+NAME          = "Download a CG3 over the COM port"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Import"
+
+DESCRIPTION   = "
+
+"
+
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "grdnlcg3.gr"
+#include "grdnlcg3.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DGW      Diag;
+WA       hWA;
+COM      Com;
+
+string(STR_FILE) sCG3;
+string(STR_DEFAULT) sCom;
+int iBaud;
+
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (!iInteractive_SYS()) Abort_SYS(_("The grdnlcg3 GX cannot be run from a script."));
+   
+
+   // --- Create the Dialogue ---
+
+   Diag = Create_DGW("GRDNLCG3");
+   SetInfoSYS_DGW(Diag,_GRDNLCG3_0,DGW_LISTALIAS,"GRDNLCG3","COM");
+   SetInfoSYS_DGW(Diag,_GRDNLCG3_1,DGW_LISTALIAS,"GRDNLCG3","BAUD");
+   SetInfoSYS_DGW(Diag,_GRDNLCG3_2,DGW_FILEPATH,"GRDNLCG3","FILE");     
+
+   if (iRunDialogue_DGW(Diag)) Cancel_SYS();    
+
+   GetInfoSYS_DGW(Diag,_GRDNLCG3_0,DGW_LISTALIAS,"GRDNLCG3","COM");
+   GetInfoSYS_DGW(Diag,_GRDNLCG3_1,DGW_LISTALIAS,"GRDNLCG3","BAUD");
+   GetInfoSYS_DGW(Diag,_GRDNLCG3_2,DGW_FILEPATH,"GRDNLCG3","FILE");     
+   
+   Destroy_DGW(Diag);
+
+   
+   // --- get parameters ---
+
+   GetString_SYS("GRDNLCG3","COM",sCom);
+   iBaud = iGetInt_SYS("GRDNLCG3","BAUD");
+   GetString_SYS("GRDNLCG3","FILE",sCG3);
+   
+   
+   // --- open file ---
+   
+   hWA = Create_WA(sCG3,0);
+   
+   
+   // --- open COM port and file ---
+
+   DisplayMessage_SYS(_("sCG3"),_("Connect to the CG3, click OK and commence downloading within 90 seconds."));
+   Com = Create_COM(
+            sCom,
+            iBaud,
+            COM_DATASIZE_EIGHT,
+            COM_PARITY_NONE,
+            COM_STOPBITS_ONE,
+            COM_FLOWCONTROL_XON_XOFF,
+            10000);
+   
+
+   // --- download ---
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Downloading..."),0);
+   ReadFile2WA_COM(Com,hWA);
+   Progress_SYS(0);
+   
+   
+   // --- Done ---
+   
+   Destroy_SYS(Com);
+   Destroy_SYS(hWA);
+   
+   
+   // --- display the file ---
+     
+   SetString_SYS("EDIT","FILE",sCG3);
+   SetString_SYS("EDIT","WAIT","");
+   SetString_SYS("EDIT","CHILD","YES");
+   iRunGX_SYS("edit");
+
+}

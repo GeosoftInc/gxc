@@ -1,0 +1,639 @@
+//===========================================================================
+NAME          = "Import an external database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/Semplot Data/Import"
+
+DESCRIPTION   = "
+   Import an ODBC compliant external database into a Geosoft database.
+   
+       SEMIMPDB.FILE        Input database file name
+       SEMIMPDB.MODE        Import mode (0: New, 1: Append)
+       SEMIMPDB.TEMPLATE    Template file for batch DB import.
+       
+       SEMIMPODBC.DB        Created GDB file name
+       SEMIMPODBC.CONNECT   SQL connection string
+       SEMIMPODBC.MODE      Import mode (0: New, 1: Append)
+       SEMIMPODBC.TEMPLATE  Template file for batch ODBC import.
+
+       SEMPLOT.DEC_OXIDES   Number of oxide decimal places
+            	
+"
+// Revision History
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v7.0.0: Fixed setting of oxide decimal places.
+// v6.3.0: Mineral channel required as input to TotalOxides_SEMPLOT.
+// v6.0.0: Licensing upgrade: removed iCheckLicense_SYS.
+//         Added call to IMPSETPRJ.GX to set projection.
+//         Changed class of "Used" channel from "ISPLOTTED" to "MASK"
+//         Added support for the SQL (ODBC) import.
+//         New channel ordering method for new databases.
+// v5.1.7: Semplot Version 2 Upgrade
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "semimpdb.gr"
+#include "semimpdb.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+// CREATE_CHAN(Channel_Name, Type, Initial_Value, Class, Width, Decimals, Protection, Label)
+#define CREATE_CHAN(A, B, C, D, E, F, G, H)        \
+   hChan = FindSymb_DB(Data, A, DB_SYMB_CHAN);  \
+   if(hChan==NULLSYMB) {                        \
+      hChan = CreateSymb_DB(Data, A, DB_SYMB_CHAN, DB_OWN_USER, B);  \
+      if(hChan==NULLSYMB) {                                          \
+         Printf_STR(sBuff, sizeof(sBuff), _("Error creating %s channel."), A); \
+         Abort_SYS(sBuff);                                           \
+      }                                                              \
+      LockSymb_DB(Data, hChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY); \
+   } else  {                                                         \
+      LockSymb_DB(Data, hChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY); \
+      SetChanProtect_DB( Data, hChan, DB_CHAN_UNPROTECTED);          \
+   }                                                  \
+   if(C!=-1) {                                        \
+      SetIntN_VV(VVd, 0, -1, C);                      \
+      PutChanVV_DB(Data, hLine, hChan, VVd);          \
+   }                                                  \
+   SetRegSymbSetting_DB(Data, hChan, "CLASS", D);     \
+   if(iStrlen_STR(H))                                 \
+      SetChanLabel_DB( Data, hChan, H);               \
+   else                                               \
+      SetChanLabel_DB( Data, hChan, A);               \
+   SetChanWidth_DB( Data, hChan, E);                  \
+   SetChanDecimal_DB( Data, hChan, F);                \
+   SetChanProtect_DB( Data, hChan, G);                \
+   UnLockSymb_DB(Data, hChan);
+
+
+// SETUP_CHAN(Channel_Name, Width, Decimals, Protection)
+#define SETUP_CHAN(A, B, C, D)        \
+   hChan = FindSymb_DB(Data, A, DB_SYMB_CHAN);  \
+   if(hChan!=NULLSYMB) {                        \
+      LockSymb_DB(Data, hChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY); \
+      SetChanProtect_DB( Data, hChan, DB_CHAN_UNPROTECTED);          \
+      SetChanWidth_DB( Data, hChan, B);                  \
+      SetChanDecimal_DB( Data, hChan, C);                \
+      SetChanProtect_DB( Data, hChan, D);                \
+      UnLockSymb_DB(Data, hChan);   \
+   }
+
+#define IMPORT_ASCII 0
+#define IMPORT_DB    1
+#define IMPORT_ODBC  2
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW			Diag;			 			// Dialogue handle
+EDB         EData;         		// Database handle
+DB          Data;          		// Database handle
+DB_SYMB		hLine,hChan;
+DB_SYMB     hAnom;
+VV				ChanVV,VVd;
+ITR         Itr;
+LST         List, ChLST, MinLST;
+
+
+int			i, iN, iNChan, iMode, iImpType;
+int 			iDecOxide, iChan, iSetX, iSetY;
+
+string(STR_FILE)	sData, sTemplate, sDB, sDir;		
+string(STR_DEFAULT_LONG) sBuff;
+string(STR_DEFAULT) sGxParam;	 
+string(STR_DB_SYMBOL) sChan, sMineralCh;
+string(1024) sConnect;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Determine import type - default to normal database import ---
+   
+   iImpType = iGetInt_SYS("SEMIMPDB", "IMPTYPE");
+   if(iImpType!=IMPORT_ODBC) iImpType = IMPORT_DB;
+   SetInt_SYS("SEMIMPDB", "IMPTYPE", IMPORT_DB);
+   
+   
+   if(iImpType==IMPORT_DB)
+      Strcpy_STR(sGxParam, "SEMIMPDB");
+   else if(iImpType==IMPORT_ODBC)
+      Strcpy_STR(sGxParam, "SEMIMPODBC");
+   else
+      Abort_SYS(_("Invalid import type in SEMIMPDB."));
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      i = 1;
+      while (i != 0) {
+
+         switch (i) {
+         
+            case 1:
+                      
+               if(iImpType==IMPORT_DB) {                        
+               
+                  
+                  // --- file name ---
+            
+                  Diag = Create_DGW("SEMIMPDB");
+                  SetInfoSYS_DGW(Diag,_SEMIMPDB_0,DGW_FILEPATH,"SEMIMPDB","FILE");
+                  SetInfoSYS_DGW(Diag,_SEMIMPDB_1,DGW_LISTALIAS,"SEMIMPDB","MODE");
+                  SetInfoSYS_DGW(Diag,_SEMIMPDB_2,DGW_TEXT,"SEMPLOT","DEC_OXIDES");
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();
+                  GetInfoSYS_DGW(Diag,_SEMIMPDB_0,DGW_FILEPATH,"SEMIMPDB","FILE");
+                  GetInfoSYS_DGW(Diag,_SEMIMPDB_1,DGW_LISTALIAS,"SEMIMPDB","MODE");
+                  GetInfoSYS_DGW(Diag,_SEMIMPDB_2,DGW_TEXT,"SEMPLOT","DEC_OXIDES");
+                  Destroy_DGW(Diag);
+                  
+                  
+                  // --- Validate ---
+
+                  GetString_SYS("SEMIMPDB","FILE",sData);
+
+
+                  if(i==0) {
+
+                     // --- Make default template name from data name ---
+
+                     FileNamePart_STR(sData, sTemplate, STR_FILE_PART_NAME);
+                     FileExt_STR(sTemplate,"i4",sTemplate,FILE_EXT_FORCE);
+
+                  
+                     // --- If a specific template for the data file does not exist, try to create one automatically ---
+
+                     if(!iFileExist_SYS(sTemplate)) {
+
+                        // --- If one cannot be created, run the wizard ---
+
+                        if(!iCreateASCIITemplate_SEMPLOT(sData, sTemplate))
+                           i = 2;
+                     }
+                  }
+               }
+               else if(iImpType==IMPORT_ODBC) {
+               
+                  Diag = Create_DGW("SEMIMPODBC");
+                  SetInfoSYS_DGW(Diag,_SEMIMPODBC_0,DGW_LISTALIAS,"SEMIMPODBC","MODE");
+                  SetInfoSYS_DGW(Diag,_SEMIMPODBC_1,DGW_TEXT,"SEMPLOT","DEC_OXIDES");
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();
+                  GetInfoSYS_DGW(Diag,_SEMIMPODBC_0,DGW_LISTALIAS,"SEMIMPODBC","MODE");
+                  GetInfoSYS_DGW(Diag,_SEMIMPODBC_1,DGW_TEXT,"SEMPLOT","DEC_OXIDES");
+                  Destroy_DGW(Diag);    
+                  
+
+                  // --- Force ODBC reconnection? ---
+                  
+                  if(i==3) {
+                     SetString_SYS("SEMIMPODBC", "CONNECTION", "");  
+                     i=2;  // --- now run the wizard ---             
+                  }                             
+               }
+
+               break;
+               
+            case 2:
+            
+               // --- wizard ---
+
+               if(iImpType==IMPORT_DB) {                        
+
+                  // --- Make template name same as data name ---
+
+                  GetString_SYS("SEMIMPDB","FILE",sData);
+                  FileNamePart_STR(sData, sTemplate, STR_FILE_PART_NAME);
+                  FileExt_STR(sTemplate,"i4",sTemplate,FILE_EXT_FORCE);
+
+                  if(ImportDatabaseADO_SEMPLOT(sData,sTemplate)) {
+                     i = 1;
+                     break;
+                  }
+               }
+               else if(iImpType==IMPORT_ODBC) {
+   
+                  GetString_SYS("SEMIMPODBC","CONNECTION",sConnect);
+               
+                  if(ImportDatabaseODBC_SEMPLOT(sConnect,sTemplate)) {
+                     i = 1;
+                     break;
+                  }
+                  SetString_SYS("SEMIMPODBC","CONNECTION",sConnect);
+                  SetString_SYS("SEMIMPODBC","TEMPLATE",sTemplate);
+               }               
+               
+               i = 0;
+               break;
+               
+           }                              
+      }            
+   }
+
+
+   if(iImpType==IMPORT_DB) {                        
+	
+      // --- get file name ---
+
+      GetString_SYS("SEMIMPDB","FILE",sData);
+	
+
+	   // --- Validate ---
+
+	   if(!iStrlen_STR(sData))
+         Abort_SYS(_("No data file specified")); 
+	
+	   if(!iFileExist_SYS(sData)) {
+         Printf_STR(sBuff, sizeof(sBuff), _("The data file %s was not found."), sData);
+         Abort_SYS(sBuff);
+      }
+
+
+      // --- Create template name from data file name ---
+      GetString_SYS("SEMIMPDB", "FILE_DIR", sDir);
+      FileNamePart_STR(sData, sTemplate, STR_FILE_PART_NAME);
+      FileExt_STR(sTemplate,"i4",sTemplate,FILE_EXT_FORCE);
+      Strcat_STR(sDir, sTemplate);
+      Strcpy_STR(sTemplate, sDir);
+   }
+   else if(iImpType==IMPORT_ODBC) {
+   
+      
+      // --- get template name ---
+
+      GetString_SYS("SEMIMPODBC","TEMPLATE",sTemplate);
+	
+
+	   // --- Validate ---
+
+	   if(!iStrlen_STR(sTemplate))
+         Abort_SYS(_("No template file specified for ODBC import.")); 
+	}
+
+   if(!iFileExist_SYS(sTemplate)) {
+      Printf_STR(sBuff, sizeof(sBuff), _("The import template file %s was not found."), sTemplate);
+      Abort_SYS(sBuff);
+   }         
+      
+
+   // --- Get the import mode - default to New database ---
+
+   iMode = iGetInt_SYS(sGxParam, "MODE");
+   if(iMode<0 || iMode>1) iMode = 0;
+
+
+   if(iMode == 0) {
+      
+      // --- Create database name from data file name ---
+
+      if(iImpType==IMPORT_DB) {
+         FileNamePart_STR(sData, sDB, STR_FILE_PART_NAME);
+         FileExt_STR(sDB,"gdb",sDB,FILE_EXT_FORCE);
+      }
+      else if(iImpType==IMPORT_ODBC)
+         GetString_SYS("SEMIMPODBC", "DB", sDB);
+
+
+      // --- Create the new database ---
+
+      SetString_SYS("CREATE","NAME",sDB);   
+      if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")==-1) Cancel_SYS();
+      GetString_SYS("CREATE","NAME",sDB);   
+
+
+      if(iImpType==IMPORT_ODBC)
+         SetString_SYS("SEMIMPODBC", "DB", sDB);
+      
+      // --- Get the database ---
+
+      EData = Load_EDB(sDB);
+
+   }
+   else {
+
+      // --- Import to current database ---
+
+      EData = Current_EDB();
+   }
+
+
+   // --- Lock the database ---
+
+   Data = Lock_EDB(EData);
+	
+	
+   // --- Import ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing Data"),1);
+   
+   ImportADO_DU(Data,"","",sTemplate,"Data");
+
+
+
+   // --- Get the temporary line and its symbol name ---
+
+   hLine = FindSymb_DB(Data, "Data", DB_SYMB_LINE);
+   if(hLine==NULLSYMB)
+      Abort_SYS(_("Error finding temporary import line \"Data\""));
+
+
+	// --- Create ITR to put into the Mask and Used channels. This
+   //     will make "0" values black and "1" values red. ---
+
+   Itr = Create_ITR();
+   SetSize_ITR(Itr, 2);
+   SetZoneValue_ITR(Itr, 0, 0.5);
+   SetZoneColor_ITR(Itr, 0, C_BLACK);
+   SetZoneColor_ITR(Itr, 1, C_RED);
+	
+
+	// --- Get any channel and find its length ---
+
+   ChanVV = Create_VV(INT, 0);
+   iNChan = iSymbList_DB(Data, ChanVV, DB_SYMB_CHAN);
+   if(iNChan==0)
+      Abort_SYS(_("No channels imported."));
+   
+   hChan = (DB_SYMB)iGetInt_VV(ChanVV, 0);
+
+   LockSymb_DB(Data, hChan, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+   iN = iGetChannelLength_DB( Data, hLine, hChan);
+   UnLockSymb_DB(Data, hChan);
+	
+	
+	// --- Create a VV for default values ---
+
+   VVd = CreateExt_VV(GS_BYTE, iN); 
+
+
+	// --- Set default channel widths for oxide channels ----
+
+	iDecOxide = iGetInt_SYS("SEMPLOT", "DEC_OXIDES");
+   if(iDecOxide==iDUMMY) iDecOxide = 2;
+ 
+
+
+   // --- Add attributes to the standard channels. This is in place of the
+   //     extra parameters found in an ASCII .i3 import template that are not
+   //     found in the ADO .i4 import template, as well as differences in the 
+   //     way the ASCII and XLS imports set protections ---
+
+   SETUP_CHAN(_n("X"), 10, 2, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("Y"), 10, 2, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("SAMPLE_NO"), 10, 0, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_("Mineral"), 8, 0, DB_CHAN_PROTECTED )
+   SETUP_CHAN(_n("Grain_No"), 8, 0, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("P2O5"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("SiO2"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("TiO2"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("Al2O3"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("V2O3"),  5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("Cr2O3"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("Fe2O3"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("FeO"),   5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("NiO"),   5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("MnO"),   5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("MgO"),   5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("CaO"),   5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("Na2O"),  5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("K2O"),   5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("ZnO"),   5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+   SETUP_CHAN(_n("P2O5"),  5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED)
+ 
+
+
+	// --- Create a Mask channel ---
+
+   CREATE_CHAN(_("Mask"), GS_BYTE, 1, "MASK", 5, 0, DB_CHAN_UNPROTECTED,"")
+   LockSymb_DB(Data, hChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+   SetITR_SEMPLOT(Data, hChan, Itr);
+   UnLockSymb_DB(Data, hChan);
+
+
+   // --- Create a Used channel ---
+
+   CREATE_CHAN(_n("Used"), GS_BYTE, 0, "MASK", 5, 0, DB_CHAN_PROTECTED,"")
+   LockSymb_DB(Data, hChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+   SetITR_SEMPLOT(Data, hChan, Itr);
+   UnLockSymb_DB(Data, hChan);
+
+
+   // --- Create a Total channel if it doesn't yet exist ---
+
+   CREATE_CHAN(_n("Total"), GS_DOUBLE, 0, "TOTAL", 7, 2, DB_CHAN_PROTECTED,"")
+
+
+   //     If an "Anal_Pos" channel exists, use it as the Position channel, 
+   // --- otherwise, create a position channel ---
+
+   if(iClassChanList_DB(Data, ChanVV, "POSITION")==0) {     
+      if(NULLSYMB != FindSymb_DB(Data, "Anal_Pos", DB_SYMB_CHAN)) {
+         CREATE_CHAN(_n("Anal_Pos"), GS_BYTE, -1, "POSITION", 8, 0, DB_CHAN_PROTECTED,"") // Anal_Pos exists, set class
+      }
+      else {
+         CREATE_CHAN(_n("Position"), GS_BYTE, 0, "POSITION", 8, 0, DB_CHAN_PROTECTED,"")
+      }
+   }
+
+
+   // --- Create an FeO channel if it doesn't yet exist ---
+   
+   CREATE_CHAN(_n("Fe2O3"), GS_DOUBLE, -1, _n("ASSAY"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED, "")
+
+
+   // --- Create an Fe2O3 channel if it doesn't yet exist ---
+
+   CREATE_CHAN(_n("FeO"),   GS_DOUBLE, -1, _n("ASSAY"), 5+iDecOxide, iDecOxide, DB_CHAN_PROTECTED, "")
+
+
+   // --- Sort the data ---
+
+   SortData_SEMPLOT(Data, hLine, 1);
+
+
+   // --- Convert dummies to 0.0 values (if specified in preferences) ---
+
+   ConvertDummies_SEMPLOT(Data, hLine);
+
+
+   // --- Split up the data on the ANOMALY channel ---
+   
+   hAnom = FindChan_DB(Data, "Anom_Name");
+   if(hAnom==NULLSYMB)
+      Abort_SYS(_("Unable to find the \"Anom_Name\" channel."));
+   
+   LockSymb_DB(Data, hLine, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+   LockSymb_DB(Data, hAnom, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+   BreakLineToGroups_DU(Data, hLine, hAnom, SEMPLOT_GROUP_CLASS);
+
+
+   // --- Delete the original data and the anomaly channel ---
+
+   DeleteSymb_DB(Data, hLine);
+   SetChanProtect_DB( Data, hAnom, DB_CHAN_UNPROTECTED);
+   DeleteSymb_DB(Data, hAnom);
+
+
+   // --- Set channel order ---
+
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   SetChannelOrder_SEMPLOT(Data, ChLST);
+   
+   
+   // --- Calculate Total Oxides. See if the MINERAL channel exists ---
+   
+   MinLST = Create_LST(2*STR_DB_SYMBOL);
+   ClassChanLST_DB(Data, MinLST, _("Mineral"));
+   if(iSize_LST(MinLST)>0) 
+   {
+      GetItem_LST(MinLST, 0, 0, sMineralCh);      
+      TotalOxides_SEMPLOT(Data, sMineralCh);   
+   }
+   else
+      TotalOxides_SEMPLOT(Data, "");   
+
+
+   // --- Set channel units for oxides (%) and elements (ppm) ---
+
+   SetChannelUnits_SEMPLOT(Data);
+
+
+   // --- Set the current X and Y channels ---
+
+   iSetX = 0;
+   iSetY = 0;
+   if(GetXYZChanSymb_DB(Data, DB_CHAN_X) == NULLSYMB &&
+      GetXYZChanSymb_DB(Data, DB_CHAN_Y) == NULLSYMB) {
+
+
+      // --- If none are found or set, look for imported channels with the "Location" class ---
+
+      List = Create_LST(2*STR_DB_SYMBOL);
+      ClassChanLST_DB(Data, List, "LOCATION");
+      if(iSize_LST(List)>=2) {
+
+         // --- Set X ---
+
+         iChan = iFindItem_LST(List, 0, "X");
+         if(iChan>0) {
+            SetXYZChan_DB(Data, DB_CHAN_X, "X");
+            iSetX = 1;
+         }
+         else {
+            iChan = iFindItem_LST(List, 0, "East");
+            if(iChan>0) {
+               SetXYZChan_DB(Data, DB_CHAN_X, "East");
+               iSetX = 1;
+            }
+
+            else {      // default to first item for X
+               GetItem_LST(List, 0, 0, sChan);
+               SetXYZChan_DB(Data, DB_CHAN_X, sChan);
+               iSetX = 1;
+            }
+         }
+
+         
+         // --- Set Y ---
+
+         iChan = iFindItem_LST(List, 0, "Y");
+         if(iChan>0){
+            SetXYZChan_DB(Data, DB_CHAN_Y, "Y");
+            iSetY = 1;
+         }
+         else {
+            iChan = iFindItem_LST(List, 0, "North");
+            if(iChan>0) {
+               SetXYZChan_DB(Data, DB_CHAN_Y, "North");
+               iSetY = 1;
+            }
+            else {      // default to first item for X
+               GetItem_LST(List, 0, 1, sChan);
+               SetXYZChan_DB(Data, DB_CHAN_Y, sChan);
+               iSetY = 1;
+            }
+         }
+      }
+   }
+
+
+   // --- Delete line 0 if it exists ---
+
+   if(iExistSymb_DB(Data,"L0",DB_SYMB_LINE)) {
+
+      hLine = FindSymb_DB(Data,"L0",DB_SYMB_LINE);
+      LockSymb_DB(Data,hLine,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      DeleteSymb_DB(Data,hLine);
+   
+   }
+
+
+	// --- release database ---
+   
+   UnLock_EDB(EData);
+
+
+	// --- display data ---
+
+   MakeCurrent_EDB(EData);
+   if(iMode==0) {
+      UnLoadAllChans_EDB(EData);
+      iNChan = iSize_LST(ChLST);
+      for(i=0;i<iNChan;i++) {
+         GetItem_LST(ChLST, 0, i, sChan);
+         LoadChan_EDB(EData, sChan);
+      }
+   }
+   
+   // --- Load any remaining channels ---
+   
+   LoadAllChans_EDB(EData);
+
+
+   // --- Set projection if not set already. ---
+
+   if(iSetX && iSetY)
+      iRunGX_SYS("impsetprj");
+
+	Progress_SYS(0);
+
+
+
+   // --- Display Errors ---
+
+   if (iInteractive_SYS()) {
+      
+      // --- Anything to display ---
+
+      if (iFileSize_SYS("import_error.log")>3) // 3 characters could be UTF-8 BOM only
+      {
+
+         // --- edit ---
+
+         SetString_SYS("EDIT","FILE","import_error.log");
+         SetString_SYS("EDIT","CHILD","Yes");
+         iRunGX_SYS("edit");         
+      }      
+   } 
+
+		
+   // --- Clean up ---
+     
+	Destroy_VV(ChanVV);
+   Destroy_VV(VVd);
+   Destroy_ITR(Itr);
+
+}

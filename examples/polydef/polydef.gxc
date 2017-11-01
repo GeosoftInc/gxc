@@ -1,0 +1,208 @@
+//===========================================================================
+
+NAME          = "Create a polygon file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GMSYS-3D Tools/Grid Editing"
+
+DESCRIPTION   = "
+		POLYDEF.FILE  	polygon file name
+		       .EXCL  	inclusive or exclusive
+"
+// Revision History:
+// v6.0.0: SJC   Fixed for oriented sections.
+// v5.1.4: SJC   Error for oriented views.
+//===========================================================================
+
+RESOURCE = "polydef.gr"
+#include "polydef.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;
+string(STR_DEFAULT_LONG) sTemp;
+int         i,iLen,iMode;
+int         iExclusive, iOrient;
+
+DGW         Diag;          // Dialogue handle
+PLY         Poly;	       // polygon object
+VV          VVx,VVy;       // polyline VV's
+
+EMAP        eMAP;
+MAP         hMAP;
+MVIEW       hMVIEW;
+IPJ         hIPJ, hUserIPJ;
+
+
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if(!iInteractive_SYS())
+      Abort_SYS(_("Error: This GX can only run interactively"));
+
+
+   // --- Get the current map ---
+
+   eMAP = Current_EMAP();
+   iSetCurrentView_EMAP(eMAP,"*Data");
+
+
+   // --- Get the various projections. ---
+
+   hMAP = Lock_EMAP(eMAP);
+   hMVIEW = Create_MVIEW(hMAP,"*Data",MVIEW_READ);
+   
+   hIPJ = Create_IPJ();
+   hUserIPJ = Create_IPJ();
+   
+   GetIPJ_MVIEW(hMVIEW,hIPJ);
+   GetUserIPJ_MVIEW(hMVIEW,hUserIPJ);
+
+   iOrient = iGetOrientation_IPJ(hIPJ);
+
+   Destroy_MVIEW(hMVIEW);
+   UnLock_EMAP(eMAP);
+
+   
+   // --- Create the 1st Dialogue ---
+
+   Diag = Create_DGW("POLYDEF");
+
+
+   // --- Set any Defaults from INI ---
+
+   SetInfoSYS_DGW(Diag,_POLYDEF_0,DGW_FILEPATH,"POLYDEF","FILE");     
+   SetInfoSYS_DGW(Diag,_POLYDEF_1,DGW_LISTALIAS,"POLYDEF","EXCL");     
+
+
+   // --- Run the Dialogue ---
+
+   iMode = iRunDialogue_DGW(Diag);
+   if (iMode < 0) Cancel_SYS();
+
+ 
+   // --- Get the Strings and replace in INI ---
+
+   GetInfoSYS_DGW(Diag,_POLYDEF_0,DGW_FILEPATH,"POLYDEF","FILE");     
+   GetInfoSYS_DGW(Diag,_POLYDEF_1,DGW_LISTALIAS,"POLYDEF","EXCL");  
+
+
+   // --- Destroy the Dialogue ---
+
+   Destroy_DGW(Diag);
+
+            
+   // --- Get file ---
+
+   GetString_SYS("POLYDEF","FILE",sFile);
+
+   // --- Get Incl ---
+
+   GetString_SYS("POLYDEF","EXCL",sTemp);     
+   
+   if (!iStrlen_STR(sTemp))
+      iExclusive = 0;
+   else
+      iExclusive = iGetInt_SYS("POLYDEF","EXCL");
+
+
+   // --- create polygon ---
+
+   Poly = Create_PLY();
+
+
+   // --- if append, load current file ---
+
+   if (iMode == 1) {
+
+      // --- file must exist ---
+
+      if (!iFileExist_SYS(sFile))
+         Abort_SYS(_("Cannot append to a file that does not exist."));
+      
+      LoadTable_PLY(Poly,sFile);
+
+   }		
+
+   // --- create VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+
+
+   // --- get profile points ---
+
+
+   DisplayMessage_SYS(_("Define polygon"), _("Enter points on polygon, Right button when done, Esc to cancel."));
+
+
+   // --- If this is an oriented section, you must use the native view
+   //     projection, otherwise, one dimension ("Z") is lost because only the
+   //     true "X" and "Y" values are recovered from UserIPJ. This means the
+   //     PLY would collapse to a line.  In a section view, the native view
+   //     "X" coordinate corresponds to either Easting (for azimuth = 90), or
+   //     northing (for azimuth = 0), or begins at 0 on the left side. ---
+   
+   if(iOrient == IPJ_ORIENT_SECTION) {   
+   
+      // --- Must clear the orientation first ---
+      
+      ClearOrientation_IPJ(hIPJ);
+        
+      hMAP = Lock_EMAP(eMAP);
+      hMVIEW = Create_MVIEW(hMAP,"*Data",MVIEW_WRITEOLD);
+      SetUserIPJ_MVIEW(hMVIEW, hIPJ);
+      Destroy_MVIEW(hMVIEW);
+      UnLock_EMAP(eMAP);
+   }
+   
+   i = iGetPolyLine_EMAP(eMAP,_("Click on polygon corners, Right button when done..."),VVx,VVy);
+
+
+   // --- Reset everything ---
+   
+   if(iOrient == IPJ_ORIENT_SECTION) {
+      hMAP = Lock_EMAP(eMAP);
+      hMVIEW = Create_MVIEW(hMAP,"*Data",MVIEW_WRITEOLD);
+      SetUserIPJ_MVIEW(hMVIEW, hUserIPJ);
+      Destroy_MVIEW(hMVIEW);
+      UnLock_EMAP(eMAP);
+   }      
+   
+   
+   // --- if not cancelled, and there are 3 or more points, process ---
+
+   iLen = iLength_VV(VVx);
+   if ((i == 0) && (iLen >= 3)) {
+   
+
+      // --- change to the current view user projection ---
+      
+      if(iOrient == IPJ_ORIENT_SECTION)      
+         ChangeIPJ_PLY(Poly,hIPJ);
+      else
+         ChangeIPJ_PLY(Poly,hUserIPJ);
+      
+      
+      // --- add the polygon ---
+   
+      AddPolygonEx_PLY(Poly,VVx,VVy,iExclusive);
+      SaveTable_PLY(Poly,sFile);
+
+   }
+
+   Destroy_SYS(VVx);
+   Destroy_SYS(VVy);
+   Destroy_SYS(Poly);
+
+}

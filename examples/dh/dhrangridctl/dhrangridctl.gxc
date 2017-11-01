@@ -1,0 +1,186 @@
+//===========================================================================
+NAME          = "DHRANGRID: RANGRID Control File Creation"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Creates a control file for the RANGRID gridding algorithm.
+
+Parameters: 
+
+       RANGRID.CHAN   - Channel to grid                        
+              .GRID   - Name of New Grid file
+              .ERR    - Name of Error Grid file
+              .CS     - Cell size
+              .XY     - Xmin,Ymin,Xmax,Ymax
+              .LOGOPT - Log option
+              .LOGMIN - Log minimum
+              .DSF    - Low-pass desampling factor
+              .BKD    - Blanking distance
+              .TOL    - Tolerance 
+              .PASTOL - % pass tolerance
+              .ITRMAX - Max. iterations
+              .ICGR   - Starting coarse grid
+              .SRD    - Starting search radius
+              .TENS   - Internal tension (0-1)
+              .EDGCLP - Cells to extend beyond data                          (optional)
+              .IWT    - Weighting power						   					(optional)
+              .WTSLP  - Weighting slope						   				(optional)
+"
+// Revision History:
+// v7.0.0: Remove reference to obsolete bclip parameter.
+// v6.0.1: Added EDGCLP, IWT and WTSLP parameters
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sCtl;           // Name of new control file
+string(STR_DEFAULT) sCS;         // grid cell size       
+string(STR_DEFAULT_LONG) sXY;    //    . 
+string(STR_DEFAULT) sLogOpt;     //    .
+string(STR_DEFAULT) sLogMin;     //    .
+string(STR_DEFAULT) sDSF;        //    . 
+string(STR_DEFAULT) sBKD;        //    .
+string(STR_DEFAULT) sTol;        //    .
+string(STR_DEFAULT) sPasTol;     //   optional parameters
+string(STR_DEFAULT) sItrMax;     //    .
+string(STR_DEFAULT) sTens;       //    .  
+string(STR_DEFAULT) sICGR;       //    . 
+string(STR_DEFAULT) sSRD;        //    .
+string(STR_DEFAULT) sEdgClp;     //    .
+string(STR_DEFAULT) sIWT;        //    .
+string(STR_DEFAULT) sWtSlp;      //    .
+
+WA          WA_con;              // Handle to write to control file
+string(STR_DEFAULT_LONG) sText;  // Line of text to write to control file
+                                           
+
+//==========================================================================
+//                           RANGRID CODE
+//===========================================================================
+
+{
+
+   GetString_SYS("DHRANGRIDCTL", "CONTROL_FILE", sCtl);
+   if(!iStrlen_STR(sCtl)) {
+      SetString_SYS("DHRANGRIDCTL", "CONTROL_FILE", "_dhrangrid.con");
+      GetString_SYS("DHRANGRIDCTL", "CONTROL_FILE", sCtl);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("RANGRID","CS",sCS);     
+   GetString_SYS("RANGRID","XY",sXY);
+   GetString_SYS("RANGRID","LOGOPT",sLogOpt);     
+   if (iStrcmp_STR(sLogOpt,_n("log"),0)==0) 
+      Strcpy_STR(sLogOpt,"-1");
+   else if (iStrcmp_STR(sLogOpt,_n("log +/-"),0)==0) 
+      Strcpy_STR(sLogOpt,"-2");
+   else if (iStrcmp_STR(sLogOpt,_n("log, save as log"),0)==0) 
+      Strcpy_STR(sLogOpt,"1");
+   else if (iStrcmp_STR(sLogOpt,_n("log +/-, save as log"),0)==0) 
+      Strcpy_STR(sLogOpt,"2");
+   else if (iStrcmp_STR(sLogOpt,"-2",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"-1",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"0",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"1",STR_CASE_TOLERANT)!=0 &&
+			iStrcmp_STR(sLogOpt,"2",STR_CASE_TOLERANT)!=0)
+      Strcpy_STR(sLogOpt,"0");
+   GetString_SYS("RANGRID","LOGMIN",sLogMin);
+   GetString_SYS("RANGRID","DSF",sDSF);     
+   GetString_SYS("RANGRID","BKD",sBKD);
+   GetString_SYS("RANGRID","TOL",sTol);     
+   GetString_SYS("RANGRID","PASTOL",sPasTol);
+   GetString_SYS("RANGRID","ITRMAX",sItrMax);     
+   GetString_SYS("RANGRID","TENS",sTens);
+   GetString_SYS("RANGRID","EDGCLP",sEdgClp);
+   GetString_SYS("RANGRID","IWT",sIWT);
+   GetString_SYS("RANGRID","WTSLP",sWtSlp);
+   
+
+   // --- Coarse grid has required default (16) which may not be set if
+   //     user does not go to advanced options ---
+
+   GetString_SYS("RANGRID","ICGR",sICGR);  
+   if(!iStrlen_STR(sICGR))
+      Strcpy_STR(sICGR,"16");
+         
+   GetString_SYS("RANGRID","SRD",sSRD);
+   
+      
+   // --- Write control file ---
+
+   WA_con=Create_WA(sCtl,0);
+
+   // --- Line 1: cs ---
+
+   Puts_WA(WA_con,sCS);
+   Strcat_STR(sText,_n("     / cs"));
+   NewLine_WA(WA_con);
+
+
+   // --- line 2: xmin,ymin,xmax,ymax ---
+
+   Puts_WA(WA_con,sXY);
+   Strcat_STR(sText,_n("     / xmin,ymin,xmax,ymax"));
+   NewLine_WA(WA_con);
+
+
+   // --- line 3: chan,zb,zm,logopt,logmin
+
+   Strcpy_STR(sText,",,,");
+   Strcat_STR(sText,sLogOpt);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sLogMin);
+   Strcat_STR(sText,_n("     / chan,zb,zm,logopt,logmin"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+
+   // --- line 4: idsf,bkd,srd,iwt,edgclp,wtslp
+
+   Strcpy_STR(sText,sDSF);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sBKD);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sSRD);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sIWT);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sEdgClp);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sWtSlp);
+   Strcat_STR(sText,_n("     / idsf,bkd,srd,iwt,edgclp,wtslp"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   
+   // --- line 5: tol,pastol,itrmax,ti,icgr
+
+   Strcpy_STR(sText,sTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sPasTol);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sItrMax);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sTens);
+   Strcat_STR(sText,",");
+   Strcat_STR(sText,sICGR);
+   Strcat_STR(sText,_n("     / tol,pastol,itrmax,ti,icgr"));
+   Puts_WA(WA_con,sText);
+   NewLine_WA(WA_con);
+
+   Destroy_WA(WA_con);
+
+}
+

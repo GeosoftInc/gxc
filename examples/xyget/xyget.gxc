@@ -1,0 +1,183 @@
+//===========================================================================
+NAME          = "Restore saved current XY coordinate channels"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Restore saved coordinates to current X and Y.
+          
+   If the current X and Y channels are not \"X\" and \"Y\", then the
+   backup channels are the same as the originals, but begin with
+   underscore \"_\" characters.
+          
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
+
+// Revision History:
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     BackXCh,BackYCh;  // Channel Handle
+DB_SYMB     XCh,YCh;          // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DB_SELECT   Select;
+IPJ         hIPJ;
+
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sXCh, sXBackCh, sYCh, sYBackCh;
+string(STR_DEFAULT_LONG) sMsg;
+
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Get channel names ---
+   
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   Strcpy_STR(sXBackCh, "__");
+   Strcat_STR(sXBackCh, sXCh);
+   Strcpy_STR(sYBackCh, "__");
+   Strcat_STR(sYBackCh, sYCh);
+
+
+   // --- Do the backup Channels Exist ? ---
+
+   BackXCh = FindChan_DB(Data,sXBackCh);
+   if(BackXCh==NULLSYMB) {
+      Strcpy_STR(sMsg, _("The backup X channel \""));   
+      Strcat_STR(sMsg,sXBackCh);   
+      Strcat_STR(sMsg, _("\" does not exist."));         
+      Abort_SYS(sMsg);
+   }
+      
+   BackYCh = FindChan_DB(Data,sYBackCh);
+   if(BackXCh==NULLSYMB) {
+      Strcpy_STR(sMsg, _("The backup Y channel \""));   
+      Strcat_STR(sMsg,sYBackCh);   
+      Strcat_STR(sMsg,_("\" does not exist."));         
+      Abort_SYS(sMsg);
+   }
+      
+   // --- Delete current X and Y if they exist ---      
+
+   XCh = FindChan_DB(Data,sXCh);
+   if (XCh!=NULLSYMB) {   
+      LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(Data,XCh,DB_CHAN_UNPROTECTED);
+      DeleteSymb_DB(Data,XCh);      
+   }
+
+   YCh = FindChan_DB(Data,sYCh);
+   if (YCh!=NULLSYMB) {   
+      LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      SetChanProtect_DB(Data,YCh,DB_CHAN_UNPROTECTED);
+      DeleteSymb_DB(Data,YCh);      
+   }
+         
+   
+   // --- create current X, Y channels ---
+         
+   XCh = DupSymb_DB(Data,BackXCh,sXCh);
+   YCh = DupSymb_DB(Data,BackYCh,sYCh);
+   
+
+   // --- Lock the backup channel symbols ---
+
+   LockSymb_DB(Data,BackXCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,BackYCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- select all ---
+   
+   Select = GetSelect_DB(Data);
+   Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+   
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel, _("Backup line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Copy ---
+
+      Decimate_DU(Data,Line,BackXCh,XCh,1);
+      Decimate_DU(Data,Line,BackYCh,YCh,1);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+   
+   
+   // --- move the IPJ ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_DB(Data,BackXCh,hIPJ);
+   SetIPJ_DB(Data,XCh,YCh,hIPJ);
+   
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,BackXCh);
+   UnLockSymb_DB(Data,BackYCh);
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+   SetSelect_DB(Data,Select);
+   
+}

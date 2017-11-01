@@ -1,0 +1,114 @@
+//===========================================================================
+NAME          = "Reverse Line Selection"
+#include <version.gxh>
+DESCRIPTION   = "
+
+                Reverse current line selection
+
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Line/Selections"
+
+//===========================================================================
+// History:
+//
+//    2003/09/12  NG First version
+//
+//===========================================================================
+
+
+//===========================================================================
+//                                 INCLUDE
+//===========================================================================
+
+#include "all.gxh"
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Line;             
+VV          LineVV;
+int         i,iLines;
+string(STR_DEFAULT)  sLine;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   // --- Get current database ---
+      
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   if (iIsWholeplot_DB(Data))
+   {
+      UnLock_EDB(EData);
+      iRunGX_SYS("dhselrev.gx");
+      Exit_SYS();
+   }
+
+   // --- Create List VV ---
+
+   LineVV = Create_VV(-STR_DEFAULT, 0);
+   
+
+   // --- Save current selection --- 
+
+   i = 0;
+   Line = FirstSelLine_DB(Data);
+
+   while (iIsLineValid_DB(Data,Line)) {
+
+      // --- Get the linename and add it to the list ---
+
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sLine);
+      UnLockSymb_DB(Data, Line);
+
+      // --- Store selected lines in VV ---
+
+      SetString_VV(LineVV, i, sLine);
+        
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      i++;
+   }
+   
+   
+   // --- Select all lines ---
+
+   Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   
+
+   // --- Deselect lines in LineVV ---  
+
+   iLines = iLength_VV(LineVV);
+   i = 0;
+   
+   for (i=0;i<iLines;i++) {
+   
+   
+      // --- Get the line symbol ---
+      
+      GetString_VV(LineVV,i,sLine);
+      Select_DB(Data,sLine,DB_LINE_SELECT_EXCLUDE);
+   }
+   
+
+   // --- Done ---
+
+   Destroy_VV(LineVV);
+   
+
+   // --- Release the database ---
+
+   UnLock_EDB(EData);
+   
+}

@@ -1,0 +1,120 @@
+//===========================================================================
+NAME          = "Export Pseudo-Sections to Geosoft IPRED format File(s)"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Create a new channel from selected time windows or frequency values
+
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPWINDOW.gr"
+#include "IPWINDOW.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+LST         List;
+
+int         iD;                // Utility 
+
+string(STR_DB_SYMBOL) sChan, sVAChan;
+string(STR_DEFAULT) sWindows;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS()) 
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPWINDOW");
+
+      // --- Create VA channel list ---
+
+      List = GetList_DGW(Diag,_IPWINDOW_0);
+      ArrayLST_DB(Data,List);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPWINDOW_0,DGW_TEXT,"IP","IPVACHAN");
+      SetInfoSYS_DGW(Diag,_IPWINDOW_1,DGW_TEXT,"IP","IPWINCHAN");
+      SetInfoSYS_DGW(Diag,_IPWINDOW_2,DGW_TEXT,"IP","IPWINDOWS");
+
+      // --- Run the Dialogue ---
+
+      iD = iRunDialogue_DGW(Diag);
+      if (iD == -1) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPWINDOW_0,DGW_TEXT,"IP","IPVACHAN");
+      GetInfoSYS_DGW(Diag,_IPWINDOW_1,DGW_TEXT,"IP","IPWINCHAN");
+      GetInfoSYS_DGW(Diag,_IPWINDOW_2,DGW_TEXT,"IP","IPWINDOWS");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","IPVACHAN",sVAChan);
+   GetString_SYS("IP","IPWINCHAN",sChan);
+   GetString_SYS("IP","IPWINDOWS",sWindows);
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Creating windowed IP Channel"),1);
+
+   Window_IP(Ip, Data, sVAChan, sChan, sWindows);
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+
+   // --- Load the channel ---
+
+   LoadChan_EDB(EData, sChan);   
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+}

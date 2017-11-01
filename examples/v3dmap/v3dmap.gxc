@@ -1,0 +1,705 @@
+//===========================================================================
+
+NAME          = "Add a 3D View or a new drawing plane to a 3D view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+
+      V3DMAP.VIEW          2D view to create 3D plane from
+                           If \"\", use current data view
+            .PLANE         name of the new plane
+            .PLANEBASE     Horizontal plane offset on the Z axis
+            .GRID        surface relief grid
+            .GRIDBASE    base value in grid units to plaxer at model 0 Z
+            .GRIDSCALE   vertical scale in Z units/grid unit
+            .GRIDMIN     surface grid clip minimum, maximum
+            .GRIDMAX      
+            .GRIDSAMPLE  grid surface sampling, multiples of 16
+
+            .VIEWGROUP     If this is defined, then the 3D view is duplicated
+                           from it, and a group or groups are copied over.
+                           If a view name by itself, copy all groups.
+                           If a view and group, copy just that group.
+            .ORIENT        Valid only if VIEWGROUP is defined.
+                           0: Take source view's orientation info
+                           1 : X,Y -> X,Y (normal)
+                           2 : X,Y -> X,Z (section, azimuth 90)
+                          -2 : X,Y -> X,-Z
+                           3 : X,Y -> Y,Z (section, azimuth 0)
+                          -3 : X,Y -> Y,-Z
+
+                           Default: Create Horizontal plane.
+                           
+            .MINX          location on map to place the 3D View
+            .MINY
+            .MAXX
+            .MAXY
+
+         V3D.DEC           view point declination, degrees azimuth from +Y
+            .INC           view point inclination from vertical
+            .DISTANCE      view distance from center of model
+            .BOX           draw a box?
+            .AXIS          draw and annotate an axis
+            .TITLEX        X, Y and Z axis titles
+            .TITLEY
+            .TITLEZ
+"
+// Revision History:
+// v6.4+  Added v3dmap.view as the parameter to specify the current view in non-interactive mode
+// v6.3.1 Restored old ORIENT values for different transforms in script mode only.
+// v6.3.0 Greatly simplified GX to simply create a new plane. View/group copying
+//        remains in non-interactive mode.
+//        Call GetDisplayAreaRaw_EMAP only in interactive mode.
+// v6.0.0 Need to get native projection clipping PPLY, not user projection.
+// v5.1.4 Various fixes for rendering, projections.
+// v5.1.3 Bug fix when creating new views in non-interactive mode.
+// v5.1.2 New GX.
+// 
+//===========================================================================
+
+RESOURCE="v3dmap.gr"
+#include "v3dmap.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+DGW   Diag;
+LST   hPlaneLST,hViewLST;         
+MVIEW View, IView;
+H3DN  h3DN;
+IMG   hIMG;
+IPJ   hImgIPJ,hViewIPJ,hViewTrueIPJ;
+PJ    hPJ;
+
+string(STR_MAX_PATH) sGrid, sStartGrid;
+string(STR_VIEW) sV,sViewGroup,sView,sGroup,s3DView,sPlane;
+string(STR_DEFAULT_LONG) sLabelX,sLabelY,sLabelZ,sVal;
+
+int i,iPlane,iSample,iNewView,iOrient;
+int iAxis,iBox,iElem,iDum,iSame;
+
+real rPlaneBase;
+real rBase,rScale,rMin,rMax;
+real rDist,rDec,rInc;
+real rDminX,rDminY,rDmaxX,rDmaxY,rDminZ,rDmaxZ,rMean,rStdDev;
+real rD,rDx,rDy,rXo,rYo,rX,rY,rS;
+real r,rMinX,rMinY,rMaxX,rMaxY;
+real rAX,rAY,rAZ,rOX,rOY,rOZ,rSX,rSY,rSZ;
+
+#define GETR(a,b,c,d) a=rGetReal_SYS(b,c); if(a==rDUMMY) a = d;
+#define GETI(a,b,c,d) a=iGetInt_SYS(b,c);  if(a==iDUMMY) a = d;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Current Map and 3D view ---
+
+   if(!iHaveCurrent_EMAP())
+      Abort_SYS(_("This GX requires a currently open map"));
+   EMap = Current_EMAP();
+   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+   if(iInteractive_SYS())
+      GetCurrentView_EMAP(EMap,s3DView);
+   else 
+      GetString_SYS("V3DMAP","VIEW",s3DView);
+      
+   
+   // --- create some stuff ---
+   
+   hViewIPJ = Create_IPJ();
+   hViewTrueIPJ = Create_IPJ();
+   hImgIPJ = Create_IPJ();
+   
+   
+   // --- get lists ---
+   
+   Map  = Lock_EMAP(EMap);
+   
+   hViewLST = Create_LST(256);
+   ViewListEx_MAP(Map,hViewLST,MAP_LIST_MODE_3D);
+   
+   hPlaneLST = Create_LST(256);
+
+   if(!iExistView_MAP(Map, s3DView))
+      View = Create_MVIEW(Map,s3DView,MVIEW_WRITENEW);
+   else
+      View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+
+   ListPlanes_MVIEW(View,hPlaneLST);
+  
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   
+   // --- new view if called from v3dnew GX ---
+   
+   iNewView = iGetYesNo_SYS("V3DMAP","NEWVIEW");
+   SetString_SYS("V3DMAP","NEWVIEW","NO");
+   if(!iNewView)
+   {   
+      // --- Should be at least one 3D view already ---
+      
+      if(iSize_LST(hViewLST)==0)
+         Abort_SYS(_("Attempted to write to existing 3D view, but none exists in the current map."));
+
+   
+      // --- get the current view ---
+      
+      if(iInteractive_SYS())
+         GetCurrentView_EMAP(EMap,s3DView);
+      else 
+         GetString_SYS("V3DMAP","VIEW",s3DView);
+    
+      
+      // --- If the current map is not a 3D view, get the first
+      //     view in the 3D LST ---
+      
+      if(iFindItem_LST(hViewLST, 0, s3DView)==-1)
+      {
+         GetItem_LST(hViewLST, 0, 0, s3DView);
+      }
+      SetString_SYS("V3DMAP","VIEW",s3DView);      
+   }   
+
+
+   // --- starting surface grid ---
+            
+   GetString_SYS("V3DMAP","GRID",sStartGrid);
+   
+
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS()) 
+   {
+
+      while(1)
+      {
+         // --- Get a new name for the surface ---
+         
+         GetString_SYS("V3DMAP","PLANE",sPlane);
+         if(!iStrlen_STR(sPlane))
+            Strcpy_STR(sPlane, "Plane1");
+
+         iPlane = 2;
+         while(iFindItem_LST(hPlaneLST, 0, sPlane)!=-1)
+         {
+            Strcpy_STR(sPlane, _n("Plane"));
+            FormatI_STR(iPlane, sVal, 5);
+            Strcat_STR(sPlane, sVal);
+            iPlane++;
+         }
+         SetString_SYS("V3DMAP","PLANE",sPlane);
+
+         if(iNewView) 
+         {
+            Diag = Create_DGW("V3DMAP0");
+            Copy_LST(GetList_DGW(Diag,_V3DMAP_0),hViewLST);   
+         } 
+         else 
+         {      
+            Diag = Create_DGW("V3DMAP");
+            Copy_LST(GetList_DGW(Diag,_V3DMAP_1),hPlaneLST);         
+         }
+               
+               
+         // --- setup depending on view ---
+         
+         SetInfoSYS_DGW(Diag,_V3DMAP_0,DGW_TEXT,"V3DMAP","VIEW");
+         SetInfoSYS_DGW(Diag,_V3DMAP_1,DGW_TEXT,"V3DMAP","PLANE");
+         SetInfoSYS_DGW(Diag,_V3DMAP_2,DGW_TEXT,"V3DMAP","PLANEBASE");
+         SetInfoSYS_DGW(Diag,_V3DMAP_3,DGW_FILEPATH,"V3DMAP","GRID");
+
+         i = iRunDialogue_DGW(Diag);
+         if(i==-1) Cancel_SYS(); 
+
+         GetInfoSYS_DGW(Diag,_V3DMAP_0,DGW_TEXT,"V3DMAP","VIEW");
+         GetInfoSYS_DGW(Diag,_V3DMAP_1,DGW_TEXT,"V3DMAP","PLANE");
+         GetInfoSYS_DGW(Diag,_V3DMAP_2,DGW_TEXT,"V3DMAP","PLANEBASE");
+         GetInfoSYS_DGW(Diag,_V3DMAP_3,DGW_FILEPATH,"V3DMAP","GRID");         
+         Destroy_DGW(Diag);
+         
+         
+         // --- Replace existing view? ---
+         
+         if(iNewView) 
+         {
+            GetString_SYS("V3DMAP","VIEW",s3DView);
+            Map = Lock_EMAP(EMap);
+            if(iExistView_MAP(Map,s3DView))
+            {
+               if(!iDisplayQuestion_SYS(_("View exists"),_("This view already exists.  Do you really want to replace the existing view?"))) 
+               {                  
+                  UnLock_EMAP(EMap);
+                  continue;
+               }   
+            }
+            UnLock_EMAP(EMap);
+         }
+         else
+         {
+                  
+            // --- Replace existing plane?         
+            
+            GetString_SYS("V3DMAP","PLANE",sPlane);
+            if(iFindItem_LST(hPlaneLST,0,sPlane) != -1)
+            {
+               if(!iDisplayQuestion_SYS(_("Plane exists"),_("This drawing plane already exists in the view.  Do you want to replace it?"))) 
+                  continue;
+            }
+         }            
+         break;
+      }
+   }
+            
+            
+   // --- check for a relief grid ---
+       
+   GetString_SYS("V3DMAP","GRID",sGrid);
+   if(iStrlen_STR(sGrid) && iInteractive_SYS())
+   {
+      // --- if grid changed, reset defaults. ---
+      
+      if (iStrcmp_STR(sStartGrid,sGrid,STR_CASE_TOLERANT) != 0) 
+      {
+         SetString_SYS("V3DMAP","GRIDMIN","");
+         SetString_SYS("V3DMAP","GRIDMAX","");
+         SetString_SYS("V3DMAP","GRIDBASE","0.0");
+         SetString_SYS("V3DMAP","GRIDSCALE","1.0");
+      }
+   
+   
+      // --- Set min/max defaults to grid values. The base and scale are
+      //     set automatically to 0 and 1 in the GRC file. ---
+      
+      if (iFileExist_SYS(sGrid))
+      {
+         rDminZ = rGetReal_SYS("V3DMAP","GRIDMIN");
+         rDmaxZ = rGetReal_SYS("V3DMAP","GRIDMAX");
+         
+         if(rDminZ==rDUMMY || rDmaxZ==rDUMMY)
+         {
+            GridStatExt_IMU(sGrid,IMU_STAT_FORCED_NO,iElem,iDum,rDminZ,rDmaxZ,rMean,rStdDev);
+      
+            SetReal_SYS("V3DMAP","GRIDMIN",rFloor_MATH(rDminZ));
+            SetReal_SYS("V3DMAP","GRIDMAX",rCeil_MATH(rDmaxZ));
+         }                  
+      }      
+   
+      while(1)
+      {
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("V3DRELIEF");
+         SetInfoSYS_DGW(Diag,_V3DRELIEF_0,DGW_TEXT,"V3DMAP","GRID");
+         SetInfoSYS_DGW(Diag,_V3DRELIEF_1,DGW_TEXT,"V3DMAP","PLANEBASE");
+         SetInfoSYS_DGW(Diag,_V3DRELIEF_2,DGW_TEXT,"V3DMAP","GRIDBASE");
+         SetInfoSYS_DGW(Diag,_V3DRELIEF_3,DGW_TEXT,"V3DMAP","GRIDSCALE");
+         SetInfoSYS_DGW(Diag,_V3DRELIEF_4,DGW_TEXT,"V3DMAP","GRIDMIN");
+         SetInfoSYS_DGW(Diag,_V3DRELIEF_5,DGW_TEXT,"V3DMAP","GRIDMAX");
+         SetInfoSYS_DGW(Diag,_V3DRELIEF_6,DGW_TEXT,"V3DMAP","GRIDSAMPLE");
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i==-1) Cancel_SYS(); 
+
+
+         // --- Get Information ---
+   
+         GetInfoSYS_DGW(Diag,_V3DRELIEF_1,DGW_TEXT,"V3DMAP","PLANEBASE");
+         GetInfoSYS_DGW(Diag,_V3DRELIEF_2,DGW_TEXT,"V3DMAP","GRIDBASE");
+         GetInfoSYS_DGW(Diag,_V3DRELIEF_3,DGW_TEXT,"V3DMAP","GRIDSCALE");
+         GetInfoSYS_DGW(Diag,_V3DRELIEF_4,DGW_TEXT,"V3DMAP","GRIDMIN");
+         GetInfoSYS_DGW(Diag,_V3DRELIEF_5,DGW_TEXT,"V3DMAP","GRIDMAX");
+         GetInfoSYS_DGW(Diag,_V3DRELIEF_6,DGW_TEXT,"V3DMAP","GRIDSAMPLE");
+         Destroy_DGW(Diag);
+         
+         
+         // --- Get Topographic or "mag-on-mag" scaling ---
+         
+         if (i==1 || i==2) 
+         {
+         
+            // --- set grid defaults or rescaling factors ---
+            
+            GridStatExt_IMU(sGrid,IMU_STAT_FORCED_NO,iElem,iDum,rDminZ,rDmaxZ,rMean,rStdDev);
+            hIMG = CreateFile_IMG(GS_FLOAT,sGrid,IMG_FILE_READONLY);
+            GetInfo_IMG(hIMG,rDx,rDy,rXo,rYo,r);
+            rDx *= (real)(iNX_IMG(hIMG)-1); 
+            rDy *= (real)(iNY_IMG(hIMG)-1);
+            Destroy_IMG(hIMG);
+      
+            SetInt_SYS("V3DMAP","GRIDSAMPLE",128);
+            SetReal_SYS("V3DMAP","GRIDMIN",rFloor_MATH(rDminZ));
+            SetReal_SYS("V3DMAP","GRIDMAX",rCeil_MATH(rDmaxZ));
+            
+            
+            // ---- Default to "Topographic" scaling of 0 and 1 ---
+            
+            if(i==1)
+            {
+               SetReal_SYS("V3DMAP","GRIDBASE",0.0);
+               SetReal_SYS("V3DMAP","GRIDSCALE",1.0);
+            }
+            else  //--- For "Mag on Mag" type scaling ---
+            {
+               SetReal_SYS("V3DMAP","GRIDBASE",rDminZ);
+               if ((rDmaxZ-rDminZ) <= 0.0)
+                  rScale = 1.0;
+               else {                     
+                  if (rDx < rDy)
+                     rScale = 0.25 * rDx / (rDmaxZ-rDminZ);
+                  else   
+                     rScale = 0.25 * rDy / (rDmaxZ-rDminZ);
+               }
+               SetReal_SYS("V3DMAP","GRIDSCALE",rScale);
+            }         
+            continue;   // run this dialog again.
+         }            
+         break;   // i == 0 (OK)
+      }
+   }
+            
+   
+   // --- view and plane settings ---
+
+   GetString_SYS("V3DMAP","VIEW",s3DView);
+   GetString_SYS("V3DMAP","PLANE",sPlane);
+   
+   if(!iStrlen_STR(s3DView))
+      Abort_SYS(_("No 3D view name defined."));
+      
+   if(!iStrlen_STR(sPlane))
+      Abort_SYS(_("No 3D plane name defined."));
+
+
+   // --- Copy groups?  ---
+   
+   GetString_SYS("V3DMAP","VIEWGROUP",sViewGroup);
+   
+   Strcpy_STR(sView,"");      // View to copy groups from
+   Strcpy_STR(sGroup,"");     // Single group to copy ("" for all)
+   if(iStrlen_STR(sViewGroup))
+   {
+      i = iTokens_STR(sViewGroup,"\\");
+      if(i > 0) {
+         GetToken_STR(sView,sViewGroup,0);
+         if(i > 1)
+            GetToken_STR(sGroup,sViewGroup,1);
+         else
+            Strcpy_STR(sGroup,"");
+      }
+   }
+      
+
+   // --- get the surface name ---
+   
+   Map = Lock_EMAP(EMap);
+   
+   if(iNewView) {
+   
+      if(iInteractive_SYS()) 
+      {      
+         // --- Get the current display area on the map in mm --
+            
+         rDminX = rDminY = rDmaxX = rDmaxY = 0.0;
+         UnLock_EMAP(EMap);
+         GetDisplayAreaRaw_EMAP(EMap,rDminX,rDminY,rDmaxX,rDmaxY);
+         Map = Lock_EMAP(EMap);
+
+
+         // --- reduce area to 50% to centre on an existing map ---
+      
+         rD = 0.25;
+            
+         r = (rDmaxX-rDminX)*rD;
+         rMinX = rDminX + r;
+         rMaxX = rDmaxX - r;
+         r = (rDmaxY-rDminY)*rD;
+         rMinY = rDminY + r;
+         rMaxY = rDmaxY - r;
+
+         SetReal_SYS("V3DMAP","MINX",rMinX);
+         SetReal_SYS("V3DMAP","MINY",rMinY);
+         SetReal_SYS("V3DMAP","MAXX",rMaxX);
+         SetReal_SYS("V3DMAP","MAXY",rMaxY);               
+      } 
+      else 
+      {      
+         GETR(rMinX,"V3DMAP","MINX",10.0)
+         GETR(rMinY,"V3DMAP","MINY",10.0)
+         GETR(rMaxX,"V3DMAP","MAXX",110.0)
+         GETR(rMaxY,"V3DMAP","MAXY",110.0)         
+      }      
+   
+      
+      // --- delete 3D view if it exists ---
+      
+      if(iExistView_MAP(Map,s3DView)) 
+      {
+         DeleteView_MAP(Map,s3DView);
+         
+         
+         // --- The following line is to guard against the case that the "source"
+         //     view for copying groups to the new 3D view was not given the same
+         //     name as the new 3D view, in which case the process makes no sense. ---
+         
+         if(iStrcmp_STR(sView,s3DView,STR_CASE_TOLERANT)==0)
+            Strcpy_STR(sView,"");
+      }            
+         
+      
+      // --- create a new view ---
+      
+      if(iStrlen_STR(sView) == 0) 
+      {
+         // --- duplicate existing data view ---
+         
+         GetClassName_MAP(Map,"Data",sV);
+         if(!iExistView_MAP(Map,sV)) 
+            Abort_SYS(_("An existing data view is required to create a new 3D view."));
+         DuplicateView_MAP(Map,sV,s3DView,FALSE);                  
+      } 
+      else
+         DuplicateView_MAP(Map,sView,s3DView,FALSE);
+         
+      View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+      
+      
+      
+      // --- Create a new 3D object ---
+
+      h3DN = Create_3DN();          
+      
+      GETR(rDist,"V3D","DISTANCE",8.0)
+      GETR(rDec, "V3D","DEC",20.0)
+      GETR(rInc, "V3D","INC",25.0)
+      SetPointOfView_3DN(h3DN,rDist,rDec,rInc);
+
+
+      // --- Handle Rendering Controls ---
+
+      GETI(iBox,"V3D","BOX",1)
+      GETI(iAxis,"V3D","AXIS",1)
+      GetString_SYS("V3D","TITLEX",sLabelX); if (iStrlen_STR(sLabelX)==0) Strcpy_STR(sLabelX,"X");
+      GetString_SYS("V3D","TITLEY",sLabelY); if (iStrlen_STR(sLabelY)==0) Strcpy_STR(sLabelY,"Y");
+      GetString_SYS("V3D","TITLEZ",sLabelZ); if (iStrlen_STR(sLabelZ)==0) Strcpy_STR(sLabelZ,"Z");
+      SetRenderControls_3DN(h3DN,iBox,iAxis,sLabelX,sLabelY,sLabelZ);
+
+
+      // --- Make the view 3D ---
+
+      SetH3DN_MVIEW(View,h3DN);
+
+
+      // --- re-locate the view ---
+         
+      Extent_MVIEW(View,MVIEW_EXTENT_MAP,MVIEW_EXTENT_UNIT_VIEW,rDminX,rDminY,rDmaxX,rDmaxY);
+      FitMapWindow3D_MVIEW(View,rMinX,rMinY,rMaxX,rMaxY,rDminX,rDminY,rDmaxX,rDmaxY);
+
+
+      SetIPJ_MVIEW(View,hViewTrueIPJ);
+
+   } else {
+   
+      View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+   
+      // --- delete an existing plane
+   
+      iPlane = iFindPlane_MVIEW(View,sPlane);
+      if(iPlane != -1) {
+         DeletePlane_MVIEW(View,iPlane,TRUE);
+         iPlane = -1;
+      }         
+      
+   } 
+
+   GETR(rPlaneBase, "V3DMAP","PLANEBASE",0.0)
+   iPlane = iCreatePlane_MVIEW(View,sPlane);
+
+   
+   // --- A non-interactive setting. Set it every time. ---
+   
+   iOrient = iGetInt_SYS("V3DMAP","ORIENT");
+   SetInt_SYS("V3DMAP","ORIENT", iDUMMY);
+
+   switch (iOrient) {
+
+      case  0: 
+
+           // --- Raw Mode ---
+
+           if (iStrlen_STR(sView)) 
+           {
+              IView = Create_MVIEW(Map,sView,MVIEW_READ);
+              GetViewPlaneEquation_MVIEW(IView,rAX,rAY,rAZ,rOX,rOY,rOZ,rSX,rSY,rSZ);
+              Destroy_MVIEW(IView);
+              SetPlaneEquation_MVIEW(View,iPlane,rAX,rAY,rAZ,rOX,rOY,rOZ,rSX,rSY,rSZ);
+
+           } else {
+
+              // --- Default Plane Equation ---
+
+              SetPlaneEquation_MVIEW(View,iPlane,  0.0,  0.0, 0.0, 0.0,0.0,rPlaneBase,1.0,1.0,1.0);   
+           }
+           break;
+
+      case  2: SetPlaneEquation_MVIEW(View,iPlane, -90.0,   0.0, 0.0, 0.0,rPlaneBase,0.0,1.0,1.0,1.0);     break;  // X-Z
+      case -2: SetPlaneEquation_MVIEW(View,iPlane,  90.0,   0.0, 0.0, 0.0,rPlaneBase,0.0,1.0,1.0,1.0);     break;  // X-Z
+      case  3: SetPlaneEquation_MVIEW(View,iPlane, -90.0,   0.0, -90.0, rPlaneBase,0.0,0.0,1.0,1.0,1.0);     break;  // Y-Z
+      case -3: SetPlaneEquation_MVIEW(View,iPlane,  90.0,   0.0, -90.0, rPlaneBase,0.0,0.0,1.0,1.0,1.0);     break;  // Y-Z
+      default: SetPlaneEquation_MVIEW(View,iPlane,   0.0,   0.0, 0.0, 0.0,0.0,rPlaneBase,1.0,1.0,1.0);     break;  // X-Y
+   }
+
+   // --- Copy Groups and set projection and clipping ---
+
+   if(iStrlen_STR(sView)) 
+   {
+
+      // --- Open Source View ---
+
+      IView = Create_MVIEW(Map,sView,MVIEW_READ);
+
+      // --- Copy Marked Groups ---
+
+      if(iStrlen_STR(sGroup)!=0) {
+         MarkAllGroups_MVIEW(IView,0);
+         MarkGroup_MVIEW(IView,sGroup,1);
+      } else
+         MarkAllGroups_MVIEW(IView,1);
+      
+      CopyRawMarkedGroups_MVIEW(IView,View);
+
+      
+      // --- Close Source View ---
+
+      Destroy_MVIEW(IView);
+   } 
+
+
+   // --- Handle Surface Information ---
+   
+   GetString_SYS("V3DMAP","GRID",sGrid);
+   if (iStrlen_STR(sGrid)) {
+   
+      GETI(iSample,"V3DMAP","GRIDSAMPLE",128)
+      GETR(rBase, "V3DMAP","GRIDBASE",rDUMMY)
+      GETR(rScale,"V3DMAP","GRIDSCALE",rDUMMY)
+      GETR(rMin,  "V3DMAP","GRIDMIN",rDUMMY)
+      GETR(rMax,  "V3DMAP","GRIDMAX",rDUMMY)
+      
+
+      // --- correct sample to nearest 16 ---
+      
+      iSample = (iSample + 15)/16;
+      if (iSample < 1) iSample = 1;
+      if (iSample > 48) iSample = 48;
+      SetInt_SYS("V3DMAP","GRIDSAMPLE",iSample*16);
+      
+      
+      // --- grid defaults ---
+      
+      if (rBase == rDUMMY) rBase = rMin;
+      
+      if ( (rBase == rDUMMY) ||
+           (rScale == rDUMMY) || (rScale == 0.0) ) {
+           
+         // --- set grid specs ---
+                    
+         GridStatExt_IMU(sGrid,IMU_STAT_FORCED_NO,iElem,iDum,rDminZ,rDmaxZ,rMean,rStdDev);
+         hIMG = CreateFile_IMG(GS_FLOAT,sGrid,IMG_FILE_READONLY);
+         GetInfo_IMG(hIMG,rDx,rDy,rXo,rYo,r);
+         rDx *= (real)(iNX_IMG(hIMG)-1); 
+         rDy *= (real)(iNY_IMG(hIMG)-1);
+         if ((rDx <= 0.0) || (rDy <= 0.0))
+            Abort_SYS(_("Topography grid invalid."));
+         hImgIPJ = Create_IPJ();
+         GetIPJ_IMG(hIMG,hImgIPJ);
+         Destroy_IMG(hIMG);
+           
+      } else
+         hImgIPJ = hViewIPJ;
+      
+      if (rBase == rDUMMY) 
+         rBase = rDminZ;
+      
+      if (rScale == rDUMMY || rScale == 0.0) {
+
+         // --- Z scale ---
+   
+         if ((rDmaxZ-rDminZ) <= 0.0)
+            rScale = 1.0;
+         else {                     
+            if (rDx < rDy)
+               rScale = 0.25 * rDx / (rDmaxZ-rDminZ);
+            else   
+               rScale = 0.25 * rDy / (rDmaxZ-rDminZ);
+         }
+         
+         
+         // --- correct scale for projection difference ---
+         
+         iSame = 0;
+         if (!iHasProjection_IPJ(hViewIPJ) || !iHasProjection_IPJ(hImgIPJ) ||
+				(iCoordinateSystemsAreTheSame_IPJ(hViewIPJ, hImgIPJ) &&
+				iWarpsAreTheSame_IPJ(hViewIPJ, hImgIPJ) &&
+				iOrientationsAreTheSame_IPJ(hViewIPJ, hImgIPJ)))
+				iSame = 1;
+   
+         if (!iSame) {
+      
+            hPJ = CreateIPJ_PJ(hViewIPJ,hViewIPJ);
+         
+            rX = rXo;
+            rY = rYo;
+            ConvertXY_PJ(hPJ,rX,rY);
+            rS = rXo + rDx;
+            rY = rYo;
+            ConvertXY_PJ(hPJ,rS,rY);
+         
+            rS  = (rS - rX)/rDx;
+            rScale *= rS;
+         
+            Destroy_PJ(hPJ);
+         
+         }
+   
+      }
+               
+      
+      // --- set the surface plane ---
+      
+      SetPlaneSurface_MVIEW(View,iPlane,sGrid);
+      SetPlaneSurfInfo_MVIEW(View,iPlane,iSample,rBase,rScale,rMin,rMax);
+      
+   }      
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   
+   // --- if interactive, activate the view ---
+   
+   if(iNewView && iInteractive_SYS())
+      ActivateView_EMAP(EMap,s3DView);
+   
+}

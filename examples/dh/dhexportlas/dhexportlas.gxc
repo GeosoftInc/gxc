@@ -1,0 +1,233 @@
+//===========================================================================
+NAME          = "Drill Hole - Export assay data to LAS files."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Export"
+
+DESCRIPTION   = "
+
+   Export a Drill Hole assay data to LAS v2 files.
+	
+   DHEXPORTLAS.ASSAYDB   Assay database index
+              .INTERVAL  Output depth interval
+              .SELECTED  Holes to export: SELECTED, ALL or LIST
+              .LIST      CSV separated hole list, used with
+                         the \"LIST\" option of DHEXPORTLAS.SELECTED 
+
+"
+// Revision History:
+// v6.3.0: Added check and error if assay data doesn't contain any of the selected holes.
+//         New method for listing only holes in the selected assay data used.
+// v6.0.0: Made huge hole list string buffer.
+// v5.1.8: Updated hole selection.
+// v5.1.7: New GX.
+//===========================================================================
+
+RESOURCE = "dhexportlas.gr"
+#include "dhexportlas.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;         // database handle
+DH          Drill;
+DGW         Diag;          // dialogue box
+LST         List, HoleLST;
+DB          hDB;
+DB_SYMB     hGroup;
+
+string(STR_DEFAULT_SHORT) sSelected;
+string(STR_FILE) sDB, sAssayDB, sFile;
+string(STR_DB_SYMBOL) sHole;
+string(STR_DH_HOLES) sHoles;
+
+int i,iNHoles,iAssayDB,iHole,iExported;
+real rInterval;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   // --- Get current database ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+
+   // --- Init the Wholeplot project ---
+
+   Progress_SYS(1);
+   Drill = Create_DH(sDB);
+
+   if(iNumAssays_DH(Drill)==0) 
+      Abort_SYS(_("There are no assay databases to export."));
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DHEXPORTLAS");
+
+
+      // --- Set up lists ---
+  
+      List = GetList_DGW(Diag,_DHEXPORTLAS_0);  
+      AssayLST_DH(Drill, List);    
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DHEXPORTLAS_0,DGW_LISTALIAS,"DHEXPORTLAS","ASSAYDB");     
+      SetInfoSYS_DGW(Diag,_DHEXPORTLAS_1,DGW_TEXT,"DHEXPORTLAS","INTERVAL");     
+      SetInfoSYS_DGW(Diag,_DHEXPORTLAS_2,DGW_LISTALIAS,"DHEXPORTLAS","SELECTED");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DHEXPORTLAS_0,DGW_LISTALIAS,"DHEXPORTLAS","ASSAYDB");     
+      GetInfoSYS_DGW(Diag,_DHEXPORTLAS_1,DGW_TEXT,"DHEXPORTLAS","INTERVAL");     
+      GetInfoSYS_DGW(Diag,_DHEXPORTLAS_2,DGW_LISTALIAS,"DHEXPORTLAS","SELECTED");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   iAssayDB = iGetInt_SYS("DHEXPORTLAS","ASSAYDB");
+   rInterval = rGetReal_SYS("DHEXPORTLAS","INTERVAL");
+   GetString_SYS("DHEXPORTLAS","SELECTED",sSelected);
+
+
+   if(iAssayDB<0 || iAssayDB>=iNumAssays_DH(Drill))
+      Abort_SYS(_("Invalid assay database index."));
+
+   if(rInterval<=0.0)
+      Abort_SYS(_("Interval must be greater than zero."));
+
+
+   // --- Need to close Drill project before doing hole selections ---
+
+   Destroy_DH(Drill);
+   EData = Load_EDB(sDB);
+
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("DHHOLELST","DATA",sSelected);
+   SetString_SYS("DHHOLELST","GX","DHEXPORTLAS");
+   if(iStrcmp_STR(sSelected, "LIST", STR_CASE_TOLERANT)==0)
+      SetInt_SYS("DHHOLELST","ASSAYDB",iAssayDB);
+   
+   if(iRunGX_SYS("DHHOLELST.GX")) Cancel_SYS();
+
+   GetString_SYS("DHHOLELST","HOLES", sHoles);
+   
+
+   // --- Get current database and open Drill project ---
+
+   EData = Load_EDB(sDB);
+   Drill = Create_DH(sDB);
+
+   
+   // --- create LSTs to hold hole lists ---
+   
+   HoleLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   
+   // --- Get all the holes ---
+
+   HoleLST2_DH(Drill, HoleLST);
+
+
+   // --- Retrieve available selected holes ---
+
+   SelectCSVStringItems_LST(HoleLST, sHoles, HoleLST);
+
+   if(iSize_LST(HoleLST)==0)
+      Abort_SYS(_("No holes have been selected for export."));
+
+   
+
+   // --- Get the assay database file name ---
+
+   hDB = hAssayDB_DH(Drill, iAssayDB);
+   GetName_DB(hDB, DB_NAME_FILE, sAssayDB);
+   
+   FileNamePart_STR(sAssayDB,sAssayDB,STR_FILE_PART_NAME);
+
+      
+   // --- export data ---
+
+   iNHoles = iSize_LST(HoleLST);
+   if(iNHoles==0)
+      Abort_SYS(_("There were no holes selected for export."));
+
+
+   iExported = 0;
+   for(i=0; i<iNHoles; i++) {
+
+      GetItem_LST(HoleLST,0,i,sHole);
+      iHole = iFindHole_DH(Drill, sHole);
+
+      hGroup = hAssaySymb_DH(Drill,iAssayDB,iHole);
+
+      if(hGroup==NULLSYMB) continue;
+
+
+      // --- Create the export file name ---
+
+      Strcpy_STR(sFile, sHole);
+      Strcat_STR(sFile, "_");
+      Strcat_STR(sFile, sAssayDB);
+      FileExt_STR(sFile,"las",sFile,FILE_EXT_FORCE);
+
+      ExportLAS_DH(Drill, iAssayDB, iHole, rInterval, sFile);
+      iExported++;
+   }
+
+   Destroy_DH(Drill);
+   EData = Load_EDB(sDB);  // Make same database current as at start
+   
+   Progress_SYS(0);
+
+   Destroy_LST(HoleLST);
+   
+   if(iExported==0)
+   {  
+      if(iStrcmp_STR(sSelected, "LIST", STR_CASE_TOLERANT)==0)
+      {
+         DisplayMessage_SYS(_("LAS Export"), _("No holes were exported because none of the holes selected from the list exist in the selected assay data."));
+      }
+      else if(iStrcmp_STR(sSelected, "SELECTED", STR_CASE_TOLERANT)==0)
+         DisplayMessage_SYS(_("LAS Export"), _("No holes were exported because none of the currently selected holes are in the selected assay data."));
+   }
+   else if(iExported<iNHoles)
+   {
+      if(iStrcmp_STR(sSelected, "LIST", STR_CASE_TOLERANT)==0 ||
+         iStrcmp_STR(sSelected, "SELECTED", STR_CASE_TOLERANT)==0)
+      {
+         DisplayMessage_SYS(_("LAS Export"), _("One or more of the selected holes was not exported because it does not appear in the selected assay data."));
+      }
+   }
+}

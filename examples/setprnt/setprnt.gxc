@@ -1,0 +1,70 @@
+//===========================================================================
+
+NAME          = "Set Printer"
+#include <version.gxh>
+DESCRIPTION   = "
+
+      SETPRNT.Name
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+//===========================================================================
+
+RESOURCE="setprnt.gr"
+#include "setprnt.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+DGW                 Diag;
+LST                 List;
+string(STR_FILE) sName;
+int                 i;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SETPRNT");
+
+      List = GetList_DGW(Diag,_SETPRNT_0);
+      GetPrinterLST_GUI(List);
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_SETPRNT_0, DGW_LISTALIAS,"SETPRNT","NAME");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if(i==-1)   Cancel_SYS(); 
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_SETPRNT_0, DGW_LISTALIAS,"SETPRNT","NAME");
+   }
+
+   GetString_SYS("SETPRNT","NAME",sName);
+      
+   
+   // --- Get Path ---
+   
+   SetPrinter_GUI(sName);
+}

@@ -1,0 +1,105 @@
+//===========================================================================
+NAME          = "Scan ASEG-GDF header file and create a default template."
+#include <version.gxh>
+DESCRIPTION   = "
+
+    SCANASEG.DATA     : ASEG-GDF data file name
+            .DEFN     : ASEG-GDF definition file name
+            .FLC      : Flight Line Channel name
+            .TEMPLATE : Template file name (.I4 assumed)
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Import/ASEG-GDF"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "scanaseg.gr"
+#include "scanaseg.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW         Diag;             // Dialogue handle
+
+int         i;                // Utility 
+
+string(STR_FILE) sData;
+string(STR_FILE) sDefn;
+string(STR_FILE) sTemplate;
+string(STR_DB_SYMBOL) sFLC;
+string(STR_DEFAULT_LONG) sTemp;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("SCANASEGForm");
+
+     // --- Set any Defaults ---
+          
+     SetInfoSYS_DGW(Diag,_SCANASEGFORM_0,DGW_FILEPATH,"SCANASEG","DEFN");     
+     SetInfoSYS_DGW(Diag,_SCANASEGFORM_1,DGW_FILEPATH,"SCANASEG","DATA");     
+     SetInfoSYS_DGW(Diag,_SCANASEGFORM_2,DGW_TEXT,"SCANASEG","FLC");     
+     SetInfoSYS_DGW(Diag,_SCANASEGFORM_3,DGW_FILEPATH,"SCANASEG","TEMPLATE");     
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_SCANASEGFORM_0,DGW_FILEPATH,"SCANASEG","DEFN");     
+     GetInfoSYS_DGW(Diag,_SCANASEGFORM_1,DGW_FILEPATH,"SCANASEG","DATA");     
+     GetInfoSYS_DGW(Diag,_SCANASEGFORM_2,DGW_TEXT,"SCANASEG","FLC");     
+     GetInfoSYS_DGW(Diag,_SCANASEGFORM_3,DGW_FILEPATH,"SCANASEG","TEMPLATE");     
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+     
+   GetString_SYS("SCANASEG","DEFN",sDefn);     
+   GetString_SYS("SCANASEG","DATA",sData);     
+   GetString_SYS("SCANASEG","FLC",sFLC);
+   GetString_SYS("SCANASEG","TEMPLATE",sTemplate);
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   Strcpy_STR(sTemp,_("Scanning: "));
+   Strcat_STR(sTemp,sData);
+   ProgName_SYS(sTemp,1);
+
+   // --- import ---
+
+   ScanAseg_DU(sDefn,sData,sFLC,sTemplate);
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+}

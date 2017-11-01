@@ -1,0 +1,375 @@
+//===========================================================================
+NAME          = "Re-grid a grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Gridding"
+
+DESCRIPTION   = "
+
+      REGRID.IN         - input grid
+            .OUT        - output grid
+            .CELL       - cell size
+            .EDGECELL   - extend cells past edge
+            .LOW_PASS   - low-pass filter cutoff
+            .HIGH_PASS  - high-pass filter cutoff
+            .NL_TOL     - non-linear tolerance
+            .SPLINE     - 0 - linear spline
+                          1 - cubic (minimum curvature) spline
+                          2 - akima spline
+            .TRA        - Trend angle CCW from x.
+			.KX         - 0 - default
+						  1 - Bottom left to right
+						  -1 - Left bottom to top
+"
+// Revision History
+// v6.1.0: Added support for trend angles.
+// v6.0.0: Fixes to correctly set along and cross-line gaps for different
+//         X and Y cell sizes, based on KX.
+//===========================================================================
+
+RESOURCE = "regrid.gr"
+#include "regrid.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sIn;   
+string(STR_FILE) sOut;  
+string(STR_DEFAULT_SHORT) sMX; 
+string(STR_DEFAULT_SHORT) sCell; 
+string(STR_DEFAULT_SHORT) sEdgeCell;
+string(STR_DEFAULT_SHORT) sLow;
+string(STR_DEFAULT_SHORT) sHigh;
+string(STR_DEFAULT_SHORT) sTol;
+string(STR_DEFAULT_SHORT) sSpline;
+string(STR_DEFAULT_SHORT) sGapLim, sTRA, sKX;
+string(STR_DEFAULT_LONG) sTemp, sTitle;
+                                           
+BIGRID     Bigrid;        // Handle to BIGRIDd object
+DAT        InDat;         // Handle to Input DAT grid
+DAT        OutDat;        // Handle to Output DAT grid
+
+IPJ        hIPJ;
+IMG        hInIMG;
+
+WA         ConFile;       // Control File
+DGW        Diag;          // Dialogue handle
+int        i, iKX, iTRA;        
+
+real       rXsep;         // X element separation
+real       rYsep;         // Y element separation
+real       r, rCell, rTRA;
+
+
+
+//===========================================================================
+//                           REGRID CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) 
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("REGRID");
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_REGRID_0,DGW_FILEPATH ,"REGRID","IN");
+      SetInfoSYS_DGW(Diag,_REGRID_1,DGW_FILEPATH ,"REGRID","OUT");
+      SetInfoSYS_DGW(Diag,_REGRID_2,DGW_TEXT     ,"REGRID","CELL");
+      SetInfoSYS_DGW(Diag,_REGRID_3,DGW_TEXT     ,"REGRID","EDGECELL");
+      SetInfoSYS_DGW(Diag,_REGRID_4,DGW_TEXT     ,"REGRID","LOW_PASS");
+      SetInfoSYS_DGW(Diag,_REGRID_5,DGW_TEXT     ,"REGRID","HIGH_PASS");
+      SetInfoSYS_DGW(Diag,_REGRID_6,DGW_TEXT     ,"REGRID","NL_TOL");
+      SetInfoSYS_DGW(Diag,_REGRID_7,DGW_LISTALIAS,"REGRID","SPLINE");
+      SetInfoSYS_DGW(Diag,_REGRID_8,DGW_TEXT     ,"REGRID","GAP");
+      SetInfoSYS_DGW(Diag,_REGRID_9,DGW_TEXT     ,"REGRID","TRA");
+	  SetInfoSYS_DGW(Diag,_REGRID_10,DGW_LISTALIAS,"REGRID","KX");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_REGRID_0,DGW_FILEPATH ,"REGRID","IN");
+      GetInfoSYS_DGW(Diag,_REGRID_1,DGW_FILEPATH ,"REGRID","OUT");
+      GetInfoSYS_DGW(Diag,_REGRID_2,DGW_TEXT     ,"REGRID","CELL");
+      GetInfoSYS_DGW(Diag,_REGRID_3,DGW_TEXT     ,"REGRID","EDGECELL");
+      GetInfoSYS_DGW(Diag,_REGRID_4,DGW_TEXT     ,"REGRID","LOW_PASS");
+      GetInfoSYS_DGW(Diag,_REGRID_5,DGW_TEXT     ,"REGRID","HIGH_PASS");
+      GetInfoSYS_DGW(Diag,_REGRID_6,DGW_TEXT     ,"REGRID","NL_TOL");
+      GetInfoSYS_DGW(Diag,_REGRID_7,DGW_LISTALIAS,"REGRID","SPLINE");
+      GetInfoSYS_DGW(Diag,_REGRID_8,DGW_TEXT     ,"REGRID","GAP");
+      GetInfoSYS_DGW(Diag,_REGRID_9,DGW_TEXT     ,"REGRID","TRA");
+	  GetInfoSYS_DGW(Diag,_REGRID_10,DGW_LISTALIAS,"REGRID","KX");
+
+
+      Destroy_DGW(Diag);
+
+   } 
+               
+   // --- Get Parameters ---
+
+   GetString_SYS("REGRID","IN",sIn);
+   GetString_SYS("REGRID","OUT",sOut); 
+   GetString_SYS("REGRID","CELL",sCell); 
+   GetString_SYS("REGRID","EDGECELL",sEdgeCell); 
+   GetString_SYS("REGRID","LOW_PASS",sLow); 
+   GetString_SYS("REGRID","HIGH_PASS",sHigh); 
+   GetString_SYS("REGRID","NL_TOL",sTol); 
+   GetString_SYS("REGRID","SPLINE",sSpline);
+   GetString_SYS("REGRID","GAP",sGapLim);
+   GetString_SYS("REGRID","TRA",sTRA);
+   GetString_SYS("REGRID","KX",sKX);
+   
+   
+   // --- trend gridding? ---
+   
+   if (iStrMin_STR(sTRA)) {
+      rTRA = rGetReal_SYS("REGRID","TRA");
+      if (rTRA != 0.0 && rTRA != rDUMMY) {
+         iTRA = TRUE;
+      } else {
+         Strcpy_STR(sTRA,"");
+         iTRA = FALSE;
+      }
+   } else
+      iTRA = FALSE;
+
+   
+   // --- get current cell size ---
+   
+   rXsep    = 0.0;   
+   rYsep    = 0.0;   
+   i        = 0;   
+   r = 0.0;
+
+   GridStat_IMU(sIn,i,i,i,rXsep,rYsep,iKX,r,r,r,r,r);
+
+
+   // --- Set default for gap limit. This is set to preserve existing gaps in the data.
+   //     (Remember, in a grid if one value is missing the gap is 2*cell size) ---
+
+   if(!iStrlen_STR(sGapLim)) 
+   {
+
+     // --- "Down-line" gaps ---
+
+      if(iKX==1)
+         FormatR_STR(1.8*rXsep,sGapLim,14,6);
+      else
+         FormatR_STR(1.8*rYsep,sGapLim,14,6);
+
+      // --- "Across-line" gaps ---
+      if(iKX==1)
+         FormatR_STR(1.8*rYsep,sMX,14,6);
+      else
+         FormatR_STR(1.8*rXsep,sMX,14,6);
+   }
+   else
+   {
+      // --- Make the across-line and down-line values the same as the input gap limit ---
+
+      Strcpy_STR(sMX, sGapLim);
+   }
+   
+   
+   // --- if the cell size is not set, set it to the original grid ---
+
+   rCell = rGetReal_SYS("REGRID","CELL");
+   if(rCell==rDUMMY)
+      FormatR_STR(rYsep,sCell,14,14);
+
+
+   // --- create a BIGRID control file ---
+
+   ConFile = Create_WA("_bigrid.con",0);
+
+   Printf_STR(sTitle, sizeof(sTitle), _("Regrid of %s"), sIn);
+   Puts_WA(ConFile,sTitle);                        NewLine_WA(ConFile);
+   Puts_WA(ConFile,sCell); 
+   Puts_WA(ConFile,","); 
+   Puts_WA(ConFile,sEdgeCell); 
+   Puts_WA(ConFile,"/CS,NEX");                     NewLine_WA(ConFile);
+   Puts_WA(ConFile,"/XMIN,YMIN,XMAX,YMAX");        NewLine_WA(ConFile);
+   Puts_WA(ConFile,sTRA);   
+   Puts_WA(ConFile,","); 
+   Puts_WA(ConFile,sKX);   
+   Puts_WA(ConFile,"/TRA,KX");                     NewLine_WA(ConFile);
+   Puts_WA(ConFile,"0,");
+   Puts_WA(ConFile,sMX);
+   Puts_WA(ConFile,",");
+   Puts_WA(ConFile,sGapLim);
+   Puts_WA(ConFile,"/SLM,SMX,GAPLIM,LSEL,BCLIP");  NewLine_WA(ConFile);
+   Puts_WA(ConFile,"/SCL,SX,SY,ANGS");             NewLine_WA(ConFile);
+   Puts_WA(ConFile,"/IZ,LOGZ,ZMIN");               NewLine_WA(ConFile);
+   Puts_WA(ConFile,"/BL,XX,CLIP");                 NewLine_WA(ConFile);
+
+   Strcpy_STR(sTemp,sLow); Strcat_STR(sTemp,",");
+   Strcat_STR(sTemp,sHigh); Strcat_STR(sTemp,"/WS,WL,FDX,FT,NC");
+   Puts_WA(ConFile,sTemp);                         NewLine_WA(ConFile);
+
+   if (iStrMin_STR(sTol) == 0)
+      Puts_WA(ConFile,"/NFLT,TOLN");
+   else {
+      Strcpy_STR(sTemp,"1,");
+      Strcat_STR(sTemp,sTol);
+      Strcat_STR(sTemp,"/NFLT,TOLN");
+      Puts_WA(ConFile,sTemp);        
+   }
+   NewLine_WA(ConFile);
+
+   Strcpy_STR(sTemp,sSpline);
+   Strcat_STR(sTemp,",");
+   Strcat_STR(sTemp,sSpline);
+   Strcat_STR(sTemp,"/ISP1,ISP2");
+   Puts_WA(ConFile,sTemp);                         NewLine_WA(ConFile);
+   Puts_WA(ConFile,"/AFACT,AZB");                  NewLine_WA(ConFile);
+   Puts_WA(ConFile,"/");                           NewLine_WA(ConFile);
+
+   Destroy_WA(ConFile);
+   
+   
+   // --- Get The IPJ from the source image ---
+   
+   hInIMG   = CreateFile_IMG(GS_FLOAT,sIn,IMG_FILE_READONLY);
+   hIPJ = Create_IPJ();
+   GetIPJ_IMG(hInIMG,hIPJ);
+   ClearWarp_IPJ(hIPJ);  // --- clear the warp to remove rotation ---
+   Destroy_IMG(hInIMG);
+   
+
+
+   // --- get the DATS ---
+
+   InDat = CreateXGD_DAT(sIn,DAT_XGD_READ);
+   if (iTRA)
+      OutDat = CreateXGD_DAT("_regrid.grd(GRD)",DAT_XGD_NEW);
+   else   
+      OutDat = CreateXGD_DAT(sOut,DAT_XGD_NEW);
+
+
+   // --- Make a BIGRID object ---
+
+   Bigrid = Create_BIGRID();
+
+
+   // --- Load up the BIGRID control parameters ---
+
+   if (iLoadParms_BIGRID(Bigrid,"_bigrid.con"))
+      Abort_SYS(_("Bad control file"));
+
+
+   // --- Execute BIGRID ---
+
+   Progress_SYS(1);
+   Run2_BIGRID(Bigrid,"1",InDat,OutDat,hIPJ);
+   Progress_SYS(0);
+   
+
+   // --- Destroy the DATs and REGRID object ---
+   
+   Destroy_BIGRID(Bigrid);
+   Destroy_DAT(InDat);
+   Destroy_DAT(OutDat);   
+   
+
+   // --- if trending, re-grid ---
+   
+   if (iTRA) {
+   
+
+      // --- create control file for squaring the grid ---
+
+      ConFile = Create_WA("_regrid.con",0);
+
+      Puts_WA(ConFile,sTitle);                        NewLine_WA(ConFile);
+   
+      Puts_WA(ConFile,sCell); 
+      Puts_WA(ConFile,","); 
+      Puts_WA(ConFile,sEdgeCell); 
+      Puts_WA(ConFile,"/CS,NEX");                     NewLine_WA(ConFile);   
+      Puts_WA(ConFile,"/XMIN,YMIN,XMAX,YMAX");        NewLine_WA(ConFile);
+      Puts_WA(ConFile,"0.0,"); 
+      Puts_WA(ConFile,sKX);
+      Puts_WA(ConFile,"/TRA,KX");                     NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/SLM,SMX,GAPLIM,LSEL,BCLIP");  NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/SCL,SX,SY,ANGS");             NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/IZ,LOGZ,ZMIN");               NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/BL,XX,CLIP");                 NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/WS,WL,FDX,FT,NC");            NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/NFLT,TOLN");                  NewLine_WA(ConFile);
+      Puts_WA(ConFile,"/ISP1,ISP2");                  NewLine_WA(ConFile);
+
+      Destroy_WA(ConFile);
+
+
+      // --- get the DAT's ---
+
+      InDat = CreateXGD_DAT("_regrid.grd(GRD)",DAT_XGD_READ);
+      OutDat = CreateXGD_DAT(sOut,DAT_XGD_NEW);
+
+
+      // --- Make a BIGRID object ---
+
+      Bigrid = Create_BIGRID();
+
+
+      // --- Load up the BIGRID control parameters ---
+
+      if (iLoadParms_BIGRID(Bigrid,"_regrid.con"))
+         Abort_SYS(_("Bad control file"));
+
+
+      // --- Execute BIGRID ---
+
+      Progress_SYS(1);
+      Run2_BIGRID(Bigrid,"",InDat,OutDat,hIPJ);
+      Progress_SYS(0);
+      
+
+      // --- Destroy the DATs and BIGRID object ---
+      
+      Destroy_BIGRID(Bigrid);
+      Destroy_DAT(InDat);
+      Destroy_DAT(OutDat);   
+
+
+      // --- delete temporary file ---
+
+      iDeleteFile_SYS("_regrid.grd");
+      
+   }
+
+
+   // --- Cleanup ---
+   
+   Destroy_IPJ(hIPJ);
+
+   
+   
+   // --- Add this grid to the current project ---
+   
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sOut,"Grid",1);
+}
+

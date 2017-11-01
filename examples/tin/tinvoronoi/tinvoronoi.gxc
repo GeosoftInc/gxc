@@ -1,0 +1,220 @@
+//===========================================================================
+
+NAME          = "Plot a TIN Voronoi Mesh"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap/Grids/Tinning"
+
+DESCRIPTION   = "
+
+        TINDB.FILE               Name of TIN file.
+        TINVORONOI.LINECOLOR     Colour of mesh
+        TINVORONOI.EDGECOLOR     Colour of convex hull
+        TINVORONOI.THICKNESS     Line Thickness
+        TINVORONI.CLIP           Clip cells to convex hull (0:No, 1:Yes)?
+"
+
+//===========================================================================
+
+RESOURCE = "tinvoronoi.gr"
+#include "tinvoronoi.grh"
+
+//===========================================================================
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sLineColor, sEdgeColor;
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+TIN   Tin;
+BF    Bf;
+VV    VVv, VVx, VVy;
+PLY   Ply;
+IPJ   hIPJ;
+
+int   i, iClip;
+real  rScale;
+real  rThickness;
+string(GS_MAX_PATH) sFile;
+string(GS_MAX_PATH) sGroup;
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- Ensure we have a base map and that we are not working with grid documents ---
+   
+   if (iRunGX_SYS("sclmap") != 0) 
+      Cancel_SYS();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TINVORONOI");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TINVORONOI_0,DGW_FILEPATH,"TINDB","FILE");     
+      SetInfoSYS_DGW(Diag,_TINVORONOI_1,DGW_TEXT,"TINVORONOI","LINECOLOR");
+      SetInfoSYS_DGW(Diag,_TINVORONOI_2,DGW_TEXT,"TINVORONOI","EDGECOLOR");
+      SetInfoSYS_DGW(Diag,_TINVORONOI_3,DGW_TEXT,"TINVORONOI","THICKNESS");
+      SetInfoSYS_DGW(Diag,_TINVORONOI_4,DGW_LISTALIAS,"TINVORONOI","CLIP");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i == 1)
+         Cancel_SYS();    // He hit cancel
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_TINVORONOI_0,DGW_FILEPATH,"TINDB","FILE");     
+      GetInfoSYS_DGW(Diag,_TINVORONOI_1,DGW_TEXT,"TINVORONOI","LINECOLOR");
+      GetInfoSYS_DGW(Diag,_TINVORONOI_2,DGW_TEXT,"TINVORONOI","EDGECOLOR");
+      GetInfoSYS_DGW(Diag,_TINVORONOI_3,DGW_TEXT,"TINVORONOI","THICKNESS");
+      GetInfoSYS_DGW(Diag,_TINVORONOI_4,DGW_LISTALIAS,"TINVORONOI","CLIP");
+
+      Destroy_DGW(Diag);
+      
+   }      
+         
+   // --- get database and map ---
+   
+   EMap   = Current_EMAP();
+   Map    = Lock_EMAP(EMap);   
+
+   GetString_SYS("TINDB","FILE",sFile); 
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("No TIN file specified"));   
+
+   rThickness = rGetReal_SYS("TINVORONOI","THICKNESS");
+   if(rThickness==rDUMMY) rThickness = 0.1;
+
+   GetString_SYS("TINVORONOI","LINECOLOR",sLineColor); 
+   if(!iStrlen_STR(sLineColor))
+      Abort_SYS(_("No line color specified"));   
+
+   GetString_SYS("TINVORONOI","EDGECOLOR",sEdgeColor); 
+   if(!iStrlen_STR(sLineColor))
+      Abort_SYS(_("No line color specified"));   
+
+   iClip = iGetInt_SYS("TINVORONOI","CLIP");
+   if(iClip!=0) iClip=1;
+
+   // --- Get TIN ---
+
+   Bf = Create_BF(sFile, BF_READ);
+   Tin = CreateS_TIN(Bf);
+
+   // --- Get the Voronoi Edges ---
+
+   VVv = Create_VV(-32,0);    // sizeof(GS_D2LINE)
+   GetVoronoiEdges_TIN(Tin, VVv);
+
+   // --- Get the Convex Hull ---
+
+   Ply = Create_PLY();
+   GetConvexHull_TIN(Tin, Ply);
+
+   VVx = CreateExt_VV(GS_DOUBLE, 0);
+   VVy = CreateExt_VV(GS_DOUBLE, 0);
+
+   GetPolygon_PLY(Ply, VVx, VVy, 0);
+
+
+   // -- Make it an inclusive, not an exclusive polygon ---
+
+   Destroy_PLY(Ply);
+   Ply = Create_PLY();
+   AddPolygonEx_PLY(Ply, VVx, VVy, 0);
+
+
+   // --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   
+
+   // --- set the working IPJ ---
+   
+   hIPJ = Create_IPJ();
+   GetIPJ_TIN(Tin,hIPJ);
+   SetWorkingIPJ_MVIEW(View,hIPJ);
+   Destroy_IPJ(hIPJ);
+
+   Progress_SYS(1);
+
+   // --- set plotting parameters ---
+
+   SetThinRes_MVIEW(View,0.02);
+   rScale = rScaleMM_MVIEW(View);
+
+   if(iClip) GroupClipMode_MVIEW(View, CLIP_ON);
+
+   // --- create path group ---
+
+   Strcpy_STR(sGroup,"TIN_");
+   FileNamePart_STR(sFile,sFile,STR_FILE_PART_NAME);
+   Strcat_STR(sGroup,sFile);
+   Strcat_STR(sGroup,"_Voronoi");
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+   
+
+   // --- set line characteristics ---
+
+   LineColor_MVIEW(View,iColor_MVIEW(sLineColor));
+   LineThick_MVIEW(View,rThickness*rScale);
+   LineStyle_MVIEW(View,0,0.0);
+   
+
+   // --- Plot the Voronoi Cells ---
+
+   if (iClip) SetClipPLY_MVIEW(View, Ply);
+
+   LineVV_MVIEW(View, VVv);
+
+   if (iClip) GroupClipMode_MVIEW(View, CLIP_OFF);
+   
+
+   // --- Plot the convex hull ---
+
+   Strcpy_STR(sGroup,"TIN_");
+   Strcat_STR(sGroup,sFile);
+   Strcat_STR(sGroup,"_Convex_Hull");
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+   LineColor_MVIEW(View,iColor_MVIEW(sEdgeColor));
+   LineThick_MVIEW(View,rThickness*rScale);
+   LineStyle_MVIEW(View,0,0.0);
+
+   PolyLine_MVIEW(View, MVIEW_DRAW_POLYGON, VVx, VVy);
+
+
+   // --- Add maker object ---
+
+   EasyMaker_MVIEW(View,_("TIN Voronoi Plot"),"TINVORONOI;TINDB");
+
+
+   // --- done ---
+
+   DestroyEx_BF(Bf);
+   Destroy_TIN(Tin);
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   
+   
+}

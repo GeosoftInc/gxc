@@ -1,0 +1,296 @@
+//===========================================================================
+NAME          = "Create an HXYZ from a SQL query"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Dap"
+
+DESCRIPTION   = "Create an HXYZ from a SQL query
+
+      Projection script parameters:
+      
+     HXYZSQL.IPJ_NAME        projection name
+            .IPJ_DATUM       datum (name, major axis, ellipticity)
+            .IPJ_METHOD      projection method (name,p1,p2,... see GXF)
+            .IPJ_UNITS       distance units (name,m/unit)
+            .IPJ_LOCALDATUM  local datum (name,dx,dy,dz,rx,ry,rz,scale)
+"
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+//===========================================================================
+
+RESOURCE = "hxyzsql.gr"
+#include "hxyzsql.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(GS_MAX_PATH)      sConnect,sData;
+string(GS_MAX_PATH)      sTemplate,sHXYZ;
+string(STR_DEFAULT_LONG) sLine;
+string(STR_DB_SYMBOL)    sFldXLong, sFldYLat, sFldZ;
+string(STR_GXF)          s1, s2, s3, s4, s5;
+
+DGW         Diag;
+
+LST         hLSTXLong, hLSTYLat, hLSTZ;
+RA          hRA;
+IPJ         hIPJ;
+HXYZ        hHXYZ;
+
+int         i,iRun, iFound,iExcell;
+int         iSelect;
+
+//===========================================================================
+//                           DAPADD CODE
+//===========================================================================
+
+{
+
+   // --- Excell ? ---
+
+   iExcell = 0;
+
+
+   // --- Create default IPJ ---
+   
+   hIPJ = Create_IPJ();
+   
+
+   // --- Are we running interactively ? ---
+   
+   if (iInteractive_SYS()) 
+   {
+      iRun = 0;
+      
+      do {
+
+         switch(iRun) {
+         
+            case 0 :  
+      
+               // --- Ask for database information ---
+
+               if (iExcell) {
+               
+                   Diag = Create_DGW("HXYZSQLEXCELL");
+   
+                   SetInfoSYS_DGW(Diag,_HXYZSQLEXCELL_0,DGW_FILEPATH,"HXYZSQL","FILE");     
+                   SetInfoSYS_DGW(Diag,_HXYZSQLEXCELL_1,DGW_LISTALIAS,"HXYZSQL","SELECT");     
+                   SetInfoSYS_DGW(Diag,_HXYZSQLEXCELL_2,DGW_FILEPATH,"HXYZSQL","HXYZ");     
+
+                   i = iRunDialogue_DGW(Diag);
+                   if (i == -1) Cancel_SYS();
+
+                   GetInfoSYS_DGW(Diag,_HXYZSQLEXCELL_0,DGW_FILEPATH,"HXYZSQL","FILE");     
+                   GetInfoSYS_DGW(Diag,_HXYZSQLEXCELL_1,DGW_LISTALIAS,"HXYZSQL","SELECT");     
+                   GetInfoSYS_DGW(Diag,_HXYZSQLEXCELL_2,DGW_FILEPATH,"HXYZSQL","HXYZ");     
+ 
+                   Destroy_DGW(Diag);
+
+               } else {
+
+                   Diag = Create_DGW("HXYZSQLSQL");
+   
+                   SetInfoSYS_DGW(Diag,_HXYZSQLSQL_0,DGW_FILEPATH,"HXYZSQL","FILE");     
+                   SetInfoSYS_DGW(Diag,_HXYZSQLSQL_1,DGW_LISTALIAS,"HXYZSQL","SELECT");     
+                   SetInfoSYS_DGW(Diag,_HXYZSQLSQL_2,DGW_FILEPATH,"HXYZSQL","HXYZ");     
+
+                   i = iRunDialogue_DGW(Diag);
+                   if (i == -1) Cancel_SYS();
+
+                   GetInfoSYS_DGW(Diag,_HXYZSQLSQL_0,DGW_FILEPATH,"HXYZSQL","FILE");     
+                   GetInfoSYS_DGW(Diag,_HXYZSQLSQL_1,DGW_LISTALIAS,"HXYZSQL","SELECT");     
+                   GetInfoSYS_DGW(Diag,_HXYZSQLSQL_2,DGW_FILEPATH,"HXYZSQL","HXYZ");     
+ 
+                   Destroy_DGW(Diag);
+               }
+
+
+               // --- Get Parameters ---
+
+               GetString_SYS("HXYZSQL","FILE",sData);
+               iSelect = iGetInt_SYS("HXYZSQL","SELECT");
+
+      
+               // --- Make Template ---
+
+               Strcpy_STR(sConnect, "FILENAME=");
+               Strcat_STR(sConnect, sData);
+
+
+               // --- Create the Template ---
+
+               if(iSelect == 0) {     
+                  if (iImportDatabaseADO_GUI(sConnect,"hxyzsql.i4",sLine,sizeof(sLine)))
+                     iRun = 0;
+                  else   
+                     iRun = 1;
+               } else {
+                  if (iImportDatabaseSQLADO_GUI(sConnect,"","hxyzsql.i4",sLine,sizeof(sLine)))
+                     iRun = 0;
+                  else   
+                     iRun = 1;
+               }          
+               SetString_SYS("HXYZSQL","TEMPLATE","hxyzsql.i4");
+               break;
+
+
+            case 1:
+
+               // --- Read field names from template ---
+
+               GetString_SYS("HXYZSQL","TEMPLATE",sTemplate);
+               hRA = Create_RA(sTemplate);
+
+
+               // --- Create Dialog ---
+
+               Diag = Create_DGW("HXYZSQLCOOR");
+               
+               
+               // --- Get Lists ---
+
+               hLSTXLong = GetList_DGW(Diag,_HXYZSQLCOOR_0);
+               hLSTYLat = GetList_DGW(Diag,_HXYZSQLCOOR_1);
+               hLSTZ = GetList_DGW(Diag,_HXYZSQLCOOR_2);
+
+   
+               // --- Populate Lists ---
+      
+               iFound = 0;
+               while (!iGets_RA(hRA, sLine)) {
+                  if (iStrncmp_STR(sLine, "IMPORT ", 7, STR_CASE_TOLERANT))
+                     continue;
+     
+                  iFound = 1;
+                  iTokens_STR(sLine, ",");
+                  Substr_STR(sLine, sLine, 7, iStrlen_STR(sLine)-1);
+                  AddItem_LST(hLSTXLong, sLine, sLine);      
+                  AddItem_LST(hLSTYLat, sLine, sLine);      
+                  AddItem_LST(hLSTZ, sLine, sLine);      
+               }
+               Destroy_RA(hRA);
+               
+               
+               // --- Did it work ? ---
+   
+               if (!iFound)  Abort_SYS(_("Failed to find any fields in import template."));
+               
+
+               // --- check that current settings are in the list ---
+               
+               GetString_SYS("HXYZSQL","X",sFldXLong);
+               if (iFindItem_LST(hLSTXLong,0,sFldXLong) == -1)
+                  SetString_SYS("HXYZSQL","X","");
+               GetString_SYS("HXYZSQL","Y",sFldYLat);
+               if (iFindItem_LST(hLSTYLat,0,sFldYLat) == -1)
+                  SetString_SYS("HXYZSQL","Y","");
+               GetString_SYS("HXYZSQL","Z",sFldZ);
+               if (iFindItem_LST(hLSTZ,0,sFldZ) == -1)
+                  SetString_SYS("HXYZSQL","Z","");
+   
+
+               // --- Get X/Long, Y/Lat ---
+
+               SetInfoSYS_DGW(Diag,_HXYZSQLCOOR_0,DGW_TEXT,"HXYZSQL","XLONG");
+               SetInfoSYS_DGW(Diag,_HXYZSQLCOOR_1,DGW_TEXT,"HXYZSQL","YLAT");
+               SetInfoSYS_DGW(Diag,_HXYZSQLCOOR_2,DGW_TEXT,"HXYZSQL","Z");
+
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_HXYZSQLCOOR_0,DGW_TEXT,"HXYZSQL","XLONG");
+               GetInfoSYS_DGW(Diag,_HXYZSQLCOOR_1,DGW_TEXT,"HXYZSQL","YLAT");
+               GetInfoSYS_DGW(Diag,_HXYZSQLCOOR_2,DGW_TEXT,"HXYZSQL","Z");
+   
+               Destroy_DGW(Diag);
+               
+               iRun = 99;
+               
+               
+               // --- Create new IPJ ---
+               
+               GetString_SYS("HXYZSQL","XLONG",sFldXLong);
+               GetString_SYS("HXYZSQL","YLAT",sFldYLat);
+               Strcpy_STR(sLine,sFldXLong);            
+               Strcat_STR(sLine,",");            
+               Strcat_STR(sLine,sFldYLat);            
+
+               if(iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_GCS_PCS, _("X,Y fields"), sLine)==1)
+               {
+                  // --- cancelled ---
+                  
+                  iRun = 1;
+               }
+               else 
+               {
+                  // --- Export IPJ parameters as GXF strings for scripting. ---
+                  
+                  GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+                  
+                  SetString_SYS("HXYZSQL", "IPJ_NAME", s1);
+                  SetString_SYS("HXYZSQL", "IPJ_DATUM", s2);
+                  SetString_SYS("HXYZSQL", "IPJ_METHOD", s3);
+                  SetString_SYS("HXYZSQL", "IPJ_UNITS", s4);
+                  SetString_SYS("HXYZSQL", "IPJ_LOCALDATUM", s5);
+               }
+
+               break;
+                     
+         }
+      } while (iRun != 99);
+   }
+
+
+   // --- Get the Information ---
+
+   GetString_SYS("HXYZSQL","TEMPLATE",sTemplate);
+   GetString_SYS("HXYZSQL","HXYZ",sHXYZ);
+   GetString_SYS("HXYZSQL","XLONG",sFldXLong);
+   GetString_SYS("HXYZSQL","YLAT",sFldYLat);
+   GetString_SYS("HXYZSQL","Z",sFldZ);
+
+
+   // --- Get the IPJ parameters from the INI ---
+   
+   GetString_SYS("HXYZSQL", "IPJ_NAME", s1);
+   GetString_SYS("HXYZSQL", "IPJ_DATUM", s2);
+   GetString_SYS("HXYZSQL", "IPJ_METHOD", s3);
+   GetString_SYS("HXYZSQL", "IPJ_UNITS", s4);
+   GetString_SYS("HXYZSQL", "IPJ_LOCALDATUM", s5);   
+   if(!iStrlen_STR(s1) &&
+      !iStrlen_STR(s2) &&
+      !iStrlen_STR(s3) &&
+      !iStrlen_STR(s4) &&
+      !iStrlen_STR(s5))
+   {
+      Abort_SYS(_("GXF projection strings HXYZSQL.IPJ_NAME, IPJ_DATUM, IPJ_METHOD, IPJ_UNITS and IPJ_LOCALDATUM not set for non-interactive use of the HXYZSQL.GX."));
+   }
+   
+   SetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+
+   if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE)
+      Abort_SYS(_("Error: The a geographic or projected coordinate system must be defined."));
+   
+
+   // --- Turn on Progress ---
+
+   Progress_SYS(1);
+
+   hHXYZ = hCreateSQL_HXYZ(sTemplate,sFldXLong,sFldYLat,sFldZ,hIPJ,sHXYZ);
+
+   Progress_SYS(0);
+   
+
+   // --- Destroy Objects ---
+
+   Destroy_HXYZ(hHXYZ);
+   Destroy_IPJ(hIPJ);
+}

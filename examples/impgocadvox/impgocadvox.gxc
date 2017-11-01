@@ -1,0 +1,215 @@
+//===========================================================================
+NAME          = "GOCAD 3D Voxet import into VOX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Imports a GOCAD voxet files into a Geosoft VOXEL.
+
+   IMPGOCADVOX.GOCAD:     GOCAD file\"|\".
+   IMPGOCADVOX.PROPERTY:  Property to import
+           IPJ.NAME        projection name
+           IPJ.DATUM       datum (name, major axis, ellipticity)
+           IPJ.METHOD      projection method (name,p1,p2,... see GXF)
+           IPJ.UNITS       distance units (name,m/unit)
+           IPJ.LOCALDATUM  local datum (name,dx,dy,dz,rx,ry,rz,scale)
+
+"
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v6.3.0   Enabled ArcGIS specific functionality
+// v6.2.0   First version
+//===========================================================================
+
+RESOURCE = "impgocadvox.gr"
+#include "impgocadvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW  hDGW;   
+LST  List;
+IPJ  hIPJ;
+VOX  hVOX;
+
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_GXF)  s1, s2, s3, s4, s5;
+string(STR_FILE) sVox,sGOCAD,sProperty;
+int i,iOrient;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Create IPJ ---
+
+   hIPJ = Create_IPJ();
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+   
+     // --- Read Previous Projection ---
+    
+     GetString_SYS("IMPGOCADVOX","IPJ_NAME",s1);
+     if (iStrlen_STR(s1)) {
+        GetString_SYS("IMPGOCADVOX","IPJ_DATUM",s2);
+        GetString_SYS("IMPGOCADVOX","IPJ_METHOD",s3);
+        GetString_SYS("IMPGOCADVOX","IPJ_UNITS",s4);
+        GetString_SYS("IMPGOCADVOX","IPJ_LOCALDATUM",s5);
+        SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+     }
+     
+   
+     // --- Start Loop ---
+   
+     i = 0;
+     do {
+     
+        switch(i)
+        {
+           case 0 :
+           
+           
+              // --- Create the Dialogue ---
+
+              hDGW = Create_DGW("IMPGOCADVOX");
+
+     
+              // --- Set any Defaults ---
+
+              SetInfoSYS_DGW(hDGW,_IMPGOCADVOX_0,DGW_FILEPATH,"IMPGOCADVOX","GOCAD");     
+     
+              // --- Run the Dialogue ---
+
+              i = iRunDialogue_DGW(hDGW);
+              if (i == -1) Cancel_SYS();    // The user hit cancel
+
+     
+              // --- Get the Strings ---
+
+              GetInfoSYS_DGW(hDGW,_IMPGOCADVOX_0,DGW_FILEPATH,"IMPGOCADVOX","GOCAD");    
+     
+     
+              // --- Destroy the Dialogue ---
+
+              Destroy_DGW(hDGW);
+              break;
+        
+           case 1 :
+           
+              // --- Create the Dialogue ---
+
+              hDGW = Create_DGW("IMPGOCADPROP");
+        
+        
+              // --- Generate the property list ---
+        
+              GetString_SYS("IMPGOCADVOX","GOCAD",sGOCAD);
+              List = GetList_DGW(hDGW,_IMPGOCADPROP_1);
+              ListGOCADProperties_VOX(sGOCAD,List);
+              Sort_LST(List,0,0);
+        
+        
+        
+              // --- Set any Defaults ---
+
+              SetInfoSYS_DGW(hDGW,_IMPGOCADPROP_0,DGW_FILEPATH,"IMPGOCADVOX","VOX");     
+              SetInfoSYS_DGW(hDGW,_IMPGOCADPROP_1,DGW_LISTALIAS,"IMPGOCADVOX","PROPERTY");     
+              SetInfoSYS_DGW(hDGW,_IMPGOCADPROP_2,DGW_LISTALIAS,"IMPGOCADVOX","ORIENTATION");     
+     
+              GetName_IPJ(hIPJ,IPJ_NAME_PCS,sTemp);         
+              SetInfo_DGW(hDGW,_IMPGOCADPROP_3,DGW_TEXT,sTemp);
+              GetName_IPJ(hIPJ,IPJ_NAME_UNIT_FULL,sTemp);         
+              SetInfo_DGW(hDGW,_IMPGOCADPROP_4,DGW_TEXT,sTemp);
+     
+              // --- Run the Dialogue ---
+
+              i = iRunDialogue_DGW(hDGW);
+              if (i == -1) Cancel_SYS();    // The user hit cancel
+
+     
+              // --- Get the Strings ---
+
+              GetInfoSYS_DGW(hDGW,_IMPGOCADPROP_0,DGW_FILEPATH,"IMPGOCADVOX","VOX");     
+              GetInfoSYS_DGW(hDGW,_IMPGOCADPROP_1,DGW_LISTALIAS,"IMPGOCADVOX","PROPERTY");     
+              GetInfoSYS_DGW(hDGW,_IMPGOCADPROP_2,DGW_LISTALIAS,"IMPGOCADVOX","ORIENTATION");     
+     
+     
+              // --- Destroy the Dialogue ---
+
+              Destroy_DGW(hDGW);
+              break;
+              
+           
+           case 2 : 
+       
+              // --- Edit/modify the IPJ ---
+              
+              GetString_SYS("IMPGOCADVOX","GOCAD",sGOCAD);
+              iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("GOCAD file"), sGOCAD);
+              i = 1;
+              break;
+         }
+         
+     } while (i != 3);
+      
+     // --- Save Projection ---
+     
+     GetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+     SetString_SYS("IMPGOCADVOX","IPJ_NAME",s1);
+     SetString_SYS("IMPGOCADVOX","IPJ_DATUM",s2);
+     SetString_SYS("IMPGOCADVOX","IPJ_METHOD",s3);
+     SetString_SYS("IMPGOCADVOX","IPJ_UNITS",s4);
+     SetString_SYS("IMPGOCADVOX","IPJ_LOCALDATUM",s5);
+   }
+   
+   
+   // --- Get and verify parameters ---
+
+   GetString_SYS("IMPGOCADVOX","VOX",sVox);
+   GetString_SYS("IMPGOCADVOX","GOCAD",sGOCAD);
+   GetString_SYS("IMPGOCADVOX","PROPERTY",sProperty);
+   iOrient = iGetInt_SYS("IMPGOCADVOX","ORIENTATION");
+   
+   
+   // --- Read Projection ---
+
+   GetString_SYS("IMPGOCADVOX","IPJ_NAME",s1);
+   if (iStrlen_STR(s1)) {
+      GetString_SYS("IMPGOCADVOX","IPJ_DATUM",s2);
+      GetString_SYS("IMPGOCADVOX","IPJ_METHOD",s3);
+      GetString_SYS("IMPGOCADVOX","IPJ_UNITS",s4);
+      GetString_SYS("IMPGOCADVOX","IPJ_LOCALDATUM",s5);
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   }
+   
+   if (iInteractive_SYS())
+      iRemoveDocument_PROJ(sVox);
+   
+   // --- Create the VOX ---
+   
+   Progress_SYS(1);
+   hVOX = GenerateOrientedGOCAD_VOX(sVox,sGOCAD,sProperty,hIPJ,iOrient);
+   Destroy_VOX(hVOX);  // close and release the file.
+   Progress_SYS(0);
+   
+   
+   // --- Display the Voxel ? ---
+   if (!iScript_SYS()) 
+	{
+		SetString_SYS("VOXEL_UTILS","DISPLAY_VOXEL",sVox);
+		iRunGX_SYS("geogxnet.dll(Geosoft.GX.VoxUtils.VoxelGxUtils;DisplayNewVoxel)");
+	}	
+}

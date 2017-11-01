@@ -1,0 +1,1230 @@
+//===========================================================================
+NAME          = "Create a new map from lat-long limits"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+
+     DAPMAP.MAP            map name
+           .TEMPLATE       template name from MAPTMPL.INI
+           .SCALE          map scale, blank for default
+           .UNITS          user units per metre
+           .IPJ_NAME       Projection information in GXF format.
+           .IPJ_DATUM         
+           .IPJ_METHOD        See GXF documentation for details
+           .IPJ_UNITS         on formatting these parameters.
+           .IPJ_LOCALDATUM    
+"
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v5.1.4: Added note for GXF string in case Robinson projection is supported.
+//===========================================================================
+
+RESOURCE = "dapmap.gr"
+#include "dapmap.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define STYLE_MAP    0
+#define STYLE_FIGURE 1
+
+//===========================================================================
+
+string(STR_FILE)  sMap,sFile,sMdf;
+string(STR_DEFAULT_LONG) sSize,sWork;
+string(STR_DEFAULT) sTmpl,sSet,sUR;
+
+
+EMAP     EMap;
+MVIEW    DataView;
+MVIEW    BaseView;
+MAPL     Mapplot;
+RA       Master;     // Master control file
+WA       ConFile;    // Control File
+IPJ      Ipj,UserIpj;
+
+MAP   Map;
+MVIEW View;
+DGW   Diag;
+LST   List;
+REG   MapReg;
+SBF   hSBF;
+IPJ   hIPJ;
+PJ    hPJ;
+LTB   hUNI;
+LTB   hMED;
+LTB   hTMP;
+PLY   hPLY,hPLYo;
+VV    hVVx1,hVVx2,hVVy1,hVVy2;   // for the warp calculation
+int   i;
+
+real  r;
+real  rMinX;     // Minimum X of map area (ground units)
+real  rMaxX;     // Maximum X of map area (ground units)
+real  rMinY;     // Minimum Y of map area (ground units)
+real  rMaxY;     // Maximum Y of map area (ground units) 
+
+real  rMinLon;   // Minimum Longitude of map area (ground units)
+real  rMaxLon;   // Maximum Longitude of map area (ground units)
+real  rMinLat;   // Minimum Latitude of map area (ground units)
+real  rMaxLat;   // Maximum Latitude of map area (ground units) 
+
+int   iPort;     // Portrait map? (or landscape) (FALSE by default)
+int   iExact;    // Map is exactly sized to area? 
+                 // (or trimmed to data and margins) (FALSE by default)
+
+real  rScale;    // Map scale (rDummy for default)
+real  rConv;     // Conversion factor (to meters/unit) (rDummy for default)
+real  rMargXmin; // Minimum X of margin area 
+real  rMargXmax; // Maximum X of margin area 
+real  rMargYmin; // Minimum Y of margin area 
+real  rMargYmax; // Maximum Y of margin area                  
+real  rInside;   // Inside edge
+real  rDist;
+
+string(STR_DEFAULT_SHORT) sUnits;
+string(STR_DEFAULT_LONG ) s1,s2,s3,s4,s5;
+real rX, rY, rX1, rX2, rY1, rY2, rRot;
+int iDescr,iFactor;
+int iSizeXF;
+int iSizeYF;
+int iNameF;
+int iLayoutF;
+int iMediaF;
+int iTypeF;
+int iFixedF;
+int iMargin_InsideF;
+int iMargin_BottomF;
+int iMargin_RightF;
+int iMargin_TopF;
+int iMargin_LeftF;
+int iUpDirF;
+int iUpAngF;
+int iTmp,iMed;
+
+int         iLines,iNext;
+string(STR_DEFAULT) sPar;
+string(2)   sTemp3;
+string(STR_FILE) sTemp,sTemp2;
+
+real     rXminD,rYminD,rXmaxD,rYmaxD;
+real     rXminB,rYminB,rXmaxB,rYmaxB;
+real     rNorth,rN;
+real     rMbottom,rMright,rMtop,rMleft;
+real     rMnLon, rMxLon, rMnLat, rMxLat;
+
+
+//===========================================================================
+
+{
+
+   // --- get user range string, if it exists, range is set ---
+   
+   GetString_SYS("DAPMAP","USERRANGE",sUR);
+   SetString_SYS("DAPMAP","USERRANGE","");
+   
+   
+   // --- get SBF for projection info ---
+   
+   hSBF = hGetSYS_SBF();
+   
+   
+   // --- Load Tables ---
+      
+   hTMP = CreateCSV_LTB("maptmpl");
+   iNameF = iFindField_LTB(hTMP,"Name");
+   iLayoutF = iFindField_LTB(hTMP,"Layout");
+   iMediaF = iFindField_LTB(hTMP,"Media");
+   iTypeF = iFindField_LTB(hTMP,"Type");
+   iFixedF = iFindField_LTB(hTMP,"Fixed");
+   iMargin_InsideF = iFindField_LTB(hTMP,"Margin_Inside");
+   iMargin_BottomF = iFindField_LTB(hTMP,"Margin_Bottom");
+   iMargin_RightF = iFindField_LTB(hTMP,"Margin_Right");
+   iMargin_TopF = iFindField_LTB(hTMP,"Margin_Top");
+   iMargin_LeftF = iFindField_LTB(hTMP,"Margin_Left");
+   iUpDirF = iFindField_LTB(hTMP,"Up_Dir");
+   iUpAngF = iFindField_LTB(hTMP,"Up_Ang");
+   
+   if (iNameF         ==-1) Abort_SYS(_("The [Name] not found in maptmpl table."));
+   if (iLayoutF       ==-1) Abort_SYS(_("The [Layout] not found in maptmpl table."));
+   if (iMediaF        ==-1) Abort_SYS(_("The [Media] not found in maptmpl table."));
+   if (iTypeF         ==-1) Abort_SYS(_("The [Type] not found in maptmpl table."));
+   if (iFixedF        ==-1) Abort_SYS(_("The [Fixed] not found in maptmpl table."));
+   if (iMargin_InsideF==-1) Abort_SYS(_("The [Margin_Inside] not found in maptmpl table."));
+   if (iMargin_BottomF==-1) Abort_SYS(_("The [Margin_Bottom] not found in maptmpl table."));
+   if (iMargin_RightF ==-1) Abort_SYS(_("The [Margin_Right] not found in maptmpl table."));
+   if (iMargin_TopF   ==-1) Abort_SYS(_("The [Margin_Top] not found in maptmpl table."));
+   if (iMargin_LeftF  ==-1) Abort_SYS(_("The [Margin_Left] not found in maptmpl table."));
+   if (iUpDirF        ==-1) Abort_SYS(_("The [Up_Dir] not found in maptmpl table."));
+   if (iUpAngF        ==-1) Abort_SYS(_("The [Up_Ang] not found in maptmpl table."));
+      
+   hUNI = CreateCSV_LTB("units");
+   iDescr  = iFindField_LTB(hUNI,"Description");
+   iFactor = iFindField_LTB(hUNI,"Factor");
+   if (iDescr==-1) Abort_SYS(_("The [Description] not found in units table."));
+   if (iFactor==-1) Abort_SYS(_("The [Factor] not found in units table."));
+   
+   hMED = Create_LTB("media",LTB_TYPE_HEADER,LTB_DELIM_COMMA,"");
+   iSizeXF = iFindField_LTB(hMED,"Size_X");
+   iSizeYF = iFindField_LTB(hMED,"Size_Y");
+   if (iSizeXF==-1) Abort_SYS(_("The [Size_X] not found in media table."));
+   if (iSizeYF==-1) Abort_SYS(_("The [Size_Y] not found in media table."));
+   
+
+   // -- Create clipping polygon ---
+      
+   hPLYo = Create_PLY();
+   
+
+   // --- Create Warp VVs ---
+
+   hVVx1 = Create_VV(REAL, 0);
+   hVVy1 = Create_VV(REAL, 0);
+   hVVx2 = Create_VV(REAL, 0);
+   hVVy2 = Create_VV(REAL, 0);
+
+   SetLen_VV(hVVx1, 2);
+   SetLen_VV(hVVx2, 2);
+   SetLen_VV(hVVy1, 2);
+   SetLen_VV(hVVy2, 2);
+   
+   rMinX = rMinY = rMaxX = rMaxY = 0.0;   // stop compile warning
+   
+   
+   SetString_SYS("DAPMAP","SCALE","");
+   
+   
+   // --- Interactive Mode ---   
+ 
+   if (iInteractive_SYS()) {
+   
+   
+      // --- if not initialized, range the current database ---
+
+      SetString_SYS("DAPMAP","SCAN","");
+      if ((rGetReal_SYS("XYRANGE","MIN_LON")) == rDUMMY && iHaveCurrent_EDB()) {
+         iRunGX_SYS("rangedb");
+         if (rGetReal_SYS("XYRANGE","MIN_LON") == rDUMMY) {
+            SetString_SYS("XYRANGE","MIN_LON","-98");
+            SetString_SYS("XYRANGE","MAX_LON","-70");
+            SetString_SYS("XYRANGE","MIN_LAT","38");
+            SetString_SYS("XYRANGE","MAX_LAT","50");
+         } else
+            SetString_SYS("DAPMAP","SCAN","DATA");
+      } else
+                     
+   
+      i = 0;
+      while (i != 99) {
+      
+         switch (i) {
+         
+            case 0:  // range
+            
+               if (iStrMin_STR(sUR) == 0) {
+               
+                  Diag = Create_DGW("DAPMAP0");
+               
+                  // --- Get initial values ---
+
+                  rMnLon = rGetReal_SYS("XYRANGE","MIN_LON");
+                  rMnLat = rGetReal_SYS("XYRANGE","MIN_LAT");
+                  rMxLon = rGetReal_SYS("XYRANGE","MAX_LON");
+                  rMxLat = rGetReal_SYS("XYRANGE","MAX_LAT");
+
+                  SetInfoSYS_DGW(Diag,_DAPMAP0_0,DGW_TEXT,"XYRANGE","MIN_LON");     
+                  SetInfoSYS_DGW(Diag,_DAPMAP0_1,DGW_TEXT,"XYRANGE","MAX_LON");    
+                  SetInfoSYS_DGW(Diag,_DAPMAP0_2,DGW_TEXT,"XYRANGE","MIN_LAT");     
+                  SetInfoSYS_DGW(Diag,_DAPMAP0_3,DGW_TEXT,"XYRANGE","MAX_LAT");
+            
+                  i = iRunDialogue_DGW(Diag);
+                  if (i == -1) Cancel_SYS();
+
+                  GetInfoSYS_DGW(Diag,_DAPMAP0_0,DGW_TEXT,"XYRANGE","MIN_LON");     
+                  GetInfoSYS_DGW(Diag,_DAPMAP0_1,DGW_TEXT,"XYRANGE","MAX_LON");    
+                  GetInfoSYS_DGW(Diag,_DAPMAP0_2,DGW_TEXT,"XYRANGE","MIN_LAT");     
+                  GetInfoSYS_DGW(Diag,_DAPMAP0_3,DGW_TEXT,"XYRANGE","MAX_LAT");    
+                  Destroy_DGW(Diag);
+                  
+               } else {
+                  i = 1;
+               }
+               
+               rMinLon = rGetReal_SYS("XYRANGE","MIN_LON");
+               rMinLat = rGetReal_SYS("XYRANGE","MIN_LAT");
+               rMaxLon = rGetReal_SYS("XYRANGE","MAX_LON");
+               rMaxLat = rGetReal_SYS("XYRANGE","MAX_LAT");
+
+               // --- Validate ---
+
+               if(rMinLon<-180.0 || rMinLon>180.0 ||
+                  rMaxLon<-180.0 || rMaxLon>180.0 ||
+                  rMinLat<-90.0 || rMinLat>90.0 ||
+                  rMaxLat<-90.0 || rMaxLat>90.0) {
+
+                  DisplayMessage_SYS(_("Data Range to Map"), _("Longitudes must be in the range -180.0 to 180.0\r\nand latitudes in the range -90.0 to 90.0."));
+
+                  SetReal_SYS("XYRANGE","MIN_LON",rMnLon);
+                  SetReal_SYS("XYRANGE","MIN_LAT",rMnLat);
+                  SetReal_SYS("XYRANGE","MAX_LON",rMxLon);
+                  SetReal_SYS("XYRANGE","MAX_LAT",rMxLat);
+            
+                  i = 0;
+                  break;      
+
+               }
+
+               if (rMinLon > rMaxLon) {r = rMinLon; rMinLon = rMaxLon; rMaxLon = r;}
+               if (rMinLat > rMaxLat) {r = rMinLat; rMinLat = rMaxLat; rMaxLat = r;}
+               
+      
+               // --- set up default projection ---
+               
+
+			   hIPJ = Create_IPJ();
+			   Strcpy_STR(s1,"");
+			   Strcpy_STR(s2,_n("\"WGS 84\""));
+			  
+			   // --- 
+			   // Use equatorial mercator if map crosses the equator
+			   // or if map is within 20 degrees of the equator
+			   // ---
+			  
+			   if ( ((rMinLat*rMaxLat) < 0.0) ||
+				    ((rMaxLat <= 20.0) && (rMinLat >= -20.0))) {
+				   
+				  if ((rMinLat < -70.0) || (rMaxLat > 70.0)) {
+					 DisplayMessage_SYS(_("Data Range to Map"), _("Global maps outside of +/- 70 degrees latitude are not supported."));
+					 i = 0;
+				     break;
+
+					 // --- NOTE: If Robinson projection is used, then the s3 parameter takes only 4
+					 //     more parameters NOT including the scale. ---
+
+					 Strcpy_STR(s2,_n("\"Sphere\""));
+					 Strcpy_STR(s3,_n("\"Robinson\","));
+				  } else   
+			 		 Strcpy_STR(s3,_n("\"Mercator (1SP)\","));
+				 
+				 
+			   } else {
+			  
+				  if ((rMaxLon - rMinLon) > 180.0) {
+ 					 DisplayMessage_SYS(_("Data Range to Map"),_("Hemisphere maps larger than 180 degrees longitude are not supported."));
+					 i = 0;
+					 break;
+				  }
+					
+				  Strcpy_STR(s3,_n("\"Lambert Conic Conformal (1SP)\","));
+				 
+			   }                     
+			   FormatR2_STR((rMinLat+rMaxLat)/2.0,sWork,14,8); 
+			   iStrMin_STR(sWork); Strcat_STR(s3,sWork); Strcat_STR(s3,",");
+			   FormatR2_STR((rMinLon+rMaxLon)/2.0,sWork,14,8); 
+			   iStrMin_STR(sWork); Strcat_STR(s3,sWork); Strcat_STR(s3,",1.0,0.0,0.0");   // See note for Robinson above.
+			   Strcpy_STR(s4,"m,1.0");
+ 			   Strcpy_STR(s5,"");
+			   SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+               
+               
+               // --- setup default map region ---
+
+               break;
+               
+               
+            case 1:
+            
+            
+               // --- dialog ---                        
+               
+               Diag = Create_DGW("DAPMAP1");
+               List = GetList_DGW(Diag,_DAPMAP1_1);
+               GetLST_LTB(hTMP,0,List);
+               Sort_LST(List,0,0);
+         
+            
+               SetInfoSYS_DGW(Diag,_DAPMAP1_0,DGW_FILEPATH,"DAPMAP","MAP");     
+               SetInfoSYS_DGW(Diag,_DAPMAP1_1,DGW_TEXT,"DAPMAP","TEMPLATE");     
+               SetInfoSYS_DGW(Diag,_DAPMAP1_2,DGW_TEXT,"DAPMAP","SCALE");     
+               SetInfoSYS_DGW(Diag,_DAPMAP1_3 ,DGW_TEXT,"MAPTITLE","TITLE");     
+               SetInfoSYS_DGW(Diag,_DAPMAP1_4 ,DGW_TEXT,"MAPTITLE","SUB_1");     
+               SetInfoSYS_DGW(Diag,_DAPMAP1_5 ,DGW_TEXT,"MAPTITLE","SUB_2");     
+               GetName_IPJ(hIPJ,IPJ_NAME_PCS,s1);    
+               SetInfo_DGW(Diag,_DAPMAP1_6,DGW_TEXT,s1);    
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_DAPMAP1_0,DGW_FILEPATH,"DAPMAP","MAP");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_1,DGW_TEXT,"DAPMAP","TEMPLATE");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_2,DGW_TEXT,"DAPMAP","SCALE");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_3 ,DGW_TEXT,"MAPTITLE","TITLE");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_4 ,DGW_TEXT,"MAPTITLE","SUB_1");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_5 ,DGW_TEXT,"MAPTITLE","SUB_2");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_3 ,DGW_TEXT,"MAP","TITLE");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_4 ,DGW_TEXT,"MAP","SUB_1");     
+               GetInfoSYS_DGW(Diag,_DAPMAP1_5 ,DGW_TEXT,"MAP","SUB_2");     
+               Destroy_DGW(Diag);
+
+
+               if (i == 0) {
+                  if (iStrMin_STR(sUR)) Cancel_SYS();
+                  break;
+               }                  
+
+            
+               // --- get unit factor and scale ---
+            
+               rConv = 1.0;                     
+               GetUnits_IPJ(hIPJ,rConv,sUnits);
+               if (rConv <= 0.0) Abort_SYS(_("Invalid unit conversion factor in UNITS table."));
+               rScale = rDUMMY;
+               if (i != 2 && iExistReal_SYS("DAPMAP","SCALE"))
+                  rScale = rGetReal_SYS("DAPMAP","SCALE");
+               
+               
+               // --- get template parameters ---
+               
+               GetString_SYS("DAPMAP","TEMPLATE",sTmpl);
+               iTmp = iFindKey_LTB(hTMP,sTmpl);
+               if (iTmp < 0) {
+                  DisplayMessage_SYS(_("No template"),_("Template not found"));
+                  i = 1;
+                  break;
+               }
+               
+               
+               // --- layout ---
+               
+               GetString_LTB(hTMP,iTmp,iLayoutF,sSet);
+               if (iStrStr_STR(sSet, _("portrait"), STR_CASE_TOLERANT) != -1)
+                  iPort = TRUE;
+               else         
+                  iPort = FALSE;
+               
+               
+               // --- exact size ---
+               
+               GetString_LTB(hTMP,iTmp,iFixedF,sSet);
+               if (iStrStr_STR(sSet, _("fixed"), STR_CASE_TOLERANT) != -1)
+                  iExact = TRUE;
+               else         
+                  iExact = FALSE;
+                     
+               
+               // --- margins ---
+               
+               rMargXmin = rGetReal_LTB(hTMP,iTmp,iMargin_LeftF);
+               rMargXmax = rGetReal_LTB(hTMP,iTmp,iMargin_RightF);
+               rMargYmin = rGetReal_LTB(hTMP,iTmp,iMargin_BottomF);
+               rMargYmax = rGetReal_LTB(hTMP,iTmp,iMargin_TopF);
+               rInside   = rGetReal_LTB(hTMP,iTmp,iMargin_InsideF);
+                     
+               
+               // --- media string ---
+
+               GetString_LTB(hTMP,iTmp,iMediaF,sSet);
+               iMed = iFindKey_LTB(hMED,sSet);
+               if (iMed < 0) {
+                  DisplayMessage_SYS(_("Media not found"),_("Media not defined"));
+                  i = 1;
+                  break;
+               }
+               GetString_LTB(hMED,iMed,iSizeXF,sSet);
+               Strcpy_STR(sSize,sSet);
+               Strcat_STR(sSize,",");
+               GetString_LTB(hMED,iMed,iSizeYF,sSet);
+               Strcat_STR(sSize,sSet);
+               
+                            
+               // --- done ---
+               
+               if (i == 2) {     // --- default scale
+                  i = 4;
+                  iNext = 1;
+               } else {
+                  i = 4;
+                  iNext = 99;
+               }
+                  
+               break;
+                                       
+               
+            case 4:  // template setup
+            
+               // --- Find rotation necessary to make the center of the
+               //     map aligned N-S ---
+
+               hPJ = CreateIPJ_PJ((IPJ)0, hIPJ);  // to go from LL to data
+               rX1 = 0.5 * (rMinLon + rMaxLon);
+               rY1 = rMinLat;
+               ConvertXY_PJ(hPJ,rX1,rY1);
+               rX2 = 0.5 * (rMinLon + rMaxLon);
+               rY2 = rMaxLat;
+               ConvertXY_PJ(hPJ,rX2,rY2);
+               rRot = 90.0 - rArcTan2_MATH(rY2-rY1, rX2-rX1)*57.29577951;
+               
+
+               // --- Save original top/bottom positions for warp ---
+
+               SetReal_VV(hVVx1, 0, rX1);
+               SetReal_VV(hVVy1, 0, rY1);
+               SetReal_VV(hVVx1, 1, rX2);
+               SetReal_VV(hVVy1, 1, rY2);
+               
+
+               // --- Create a clipping polygon along the lat-long boundary. ---
+
+               hPLY = Create_PLY();
+               ClipPLY_PJ(hPJ, rMinLon, rMinLat, rMaxLon, rMaxLat, 0.5, hPLY);
+               Copy_PLY(hPLYo,hPLY);
+               SaveTable_PLY(hPLYo,"_LLMask.ply");
+               
+
+               // --- Rotate the PLY about the center, and get the range in X and Y ---
+         
+               rX = 0.5*(rX1 + rX2);
+               rY = 0.5*(rY1 + rY2);
+               Rotate_PLY(hPLY, rX, rY, rRot);
+
+               Extent_PLY(hPLY, rMinX, rMinY, rMaxX, rMaxY);
+               Destroy_PLY(hPLY);
+               
+
+               // --- Save new top/bottom positions for warp ---
+              
+               rDist = rSqrt_MATH((rX2-rX1)*(rX2-rX1) + (rY2-rY1)*(rY2-rY1))/2.0;
+               rX1 = rX;
+               rX2 = rX;
+               rY1 = rY - rDist;
+               rY2 = rY + rDist;
+               SetReal_VV(hVVx2, 0, rX1);
+               SetReal_VV(hVVy2, 0, rY1);
+               SetReal_VV(hVVx2, 1, rX2);
+               SetReal_VV(hVVy2, 1, rY2);
+         
+               if ((rMinX == rDUMMY) || (rMinX >= rMaxX)) {
+                  DisplayMessage_SYS(_("Invalid range"),_("Invalid X range."));
+                  i = 0;
+                  break;
+               } else if ((rMinY == rDUMMY) || (rMinY >= rMaxY)) {
+                  DisplayMessage_SYS(_("Invalid range"),_("Invalid Y range."));
+                  i = 0;
+                  break;
+               }
+               
+               
+               // --- calculate a size for unlimited size ---
+               
+               if (iStrMin_STR(sSize) == 1) {
+                  if (rScale==rDUMMY) {
+                     DisplayMessage_SYS(_("Scale error"),_("Unlimited media size requires a scale."));
+                     i = 1;
+                     break;
+                  }
+                  rX = 100.0 * rConv * (rMaxX - rMinX) / rScale + 2.0*rInside + rMargXmax + rMargXmin + 0.25;
+                  rY = 100.0 * rConv * (rMaxY - rMinY) / rScale + 2.0*rInside + rMargYmax + rMargYmin + 0.25;
+                  FormatR2_STR(rX, sTemp, 10, 2);
+                  Strcpy_STR(sSize, sTemp);
+                  Strcat_STR(sSize, ",");
+                  FormatR2_STR(rY, sTemp, 10, 2);
+                  Strcat_STR(sSize, sTemp);                   
+               }
+                 
+
+               // --- open the map and set up views ---
+
+               GetString_SYS("DAPMAP","MAP",sMap);
+               if (iLoaded_EMAP(sMap))
+                  UnLoad_EMAP(sMap);
+               
+               Map = Create_MAP(sMap,MAP_WRITENEW);
+               Mapset_MVU(Map,"*Base","*Data",rMinX,rMaxX,rMinY,rMaxY,sSize,iPort,iExact,
+                          rScale,1.0/rConv,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside);
+               rScale = rGetMapScale_MAP(Map);
+               SetReal_SYS("DAPMAP","SCALE",rScale);
+               Destroy_MAP(Map);
+                          
+                          
+               // --- done ---
+               
+               i = iNext;
+               break;
+               
+               
+            default:
+            
+               DisplayInt_SYS(_("I'm lost"),i);            
+               i = 0;
+               break;
+             
+         }            
+         
+      }
+      
+   }
+   else {
+      rMinLon = rGetReal_SYS("XYRANGE","MIN_LON");
+      rMinLat = rGetReal_SYS("XYRANGE","MIN_LAT");
+      rMaxLon = rGetReal_SYS("XYRANGE","MAX_LON");
+      rMaxLat = rGetReal_SYS("XYRANGE","MAX_LAT");
+
+      // --- Validate ---
+
+      if(rMinLon<-180.0 || rMinLon>180.0 ||
+         rMaxLon<-180.0 || rMaxLon>180.0 ||
+         rMinLat<-90.0 || rMinLat>90.0 ||
+         rMaxLat<-90.0 || rMaxLat>90.0) {
+
+         Abort_SYS(_("Longitudes must be in the range -180.0 to 180.0\r\nand latitudes in the range -90.0 to 90.0."));
+         
+      }
+
+      if (rMinLon > rMaxLon) {r = rMinLon; rMinLon = rMaxLon; rMaxLon = r;}
+      if (rMinLat > rMaxLat) {r = rMinLat; rMinLat = rMaxLat; rMaxLat = r;}
+      
+
+      // --- set up default projection ---
+      
+	 hIPJ = Create_IPJ();
+	 Strcpy_STR(s1,"");
+	 Strcpy_STR(s2,_n("\"WGS 84\""));
+	 
+	 // --- 
+	 // Use equatorial mercator if map crosses the equator
+	 // or if map is within 20 degrees of the equator
+	 // ---
+	 
+	 if ( ((rMinLat*rMaxLat) < 0.0) ||
+		  ((rMaxLat <= 20.0) && (rMinLat >= -20.0))) {
+		  
+		if ((rMinLat < -70.0) || (rMaxLat > 70.0)) {
+		   Abort_SYS(_("Global maps outside of +/- 70 degrees latitude are not supported."));
+
+		   // --- NOTE: If Robinson projection is used, then the s3 parameter takes only 4
+		   //     more parameters NOT including the scale. ---
+
+		   Strcpy_STR(s2,_n("\"Sphere\""));
+		   Strcpy_STR(s3,_n("\"Robinson\","));
+		} else   
+		   Strcpy_STR(s3,_n("\"Mercator (1SP)\","));
+		
+		
+	 } else {
+	 
+		if ((rMaxLon - rMinLon) > 180.0)
+		   Abort_SYS(_("Hemisphere maps larger than 180 degrees longitude are not supported."));
+		   
+		Strcpy_STR(s3,_n("\"Lambert Conic Conformal (1SP)\","));
+		
+	 }                     
+	 FormatR2_STR((rMinLat+rMaxLat)/2.0,sWork,14,8); 
+	 iStrMin_STR(sWork); Strcat_STR(s3,sWork); Strcat_STR(s3,",");
+	 FormatR2_STR((rMinLon+rMaxLon)/2.0,sWork,14,8); 
+	 iStrMin_STR(sWork); Strcat_STR(s3,sWork); Strcat_STR(s3,",1.0,0.0,0.0");   // See note for Robinson above.
+	 Strcpy_STR(s4,"m,1.0");
+	 Strcpy_STR(s5,"");
+	 SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+
+      
+      rConv = 1.0;                     
+      GetUnits_IPJ(hIPJ,rConv,sUnits);
+      if (rConv <= 0.0) Abort_SYS(_("Invalid unit conversion factor in UNITS table."));
+      rScale = rDUMMY;
+      
+      if (iExistReal_SYS("DAPMAP","SCALE"))
+         rScale = rGetReal_SYS("DAPMAP","SCALE");
+      
+      // --- get template parameters ---
+      
+      GetString_SYS("DAPMAP","TEMPLATE",sTmpl);
+      iTmp = iFindKey_LTB(hTMP,sTmpl);
+      if (iTmp < 0) {
+         Abort_SYS(_("Template not found"));
+      }
+      
+      // --- layout ---
+      
+      GetString_LTB(hTMP,iTmp,iLayoutF,sSet);
+      if (iStrStr_STR(sSet, _("portrait"), STR_CASE_TOLERANT) != -1)
+         iPort = TRUE;
+      else         
+         iPort = FALSE;
+      
+      // --- exact size ---
+      GetString_LTB(hTMP,iTmp,iFixedF,sSet);
+      if (iStrStr_STR(sSet, _("fixed"), STR_CASE_TOLERANT) != -1)
+         iExact = TRUE;
+      else         
+         iExact = FALSE;
+            
+      
+      // --- margins ---
+      
+      rMargXmin = rGetReal_LTB(hTMP,iTmp,iMargin_LeftF);
+      rMargXmax = rGetReal_LTB(hTMP,iTmp,iMargin_RightF);
+      rMargYmin = rGetReal_LTB(hTMP,iTmp,iMargin_BottomF);
+      rMargYmax = rGetReal_LTB(hTMP,iTmp,iMargin_TopF);
+      rInside   = rGetReal_LTB(hTMP,iTmp,iMargin_InsideF);
+            
+      
+      // --- media string ---
+
+      GetString_LTB(hTMP,iTmp,iMediaF,sSet);
+      iMed = iFindKey_LTB(hMED,sSet);
+      if (iMed < 0) {
+         Abort_SYS(_("Media not defined"));
+      }
+
+      GetString_LTB(hMED,iMed,iSizeXF,sSet);
+      Strcpy_STR(sSize,sSet);
+      Strcat_STR(sSize,",");
+      GetString_LTB(hMED,iMed,iSizeYF,sSet);
+      Strcat_STR(sSize,sSet);
+          
+      // --- Find rotation necessary to make the center of the
+      //     map aligned N-S ---
+
+      hPJ = CreateIPJ_PJ((IPJ)0, hIPJ);  // to go from LL to data
+      rX1 = 0.5 * (rMinLon + rMaxLon);
+      rY1 = rMinLat;
+      ConvertXY_PJ(hPJ,rX1,rY1);
+      rX2 = 0.5 * (rMinLon + rMaxLon);
+      rY2 = rMaxLat;
+      ConvertXY_PJ(hPJ,rX2,rY2);
+      rRot = 90.0 - rArcTan2_MATH(rY2-rY1, rX2-rX1)*57.29577951;
+      
+
+      // --- Save original top/bottom positions for warp ---
+
+      SetReal_VV(hVVx1, 0, rX1);
+      SetReal_VV(hVVy1, 0, rY1);
+      SetReal_VV(hVVx1, 1, rX2);
+      SetReal_VV(hVVy1, 1, rY2);
+      
+
+      // --- Create a clipping polygon along the lat-long boundary. ---
+
+      hPLY = Create_PLY();
+      ClipPLY_PJ(hPJ, rMinLon, rMinLat, rMaxLon, rMaxLat, 0.5, hPLY);
+      Copy_PLY(hPLYo,hPLY);
+      SaveTable_PLY(hPLYo,"_LLMask.ply");
+      
+
+      // --- Rotate the PLY about the center, and get the range in X and Y ---
+
+      rX = 0.5*(rX1 + rX2);
+      rY = 0.5*(rY1 + rY2);
+      Rotate_PLY(hPLY, rX, rY, rRot);
+
+      Extent_PLY(hPLY, rMinX, rMinY, rMaxX, rMaxY);
+      Destroy_PLY(hPLY);
+      
+
+      // --- Save new top/bottom positions for warp ---
+     
+      rDist = rSqrt_MATH((rX2-rX1)*(rX2-rX1) + (rY2-rY1)*(rY2-rY1))/2.0;
+      rX1 = rX;
+      rX2 = rX;
+      rY1 = rY - rDist;
+      rY2 = rY + rDist;
+      SetReal_VV(hVVx2, 0, rX1);
+      SetReal_VV(hVVy2, 0, rY1);
+      SetReal_VV(hVVx2, 1, rX2);
+      SetReal_VV(hVVy2, 1, rY2);
+
+      if ((rMinX == rDUMMY) || (rMinX >= rMaxX)) {
+         Abort_SYS(_("Invalid range. Invalid X range."));
+      } else if ((rMinY == rDUMMY) || (rMinY >= rMaxY)) {
+         Abort_SYS(_("Invalid range. Invalid Y range."));
+      }
+      
+      
+      // --- calculate a size for unlimited size ---
+      
+      if (iStrMin_STR(sSize) == 1) {
+         if (rScale==rDUMMY) {
+            Abort_SYS(_("Scale error. Unlimited media size requires a scale."));
+         }
+         rX = 100.0 * rConv * (rMaxX - rMinX) / rScale + 2.0*rInside + rMargXmax + rMargXmin + 0.25;
+         rY = 100.0 * rConv * (rMaxY - rMinY) / rScale + 2.0*rInside + rMargYmax + rMargYmin + 0.25;
+         FormatR2_STR(rX, sTemp, 10, 2);
+         Strcpy_STR(sSize, sTemp);
+         Strcat_STR(sSize, ",");
+         FormatR2_STR(rY, sTemp, 10, 2);
+         Strcat_STR(sSize, sTemp);                   
+      }
+        
+
+      // --- open the map and set up views ---
+
+      GetString_SYS("DAPMAP","MAP",sMap);
+      if (iLoaded_EMAP(sMap))
+         UnLoad_EMAP(sMap);
+      
+      Map = Create_MAP(sMap,MAP_WRITENEW);
+      Mapset_MVU(Map,"*Base","*Data",rMinX,rMaxX,rMinY,rMaxY,sSize,iPort,iExact,
+                 rScale,1.0/rConv,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside);
+      rScale = rGetMapScale_MAP(Map);
+      SetReal_SYS("DAPMAP","SCALE",rScale);
+      Destroy_MAP(Map);
+                 
+      // --- done ---
+      
+   }
+              
+   // --- get unit factor and scale ---
+
+   rConv = 1.0;                     
+   GetUnits_IPJ(hIPJ,rConv,sUnits);
+   if (rConv <= 0.0) Abort_SYS(_("Invalid unit conversion factor in UNITS table."));
+   rScale = rGetReal_SYS("DAPMAP","SCALE");
+   
+   
+   // --- get template parameters ---
+   
+   GetString_SYS("DAPMAP","TEMPLATE",sTmpl);
+   iTmp = iFindKey_LTB(hTMP,sTmpl);
+   if (iTmp < 0) {
+      Strcpy_STR(sFile,_("Template not found:"));
+      Strcat_STR(sFile,sTmpl);
+      Abort_SYS(sFile);
+   }
+   
+   
+   // --- Check the projection ---
+   if (iInteractive_SYS() == 1) {
+      if (iSourceType_IPJ(hIPJ) != IPJ_TYPE_PCS) {
+         Abort_SYS(_("This is not a projected coordinate system map"));
+      }                    
+   }
+   GetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   SetString_SYS("DAPMAP","IPJ_NAME",s1);
+   SetString_SYS("DAPMAP","IPJ_DATUM",s2);
+   SetString_SYS("DAPMAP","IPJ_METHOD",s3);
+   SetString_SYS("DAPMAP","IPJ_UNITS",s4);
+   SetString_SYS("DAPMAP","IPJ_LOCALDATUM",s5);
+
+   
+   // --- layout ---
+   
+   GetString_LTB(hTMP,iTmp,iLayoutF,sSet);
+   if (iStrStr_STR(sSet, _("portrait"), STR_CASE_TOLERANT) != -1)
+      iPort = TRUE;
+   else         
+      iPort = FALSE;
+   
+   
+   // --- exact size ---
+   
+   GetString_LTB(hTMP,iTmp,iFixedF,sSet);
+   if (iStrStr_STR(sSet, _("fixed"), STR_CASE_TOLERANT) != -1)
+      iExact = TRUE;
+   else         
+      iExact = FALSE;
+         
+   
+   // --- margins ---
+   
+   rMargXmin = rGetReal_LTB(hTMP,iTmp,iMargin_LeftF);
+   rMargXmax = rGetReal_LTB(hTMP,iTmp,iMargin_RightF);
+   rMargYmin = rGetReal_LTB(hTMP,iTmp,iMargin_BottomF);
+   rMargYmax = rGetReal_LTB(hTMP,iTmp,iMargin_TopF);
+   rInside   = rGetReal_LTB(hTMP,iTmp,iMargin_InsideF);
+         
+   
+   // --- media string ---
+
+   GetString_LTB(hTMP,iTmp,iMediaF,sSet);
+   iMed = iFindKey_LTB(hMED,sSet);
+   if (iMed < 0) {
+      Strcpy_STR(sFile,_("Media not found:"));
+      Strcat_STR(sFile,sSet);
+      Abort_SYS(sFile);
+   }
+   GetString_LTB(hMED,iMed,iSizeXF,sSet);
+   Strcpy_STR(sSize,sSet);
+   Strcat_STR(sSize,",");
+   GetString_LTB(hMED,iMed,iSizeYF,sSet);
+   Strcat_STR(sSize,sSet);
+   
+  
+   // --- calculate a size for unlimited size ---
+              
+   if (iStrMin_STR(sSize) == 1) {
+      if(rScale==rDUMMY) {
+         Abort_SYS(_("Unlimited media size requires a scale."));
+      }
+      rX = 100.0 * rConv * (rMaxX - rMinX) / rScale + 2.0*rInside + rMargXmax + rMargXmin + 0.25;
+      rY = 100.0 * rConv * (rMaxY - rMinY) / rScale + 2.0*rInside + rMargYmax + rMargYmin + 0.25;
+      FormatR2_STR(rX, sTemp, 10, 2);
+      Strcpy_STR(sSize, sTemp);
+      Strcat_STR(sSize, ",");
+      FormatR2_STR(rY, sTemp, 10, 2);
+      Strcat_STR(sSize, sTemp);                   
+   }
+                 
+
+   // --- open the map and set up views ---
+
+   GetString_SYS("DAPMAP","MAP",sMap);
+   if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+   Mapset_MVU(Map,"*Base","*Data",rMinX,rMaxX,rMinY,rMaxY,sSize,iPort,iExact,
+              rScale,1.0/rConv,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside);
+                    
+   // --- create the map REG ---
+   
+   MapReg = Create_REG(128);
+   GetString_LTB(hTMP,iTmp,iTypeF,sSet);
+   Set_REG(MapReg,"MAP.STYLE",sSet);
+   
+   
+   // --- inside margin ---
+   
+   GetString_LTB(hTMP,iTmp,iMargin_InsideF,sSet);
+   Set_REG(MapReg,"MAP.MARGIN_INSIDE",sSet);
+   
+   
+   // --- up ---
+   
+   GetString_LTB(hTMP,iTmp,iUpDirF,sSet);
+   Set_REG(MapReg,"MAP.UP_DIRECTION",sSet);
+   GetString_LTB(hTMP,iTmp,iUpAngF,sSet);
+   Set_REG(MapReg,"MAP.UP_ANGLE",sSet);
+   
+   
+   // --- Add Lat,Lon information ---
+
+   SetInt_REG(MapReg,"MAP_LL.CLIP",1);
+   SetReal_REG(MapReg,"MAP_LL.MIN_LON",rMinLon);
+   SetReal_REG(MapReg,"MAP_LL.MAX_LON",rMaxLon);
+   SetReal_REG(MapReg,"MAP_LL.MIN_LAT",rMinLat);
+   SetReal_REG(MapReg,"MAP_LL.MAX_LAT",rMaxLat);
+   
+   SetReal_SYS("XYRANGE","MIN_LON",rMinLon);
+   SetReal_SYS("XYRANGE","MIN_LAT",rMinLat);
+   SetReal_SYS("XYRANGE","MAX_LON",rMaxLon);
+   SetReal_SYS("XYRANGE","MAX_LAT",rMaxLat);
+   
+   
+   // --- add titles ---
+   
+   GetString_SYS("MAP","TITLE",sWork);
+   Set_REG(MapReg,"MAP.TITLE",sWork);
+   GetString_SYS("MAP","SUB_1",sWork);
+   Set_REG(MapReg,"MAP.SUB_1",sWork);
+   GetString_SYS("MAP","SUB_2",sWork);
+   Set_REG(MapReg,"MAP.SUB_2",sWork);
+   
+
+   // --- put REG in the map ---
+   
+   SetREG_MAP(Map,MapReg);
+
+
+   // --- create an MDF ---
+
+   FileExt_STR(sMap,"mdf",sMdf,FILE_EXT_FORCE);
+   MapMDF_MVU(Map,sMdf,"*Data");
+   
+   
+   // --- Add a rotational warp to the IPJ ---
+
+   AddWarp_IPJ(hIPJ, 2, hVVx2, hVVy2, hVVx1, hVVy1);
+   
+      
+   // --- set view projection ---
+      
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   SetIPJ_MVIEW(View,hIPJ);
+   ClearWarp_IPJ(hIPJ);
+   SetUserIPJ_MVIEW(View,hIPJ);
+   
+
+   // --- Set the view's clip region to the selected region
+
+   SetClipPLY_MVIEW(View, hPLYo);
+   Destroy_MVIEW(View);
+   
+   
+   // --- map creation complete ---
+
+   Destroy_VV(hVVx1);
+   Destroy_VV(hVVx2);
+   Destroy_VV(hVVy1);
+   Destroy_VV(hVVy2);
+   Destroy_PLY(hPLYo);
+   Destroy_SYS(Map);
+   Destroy_SYS(MapReg);
+   Destroy_SBF(hSBF);
+
+
+   // --- Display Map ---
+
+   //if (iInteractive_SYS()) 
+      Load_EMAP(sMap);
+      
+      
+   // --- add base map ---
+   
+   // --- get current map info ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   if (iExistView_MAP(Map,"*Data") == FALSE)
+      Abort_SYS(_("The MAP has no \"Data\" view."));
+   
+   
+   // --- 
+   // if interactive, and base view already exists, clear MAP settings
+   // because we will get them from the map.  Otherwise, this is the first time
+   // through on this map so re-use the settings we have.
+   // ---
+   
+   if (iInteractive_SYS() && iExistView_MAP(Map,"*Base"))  ClearGroup_SYS("MAP");
+   
+   
+   // --- now get the map reg and set the environent ---
+   
+   MapReg = GetREG_MAP(Map);
+   SaveINI_REG(MapReg,"map0.ini");
+   SetREG_SYS(MapReg);
+   SaveINI_REG(MapReg,"map1.ini");
+   
+   
+   // --- Get current inside margin ---
+   												
+   
+   // --- update parameters for actual map limits ---
+   
+   DataView = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   rXminD=rYminD=rXmaxD=rYmaxD=0.0;
+   Extent_MVIEW(DataView,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_PLOT,rXminD,rYminD,rXmaxD,rYmaxD);
+   
+
+   // --- See if a projection exists in the data view, and it is not geographic ---
+
+   UserIpj = Create_IPJ();
+	GetUserIPJ_MVIEW(DataView, UserIpj);
+   
+   Ipj = Create_IPJ();
+	GetIPJ_MVIEW(DataView, Ipj);
+   
+   
+   // --- determine current map scale and North ---
+   
+   rScale = rGetMapScale_MVIEW(DataView);
+   if (rScale <= 0.0) Abort_SYS(_("Invalid map scale ( <= 0 )."));
+      
+   rN = rNorth_MVIEW(DataView);
+   if (rN != rDUMMY)
+   {
+       rNorth = rRound_MATH(rN,5);
+   }
+   
+   // --- determine current margins ---
+   
+   if (iExistView_MAP(Map,"*Base")) {
+   
+      BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+      rXminB=rYminB=rXmaxB=rYmaxB=0.0;
+      Extent_MVIEW(BaseView,MVIEW_EXTENT_CLIP,MVIEW_EXTENT_UNIT_PLOT,rXminB,rYminB,rXmaxB,rYmaxB);
+      
+      if (rXminB > -1000000.0) {
+      
+         rMbottom = (real)((int)(rYminD - rYminB + 0.5))/1000.0;
+         rMright  = (real)((int)(rXmaxB - rXmaxD + 0.5))/1000.0;
+         rMtop    = (real)((int)(rYmaxB - rYmaxD + 0.5))/1000.0;
+         rMleft   = (real)((int)(rXminD - rXminB + 0.5))/1000.0;
+         
+      }
+      
+   } else
+      BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITENEW);
+   
+   
+   SetReal_SYS("MAP","NORTH",rNorth);
+   SetReal_SYS("MAP","SCALE",rScale);
+   
+   SetReal_SYS("MAP","MARGIN_BOTTOM",rMbottom);
+   SetReal_SYS("MAP","MARGIN_RIGHT",rMright);
+   SetReal_SYS("MAP","MARGIN_TOP",rMtop);
+   SetReal_SYS("MAP","MARGIN_LEFT",rMleft);
+   
+   
+   // --- establish base view ---
+   
+   rMbottom = rGetReal_SYS("MAP","MARGIN_BOTTOM")*1000.0;
+   rMright  = rGetReal_SYS("MAP","MARGIN_RIGHT")*1000.0;
+   rMtop    = rGetReal_SYS("MAP","MARGIN_TOP")*1000.0;
+   rMleft   = rGetReal_SYS("MAP","MARGIN_LEFT")*1000.0;
+   rXminB   = rXminD - rMleft;
+   rYminB   = rYminD - rMbottom;
+   rXmaxB   = rXmaxD + rMright;
+   rYmaxB   = rYmaxD + rMtop;
+   TranScale_MVIEW(BaseView,-rXminB*0.01,-rYminB*0.01,1.0,1.0);
+   SetWindow_MVIEW(BaseView,0.0,0.0,(rXmaxB-rXminB)*0.01,(rYmaxB-rYminB)*0.01,MVIEW_UNIT_VIEW);
+   
+
+   // --- put the projection back in the data view ---
+   
+	SetIPJ_MVIEW(DataView, Ipj);
+	SetUserIPJ_MVIEW(DataView, UserIpj);
+   
+   
+   // --- destroy views ---
+   
+   Destroy_MVIEW(BaseView);
+   Destroy_MVIEW(DataView);
+   
+   
+   // --- save current map info into the map REG ---
+   
+   GetREG_SYS(MapReg,"MAP");
+   SetREG_MAP(Map,MapReg);
+   SaveINI_REG(MapReg,"map2.ini");
+   
+
+   // ---DAP map defaults ---
+      
+   SetString_SYS("MAP","REFGRID","0");
+   SetString_SYS("MAP","LLCOLOR","b");
+   SetString_SYS("MAP","LLGRID","-3");
+   
+
+   // --- Get parameters and set defaults ---
+
+   GetString_SYS("MAP","NORTH",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","NORTH","");
+
+   GetString_SYS("MAP","COMPASS",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","COMPASS","-1");
+
+   GetString_SYS("MAP","REFTHICK",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","REFTHICK","150");
+
+   GetString_SYS("MAP","REFCOLOR",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","REFCOLOR","black");
+
+   GetString_SYS("MAP","LLTHICK",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","LLTHICK","150");
+
+   GetString_SYS("MAP","YORIENT",sPar);
+   if (iStrcmp_STR(sPar,"",STR_CASE_TOLERANT) == 0)
+      SetString_SYS("MAP","YORIENT","-1");
+      
+      
+   // --- escape strings for titles ---
+   
+#define ESCAPE(A) GetString_SYS("MAP",A,sTemp); Escape_STR(sTemp,ESCAPE_CONVERT); SetString_SYS("MAP",A,sTemp);
+   
+   ESCAPE("TITLE")     
+   ESCAPE("SUB_1")     
+   ESCAPE("SUB_2")     
+   
+   
+   // --- Create control file ---
+
+   if (iFindPathNameEx_SYS("dapmap.con",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_ETC,sTemp) == 1)
+      Abort_SYS(_("Cannot find master control file \"dapmap.con\"."));
+   
+   Master  = Create_RA(sTemp);
+   ConFile = Create_WA("_basemap.con",0);
+   
+   
+   // --- go through master file ---
+   
+   iLines = iLen_RA(Master);
+   for(i=0;i<iLines;i++) {
+   
+      iGets_RA(Master,sTemp);
+      
+      
+      // --- strip comment ---
+      
+      SplitString_STR(sTemp,"/",sTemp2);
+      if (iCharComp_STR(sTemp2,"%")) {
+      
+      
+         // --- test dependency ---
+         
+         SplitString_STR(sTemp2," ",sTemp3);
+         ReplaceString_SYS(sTemp2,sTemp2,"MAP");
+         
+         if (iStrMin_STR(sTemp2) == 0) continue; 
+         
+      }         
+      
+      
+      // --- replace variables ---         
+      
+      ReplaceString_SYS(sTemp,sTemp,"MAP");
+      
+      
+      // --- write out control file ---
+      
+      Puts_WA(ConFile,sTemp);
+      NewLine_WA(ConFile);
+      
+   }
+   
+   Destroy_RA(Master);
+   Destroy_WA(ConFile);
+
+   
+   // --- create MDF file ---
+
+   MapMDF_MVU(Map,"_basemap.mdf","*Data");
+
+   
+   // --- process ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Processing _basemap.con"),1);
+   Mapplot = Create_MAPL("_basemap.con","base",0);
+   Process_MAPL(Mapplot,Map);
+   Destroy_MAPL(Mapplot);
+   
+   
+   // --- add makers ---
+   
+   DataView = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   BaseView = Create_MVIEW(Map,"*Base",MVIEW_WRITEOLD);
+
+   StartGroup_MVIEW(BaseView,"Surround",MVIEW_GROUP_APPEND);
+   Maker_MVIEW(BaseView,0,1,"basemap2",MAKER_GX,_("Redraw basemap..."),"MAP;MAPCONFIG;MAPTITLE;");
+   StartGroup_MVIEW(BaseView,"Titles",MVIEW_GROUP_APPEND);
+   Maker_MVIEW(BaseView,0,1,"basemap2",MAKER_GX,_("Redraw basemap..."),"MAP;MAPCONFIG;MAPTITLE;");
+   
+   StartGroup_MVIEW(DataView,"Coordinates",MVIEW_GROUP_APPEND);
+   Maker_MVIEW(DataView,0,1,"basemap2",MAKER_GX,_("Redraw basemap..."),"MAP;MAPCONFIG;MAPTITLE;");
+   
+   
+   // --- done with the views ---
+   
+   Destroy_MVIEW(BaseView);
+   Destroy_MVIEW(DataView);
+   
+
+   // --- Clean up empty groups from all views in map ---
+
+   Clean_MAP(Map);
+   
+   
+   // --- done ---
+
+   Destroy_SYS(MapReg);
+   UnLock_EMAP(EMap);
+
+   Progress_SYS(0);
+      
+}

@@ -1,0 +1,461 @@
+//===========================================================================
+NAME          = "ANOMPICK GX"
+#include <version.gxh>
+DESCRIPTION   = "
+
+PARAMETERS:
+
+Use of this Gx to pick anomalies from one channel or a selection of channels
+
+   ANOMPICK.INCHAN   : Name(s) of input channel(s). Comma delimited names are accepted.
+           .RESULT   : Format of results to save (Values,Numeric or Alphabetic).
+           .LEVEL    : Base level above which anomalies are picked.
+           .AMPL     : Minimum amplitude to accept
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+// Revision History:
+// v7.1.0 Added fix-up for unset fid start and increment values (QA 15119)
+// v5.1.4 New GX based on HEMPICK2 GX.
+// v5.1.5 GX now available to 4500 and 3500.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "ANOMPICK.gr"
+#include "ANOMPICK.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    InCh,OutCh;        // channel handles
+DB_SYMB    Line;              // line handle
+DGW        Diag;              // dialogue handle
+LST        List;              // dialog list handle
+VV         InVV,OutVV;        // input and output channel VV handles
+VV         PassVV;
+VM         AtoZ;              // VM to contain letters 'A' to 'Z'
+
+string(255) sInChStr;                 // channel names string (comma delimited)
+string(DB_SYMB_NAME_SIZE) sInCh;      // input channel name
+string(DB_SYMB_NAME_SIZE) sOutCh;     // output channel name
+
+string(10)  sNoAnomaly;       // number of anomaly string 
+string(50)  sTemp;            // temporary number formating string
+string(60)  sLabel;           // label for progress bar
+
+real       rVV;               // real element of a VV
+real       rFidStart;		  // fiducial start
+real       rFidIncr;          // fiducial increment
+real       rLevel;            // base level
+real       rAmpl;             // minimum amplitude
+
+int        iInChan;           // number of input channels
+int        iLines;            // number of Lines Processed
+int        iTotLines;         // total Number of Lines to Process
+int        iVVLength;         // number of points in a VV
+int        ResultFlag;        // result format flag:  0 - Values, 1  - Numeric, 2 - Characters
+int        iNoAnomaly;        // number of anomalies
+int        iTotAnom;
+int        iMod, iDiv;        // integers for defining A to Z symbols 
+int        i,j;               // utility int
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+   // --- Initialize # of anomalies and AtoZ VM ---
+
+   iTotAnom = 0;
+
+   AtoZ = Create_VM(-10,0);
+   SetString_VM(AtoZ, 0, "A");     SetString_VM(AtoZ, 1, "B");     SetString_VM(AtoZ, 2, "C");    
+   SetString_VM(AtoZ, 3, "D");     SetString_VM(AtoZ, 4, "E");     SetString_VM(AtoZ, 5, "F");    
+   SetString_VM(AtoZ, 6, "G");     SetString_VM(AtoZ, 7, "H");     SetString_VM(AtoZ, 8, "I");    
+   SetString_VM(AtoZ, 9, "J");     SetString_VM(AtoZ, 10, "K");    SetString_VM(AtoZ, 11, "L");    
+   SetString_VM(AtoZ, 12, "M");    SetString_VM(AtoZ, 13, "N");    SetString_VM(AtoZ, 14, "O");    
+   SetString_VM(AtoZ, 15, "P");    SetString_VM(AtoZ, 16, "Q");    SetString_VM(AtoZ, 17, "R");    
+   SetString_VM(AtoZ, 18, "S");    SetString_VM(AtoZ, 19, "T");    SetString_VM(AtoZ, 20, "U");    
+   SetString_VM(AtoZ, 21, "V");    SetString_VM(AtoZ, 22, "W");    SetString_VM(AtoZ, 23, "X");    
+   SetString_VM(AtoZ, 24, "Y");    SetString_VM(AtoZ, 25, "Z");    
+
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("ANOMPICKForm");
+
+     // --- Set up channel and line input and output lists ---
+
+     List = GetList_DGW(Diag,_ANOMPICKFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_ANOMPICKFORM_0,DGW_TEXT,"ANOMPICK","INCHAN");     
+     SetInfoSYS_DGW(Diag,_ANOMPICKFORM_1,DGW_LISTALIAS,"ANOMPICK","RESULT");    
+     SetInfoSYS_DGW(Diag,_ANOMPICKFORM_2,DGW_TEXT,"ANOMPICK","LEVEL");    
+     SetInfoSYS_DGW(Diag,_ANOMPICKFORM_3,DGW_TEXT,"ANOMPICK","AMPL");    
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_ANOMPICKFORM_0,DGW_TEXT,"ANOMPICK","INCHAN");     
+     GetInfoSYS_DGW(Diag,_ANOMPICKFORM_1,DGW_LISTALIAS,"ANOMPICK","RESULT");    
+     GetInfoSYS_DGW(Diag,_ANOMPICKFORM_2,DGW_TEXT,"ANOMPICK","LEVEL");    
+     GetInfoSYS_DGW(Diag,_ANOMPICKFORM_3,DGW_TEXT,"ANOMPICK","AMPL");    
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+
+
+   // --- Get the base level/amplitude ---
+
+   rLevel = rGetReal_SYS("ANOMPICK","LEVEL");
+   rAmpl = rGetReal_SYS("ANOMPICK","AMPL");
+       
+ 
+
+   // --- Get input channel selection string ---
+
+   
+   GetString_SYS("ANOMPICK","INCHAN",sInChStr);
+   iInChan = iTokens_STR(sInChStr,",");                     // No of comma delimited tokens
+
+
+   // --- Type of results to save ---
+
+   GetString_SYS("ANOMPICK","RESULT",sTemp);
+   if (iStrcmp_STR(sTemp,_n("Values"),STR_CASE_TOLERANT) == 0) 
+      ResultFlag = 0;
+   else if (iStrcmp_STR(sTemp,_n("Numeric"),STR_CASE_TOLERANT) == 0) 
+      ResultFlag = 1;
+   else if (iStrcmp_STR(sTemp,_n("Alphabetic"),STR_CASE_TOLERANT) == 0) 
+      ResultFlag = 2;
+   else 
+      Abort_SYS(_("This should never occur."));
+  
+      
+   // --- Go through each input channel ---
+
+   for (i=0; i < iInChan; ++i) {
+
+  
+      // --- Does the input channel Exist ? ---
+
+
+      GetToken_STR(sInCh, sInChStr, i);
+      if (iExistSymb_DB(Data, sInCh, DB_SYMB_CHAN) == 0) {
+         Printf_STR(sTemp,sizeof(sTemp),_("%s (channel name) does not exist in the database."), sInCh);
+         Abort_SYS(sTemp);
+      }
+      InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+
+   
+      // --- Get the ouput channel name ---
+
+      Strcpy_STR(sOutCh,sInCh);
+      Strcat_STR(sOutCh,"_A");
+     
+      
+      // --- Delete the existing channel with output channel name ---
+
+      
+      if (iExistSymb_DB(Data, sOutCh, DB_SYMB_CHAN) == 1) {
+         OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);   
+         LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data, OutCh);
+      }
+
+
+
+
+      // --- Create the output channel ---
+
+      if (ResultFlag == 0) 
+         OutCh = DupSymbNoLock_DB(Data,InCh,sOutCh);
+      else
+         OutCh = CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,-10);        // -10 for string of width 10
+                                                                                   
+
+
+      // --- Lock the channel symbols ---
+
+      if (InCh != OutCh) 
+         LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      
+         
+      
+      // --- Prepare to go ---
+
+      iTotLines = iCountSelLines_DB(Data);
+
+
+      // --- Progress bar ---
+
+      iLines = 0;
+      Progress_SYS(1);
+
+
+      // --- Go through all selected Lines ---
+
+
+      ProgName_SYS("",1);
+      Line = FirstSelLine_DB(Data);
+      while (iIsLineValid_DB(Data,Line))
+      {
+
+         // --- Initialize the anomaly counter -
+
+         iNoAnomaly = 0;
+
+
+         // --- Create VVs to hold point values ---
+
+         InVV = Create_VV(REAL,0);
+         PassVV = Create_VV(REAL,0);
+                     
+         
+         // --- Get point values from input channel to VV ---
+
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         GetChanVV_DB(Data, Line, InCh, InVV);
+         rFidStart = rGetFidStart_VV(InVV);
+         rFidIncr = rGetFidIncr_VV(InVV);
+         
+         
+         // --- Skip empty lines ---
+
+         if(iLength_VV(InVV)==0) {
+
+            Destroy_VV(InVV);
+            Destroy_VV(PassVV);
+
+            UnLockSymb_DB(Data,Line);
+
+            // --- Advance to Next Line ---        
+
+            Line = NextSelLine_DB(Data, Line );
+            iLines++;
+
+            continue;
+         }
+
+
+         // --- Update the Progress Bar ---
+
+
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         
+         Printf_STR(sLabel,sizeof(sLabel),_("Pick anomaly in '%s' of line: %s"), sInCh, sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdate_SYS( (int) ((real) iLines / (real) iTotLines * 100.0) );
+		     
+             
+
+//         FormatR_STR(rTolerance, sTemp, 20,10);
+//         DisplayMessage_SYS("Tol",sTemp);
+//         FormatR_STR(rDev, sTemp, 20,10);
+//         DisplayMessage_SYS("Dev",sTemp);
+                             
+
+
+         // --- Fix up Fid info ---
+         
+         if(rFidStart == rDUMMY)
+         {
+            rFidStart = 0.0;
+            SetFidStart_VV(InVV, rFidStart);
+         }
+            
+         if(rFidIncr == rDUMMY)
+			{
+				rFidIncr = 1.0;
+				SetFidIncr_VV(InVV, rFidIncr);
+			}
+
+
+         // --- Apply anomaly picking ---
+
+         PickPeak2_VVU(InVV, PassVV, rLevel, rAmpl);         
+
+         // --- Create VV to hold results ---
+
+         
+         if (ResultFlag ==0 ) OutVV = Create_VV(REAL, 0);
+         else                 OutVV = Create_VV(-DB_SYMB_NAME_SIZE,0);
+         SetFidStart_VV(OutVV, rFidStart);
+         SetFidIncr_VV(OutVV,rFidIncr);
+
+        
+         // --- Classify the anomalies ---
+
+         iVVLength = iLength_VV(InVV);
+         
+         for (j = 0; j < iVVLength; ++j) {
+            rVV = rGetReal_VV(PassVV, j);
+            
+            // --- Is it an anomaly  ? ---
+            
+            if (rVV != rDUMMY) {
+               iNoAnomaly++;                                // an anomaly
+               iTotAnom++;
+
+               switch (ResultFlag) {              
+               
+                  case 0:   
+                     SetReal_VV(OutVV, j, rGetReal_VV(InVV,j)); // put real element back
+                     break;
+
+                  case 1:
+                     FormatI_STR(iNoAnomaly, sNoAnomaly, 10);     // numeric symbols
+                     SetString_VV(OutVV, j, sNoAnomaly);   
+                     break;
+                
+                  case 2:                                         // A to Z symbols
+
+                     iDiv = iNoAnomaly - 1;
+                     Strcpy_STR(sNoAnomaly, "");
+
+
+                     do {
+
+                        iMod = iDiv % 26;
+                        iDiv /= 26;
+                        iDiv--;
+
+                        GetString_VM(AtoZ, iMod, sTemp);
+                        Strcat_STR(sTemp, sNoAnomaly);
+                        Strcpy_STR(sNoAnomaly, sTemp);
+                        if ((iDiv < 26) && (iDiv >= 0))  {
+                           GetString_VM(AtoZ, iDiv, sNoAnomaly);
+                           Strcat_STR(sNoAnomaly, sTemp);
+                        }
+
+                     } while (iDiv > 25);
+                     SetString_VV(OutVV, j, sNoAnomaly);   
+                     break;
+
+                  default:
+
+               }
+            }
+
+
+            // --- Not an anomaly ---
+            
+            else {
+
+               switch (ResultFlag) {
+                  
+                  case 0:
+                     SetReal_VV(OutVV, j, rDUMMY);   // put real element back
+                     break;
+ 
+                  case 1: case 2:    
+                     Strcpy_STR(sNoAnomaly, "");    // Not an anomaly
+
+                     // --- Put the string element back to OutVV ---
+            
+                     SetString_VV(OutVV, j, sNoAnomaly);
+                     break;
+
+                  default: break;
+               
+               }
+
+            }
+
+         }
+          
+         // --- Put the result VV 'OutVV' back to result channel 'OutCh' ---
+
+
+         PutChanVV_DB(Data, Line, OutCh, OutVV); 
+       
+
+         // --- Destroy VVs ---
+
+         Destroy_VV(InVV);
+         Destroy_VV(PassVV);
+         Destroy_VV(OutVV);
+         
+		 
+         // --- Advance to Next Line ---        
+
+         Line = NextSelLine_DB(Data, Line );
+         iLines++;
+
+      }
+      
+      // --- done with anomaly picking in current channel ---
+
+      Progress_SYS(0);
+
+
+      // --- Add maker ---
+
+      EasyMakerSymb_DB(Data,OutCh, _("Pick anomalies"),"ANOMPICK;");
+   
+
+      // --- clean up - Unlock the channel symbol ---
+
+      if (InCh != OutCh)
+         UnLockSymb_DB(Data,InCh);
+      UnLockSymb_DB(Data,OutCh);
+
+
+     
+   }
+
+   if (iInteractive_SYS())
+   {
+      // --- Comfirmation ---
+
+      if (iTotAnom == 0)
+         DisplayMessage_SYS(_("ANOMPICK"), _("No anomalies found."));
+
+      else
+      {
+         Printf_STR(sTemp, sizeof(sTemp), _("%d anomalies found."), iTotAnom);
+         DisplayMessage_SYS(_("ANOMPICK"), sTemp);
+      }
+   }
+
+   UnLock_EDB(EData);
+}

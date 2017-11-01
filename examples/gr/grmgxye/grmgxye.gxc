@@ -1,0 +1,371 @@
+//===========================================================================
+NAME          = "Merge location data into gravity database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Locations"
+
+DESCRIPTION   = "
+
+   GRMGXYE.LOCATION  The lookup database name, must contain \"Station\",
+                     channel.
+          .GRAVITY   The gravity database.                       
+
+"
+// Revision History:
+// v6.0.0: Validates location database before doing anything.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "grmgxye.gr"
+#include "grmgxye.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+#define REPORT_FILE "location_merge_report.txt"
+
+string(STR_FILE) sXY,sGrv,sDB,sNameDB,sNameXY;
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT_LONG) sString;
+string(STR_DB_SYMBOL) sCh;     // Channel name
+
+EDB         eGrv,eXY;
+DB          hGrv,hXY;
+DGW         Diag;                  // Dialogue handle
+DB_SYMB     LineCh,SampleCh,OtherCh,Ch;   // Channel Handles
+DB_SYMB     ChX,ChY;
+DB_SYMB     Line;                  // Line Handle
+TB          Tb;                    // Table Handle
+REG         hWorkREG;
+REG         hChREG;
+VV          ChVV;
+IPJ         hIPJ;
+
+int         iLines;                // Number of Lines Processed
+int         iTotLines;             // Total Number of Lines to Process
+int         i,iChan,iChild;
+int         iLine;
+
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+      
+      
+   // --- get location from the gravity reg ---
+
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sXY,sizeof(sXY));
+
+
+   // --- get default names. Use the current DB as the gravity DB
+   //     if it is not the same as the location DB ---
+   
+   GetString_SYS("GRMGXYE","GRAVITY",sGrv);
+   if(iHaveCurrent_EDB()) {
+      GetName_EDB(Current_EDB(),sDB);
+      FileNamePart_STR(sDB,sNameDB,STR_FILE_PART_NAME);
+      FileNamePart_STR(sXY,sNameXY,STR_FILE_PART_NAME);
+      if(iStrcmp_STR(sNameDB, sNameXY, STR_CASE_TOLERANT))
+         Strcpy_STR(sGrv, sDB);
+   }
+   
+
+   // --- Are we running interactively ? ---
+
+   iChild = iGetInt_SYS("GRMGXYE","CHILD");
+   SetString_SYS("GRMGXYE","CHILD","");
+   
+   if (iInteractive_SYS() && iChild != 1) {
+   
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRMGXYE");
+      SetInfo_DGW(Diag,_GRMGXYE_0,DGW_FILEPATH,sGrv);     
+      SetInfo_DGW(Diag,_GRMGXYE_1,DGW_FILEPATH,sXY);     
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+      GetInfo_DGW(Diag,_GRMGXYE_0,DGW_FILEPATH,sGrv);     
+      GetInfo_DGW(Diag,_GRMGXYE_1,DGW_FILEPATH,sXY);     
+      Destroy_DGW(Diag);
+
+      Set_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sXY);
+      SetWorkspaceREG_SYS(hWorkREG);
+      
+   }
+   
+   
+   // --- Is the location database actually set up correctly? ---
+
+   if(iRunGX_SYS("grtestloc.gx"))
+      Cancel_SYS();
+
+
+   // --- load/create the new database ---
+
+   if (!iFileExist_SYS(sXY)) {
+      Set_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sXY);
+      SetWorkspaceREG_SYS(hWorkREG);
+      SetInt_SYS("GRLDXYE", "FORCE_CREATE", 1);  // suppresses "do you want to create" message
+      if (iRunGX_SYS("grldxye")) 
+         Abort_SYS(_("Unable to create a new location database."));
+   }
+
+
+   // --- Get Parameters ---
+
+   eGrv = Load_EDB(sGrv);
+   eXY  = Load_EDB(sXY);
+   
+   
+   // --- sort line/stations ---
+   
+   hXY   = Lock_EDB(eXY);
+   hGrv  = Lock_EDB(eGrv);
+   if (iExistSymb_DB(hXY,"Line",DB_SYMB_CHAN) &&
+       iExistSymb_DB(hGrv,"Line",DB_SYMB_CHAN) ) {
+   
+      UnLock_EDB(eXY);
+      UnLock_EDB(eGrv);
+      
+      // --- sort by line/station ---
+      
+      SetString_SYS("SORTALL2","CHANNEL1","Line");
+      SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+      SetString_SYS("SORTALL2","CHANNEL2","Station");
+      SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+      SetString_SYS("SORTALL2","READONLY","YES");
+
+      MakeCurrent_EDB(eGrv);
+      if (iRunGX_SYS("sortal2"))
+         Abort_SYS(_("Sort failed."));
+      MakeCurrent_EDB(eXY);
+      if (iRunGX_SYS("sortal2"))
+         Abort_SYS(_("Sort failed."));
+      
+      iLine = TRUE;
+
+   } else {
+   
+      UnLock_EDB(eXY);
+      UnLock_EDB(eGrv);
+      
+      // --- sort by  station ---
+      
+      SetString_SYS("SORTALL","CHANNEL","station");
+      SetString_SYS("SORTALL","ORDER","ASCENDING");
+      SetString_SYS("SORTALL","READONLY","YES");
+
+      MakeCurrent_EDB(eGrv);
+      if (iRunGX_SYS("sortal"))
+         Abort_SYS(_("Sort failed."));
+   
+      MakeCurrent_EDB(eXY);
+      if (iRunGX_SYS("sortal"))
+         Abort_SYS(_("Sort failed."));
+      
+      iLine = FALSE;
+      
+   }   
+
+   
+   // --- get databases ---
+   
+   hXY  = Lock_EDB(eXY);
+   hGrv = Lock_EDB(eGrv);
+   
+
+   // --- Does the reference channel Exist ? ---
+
+   SampleCh = FindSymb_DB(hGrv,"station",DB_SYMB_CHAN);
+   if (SampleCh == NULLSYMB)
+      Abort_SYS(_("Station channel does not exist."));
+      
+   if (!iExistSymb_DB(hXY,"station",DB_SYMB_CHAN))
+      Abort_SYS(_("Station does not exist in the location database."));
+
+
+   // --- line channel ---
+   
+   if (iLine) {
+      LineCh = FindSymb_DB(hGrv,"line",DB_SYMB_CHAN);
+      if (LineCh == NULLSYMB)
+         Abort_SYS(_("Line channel does not exist."));
+      if (!iExistSymb_DB(hXY,"line",DB_SYMB_CHAN))
+         Abort_SYS(_("Line does not exist in the location database."));
+   }
+      
+
+
+   // --- create table from location database ---
+   
+   Line = FindSymb_DB(hXY,"Location",DB_SYMB_LINE);
+   Tb = CreateDB_TB(hXY);
+   LoadDB_TB(Tb,hXY,Line);
+
+
+   // --- search mode ---
+
+   SetSearchMode_TB(Tb,TB_SEARCH_LINEAR);
+
+
+   // --- Lock the channel symbols ---
+
+   LOCK_R(hGrv,SampleCh);
+   if (iLine)
+      LOCK_R(hGrv,LineCh);
+
+
+   // --- Prepare to do the work ---
+
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Load locations"),1);
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(hGrv);
+
+
+   // --- Go through all selected Lines ---
+
+   hChREG = Create_REG(256);
+   ChVV = Create_VV(INT,0);
+   iChan = iSymbList_DB(hXY,ChVV,DB_SYMB_CHAN);
+   Line = FirstSelLine_DB(hGrv);
+   while (iIsLineValid_DB(hGrv,Line)) {
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(hGrv,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+	   GetSymbName_DB(hGrv,Line,sTemp);
+      UnLockSymb_DB(hGrv,Line);
+      Strcpy_STR(sString,_("Processing line: "));
+      Strcat_STR(sString,sTemp);
+      ProgName_SYS(sString,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Lookup each field ---
+
+      for (i=0;i<iChan;i++) {
+      
+
+         // --- Get channel name ---
+      
+         Ch = (DB_SYMB)iGetInt_VV(ChVV,i);
+         GetChanName_DB(hXY,Ch,sCh);
+         
+         
+         // --- skip line and station channel ---
+
+         if (iStrcmp_STR(sCh,_n("line"),STR_CASE_TOLERANT) == 0) continue;
+         if (iStrcmp_STR(sCh,_n("station"),STR_CASE_TOLERANT) == 0) continue;
+         
+
+         // --- Does the Ouput Channel Exist ? ---
+     
+         if (!iExistSymb_DB(hGrv,sCh,DB_SYMB_CHAN)) 
+            OtherCh = DupSymbAcross_DB(hXY,hGrv,Ch);
+         else {
+         
+            OtherCh = FindSymb_DB(hGrv,sCh,DB_SYMB_CHAN);
+            
+            
+            // --- copy REG ---
+            
+            GetRegSymb_DB(hXY,Ch,hChREG);            
+            SetRegSymb_DB(hGrv,OtherCh,hChREG);            
+            
+         }
+
+
+         // --- lookup ---
+
+         LockSymb_DB(hGrv,OtherCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         if (iLine)
+            TableLook2_DU(hGrv,Line,LineCh,SampleCh,OtherCh,"line","station",sCh,DU_LOOKUP_EXACT,0.0,Tb);
+         else
+            TableLook1_DU(hGrv,Line,SampleCh,OtherCh,"station",sCh,DU_LOOKUP_EXACT,0.0,Tb);
+         UnLockSymb_DB(hGrv,OtherCh);
+         
+      }
+
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(hGrv, Line );
+      iLines++;
+
+   }
+   Destroy_REG(hChREG);
+   
+   
+   // --- copy projections ---
+   
+   hIPJ = Create_IPJ();
+   Ch = GetXYZChanSymb_DB(hXY, DB_CHAN_X);
+   if (Ch != NULLSYMB) {
+      ChX = GetXYZChanSymb_DB(hGrv, DB_CHAN_X);
+      ChY = GetXYZChanSymb_DB(hGrv, DB_CHAN_Y);
+      if (ChX != NULLSYMB && ChY != NULLSYMB) {
+         GetIPJ_DB(hXY,Ch,hIPJ);         
+         SetIPJ_DB(hGrv,ChX,ChY,hIPJ);
+      }
+   }   
+   Ch = FindSymb_DB(hXY,"longitude",DB_SYMB_CHAN);
+   if (Ch != NULLSYMB) {
+      ChX = FindSymb_DB(hGrv,"longitude",DB_SYMB_CHAN);
+      ChY = FindSymb_DB(hGrv,"latitude",DB_SYMB_CHAN);
+      if (ChX != NULLSYMB && ChY != NULLSYMB) {
+         GetIPJ_DB(hXY,Ch,hIPJ);         
+         SetIPJ_DB(hGrv,ChX,ChY,hIPJ);
+      }
+   }   
+   Destroy_IPJ(hIPJ);   
+   
+
+   // --- Unlock the channel symbol ---
+
+   Progress_SYS(0);
+   UnLockSymb_DB(hGrv,SampleCh);
+   if (iLine)
+      UnLockSymb_DB(hGrv,LineCh);
+   UnLock_EDB(eXY);
+   UnLock_EDB(eGrv);
+   Destroy_TB(Tb);
+   Destroy_VV(ChVV);
+   
+   
+   // --- resort on date/time  ---
+   
+   SetString_SYS("SORTALL2","CHANNEL1","date");
+   SetString_SYS("SORTALL2","CHANNEL2","time");
+   SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+   SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+   SetString_SYS("SORTALL2","READONLY","YES");
+
+   MakeCurrent_EDB(eGrv);
+   if (iRunGX_SYS("sortal2"))
+      Abort_SYS(_("Date/Time sort failed."));
+   
+   
+   // --- done ---
+
+   Progress_SYS(0);
+   
+   Destroy_SYS(hWorkREG);
+
+}

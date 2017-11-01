@@ -1,0 +1,117 @@
+//===========================================================================
+
+NAME          = "Extract mask from view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Map Views"
+
+DESCRIPTION   = "
+      VIEWGETCLIP.FILE  polygon file name
+                 .VIEW  name of the view
+"
+//===========================================================================
+
+RESOURCE = "viewgetclip.gr"
+#include "viewgetclip.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;
+string(STR_VIEW) sView;
+
+DGW         Diag;             // Dialogue handle
+PLY         Poly;		// polygon object
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+LST         List;
+IPJ         hIPJ;
+
+//===========================================================================
+
+{
+   // --- get current map ---
+
+   EMap  = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+
+      // --- Create the 1st Dialogue ---
+
+      Diag = Create_DGW("VIEWGETCLIP");
+
+      List = GetList_DGW(Diag,_VIEWGETCLIP_1);
+      ViewList_MAP(Map,List);
+      Sort_LST(List,0,0);
+      
+      
+      // --- set default view to the current data view ---
+      
+      GetClassName_MAP(Map,"Data",sView);
+      SetInfo_DGW(Diag,_VIEWGETCLIP_1,DGW_TEXT,sView);
+      
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_VIEWGETCLIP_0,DGW_FILEPATH,"VIEWGETCLIP","FILE");
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) < 0) Cancel_SYS();
+
+    
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_VIEWGETCLIP_0,DGW_FILEPATH,"VIEWGETCLIP","FILE");     
+      GetInfoSYS_DGW(Diag,_VIEWGETCLIP_1,DGW_TEXT,"VIEWGETCLIP","VIEW");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+	}
+            
+   // --- Get parameters ---
+
+   GetString_SYS("VIEWGETCLIP","FILE",sFile);
+   GetString_SYS("VIEWGETCLIP","VIEW",sView);
+
+   // --- get view and clear ---
+
+   View = Create_MVIEW(Map,sView,MVIEW_READ);
+
+
+   // --- Change the PLY Projection to that of the View ---
+
+   hIPJ = Create_IPJ();
+   GetIPJ_MVIEW(View,hIPJ);
+
+   Poly = Create_PLY();
+   ChangeIPJ_PLY(Poly,hIPJ);
+   Destroy_IPJ(hIPJ);
+
+   // --- Get polygon and save to file ---
+
+   GetClipPLY_MVIEW(View, Poly);
+   SaveTable_PLY(Poly, sFile);
+      
+   
+   Destroy_MVIEW(View);
+   
+   // --- Release the Map ---
+
+   UnLock_EMAP(EMap);
+}

@@ -1,0 +1,75 @@
+//===========================================================================
+NAME          = "Un-protect all channels"
+#include <version.gxh>
+DESCRIPTION   = "
+   Un-protect all channels.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Channel"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;
+DB_SYMB     Ch;
+
+VV          ChanVV;             // channel list
+int         i,iChan;
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- get a list of channels ---
+
+   ChanVV = Create_VV(INT,0);
+   iChan = iSymbList_DB(Data,ChanVV,DB_SYMB_CHAN);
+
+
+   // --- process each channel of the line ---
+
+   for (i=0;i<iChan;i++) {
+
+
+      // --- get the channel ---
+
+      Ch = (DB_SYMB)iGetInt_VV(ChanVV,i);
+
+
+      // --- lock the channel ---
+
+      LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+      // --- protect the channel ---
+
+      SetChanProtect_DB(Data,Ch,DB_CHAN_UNPROTECTED);
+
+      // --- unlock ---
+
+      UnLockSymb_DB(Data,Ch);
+
+   }
+
+   Destroy_VV(ChanVV);
+   
+   UnLock_EDB(EData);
+
+}

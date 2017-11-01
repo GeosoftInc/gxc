@@ -1,0 +1,389 @@
+//===========================================================================
+NAME          = "Fill a channel with noise values"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Filters"
+
+DESCRIPTION   = "
+
+   The selected channel is populated with random values calculated
+   according to the selected distribution.
+   The reference channel is used to determine the number of values
+   to calculate, and may be the same as the output channel.
+
+Parameters: 
+
+    NOISECHAN.REF     - Reference channel
+             .CHAN    - Destination channel
+             .SEED    - Random number generator seed
+             .TYPE    - Distribution: 
+                        0: Uniform
+                        1: Exponential
+                        2: Normal
+             .MIN     - Uniform distribution minimum
+             .MAX     - Uniform distribution maximum
+             .MEAN    - Mean value (Exponential and Normal)
+             .SDEV    - Standard deviation (Normal distribution)
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v5.1.7: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "noisechan.gr"
+#include "noisechan.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sRefCh;           // Channel Names
+string(STR_DB_SYMBOL) sOutCh;           // Channel Names
+
+EDB         EData;
+DB          Data;             // Database handle
+DB_SYMB     RefCh;            // Channel Handle
+DB_SYMB     OutCh;            // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+VV          VVx;
+
+int         i;                // Utility 
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+int         iLen, iType, iSeed, iChType;
+real        rMin, rMax, rMean, rStdDev;
+real        rFidStart, rFidIncr;
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("NOISECHAN");
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_NOISECHAN_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_NOISECHAN_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_NOISECHAN_0,DGW_TEXT,"NOISECHAN","REF");     
+      SetInfoSYS_DGW(Diag,_NOISECHAN_1,DGW_TEXT,"NOISECHAN","CHAN");     
+      SetInfoSYS_DGW(Diag,_NOISECHAN_2,DGW_LISTALIAS,"NOISECHAN","TYPE");     
+      SetInfoSYS_DGW(Diag,_NOISECHAN_3,DGW_TEXT,"NOISECHAN","SEED");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_NOISECHAN_0,DGW_TEXT,"NOISECHAN","REF");     
+      GetInfoSYS_DGW(Diag,_NOISECHAN_1,DGW_TEXT,"NOISECHAN","CHAN");     
+      GetInfoSYS_DGW(Diag,_NOISECHAN_2,DGW_LISTALIAS,"NOISECHAN","TYPE");     
+      GetInfoSYS_DGW(Diag,_NOISECHAN_3,DGW_TEXT,"NOISECHAN","SEED");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters and validate ---
+
+   GetString_SYS("NOISECHAN","REF",sRefCh);
+   GetString_SYS("NOISECHAN","CHAN",sOutCh);
+   iType = iGetInt_SYS("NOISECHAN","TYPE");
+   iSeed = iGetInt_SYS("NOISECHAN","SEED");
+
+   if(!iStrlen_STR(sRefCh))
+      Abort_SYS(_("No reference channel specified"));
+
+   if(!iStrlen_STR(sOutCh))
+      Abort_SYS(_("No output channel specified"));
+
+   if(iType<0 || iType>2)
+      Abort_SYS(_("Invalid distribution selection"));
+
+   if(iSeed==iDUMMY) iSeed = 0;
+
+
+   // --- Get the distribution parameters ---
+
+   if (iInteractive_SYS())
+   {
+      if(iType==0) {
+
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("NOISECHAN0");
+
+
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_NOISECHAN0_0,DGW_TEXT,"NOISECHAN","MIN");     
+         SetInfoSYS_DGW(Diag,_NOISECHAN0_1,DGW_TEXT,"NOISECHAN","MAX");     
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i != 0) Cancel_SYS();
+
+
+         // --- Get the Strings ---
+
+         GetInfoSYS_DGW(Diag,_NOISECHAN0_0,DGW_TEXT,"NOISECHAN","MIN");
+         GetInfoSYS_DGW(Diag,_NOISECHAN0_1,DGW_TEXT,"NOISECHAN","MAX");     
+
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+
+      }
+      else if(iType==1) {
+
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("NOISECHAN1");
+
+
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_NOISECHAN1_0,DGW_TEXT,"NOISECHAN","MEAN");     
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i != 0) Cancel_SYS();
+
+
+         // --- Get the Strings ---
+
+         GetInfoSYS_DGW(Diag,_NOISECHAN1_0,DGW_TEXT,"NOISECHAN","MEAN");     
+
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+
+      }
+      else if(iType==2) {
+
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("NOISECHAN2");
+
+
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_NOISECHAN2_0,DGW_TEXT,"NOISECHAN","MEAN");     
+         SetInfoSYS_DGW(Diag,_NOISECHAN2_1,DGW_TEXT,"NOISECHAN","SDEV");     
+
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i != 0) Cancel_SYS();
+
+
+         // --- Get the Strings ---
+
+         GetInfoSYS_DGW(Diag,_NOISECHAN2_0,DGW_TEXT,"NOISECHAN","MEAN");     
+         GetInfoSYS_DGW(Diag,_NOISECHAN2_1,DGW_TEXT,"NOISECHAN","SDEV");     
+
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+
+      }
+   }
+
+
+   // --- Get and validate parameters ---
+
+   if(iType==0) {
+
+      rMin = rGetReal_SYS("NOISECHAN","MIN");
+      rMax = rGetReal_SYS("NOISECHAN","MAX");
+
+      if(rMin==rDUMMY || rMax==rDUMMY)
+         Abort_SYS(_("Minimum and/or maximum of range not defined."));
+      if(rMax <= rMin)
+         Abort_SYS(_("Invalid range, maximum value must be greater than minimum"));
+   }
+   else if(iType==1) {
+
+      rMean = rGetReal_SYS("NOISECHAN","MEAN");
+      if(rMean==rDUMMY)
+         Abort_SYS(_("Mean value is not defined."));
+
+   }
+   else if(iType==2) {
+
+      rMean = rGetReal_SYS("NOISECHAN","MEAN");
+      rStdDev = rGetReal_SYS("NOISECHAN","SDEV");
+      if(rMean==rDUMMY || rStdDev==rDUMMY)
+         Abort_SYS(_("Mean value or standard deviation is not defined."));
+
+      if(rStdDev<=0.0)
+         Abort_SYS(_("Standard deviation must be greater than 0"));
+   }
+
+
+
+   // --- Do the Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sRefCh))
+      Abort_SYS(_("Reference channel does not exist."));
+   RefCh = FindChan_DB(Data,sRefCh);
+
+
+   if (!iExistChan_DB(Data,sOutCh)) {
+      OutCh = CreateSymb_DB(Data, sOutCh, DB_SYMB_CHAN, DB_OWN_USER, DB_CATEGORY_CHAN_DOUBLE);
+   }
+   else
+      OutCh = FindChan_DB(Data,sOutCh);
+   
+
+
+   // --- Lock the channel symbols ---
+
+   if (RefCh != OutCh) LockSymb_DB(Data,RefCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Get output channel type and create a VV ---
+
+   iChType = iGetChanType_DB(Data, OutCh);
+   VVx = CreateExt_VV(iChType, 0);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Do the work ---
+
+      iLen = iGetChannelLength_DB(Data, Line, RefCh);
+
+      if(RefCh!=OutCh) {
+         rFidStart = rGetFidStart_DB(Data, Line, RefCh);
+         rFidIncr  = rGetFidIncr_DB(Data, Line, RefCh);
+         SetFidStart_VV(VVx, rFidStart);
+         SetFidIncr_VV(VVx, rFidIncr);
+         SetFid_DB(Data, Line, OutCh, rFidStart, rFidIncr);
+      }
+
+      GetChanVV_DB(Data, Line, OutCh, VVx);
+
+      if(iType==0)
+         UniformDist_VVU(VVx, iSeed, rMin, rMax, iLen);
+      else if(iType==1)
+         ExpDist_VVU(VVx, iSeed, rMean, iLen);
+      else if(iType==2)
+         NormalDist_VVU(VVx, iSeed, rMean, rStdDev*rStdDev, iLen);
+
+      PutChanVV_DB(Data, Line, OutCh, VVx);
+
+      
+      if(iLineCategory_DB(Data, Line) == DB_CATEGORY_LINE_GROUP)
+         AddAssociatedLoad_DB(Data, Line, OutCh);
+
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+      iSeed++;    // change the seed or series will repeat.
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Create noise channel"),"NOISECHAN;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (RefCh != OutCh) UnLockSymb_DB(Data,RefCh);
+   UnLockSymb_DB(Data,OutCh);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+   if (iInteractive_SYS())
+      LoadChan_EDB(EData, sOutCh);
+}

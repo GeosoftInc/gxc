@@ -1,0 +1,174 @@
+//===========================================================================
+
+NAME          = "Export a Map"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+DESCRIPTION   = "
+
+      EXPMAP.FILE      - File name to export to
+      
+            .MODE      - Mode to export in (0 view units, 1 Raster )
+            .ALL       - Area specified (0) or Entire Map (1)
+            .FORMAT    - Format to use see FORMATS
+            
+            .MINX      - Region to Export MinX
+            .MINY      - Region to Export MinY
+            .MAXX      - Region to Export MaxX
+            .MAXY      - Region to Export MaxY
+
+            .BITS      - Number of bits for colour depth (default 24)
+            .DITHER    - Dithering methods Colour depths 1, 4, 5, 8 or 9.
+          
+            MODE (0)
+            
+            .VIEW      - Name of View
+            .RES       - Resolution for images in view units
+            
+            MODE (1)
+            
+            .SIZEX     - Number of Pixels in X (only one should be specified)
+            .SIZEY     - Number of Pixels in Y (the other should be 0)
+
+            MODE (0 and 1)
+
+            .DPI       - If output format is a raster type this will override RES or SIZEX and SIZEY if not dummy.
+                         Map page size will be used to determine pixel size of output
+           
+"
+// Revision History:
+// v5.1.4: Added colour depth and dither as VIEW MODE options.
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP                EMap;
+MAP                 Map;
+MVIEW               View;
+
+string(STR_FILE) sFile;
+string(STR_FILE) sFormat;
+string(STR_FILE) sView;
+
+int                 iMode;
+int                 iAll;
+
+real                rMinX;    
+real                rMinY;    
+real                rMaxX;    
+real                rMaxY;    
+
+real                rRes;    
+real                rDPI;    
+int                 iPixX;    
+int                 iPixY;    
+
+int                 iBits;    
+int                 iDither;  
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   if (iInteractive_SYS())
+      Abort_SYS(_("This GX can only be run from a script."));
+
+   // --- Get Parameters ---
+
+   GetString_SYS("EXPMAP","FILE",sFile);
+   GetString_SYS("EXPMAP","FORMAT",sFormat);
+   GetString_SYS("EXPMAP","VIEW",sView);
+   
+   iMode    = iGetInt_SYS("EXPMAP","MODE");
+   iAll     = iGetInt_SYS("EXPMAP","ALL");
+   
+   if (iAll == 0)
+   {
+      rMinX    = rGetReal_SYS("EXPMAP","MINX");
+      rMinY    = rGetReal_SYS("EXPMAP","MINY");
+      rMaxX    = rGetReal_SYS("EXPMAP","MAXX");
+      rMaxY    = rGetReal_SYS("EXPMAP","MAXY");
+
+      // --- Validate the area ---
+
+      if(rMaxX - rMinX <= 0.0 ||
+         rMaxY - rMinY <= 0.0) {
+
+         Abort_SYS(_("Invalid area specified. Check XY ranges."));
+      }
+   }
+   
+   
+   // --- Colour depth now applies to both VIEW and RASTER modes ---
+
+   iBits    = iGetInt_SYS("EXPMAP","BITS");
+   if(iBits==iDUMMY) iBits = MAP_EXPORT_BITS_24;
+
+   iDither  = iGetInt_SYS("EXPMAP","DITHER");
+   if(iDither==iDUMMY) iDither = MAP_EXPORT_METHOD_STANDARD;
+
+
+   if (iMode==0)
+   {
+      rRes     = rGetReal_SYS("EXPMAP","RES");
+   } else {
+      iPixX    = iGetInt_SYS("EXPMAP","SIZEX");
+      iPixY    = iGetInt_SYS("EXPMAP","SIZEY");
+   }
+   rDPI = rGetReal_SYS("EXPMAP","DPI");
+   
+   // --- Export Map ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+   Progress_SYS(1);
+   
+   if (iMode==0)
+   {
+       if (iAll==1)
+         ExportAllInView_MAP(Map,sFile,sView,rRes,rDPI,iBits,iDither,sFormat,"");
+       else
+         ExportAreaInView_MAP(Map,sFile,sView,rRes,rDPI,iBits,iDither,rMinX,rMinY,rMaxX,rMaxY,sFormat,"");
+         
+   } else {
+   
+       if (iAll==1)
+         ExportAllRaster_MAP(Map,sFile,sView,iPixX,iPixY,rDPI,iBits,iDither,sFormat,"");
+       else
+		 {
+			// --- Must convert view range to view units ---
+
+			if(iStrlen_STR(sView) > 0)
+				View = Create_MVIEW(Map, sView, MVIEW_READ);
+			else
+			{
+				GetClassName_MAP(Map,"Data",sView);
+				if(iExistView_MAP(Map, sView))
+					View = Create_MVIEW(Map, sView, MVIEW_READ);
+				else
+				{
+					GetClassName_MAP(Map,"Base",sView);
+					View = Create_MVIEW(Map, sView, MVIEW_READ);
+				}
+			}
+
+			PlotToView_MVIEW(View, rMinX, rMinY);
+			PlotToView_MVIEW(View, rMaxX, rMaxY);
+			Destroy_MVIEW(View);
+
+         ExportAreaRaster_MAP(Map,sFile,sView,rMinX,rMinY,rMaxX,rMaxY,iPixX,iPixY,rDPI,iBits,iDither,sFormat,"");
+		}
+   }
+   Progress_SYS(0);
+
+   SetRedrawFlag_EMAP(EMap, EMAP_REDRAW_NO);
+   UnLock_EMAP(EMap);
+}   

@@ -1,0 +1,157 @@
+//===========================================================================
+NAME          = "Drill Hole - Export data to a CSV files."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Export"
+
+DESCRIPTION   = "
+
+   Export a Drill Hole project to CSV files.
+	
+   DHEXPCSV.FILE      CSV file name, .csv assumed
+           .SELECTED  SELECTED, ALL or LIST
+           .LIST      CSV separated hole list, used with
+                      the \"LIST\" option of DHEXPCSV.SELECTED 
+
+"
+// Revision History:
+// v6.0.0: Made huge hole list string buffer.
+//         Skip selection code if getting ALL holes.
+// v5.1.8: Updated hole selection.
+// v5.1.3: Hot Fix: Re-fixed selections bug.
+// v5.1.3: Fixed "All" holes selection bug.
+//===========================================================================
+
+RESOURCE = "dhexpcsv.gr"
+#include "dhexpcsv.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sPrefix,sSelected;
+string(STR_FILE) sDB;
+string(STR_DH_HOLES) sHoles;
+
+int         i, iAll;
+
+EDB         EData;         // database handle
+DH          Drill;
+DGW         Diag;          // dialogue box
+LST         HoleLST;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("DHEXPCSV");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_DHEXPCSV_0,DGW_TEXT,"DHEXPCSV","PREFIX");     
+      SetInfoSYS_DGW(Diag,_DHEXPCSV_1,DGW_LISTALIAS,"DHEXPCSV","SELECTED");     
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_DHEXPCSV_0,DGW_TEXT,"DHEXPCSV","PREFIX");     
+      GetInfoSYS_DGW(Diag,_DHEXPCSV_1,DGW_LISTALIAS,"DHEXPCSV","SELECTED");     
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- read the dialogue ---
+
+   GetString_SYS("DHEXPCSV","PREFIX",sPrefix);
+   GetString_SYS("DHEXPCSV","SELECTED",sSelected);
+
+
+   // --- Exporting ALL the holes? ---
+   
+   iAll = 0;
+   if (iStrcmp_STR(sSelected,"ALL",STR_CASE_TOLERANT) == 0) iAll = 1;
+   
+   
+   if(iAll!=1) {
+   
+      // --- Do the channel selection by calling the CHCHANLST GX ---
+
+      SetString_SYS("DHHOLELST","DATA",sSelected);
+      SetString_SYS("DHHOLELST","GX","DHEXPCSV");
+      
+      if(iRunGX_SYS("DHHOLELST.GX")) Cancel_SYS();
+
+      GetString_SYS("DHHOLELST","HOLES", sHoles);
+   }
+   
+
+   // --- Get current database and open Drill project ---
+
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+   Drill = Create_DH(sDB);
+
+   
+   // --- create LSTs to hold hole lists ---
+   
+   HoleLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   
+   // --- Get all the holes ---
+
+   HoleLST2_DH(Drill, HoleLST);
+
+
+   if(iAll!=1) {
+   
+      // --- Retrieve available selected holes ---
+
+      SelectCSVStringItems_LST(HoleLST, sHoles, HoleLST);
+   }
+
+   if(iSize_LST(HoleLST)==0)
+      Abort_SYS(_("No holes have been selected for export."));
+
+   
+   // --- export data ---
+
+   Progress_SYS(1);
+
+   ExportLST_DH(Drill, HoleLST, sPrefix, DH_EXP_CSV);   
+
+   Destroy_DH(Drill);
+
+
+   // --- Put the current database back on top ---
+
+   MakeCurrent_EDB(EData);
+   
+   Progress_SYS(0);
+
+   Destroy_LST(HoleLST);
+}

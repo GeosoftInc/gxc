@@ -1,0 +1,439 @@
+//===========================================================================
+
+NAME          = "Probability Plot on Map"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemMap"
+
+DESCRIPTION   = "
+
+      CHPRPROB.TITLE       Plot Title
+              .WIDTH       Box size in mm (width = height)
+              .X           X location of bottom left corner of boxes (mm)
+              .Y           Y location of bottom left corner of boxes (mm)
+              .SYMBSIZE    Symbol size (mm)
+              .SUMM        Draw summary statistics: 0 for NO and 1 for YES
+              .CHAN        Channel for probability plot
+              .MASKCHAN    Mask Channel to mask the computing channel
+              .DB          Database
+              .TRANSFORM   -1 Default (Log or Linear) 0: Raw Data; 1: Log; 2: Lambda Transform
+              .SIGMA       Range is from -Sigma to Sigma
+              .SUMWIDTH    Width of the box for summary stats (mm).
+                           Default is 3/5 of the Box width defined above.
+                             
+"
+// Revision History:
+// v6.0.0: Make map current active object.
+//         Fix locking problems with locate function.
+//         Changed "histogram" references during location to "probability".
+// v5.1.8: New GX.
+//===========================================================================
+
+RESOURCE="chprprob.gr"
+#include "chprprob.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+ST    hST,hSTHist;
+ITR   hITR;
+VV    hVV,hMaskVV;
+EDB   EData;
+DB    Data;
+DB_SYMB  Ch,Line,MCh;
+DGW   Diag;
+
+int   i,iTransform,iLine,iTotLines;
+int   iSumm,iDecimal,iDialog,iMask;
+real  rHeight,rWidth,rX1,rY1;
+real  rSumWidth;
+real  rLambda, rSigma, rSymbSize, rMin, rMinPos;
+string(STR_DB_SYMBOL) sChan,sMaskChan;
+string(STR_FILE) sDB;
+string(STR_DEFAULT_LONG) sTitle,sTemp;
+string(STR_DEFAULT) sLabel;
+string(STR_FILE) sFont,sMap;
+string(STR_GROUP) sGrpName;
+string(STR_DEFAULT_SHORT) sUnit;
+string(STR_VIEW) sView;
+
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- Get Non-Dialog parameters set by CHPROBABILITY ---
+
+   GetString_SYS("CHPRPROB","CHAN",sChan);
+   GetString_SYS("CHPRPROB","DB",sDB);
+   GetString_SYS("CHPRPROB","VIEW",sView);
+   SetString_SYS("CHPRPROB","VIEW","");
+   iTransform = iGetInt_SYS("CHPRPROB","TRANSFORM");
+   if(iTransform==iDUMMY) iTransform = -1;
+
+   if (iExistString_SYS("CHPRPROB","DIALOG")) {
+      iDialog = iGetYesNo_SYS("CHPRPROB","DIALOG");
+      SetString_SYS("CHPRPROB","DIALOG","");
+   } else 
+      iDialog = TRUE;
+      
+   rLambda = rGetReal_SYS("CHPRPROB","LAMBDA");
+   if(iTransform==2 && rLambda==rDUMMY)
+      Abort_SYS(_("Lambda value must be set for Lambda transform."));
+
+
+      
+   // --- Get Database ---
+
+   EData = Load_EDB(sDB);
+   Data = Lock_EDB(EData);
+
+   GetString_SYS("CHPRPROB","DB",sDB);
+
+
+   // --- set iMask ---
+
+   iMask = 0;       // mask function needs more work!
+         
+
+   // --- set the base view ---
+
+   if (iDialog) {
+   
+      // --- Get the current map and make it the current active object ---
+   
+      EMap = Current_EMAP();
+      MakeCurrent_EMAP(EMap);
+
+      if (iStrMin_STR(sView) == 0) 
+         Strcpy_STR(sView,"*base");
+      Map = Lock_EMAP(EMap);
+      if (!iExistView_MAP(Map,sView)) {
+   
+         // --- create a base view ---
+      
+         Strcpy_STR(sView,_n("Base"));
+         View = Create_MVIEW(Map,sView,MVIEW_WRITENEW);
+         Destroy_MVIEW(View);
+      
+      }
+      UnLock_EMAP(EMap);
+      iSetCurrentView_EMAP(EMap,sView);
+      
+      
+
+      // --- Are we running interactively ? ---
+
+      if (iInteractive_SYS()) {
+
+
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("CHPRPROB");
+
+         
+         // --- Set any Defaults from INI ---
+
+         SetInfoSYS_DGW(Diag,_CHPRPROB_0,DGW_TEXT,"CHPRPROB","TITLE");
+         SetInfoSYS_DGW(Diag,_CHPRPROB_1,DGW_TEXT,"CHPRPROB","WIDTH");
+         SetInfoSYS_DGW(Diag,_CHPRPROB_2,DGW_TEXT,"CHPRPROB","X");
+         SetInfoSYS_DGW(Diag,_CHPRPROB_3,DGW_TEXT,"CHPRPROB","Y");
+         SetInfoSYS_DGW(Diag,_CHPRPROB_4,DGW_TEXT,"CHPRPROB","SYMBSIZE");
+         SetInfoSYS_DGW(Diag,_CHPRPROB_5,DGW_TEXT,"CHPRPROB","SIGMA");
+         SetInfoSYS_DGW(Diag,_CHPRPROB_6,DGW_LISTALIAS,"CHPRPROB","SUMM");
+
+
+         // --- Run the Dialogue ---
+
+         rX1 = 0.0;     // prevents warning message on compile
+         rY1 = 0.0;
+         do {
+            i = iRunDialogue_DGW(Diag);
+            if(i==-1)   Cancel_SYS(); 
+            if(i==2)    {
+               
+               // --- Get the coordinates of a user selected box ---
+
+               DisplayMessage_SYS(_("Locate Probability Plot"),_("Locate the lower left corner of the probability plot..."));
+               if (iGetPoint_EMAP(EMap,_("Locate Histogram..."),rX1,rY1))  Cancel_SYS();
+               
+               Map = Lock_EMAP(EMap);
+               View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+               
+               UserToView_MVIEW(View,rX1,rY1);
+               ViewToPlot_MVIEW(View,rX1,rY1);
+               
+               Destroy_MVIEW(View);
+               UnLock_EMAP(EMap);
+
+               SetReal_SYS("CHPRPROB","X",rX1);
+               SetReal_SYS("CHPRPROB","Y",rY1);
+
+               SetInfoSYS_DGW(Diag,_CHPRPROB_2,DGW_TEXT,"CHPRPROB","X");
+               SetInfoSYS_DGW(Diag,_CHPRPROB_3,DGW_TEXT,"CHPRPROB","Y");
+
+            }
+            
+         } while (i!=0);
+         
+         
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag,_CHPRPROB_0,DGW_TEXT,"CHPRPROB","TITLE");
+         GetInfoSYS_DGW(Diag,_CHPRPROB_1,DGW_TEXT,"CHPRPROB","WIDTH");
+         GetInfoSYS_DGW(Diag,_CHPRPROB_2,DGW_TEXT,"CHPRPROB","X");
+         GetInfoSYS_DGW(Diag,_CHPRPROB_3,DGW_TEXT,"CHPRPROB","Y");
+         GetInfoSYS_DGW(Diag,_CHPRPROB_4,DGW_TEXT,"CHPRPROB","SYMBSIZE");
+         GetInfoSYS_DGW(Diag,_CHPRPROB_5,DGW_TEXT,"CHPRPROB","SIGMA");
+         GetInfoSYS_DGW(Diag,_CHPRPROB_6,DGW_LISTALIAS,"CHPRPROB","SUMM");
+         
+      }
+
+      // --- get the map ---
+
+      Map  = Lock_EMAP(EMap);
+      
+   } else {
+      
+      GetString_SYS("CHPRPROB","MAP",sMap);
+      UnLoad_EMAP(sMap);
+      Map  = Create_MAP(sMap,MAP_WRITEOLD);
+      
+   }
+
+   GetString_SYS("CHPRPROB","TITLE",sTitle);
+   rWidth   = rGetReal_SYS("CHPRPROB","WIDTH");
+   rX1  = rGetReal_SYS("CHPRPROB","X");
+   rY1  = rGetReal_SYS("CHPRPROB","Y");
+   rSymbSize = rGetReal_SYS("CHPRPROB","SYMBSIZE");
+   rSigma = rGetReal_SYS("CHPRPROB","SIGMA");
+   iSumm = iGetInt_SYS("CHPRPROB","SUMM");
+   rSumWidth   = rGetReal_SYS("CHPRPROB","SUMWIDTH");
+
+
+   // --- Validate parameters ---
+
+   rHeight = rWidth;
+   if (rWidth <= 0.0)
+      Abort_SYS(_("Plot width must be greater than 0.0"));
+   if (rHeight <= 0.0)
+      Abort_SYS(_("Plot height must be greater than 0.0"));
+   if(rSigma<1.0 || rSigma>5.0)
+      Abort_SYS(_("The number of standard deviations from the mean must be in the range 1 to 5."));
+   if ((iSumm < 0) || (iSumm > 1)) iSumm = 0;
+
+   if ((rSumWidth <= 0.0) || (rSumWidth == rDUMMY))
+      rSumWidth = 3.0/5.0*rHeight;
+
+   if(rSymbSize<=0.0) rSymbSize = 0.5;
+
+
+   // --- Lock the chan ---
+
+   if (!iExistChan_DB(Data,sChan))  
+      Abort_SYS(_("Input channel does not exist."));
+   Ch = FindChan_DB(Data,sChan);
+   LockSymb_DB(Data,Ch,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   iDecimal = iGetChanDecimal_DB(Data,Ch);
+   if (iTransform==-1) {
+      GetRegSymbSetting_DB(Data,Ch,"LOG",sUnit,sizeof(sUnit));
+      if(iCharComp_STR(sUnit,_n("Y")) || iCharComp_STR(sUnit,_n("y")))
+         iTransform = 1;
+      else
+         iTransform = 0;
+   }
+   GetRegSymbSetting_DB(Data,Ch,"UNITS",sUnit,sizeof(sUnit));
+
+   if(iMask) {
+      MCh = FindChan_DB(Data,sMaskChan);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
+
+  
+   // --- calculate statistics ---
+
+   hST = CreateExact_ST();
+   hSTHist = CreateExact_ST();
+   
+   hVV  = Create_VV(REAL,0);
+   hMaskVV  = Create_VV(INT,0);
+
+
+   // --- Get the channel's ITR ---
+
+   hITR = Create_ITR();
+   GetITR_DB(Data, Ch, hITR);
+
+
+   // --- Prepare to do the work ---
+
+   iTotLines = iCountSelLines_DB(Data);
+   if(iDialog) Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   if(iDialog) ProgName_SYS(_("Computing Data Range"),1);
+   iLine = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+   
+      // --- Update the Progress Bar ---
+
+      if(iDialog) {
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Accumulate stats on line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLine,iTotLines);
+      }
+
+
+      // --- get data ---
+
+      GetChanVV_DB(Data,Line,Ch,hVV);
+
+      if(iMask) {
+         GetChanVV_DB(Data,Line,MCh,hMaskVV);
+         _Mask_VV (hVV,hMaskVV);
+      }
+
+
+      // --- stat ---
+
+      Statistics_VV(hST,hVV);
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+
+   // --- Clip data for log/lambda transform to the power of 10 less than the
+   //     smallest positive value ---
+
+   if(iTransform==1 || iTransform==2) {
+
+      rMinPos = rGetInfo_ST(hST, ST_MINPOS);
+      if(rMinPos > 0.0) {
+         rMin = rPow_MATH(10.0, rFloor_MATH(rLog10_MATH(rMinPos)));
+      }
+      else
+         rMin = 0.001;
+   }
+
+
+   // --- Go through all selected Lines ---
+
+   if(iDialog) ProgName_SYS(_("Accumulating statistics"),1);
+   iLine = 0;
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      // --- Update the Progress Bar ---
+
+      if(iDialog) {
+         LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+         GetSymbName_DB(Data,Line,sTemp);
+         UnLockSymb_DB(Data,Line);
+         Strcpy_STR(sLabel,_("Accumulate stats on line: "));
+         Strcat_STR(sLabel,sTemp);
+         ProgName_SYS(sLabel,0);
+         ProgUpdateL_SYS(iLine,iTotLines);
+      }
+
+
+      // --- get data ---
+
+      GetChanVV_DB(Data,Line,Ch,hVV);
+
+      if(iMask) {
+         GetChanVV_DB(Data,Line,MCh,hMaskVV);
+         _Mask_VV (hVV,hMaskVV);
+      }
+
+
+      // --- stat ---
+
+      if(iTransform==1)  
+         Log_VV(hVV,VV_LOG_BASE_10,VV_LOG_NEGATIVE_NO,rMin);
+      else if(iTransform==2) {
+         Clip_VVU(hVV, rMin, rDUMMY, VVU_CLIP_LIMIT);
+         BoxCox_VVU(hVV, rLambda);
+      }
+
+      Statistics_VV(hSTHist,hVV);
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   // --- Get base view ---
+  
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+
+
+   // --- Set a title group ---
+
+   GetString_SYS("CHPRPROB","GROUP",sGrpName);
+   SetString_SYS("CHPRPROB","GROUP","");
+   if (iStrMin_STR(sGrpName) == 0) {
+      GenGroupName_STR("PROB",sChan,"",sGrpName);
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_NEW);
+   } else   
+      StartGroup_MVIEW(View,sGrpName,MVIEW_GROUP_APPEND);
+
+
+   // --- Set attributes ---
+   
+   if (iGlobal_SYS("MONTAJ.DEFAULT_MAP_FONT",sFont) == 1)
+      Strcpy_STR(sFont,_n("Default"));
+   TextFont_MVIEW(View,sFont,FALSE,MVIEW_FONT_WEIGHT_NORMAL,FALSE);
+   TextColor_MVIEW(View,iColor_MVIEW("K"));
+   FillColor_MVIEW(View,iColor_MVIEW("k100"));
+   TextAngle_MVIEW(View,0.0);
+
+
+   // --- Draw Probability Plot ---
+
+   Probability_MVU(View,hST,hSTHist,sTitle,sUnit,iTransform,rLambda,
+                 rX1,rY1,rWidth,rHeight,rSymbSize,
+                 rSigma,rSumWidth,iSumm,iDecimal,-4,hITR);
+   
+
+   // --- add the maker ---
+
+   if (iDialog)
+      Maker_MVIEW(View,0,1,"CHPRPROB",MAKER_GX,_("Probability Plot..."),"CHPRPROB;");
+
+
+   // --- done ---
+
+   if(iDialog) Progress_SYS(0);
+   UnLockSymb_DB(Data,Ch);
+   if(iMask)
+      UnLockSymb_DB(Data,MCh);
+   Destroy_MVIEW(View);
+   UnLock_EDB(EData);
+   
+   if (iDialog)
+      UnLock_EMAP(EMap);
+      
+}

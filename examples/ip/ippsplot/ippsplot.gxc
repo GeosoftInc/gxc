@@ -1,0 +1,338 @@
+//===========================================================================
+NAME          = "Plot Pseudo-Section Map(s)"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP"
+
+DESCRIPTION   = "
+   Plot Pseudo-Section Map(s)
+
+    IP.PLOTFILE : IPPLOT control file
+    IP.LINES : Line selections:
+               A : All lines
+               S : Selected lines
+               D : Displayed line
+"
+// Revision History
+// v6.1.0: New User Interface implemented, modelled after DHPLAN.GX
+// v5.1.7: User can now specify a map tag.
+//         Improved line selection methodology.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPPSPLOT.gr"
+#include "IPPSPLOT.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP object
+DB_SYMB     Line;  
+DB_SELECT   Select;
+LST         LineLST;
+
+int         i;                // Utility 
+
+string(STR_FILE) sJob, sJob2, sMap, sMapTag, sDirectory;
+string(300) sBuff, sMsg;
+string(STR_DEFAULT_SHORT) sLines;
+string(STR_DB_SYMBOL) sCurLine;
+int iLine, iLines, iMod, iTotLines, iPage, iPlotted, iInteractive;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- get database ---
+   
+   EData = Current_EDB();
+
+   
+	// --- Run non-interactively? ---
+
+	iInteractive = iGetInt_SYS("IPPSPLOT", "INTERACTIVE");
+	SetString_SYS("IPPSPLOT", "INTERACTIVE", "");	// Force set every time
+	if(iInteractive != 0)
+		iInteractive = 1;
+
+
+   // --- Get currently selected line if line is not specified. ---
+
+	GetString_SYS("IPPSPLOT", "LINE", sCurLine);
+	SetString_SYS("IPPSPLOT", "LINE", sCurLine);		// Force set every time
+	
+	if(!iStrlen_STR(sCurLine))
+		GetCurLine_EDB(EData,sCurLine);
+   Data = Lock_EDB(EData);
+
+
+   // --- Set default control file name ---
+   
+   GetString_SYS("IP","PLOTFILE",sJob);
+   if(!iStrlen_STR(sJob)) {
+      Strcat_STR(sJob, "_psplot.ipi");
+      SetString_SYS("IP","PLOTFILE",sJob);
+   }
+   
+   Ip = Create_IP();
+   
+
+   // --- Are we running interactively ? ---
+
+   if(iInteractive_SYS() && iInteractive == 1)
+   {
+      i = 1;
+      while (i!=0)
+      {
+         // --- Create the Dialogue ---
+
+         Diag = Create_DGW("IPPSPLOT");
+
+
+         // --- Set any Defaults ---
+
+         SetInfoSYS_DGW(Diag,_IPPSPLOT_0,DGW_FILEPATH,"IP","PLOTFILE");
+         SetInfoSYS_DGW(Diag,_IPPSPLOT_1,DGW_TEXT,"IP","MAP_TAG");
+         SetInfoSYS_DGW(Diag,_IPPSPLOT_2,DGW_LISTALIAS,"IP","LINES");
+
+         // --- Run the Dialogue ---
+
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+         // --- Get the Strings ---
+
+         GetInfoSYS_DGW(Diag,_IPPSPLOT_0,DGW_FILEPATH,"IP","PLOTFILE");
+         GetInfoSYS_DGW(Diag,_IPPSPLOT_1,DGW_TEXT,"IP","MAP_TAG");
+         GetInfoSYS_DGW(Diag,_IPPSPLOT_2,DGW_LISTALIAS,"IP","LINES");
+
+
+         // --- Destroy the Dialogue ---
+
+         Destroy_DGW(Diag);
+
+         
+         // --- If the plot file does not exist, create a default job and
+         //     force the wizard ---
+         
+         GetString_SYS("IP","PLOTFILE",sJob);
+         if(!iFileExist_SYS(sJob)) {
+            CreateDefaultJob_IP(Ip, sJob, IP_PLOT_PSEUDOSECTION);
+            i = 1;
+         }
+
+
+         // --- Run IPPLOT control file wizard ---
+
+         if(i==1) 
+         {
+      
+            OpenJob_IP(Ip, sJob, IP_PLOT_PSEUDOSECTION);
+
+
+            // --- Create a temporary copy of the job ---
+
+            TempFileName_SYS(sJob,sJob2);
+                  
+            FileToClipboard_SYS(sJob);
+            ClipboardToFile_SYS(sJob2);
+
+
+            // --- Call the tabbed dialog ---
+            
+            iPage = iGetInt_SYS("IPPSPLOT","PAGE");
+            iMod = iModifyJob_IPGUI(Ip, Data, sJob2, IP_PLOT_PSEUDOSECTION, iPage);
+
+
+            // --- Save the modified data ---
+
+            if(iMod!=-1) {
+
+               // --- Set to return to the same page in the dialogue ---
+
+               SetInt_SYS("IPPSPLOT","PAGE", iPage);
+               
+               
+               // --- Save the modified temp file to the actual job ---
+               
+               FileToClipboard_SYS(sJob2);
+               ClipboardToFile_SYS(sJob);                           
+            }            
+
+            if(iFileExist_SYS(sJob2))
+               iDeleteFile_SYS(sJob2);
+               
+            if(iMod==-1)
+               Cancel_SYS();
+            else
+               i = 0;   // go straight to plotting.
+
+         }
+      } 
+   }
+      
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","LINES",sLines);
+   GetString_SYS("IPPSPLOT","DIRECTORY",sDirectory);
+   GetString_SYS("IP","MAP_TAG",sMapTag);
+   GetString_SYS("IP","PLOTFILE",sJob);
+
+   
+   // --- Validate ---
+   
+   if(!iStrlen_STR(sJob))
+      Abort_SYS(_("No job name specified."));
+      
+   if(!iFileExist_SYS(sJob)) {
+      Printf_STR(sMsg, sizeof(sMsg), _("The job file %s was not found."), sJob);
+      Abort_SYS(sMsg);
+   }
+
+   // --- Trim the map tag ---
+
+   iStrMin_STR(sMapTag);
+
+
+   // --- Set line selections ---
+
+   if (iChar_STR(sLines) == iChar_STR("D")) 
+      iLine = DU_LINES_DISPLAYED;
+   else if (iChar_STR(sLines) == iChar_STR("S")) 
+      iLine = DU_LINES_SELECTED;
+   else if (iChar_STR(sLines) == iChar_STR("A")) 
+      iLine = DU_LINES_ALL;
+   else
+      Abort_SYS(_("Line selection invalid"));
+
+
+   // --- Do the line selection ---
+
+   if(iLine != DU_LINES_SELECTED) {
+      Select = GetSelect_DB(Data);
+      if (iLine == DU_LINES_DISPLAYED) {
+         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      }
+      else if (iLine == DU_LINES_ALL)
+         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+   }
+
+
+   // --- Get LST of selected lines ---
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   SelectedLineLST_DB(Data, LineLST);
+   
+   
+   // --- Reset selections ---
+
+   if(iLine != DU_LINES_SELECTED) {
+      SetSelect_DB(Data, Select);
+   }
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iSize_LST(LineLST);
+
+   // --- Go through all selected Lines ---
+
+   iPlotted = 0;
+
+   Progress_SYS(1);
+
+   for(i=0;i<iTotLines;i++) {
+   
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, i);
+      GetItem_LST(LineLST, 0, i, sCurLine);
+
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+      Strcpy_STR(sBuff,_("Processing line: "));
+      Strcat_STR(sBuff,sCurLine);
+
+      ProgName_SYS(sBuff,0);
+      ProgUpdateL_SYS(i,iTotLines);
+
+
+      // --- Loop over the lines ---
+      
+      if(!iStrlen_STR(sDirectory)) {
+         Strcpy_STR(sMap,sCurLine);
+      }
+      else {
+         Strcpy_STR(sMap,sDirectory);
+         Strcat_STR(sMap, sCurLine);
+      }
+      Strcat_STR(sMap, sMapTag);
+      Strcat_STR(sMap,".map");
+
+      if(iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+
+      if(iLineType_DB(Data, Line) != DB_LINE_TYPE_NORMAL) {
+
+         // --- Advance to Next Line ---        
+
+         UnLockSymb_DB(Data,Line);
+         continue;
+      }
+
+      
+      // --- Plot ---
+
+      if (iInteractive_SYS()) 
+         PseudoPlot2_IP(Ip, Data, sJob, sCurLine, sMapTag, sMap);
+      else
+         PseudoPlot2Dir_IP(Ip, Data, sJob, sCurLine, sMapTag, sMap, sDirectory);
+      iPlotted++;
+
+      Load_EMAP(sMap);
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);   
+   }
+
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   
+   // --- give a warning if nothing happened... ---
+
+   if(iPlotted==0) {
+      if (iChar_STR(sLines) == iChar_STR("D")) 
+         DisplayMessage_SYS(_("IP Warning"), _("The displayed line was not plotted because it may not be a normal IP line."));
+      else
+         DisplayMessage_SYS(_("IP Warning"), _("No lines were plotted. There may be no lines selected or no normal IP lines."));
+   }
+
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_LST(LineLST);
+
+}

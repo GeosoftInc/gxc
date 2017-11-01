@@ -1,0 +1,510 @@
+//===========================================================================
+NAME          = "Proportional Symbol Plot"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Plot Solution Symbols"
+
+DESCRIPTION   = "
+
+   PROPSYMB.MAP          - map name
+           .CHANNEL      - channel name
+           .BASE         - zero base level.
+           .SCALE        - symbol size units/mm.
+           .MASK         - Optional mask channel
+           .FONT         - Font file name (e.g. \"symbol.gfn\")
+           .GEO_FONT     - Is this a geosoft font?
+           .SYMBOL       - symbol number
+           .WEIGHT       - symbol weight
+           .LINE_COLOR   - symbol color 
+           .FILL_COLOR   - fill color
+           .ANGLE        - symbol angle
+
+"
+// Revision History:
+// v7.0.0: Symbol font weight fix-up.
+// v6.4.2: Replaced symbol controls with button and symbol form.
+// v6.3.0: Turn on the group clipping instead of previous changes.
+// v6.2.1: Reverted data view clipping to reconsider.
+// v6.2.0: Now clips the data to the data view.
+// v5.1.6: If no MASK class channels are located, fill mask channel list with all of them.
+// v5.1.5: Optional mask channel
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "propsymb.gr"
+#include "propsymb.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT)	 sLcolor,sFcolor;
+string(STR_DB_SYMBOL)		 sChan,sMask;
+string(STR_DEFAULT)			 sLabel,sVal,sUnits;
+string(STR_DB_SYMBOL)		 sLine;
+string(STR_GROUP)				 sGroup;
+string(STR_FILE)				 sSymbFont, sName, sQualPart, sNamePart;
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh,YCh,ZCh,DataCh,MCh; // Channel handles
+DB_SYMB    Line;        // Line handle
+IPJ        DataIPJ;
+IPJ        ViewIPJ;
+PJ			  Pj;
+EMAP		  EMap;
+MAP		  Map;
+MVIEW 	  View;
+DGW   	  Diag;
+LST   	  List;
+VV    	  VVx,VVy,VVz,VVdata,VVm;
+PLY   	  Ply;
+int   	  iSymb,iLines,iTotLines,iSymbWt,iChimera,iMask,iGeoFont;
+int   	  iRet, iFillCol, iEdgeCol;
+int	     iOrientation, iHasOrientation;
+real  	  rBase,rScale,rScaleMM,rOutlier,rSymbAng,rSymbSize;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+   // --- get current database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+	ViewIPJ = Create_IPJ();
+	iHasOrientation = 0;
+
+	// --- channels exist ? ---
+
+   XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+   if (XCh==NULLSYMB)
+      Abort_SYS(_("The current X channel does not exist."));
+
+   YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+   if (YCh==NULLSYMB)
+      Abort_SYS(_("The current Y channel does not exist."));
+
+
+   // --- get current map  ---
+
+   EMap = Current_EMAP();
+   Map  = Lock_EMAP(EMap);
+
+	
+	// --- open the data view ---
+
+   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+
+
+	// --- Check for non-plan orientations ---
+
+	GetIPJ_MVIEW(View, ViewIPJ);
+
+	iOrientation = iGetOrientation_IPJ(ViewIPJ);
+	if(iOrientation != IPJ_ORIENT_DEFAULT && iOrientation != IPJ_ORIENT_PLAN)
+	{
+		iHasOrientation = 1;
+
+		ZCh = GetXYZChanSymb_DB(Data, DB_CHAN_Z);
+		if (ZCh==NULLSYMB)
+			Abort_SYS(_("A current Z channel is required to correctly locate symbols on an oriented view"));
+	}
+
+
+
+   // --- Is it CHIMERA? ---
+
+   iChimera = iGetInt_SYS("PROPSYMB","CHIMERA");
+   SetInt_SYS("PROPSYMB","CHIMERA",0);  // Must set every time.
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) 
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("propsymb");
+      
+      
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_PROPSYMB_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_PROPSYMB_3);
+      if(iChimera==1)
+         MaskChanLST_DB(Data,List);
+      else {
+         ClassChanLST_DB(Data,List,"MASK");
+         Sort_LST(List,0,0);
+      }
+
+      if(iSize_LST(List)==0)
+         SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      
+
+      // --- Run dialog and allow for the symbols form ---      
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_PROPSYMB_0,DGW_TEXT,     "PROPSYMB","CHANNEL");
+      SetInfoSYS_DGW(Diag,_PROPSYMB_1,DGW_TEXT,     "PROPSYMB","BASE");     
+      SetInfoSYS_DGW(Diag,_PROPSYMB_2,DGW_TEXT,     "PROPSYMB","SCALE");     
+      SetInfoSYS_DGW(Diag,_PROPSYMB_3,DGW_TEXT,     "PROPSYMB","MASK");     
+
+
+      // --- Run the Dialogue ---
+      
+      do 
+      {
+         iRet = iRunDialogue_DGW(Diag);
+         if(iRet==-1) Cancel_SYS();    
+         
+         if(iRet==1)
+         {
+         
+            GetString_SYS("PROPSYMB","FONT",sSymbFont);
+            if(!iStrlen_STR(sSymbFont)) {
+               iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sSymbFont);
+					if(!iStrlen_STR(sSymbFont))
+						Strcpy_STR(sSymbFont, "Symbols(GFN)");
+               SetString_SYS("PROPSYMB","FONT", sSymbFont);
+            }
+
+            iGeoFont = iGetInt_SYS("PROPSYMB","GFN_FONT");
+            if(iGeoFont==iDUMMY) iGeoFont = TRUE;
+             
+            iSymb = iGetInt_SYS("PROPSYMB","SYMBOL");    
+				if(iSymb==iDUMMY) iSymb = 20;		// Filled circle in symbols.gfn
+				
+            iSymbWt = iGetInt_SYS("PROPSYMB","WEIGHT");    
+            if(iSymbWt==iDUMMY) iSymbWt = MVIEW_FONT_WEIGHT_MEDIUM; // medium by default
+
+            GetString_SYS("PROPSYMB","LINE_COLOR",sLcolor);
+            if(iStrlen_STR(sLcolor)==0)
+               Strcpy_STR(sLcolor, "K");     // default to black
+
+            GetString_SYS("PROPSYMB","FILL_COLOR",sFcolor);
+
+            rSymbAng = rGetReal_SYS("PROPSYMB","ANGLE");
+            if(rSymbAng==rDUMMY) rSymbAng = 0.0;
+
+            iEdgeCol = iColor_MVIEW(sLcolor);
+            iFillCol = iColor_MVIEW(sFcolor);
+            
+            rSymbSize = 1.0;     // doesn't change
+            
+            
+            // --- Call the symbol GUI ---
+                        
+            if(iSymbolForm_GUI(sSymbFont, iGeoFont, iSymbWt, iSymb, rSymbSize, rSymbAng, iEdgeCol, iFillCol)==0)
+            {
+               
+               ColorDescr_MVIEW(iEdgeCol, sLcolor, sizeof(sLcolor));
+               ColorDescr_MVIEW(iFillCol, sFcolor, sizeof(sFcolor));
+
+               SetString_SYS("PROPSYMB","FONT",sSymbFont);  
+               SetInt_SYS("PROPSYMB","GFN_FONT", iGeoFont);   
+               SetInt_SYS("PROPSYMB","SYMBOL", iSymb);      
+               SetInt_SYS("PROPSYMB","WEIGHT",iSymbWt);             
+               SetString_SYS("PROPSYMB","LINE_COLOR",sLcolor);
+               SetString_SYS("PROPSYMB","FILL_COLOR",sFcolor);
+               SetReal_SYS("PROPSYMB","ANGLE",rSymbAng);
+            }
+         }
+         
+      } while(iRet==1);
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_PROPSYMB_0,DGW_TEXT,     "PROPSYMB","CHANNEL");
+      GetInfoSYS_DGW(Diag,_PROPSYMB_1,DGW_TEXT,     "PROPSYMB","BASE");     
+      GetInfoSYS_DGW(Diag,_PROPSYMB_2,DGW_TEXT,     "PROPSYMB","SCALE");     
+      GetInfoSYS_DGW(Diag,_PROPSYMB_3,DGW_TEXT,     "PROPSYMB","MASK");     
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("PROPSYMB","CHANNEL",sChan);    
+   rBase = rGetReal_SYS("PROPSYMB","BASE");     
+   rScale = rGetReal_SYS("PROPSYMB","SCALE");    
+   
+   GetString_SYS("PROPSYMB","FONT",sSymbFont);
+   if(!iStrlen_STR(sSymbFont)) {
+      iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sSymbFont);
+		if(!iStrlen_STR(sSymbFont))
+			Strcpy_STR(sSymbFont, "Symbols(GFN)");
+      SetString_SYS("PROPSYMB","FONT", sSymbFont);
+   }
+   
+   
+   // --- As a clean-up of a previous bug, prevent full file paths being using as the
+   //     symbol font name.  Remove any drive, directory or extension. ---
+   
+   FileNamePart_STR(sSymbFont, sNamePart, STR_FILE_PART_NAME);
+   FileNamePart_STR(sSymbFont, sQualPart, STR_FILE_PART_QUALIFIERS);
+   FileCombineParts_STR("", "", sNamePart, "", sQualPart, sSymbFont);
+
+   iGeoFont = iGetInt_SYS("PROPSYMB","GFN_FONT");
+   if(iGeoFont==iDUMMY) iGeoFont = TRUE;
+    
+   iSymb = iGetInt_SYS("PROPSYMB","SYMBOL");    
+   if(iSymb==iDUMMY) iSymb = 20;		// Filled circle in symbols.gfn
+
+   iSymbWt = iGetInt_SYS("PROPSYMB","WEIGHT");    
+   if(iSymbWt==iDUMMY) iSymbWt = MVIEW_FONT_WEIGHT_MEDIUM; // medium by default
+
+   GetString_SYS("PROPSYMB","LINE_COLOR",sLcolor);
+   if(iStrlen_STR(sLcolor)==0)
+      Strcpy_STR(sLcolor, "K");     // default to black
+      
+   GetString_SYS("PROPSYMB","FILL_COLOR",sFcolor);
+
+   rSymbAng = rGetReal_SYS("PROPSYMB","ANGLE");
+   if(rSymbAng==rDUMMY) rSymbAng = 0.0;
+
+
+   // --- channels exist ? ---
+
+   DataCh = FindChan_DB(Data,sChan);
+   if (DataCh==NULLSYMB)
+      Abort_SYS(_("The data channel does not exist."));
+
+
+   // --- Apply mask? ---
+
+   iMask = 0;
+   GetString_SYS("PROPSYMB","MASK",sMask);
+   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (!iExistChan_DB(Data,sMask))  
+         Abort_SYS(_("Mask channel does not exist."));
+      MCh = FindChan_DB(Data,sMask);
+      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+      iMask = 1;
+   }
+
+
+   // --- Clip outliers? ---
+
+   rOutlier = rDUMMY;
+   if(iChimera==1) {
+      GetRegSymbSetting_DB(Data,DataCh,"OUTLIERLIMIT",sVal, sizeof(sVal));
+      rOutlier = rScanR_STR(sVal);
+   }
+
+
+	// --- set thining and local scale ---
+   
+	SetThinRes_MVIEW(View,0.02);
+   rScaleMM = rScaleMM_MVIEW(View);
+
+   // --- Handle Projections ---
+   
+   DataIPJ = Create_IPJ();
+   GetIPJ_DB(Data,XCh,DataIPJ);
+
+
+   if(iHasOrientation == 1)
+		  Pj = CreateIPJ_PJ(DataIPJ, ViewIPJ);
+	else
+		  SetWorkingIPJ_MVIEW(View,DataIPJ);
+
+
+   // --- Set the group clip mode ---
+   
+   GroupClipMode_MVIEW(View, CLIP_ON);
+   
+   
+   // --- start a group ---
+
+   GetName_DB(Data,DB_NAME_FILE,sName);
+   FileNamePart_STR(sName,sName,STR_FILE_PART_NAME);
+   GenGroupName_STR("PSYMB",sName,sChan,sGroup);
+   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
+
+
+   // --- Add maker. Set special switches here for saving by the makers ---
+   
+   SetInt_SYS("PROPSYMB","CHIMERA",iChimera);
+   Maker_MVIEW(View,1,1,"propsymb",MAKER_GX,_("Proportional symbols..."),"PROPSYMB;");
+   SetInt_SYS("PROPSYMB","CHIMERA",iChimera);  // reset to default
+   
+
+   // --- data line ---
+
+   Link_MVIEW(View,Data,_n("Data Link"));
+
+
+   // --- set symbol parameters ---
+
+   SymbFont_MVIEW(View,sSymbFont,iGeoFont,iSymbWt,FALSE);
+   SymbColor_MVIEW(View,iColor_MVIEW(sLcolor));
+   SymbFillColor_MVIEW(View,iColor_MVIEW(sFcolor));
+   SymbNumber_MVIEW(View,iSymb);
+   SymbAngle_MVIEW(View,rSymbAng);
+
+
+   // --- scale factor to convert Z to mm on map ---
+
+   if (rScale == 0.0) rScale = 1.0;
+   rScale = rScaleMM/rScale;
+
+
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVy = Create_VV(REAL,0);
+   if(iHasOrientation == 1)
+		VVz = Create_VV(REAL,0);	
+	VVdata = Create_VV(REAL,0);
+   VVm = Create_VV(INT,0);
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);   
+	if(iHasOrientation == 1)
+		LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+	LockSymb_DB(Data,DataCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+   // --- Get the view's clip PLY ---
+   
+   Ply = Create_PLY();
+   GetClipPLY_MVIEW(View, Ply);
+   
+   
+   // --- process lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,YCh,VVy);
+		if(iHasOrientation == 1)
+		   GetChanVV_DB(Data,Line,ZCh,VVz);
+	   GetChanVV_DB(Data,Line,DataCh,VVdata);
+      ReFidVV_VV(VVx,VVdata);
+      ReFidVV_VV(VVy,VVdata);
+		if(iHasOrientation == 1)
+		   ReFidVV_VV(VVz,VVdata);
+
+      // --- mask? ---
+
+      if (iMask) {
+         GetChanVV_DB(Data,Line,MCh,VVm);
+         ReFidVV_VV(VVm,VVdata);
+         Mask_VVU(VVx,VVm);
+      }
+
+
+      // --- Clip outliers ---
+      			
+      if(rOutlier!=rDUMMY) 
+         Clip_VVU(VVdata, rDUMMY, rOutlier, VVU_CLIP_LIMIT);
+			   
+
+      // --- translate data to mm ---
+
+      Translate_VVU(VVdata,-rBase,rScale);
+      Clip_VVU(VVdata,0.0,rDUMMY,VVU_CLIP_DUMMY);
+
+
+      // --- add line link ---
+
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_LINK);
+      ChangeLineMessage_MVIEW(View,sLine);
+
+
+		if(iHasOrientation == 1)
+			ConvertVV3_PJ(Pj, VVx, VVy, VVz);
+
+      // --- Draw ---
+
+      SizeSymbols_MVIEW(View,VVx,VVy,VVdata);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+   Progress_SYS(0);
+
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+	UnLockSymb_DB(Data,DataCh);
+   if(iHasOrientation == 1) UnLockSymb_DB(Data,ZCh);
+   if(iMask) UnLockSymb_DB(Data,MCh);
+
+
+   // --- Set default parameters for proportional symbol legend plot ---
+
+   SetString_SYS("PROPSYMBLEG","TITLE", sChan);
+
+   GetChanUnit_DB(Data,DataCh,sUnits);
+   if(iStrlen_STR(sUnits)) {
+      Strcpy_STR(sVal,"(");
+      Strcat_STR(sVal,sUnits);
+      Strcat_STR(sVal,")");
+   }
+   else
+      Strcpy_STR(sVal,"");
+   SetString_SYS("PROPSYMBLEG","SUBTITLE", sVal);
+
+
+   // --- done ---
+
+	if(iHasOrientation == 1)
+		Destroy_PJ(Pj);
+	Destroy_IPJ(ViewIPJ);
+	Destroy_IPJ(DataIPJ);
+
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+   UnLock_EDB(EData);
+
+}

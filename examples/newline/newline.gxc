@@ -1,0 +1,171 @@
+//===========================================================================
+NAME          = "Create a New Line"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Create a New Line in a database.
+
+Parameters: 
+
+     NEWLINE.LINE         - Number of the New Line (eg. L100.2)
+            .FLIGHT       - Flight number
+            .DATE         - Date of Line (yyyy/mm/dd)
+"                                                      
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Scripting"
+
+//===========================================================================
+
+RESOURCE = "newline.gr"
+#include "newline.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sLineName;         // Line Name
+string(2)  sTemp;             // Temporary string
+string(STR_DEFAULT_SHORT) sDate;             // Line date
+
+EDB        EData;
+DB         Data;
+DB_SYMB    Ln;                // Line handle
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // Utility variable
+int        iFlight;           // Line flight
+
+real       rDate;             // Line date value
+
+
+
+
+//===========================================================================
+//                             LINE CREATION CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("NEWLINE");
+
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_NEWLINE_0,DGW_TEXT,"NEWLINE","LINE");     
+      SetInfoSYS_DGW(Diag,_NEWLINE_1,DGW_TEXT,"NEWLINE","FLIGHT");
+
+
+      // --- set the current date ---
+
+      if (iExistString_SYS("NEWLINE","DATE"))
+         SetInfoSYS_DGW(Diag,_NEWLINE_2,DGW_TEXT,"NEWLINE","DATE");
+      else {
+         rDate = rDate_SYS();
+         FormatDate_STR(rDate,sDate,11,DATE_FORMAT_YYYYMMDD);
+         SetInfo_DGW(Diag,_NEWLINE_2,DGW_TEXT,sDate);
+      }
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_NEWLINE_0,DGW_TEXT,"NEWLINE","LINE");     
+      GetInfoSYS_DGW(Diag,_NEWLINE_1,DGW_TEXT,"NEWLINE","FLIGHT");
+      GetInfoSYS_DGW(Diag,_NEWLINE_2,DGW_TEXT,"NEWLINE","DATE");
+
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("NEWLINE","LINE",sLineName);
+   iFlight = iGetInt_SYS("NEWLINE","FLIGHT");
+   GetString_SYS("NEWLINE","DATE",sDate);
+
+ 
+   // --- check all parameters ---
+
+   if ((iFlight < 0) || (iFlight == iDUMMY))
+      Abort_SYS(_("Invalid Flight Number - it must be an integer and >= 0"));  
+
+
+   // --- Get the date ---
+
+   rDate = rScanDate_STR(sDate,DATE_FORMAT_YYYYMMDD);
+
+
+   // --- Check the date ---
+
+   if (rDate == rDUMMY)
+      Abort_SYS(_("Invalid date - should be YYYY/MM/DD eg. 1999/12/31"));
+
+   // --- Check the line type (first letter of line must be a GEOSOFT line type) ---
+
+   Substr_STR(sTemp,sLineName,0,1);   
+
+   if (!( (!iStrcmp_STR(sTemp,"L",STR_CASE_SENSITIVE)) ||    // survey line
+          (!iStrcmp_STR(sTemp,"B",STR_CASE_SENSITIVE)) ||    // base line
+          (!iStrcmp_STR(sTemp,"T",STR_CASE_SENSITIVE)) ||    // tie line
+          (!iStrcmp_STR(sTemp,"R",STR_CASE_SENSITIVE)) ||    // trend line
+          (!iStrcmp_STR(sTemp,"S",STR_CASE_SENSITIVE)) ||    // test line
+          (!iStrcmp_STR(sTemp,"D",STR_CASE_SENSITIVE)) ||    // random line
+          (!iStrcmp_STR(sTemp,"P",STR_CASE_SENSITIVE)) ) )   // special line
+
+      Abort_SYS(_("Invalid Line type requested. Must have a prefix of: L,B,T,R,S,D or P"));
+      
+
+   // --- Does the Line Exist ? ---
+
+   if (iExistSymb_DB(Data,sLineName,DB_SYMB_LINE))
+      Abort_SYS(_("Line already exists."));
+   else
+      Ln = CreateSymb_DB(Data,sLineName,DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_FLIGHT);  // Create it 
+
+
+   // --- Set the new line's flight, date, selection mode, and map clipping ---
+ 
+   LockSymb_DB(Data,Ln,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   SetLineFlight_DB(Data,Ln,iFlight);
+   SetLineDate_DB(Data,Ln,rDate); 
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,Ln,_("New line"),"NEWLINE;");
+
+
+   UnLockSymb_DB(Data,Ln);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+}

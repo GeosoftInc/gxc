@@ -1,0 +1,188 @@
+//===========================================================================
+NAME          = "Rename group mask in view"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Map Views"
+
+DESCRIPTION   = "
+
+      VIEWRENEXTCLIP.NAME    - group mask name
+                    .NEWNAME - New mask name
+                    .VIEW    - View name
+"
+
+//===========================================================================
+
+RESOURCE = "viewrenextclip.gr"
+#include "viewrenextclip.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sName, sNewName, sNameComp;
+string(STR_VIEW) sView;
+
+DGW         hDGW;
+int         i;
+int         iClipRegion;
+int         iRun;
+EMAP        EMap;
+MAP   		hMAP;
+MVIEW 		View;
+LST         hLST;
+
+//===========================================================================
+//                           DIGITS CODE
+//===========================================================================
+
+{
+	// --- get current map ---
+
+   EMap  = Current_EMAP();
+   hMAP = Lock_EMAP(EMap);
+   View = (MVIEW) 0;
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+      iRun = 0;
+
+      while (iRun != 99) {
+
+         if (iRun == 0) {
+            // --- Create the Dialogue ---
+
+            hDGW = Create_DGW("VIEWRENEXTCLIP1");
+
+            hLST = GetList_DGW(hDGW,_VIEWRENEXTCLIP1_0);
+            ViewList_MAP(hMAP,hLST);
+            Sort_LST(hLST,0,0);
+
+            // --- set default view to the current data view ---
+      
+            GetClassName_MAP(hMAP,"Data",sView);
+            SetInfo_DGW(hDGW,_VIEWRENEXTCLIP1_0,DGW_TEXT,sView);
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(hDGW);
+            if (i == -1) Cancel_SYS(); 
+
+            GetInfoSYS_DGW(hDGW,_VIEWRENEXTCLIP1_0,DGW_TEXT,"VIEWRENEXTCLIP","VIEW");     
+      
+            Destroy_DGW(hDGW);
+
+            GetString_SYS("VIEWRENEXTCLIP","VIEW",sView);
+            View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+
+            if (iNumExtClipPLY_MVIEW(View)<=0)
+               DisplayMessage_SYS(_("VIEWRENEXTCLIP"), _("No extended regions found in this view."));
+            else
+               iRun = 1;
+            Destroy_MVIEW(View);
+         } else if (iRun == 1) {
+
+
+            // --- Create the Dialogue ---
+
+            hDGW = Create_DGW("VIEWRENEXTCLIP2");
+
+            hLST = GetList_DGW(hDGW,_VIEWRENEXTCLIP2_0);
+            View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+            ExtClipPLYList_MVIEW(View,hLST);
+            Sort_LST(hLST,0,0);
+
+            GetString_SYS("VIEWRENEXTCLIP","NAME",sName);
+            iClipRegion = iFindItem_LST(hLST, 0, sName);
+            if(iClipRegion==-1) {
+               GetItem_LST(hLST,0,0,sName);
+               SetString_SYS("VIEWRENEXTCLIP","NAME",sName);
+            }
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(hDGW,_VIEWRENEXTCLIP2_0,DGW_TEXT,"VIEWRENEXTCLIP","NAME");
+            SetInfoSYS_DGW(hDGW,_VIEWRENEXTCLIP2_1,DGW_TEXT,"VIEWRENEXTCLIP","NEWNAME");
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(hDGW);
+            if (i == -1) Cancel_SYS(); 
+
+            GetInfoSYS_DGW(hDGW,_VIEWRENEXTCLIP2_0,DGW_TEXT,"VIEWRENEXTCLIP","NAME");
+            GetInfoSYS_DGW(hDGW,_VIEWRENEXTCLIP2_1,DGW_TEXT,"VIEWRENEXTCLIP","NEWNAME");
+
+            Destroy_DGW(hDGW);
+
+            GetString_SYS("VIEWRENEXTCLIP","NAME",sName);
+            GetString_SYS("VIEWRENEXTCLIP","NEWNAME",sNewName);
+
+            iClipRegion = -1;
+            for (i = 0; i<iNumExtClipPLY_MVIEW(View); i++) {
+               GetNameExtClipPLY_MVIEW(View,i,sNameComp);
+               if (iStrcmp_STR(sNameComp, sNewName, STR_CASE_TOLERANT) == 0 && iStrcmp_STR(sNameComp, sName, STR_CASE_TOLERANT) != 0) {
+                  iClipRegion = i;
+                  break;
+               }
+            }
+            Destroy_MVIEW(View);
+   
+            if (iClipRegion != -1)
+               DisplayMessage_SYS(_("VIEWRENEXTCLIP"),_("There is already another region by that name!"));
+            else
+               iRun = 99;      
+         } else 
+            Abort_SYS(_("Error processing dialog options"));
+      }
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VIEWRENEXTCLIP","VIEW",sView);
+   GetString_SYS("VIEWRENEXTCLIP","NAME",sName);
+   GetString_SYS("VIEWRENEXTCLIP","NEWNAME",sNewName);
+
+
+   View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+   iClipRegion = -1;
+   for (i = 0; i<iNumExtClipPLY_MVIEW(View); i++) {
+      GetNameExtClipPLY_MVIEW(View,i,sNameComp);
+      if (iStrcmp_STR(sNameComp, sNewName, STR_CASE_TOLERANT) == 0 && iStrcmp_STR(sNameComp, sName, STR_CASE_TOLERANT) != 0) {
+         iClipRegion = i;
+         break;
+      }
+   }
+   if (iClipRegion != -1)
+      Abort_SYS(_("There is already another region by that name!"));
+
+   iClipRegion = -1;
+   for (i = 0; i<iNumExtClipPLY_MVIEW(View); i++) {
+      GetNameExtClipPLY_MVIEW(View,i,sNameComp);
+      if (iStrcmp_STR(sNameComp, sName, STR_CASE_TOLERANT) == 0) {
+         iClipRegion = i;
+         break;
+      }
+   }
+   if (iClipRegion == -1)
+      Abort_SYS(_("Could not find region by that name!"));
+   Destroy_MVIEW(View);
+
+   View = Create_MVIEW(hMAP,sView,MVIEW_WRITEOLD);
+
+   if (iSetExtClipPLY_MVIEW(View, iClipRegion, sNewName, (PLY) 0) == -1)
+      Abort_SYS(_("Error renaming extended region!"));
+
+   // --- Release the map ---
+   Destroy_MVIEW(View);
+   UnLock_EMAP(EMap);
+}

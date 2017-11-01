@@ -1,0 +1,258 @@
+//===========================================================================
+NAME          = "Voxel export to UBC 3D Voxet"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Exports a Geosoft VOXEL into UBC
+
+   EXPUBCVOX.VOXEL:     Voxel File.
+   EXPUBCVOX.UBC:       UBC file
+
+"
+// Revision History:
+// v8.4.0   CRG-523 Use real-world origin coordinates.
+// v7.3.0   Changed workflow to always provide user choice of output voxel, and not always show the voxel viewer.
+// v6.2.0   First version
+//===========================================================================
+
+RESOURCE = "expubcvox.gr"
+#include "expubcvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW  hDGW;   
+VOX  hVOX;
+WA   hWA;
+PG   hPG;
+VV   hVVx;
+VV   hVVy;
+VV   hVVz;
+EDOC hEDOC;
+
+string(STR_FILE) sVoxel,sNew,sUBC,sHead,sData,sTmp,sDummy;
+string(STR_DEFAULT_LONG) sMsg;
+int              i,iLen,iType,iArray,iX,iY,iZ;
+real             rOx,rOy,rOz,rVal;
+real             rDx, rDy, rDz;
+real             rXX, rXY, rXZ, rYX, rYY, rYZ, rZX, rZY, rZZ;
+
+string(64) sLicClass;
+int iArcGIS;
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, _n("ArcGIS"), STR_CASE_TOLERANT) == 0;
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+		// --- Set the defaults from the voxel in the voxel viewer, if present ---
+
+		if (!iArcGIS && iHaveCurrent_EDOC(EDOC_TYPE_VOXEL))
+		{
+			hEDOC = Current_EDOC(EDOC_TYPE_VOXEL);
+			GetName_EDOC(hEDOC, sVoxel);				
+			
+			FileNamePart_STR(sVoxel, sNew, STR_FILE_PART_NAME);
+			FileExt_STR(sNew, "msh", sNew, FILE_EXT_FORCE);
+			SetString_SYS("EXPUBCVOX", "VOXEL", sVoxel);				
+			SetString_SYS("EXPUBCVOX", "UBC", sNew);				
+		}
+
+
+	   // --- Create the Dialogue ---
+
+	   hDGW = Create_DGW("EXPUBCVOX");
+
+	     
+	   // --- Set any Defaults ---
+
+	   SetInfoSYS_DGW(hDGW,_EXPUBCVOX_0,DGW_FILEPATH,"EXPUBCVOX","VOXEL");     
+	   SetInfoSYS_DGW(hDGW,_EXPUBCVOX_1,DGW_FILEPATH,"EXPUBCVOX","UBC");     
+	   SetInfoSYS_DGW(hDGW,_EXPUBCVOX_2,DGW_TEXT,"EXPUBCVOX","DUMMY");     
+	     
+	   // --- Run the Dialogue ---
+
+	   i = iRunDialogue_DGW(hDGW);
+	   if (i == -1) Cancel_SYS();    // The user hit cancel
+
+	     
+	   // --- Get the Strings ---
+
+	   GetInfoSYS_DGW(hDGW,_EXPUBCVOX_0,DGW_FILEPATH,"EXPUBCVOX","VOXEL");     
+	   GetInfoSYS_DGW(hDGW,_EXPUBCVOX_1,DGW_FILEPATH,"EXPUBCVOX","UBC");     
+	   GetInfoSYS_DGW(hDGW,_EXPUBCVOX_2,DGW_TEXT,"EXPUBCVOX","DUMMY");     
+	     
+	     
+	   // --- Destroy the Dialogue ---
+
+	   Destroy_DGW(hDGW);
+	}
+        
+   
+   // --- Get and verify parameters ---
+
+   GetString_SYS("EXPUBCVOX","VOXEL",sVoxel);
+   GetString_SYS("EXPUBCVOX","UBC",sUBC);
+   GetString_SYS("EXPUBCVOX","DUMMY",sDummy);
+   
+   
+   // --- Generate Names ---
+   
+   FileExt_STR(sUBC,".msh",sHead,FILE_EXT_FORCE);
+   FileExt_STR(sUBC,".mod",sData,FILE_EXT_FORCE);
+   
+   
+   // --- Create VV's ---
+   
+   hVVx = CreateExt_VV(GS_DOUBLE,0);
+   hVVy = CreateExt_VV(GS_DOUBLE,0);
+   hVVz = CreateExt_VV(GS_DOUBLE,0);
+   
+   
+   // --- Progress ---
+   
+   Progress_SYS(1);
+   
+   
+   // --- Open the Voxel ---
+   
+   hVOX = Create_VOX(sVoxel);
+   
+   
+   // --- Get Voxel Information ---
+   
+   GetInfo_VOX(hVOX,iType,iArray,iX,iY,iZ);
+   
+   
+   // --- Get the point a the top of the model (Z is top in the UBC model) ---
+	// --- First, get the location of the origin in real-world coords. Note that the MSH definition
+	//     cannot handle rotated voxels, so the vectors are of little use. ---
+
+	GetRealLocation_VOX(hVOX, rOx, rOy, rOz, rXX, rXY, rXZ, rYX, rYY, rYZ, rZX, rZY, rZZ);
+
+
+	// --- Warn about export of rotated voxels ---
+
+	if(rXX < 0.9999 || rYY < 0.9999 || rZZ < 0.9999)
+	{
+		Strcpy_STR(sMsg, _("The UBC MOD/MSH format does not support rotated voxels; the origin will be correct but the rotation will be lost.\n\nDo you wish to continue?"));
+		if(iDisplayQuestion_SYS(_("Export a Geosoft Voxel to UBC MSH/MOD"), sMsg) == 0)
+			Cancel_SYS();
+	}
+
+
+   // --- Get the cells sizes (and the origin of the voxel in voxel coords, not what we want) ---
+
+   GetLocation_VOX(hVOX,rVal,rVal,rVal,hVVx,hVVy,hVVz);
+   
+   
+   // --- Update the UBC Origins since they are the cell edge. First get the bottom corner point.
+	//     We DO handle any rotations here just in case it is supported in the future. ---
+   
+	rDx = rGetReal_VV(hVVx,0);
+	rDy = rGetReal_VV(hVVy,0);
+	rDz = rGetReal_VV(hVVz,0);
+
+   rOx -= (rDx * rXX + rDy * rYX + rDz * rZX) / 2.0;
+   rOy -= (rDx * rXY + rDy * rYY + rDz * rZY) / 2.0;
+	rOz -= (rDx * rXZ + rDy * rYZ + rDz * rZZ) / 2.0;
+
+
+	// --- Now go up the edge to the top ---
+	
+   iLen = iLength_VV(hVVz);
+	for(i = 0; i<iLen; i++)
+	{
+		rDz = rGetReal_VV(hVVz, i);
+		rOx += rZX * rDz;
+		rOy += rZY * rDz;
+		rOz += rZZ * rDz;
+	}
+
+   
+   // --- Create the Header file ---
+   
+   hWA = Create_WA(sHead,WA_NEW);
+
+
+   // --- Location ---
+   
+   FormatI_STR(iX,sTmp,20); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatI_STR(iY,sTmp,20); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatI_STR(iZ,sTmp,20); Puts_WA(hWA,sTmp); 
+   NewLine_WA(hWA);
+   
+   FormatReal_STR(rOx,sTmp,FORMAT_SIG_DIG,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rOy,sTmp,FORMAT_SIG_DIG,20,10); Puts_WA(hWA,sTmp); Puts_WA(hWA," ");
+   FormatReal_STR(rOz,sTmp,FORMAT_SIG_DIG,20,10); Puts_WA(hWA,sTmp);
+   NewLine_WA(hWA);
+   
+   
+   // --- Cell Sizes ---
+ 
+   
+   iLen = iLength_VV(hVVx);
+   for (i=0;i<iLen;i++) 
+   { 
+      rVal = rGetReal_VV(hVVx,i);
+      FormatReal_STR(rVal,sTmp,FORMAT_SIG_DIG,20,10); 
+      Puts_WA(hWA,sTmp); 
+      Puts_WA(hWA," ");
+   }
+   NewLine_WA(hWA);
+   
+   iLen = iLength_VV(hVVy);
+   for (i=0;i<iLen;i++) 
+   { 
+      rVal = rGetReal_VV(hVVy,i);
+      FormatReal_STR(rVal,sTmp,FORMAT_SIG_DIG,20,10); 
+      Puts_WA(hWA,sTmp); 
+      Puts_WA(hWA," ");
+   }
+   NewLine_WA(hWA);
+   
+   // --- Write Z backwards since its reversed in the UBC model ---
+   
+   iLen = iLength_VV(hVVz);
+   for (i=iLen-1;i>=0;i--) 
+   { 
+      rVal = rGetReal_VV(hVVz,i);
+      FormatReal_STR(rVal,sTmp,FORMAT_SIG_DIG,20,10); 
+      Puts_WA(hWA,sTmp); 
+      Puts_WA(hWA," ");
+   }
+   NewLine_WA(hWA);
+   Destroy_WA(hWA);
+   
+   
+
+
+   // --- Write the Properties file ---
+   
+   hWA = Create_WA(sData,WA_NEW);
+   hPG = CreatePG_VOX(hVOX);
+   WriteWA_PG(hPG,hWA,PG_3D_DIR_YXZ,GS_FALSE,GS_FALSE,GS_TRUE,sDummy);
+   Destroy_PG(hPG);
+   Destroy_WA(hWA);
+   
+   
+   // --- Done ---
+   
+   Progress_SYS(0);
+}

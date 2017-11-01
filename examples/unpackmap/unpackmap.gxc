@@ -1,0 +1,115 @@
+//===========================================================================
+NAME          = "Unpack a map"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   UNPACKMAP.MAP       New map name
+   
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+string(STR_MULTI_FILE) sFiles;
+string(STR_MULTI_FILE) sMessage;
+string(STR_MULTI_FILE) sNewDir;
+string(STR_MULTI_FILE) sMapFilePath;
+string(STR_MULTI_FILE) sMapDirPath;
+string(GS_MAX_PATH) sMessageTitle;
+string(STR_MULTI_FILE) sUnpackWarning;
+
+//===========================================================================
+
+{
+	// --- gotta have a map ---
+	
+	if (!iHaveCurrent_EMAP()) Cancel_SYS();
+	
+	
+	// --- get the current map ---
+
+	EMap = Current_EMAP();
+    
+    
+	IGetName_EMAP(EMap,sMapFilePath,sizeof(sMapFilePath));
+	Map = Lock_EMAP(EMap);
+	SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+	
+  
+	
+	// --- Are we interactive ? ---
+	
+	if (iInteractive_SYS())
+	{
+            
+        if (iIs3DView_EMAP(EMap) == 0)
+        {
+            Strcpy_STR(sMessageTitle, _("Unpack Map"));
+            Strcpy_STR(sUnpackWarning, _("The unpack process has detected files [%s] in the workspace directory with the same name as those packed into the map but are not identical. Do you wish to unpack the map and overwrite them ?"));
+        }
+        else
+        {
+            Strcpy_STR(sMessageTitle, _("Unpack 3D View"));
+            Strcpy_STR(sUnpackWarning, _("The unpack process has detected files [%s] in the workspace directory with the same name as those packed into the 3D view but are not identical. Do you wish to unpack the 3D view and overwrite them ?"));
+        }
+
+		  
+		if(iExistString_SYS(_n("UNPACKMAP"),_n("WORKINGDIR"))==1)
+			GtString_SYS(_n("UNPACKMAP"),_n("WORKINGDIR"),sNewDir,sizeof(sNewDir));
+		else
+		{
+			IStrcpy_STR(sMapDirPath,_n(""),sizeof(sMapDirPath));
+			ITransferPath_SYS(sMapFilePath,sMapDirPath,sizeof(sMapDirPath));
+			if(IiBrowseDir_GUI(sMessageTitle,sMapDirPath,sNewDir,sizeof(sNewDir))==1)
+				Cancel_SYS();
+		}
+		
+		// --- Try to do the UnPack ---
+
+		Progress_SYS(1);
+		IUnPackFilesToFolder_MAP(Map,0,sNewDir,sFiles,sizeof(sFiles));
+		Progress_SYS(0);
+				 
+	
+		 // --- Did it work ? ---
+	
+		 if (iStrlen_STR(sFiles)!=0)
+		 {
+			  // --- Ask user if he wants to overwrite ---
+		  
+			  Printf_STR(sMessage, sizeof(sMessage), sUnpackWarning, sFiles);
+		  
+		  
+			  if (iDisplayQuestion_SYS(sMessageTitle, sMessage))
+			  {
+				  // --- Force Unpack the Files ---
+				
+					IUnPackFilesToFolder_MAP(Map,1,sNewDir,sFiles,sizeof(sFiles));
+			  }
+		 }
+		 
+	} else {
+	
+		 // --- Try Save Unpack ---
+	
+		Progress_SYS(1);
+		UnPackFiles_MAP(Map);
+		Progress_SYS(0);
+	}
+	
+	
+   
+   
+   // --- done ---
+
+   UnLock_EMAP(EMap);
+}

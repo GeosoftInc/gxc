@@ -1,0 +1,289 @@
+//===========================================================================
+NAME = "Drill Hole - Refresh Project."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION = "
+
+Re - import the original data to the constituent databases
+in a Wholeplot project by extracting the import templates
+and calling the DHIMPORT GX.
+
+DHREFRESH.OVERWRITE   Create new database(1) or merge / append to existing(0)
+"
+
+//===========================================================================
+// Revision History:
+// v6.4.2: QA 11025 OVERWRITE parameter not being returned.
+// v6.4.0: QA 9860 Error/Cancel termination improved to restored original database.
+// v6.3.0: Fix QA 8073: Merge/Append not working - only did overwrite.
+// v6.0.0: New GX.
+//===========================================================================
+
+RESOURCE = "dhrefresh.gr"
+#include "dhrefresh.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define REFRESH(A) \
+   if(A!=DB_NULL) { \
+      }
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+EDB         EData;         // database handle
+DH          Drill;
+DB          Data;
+DGW         Diag;          // dialogue box
+VV          VVf;
+REG         Reg;
+
+string(STR_FILE) sBackupDB, sDB, sTemplate;
+string(2048) sMsg;
+string(STR_FILE)      sProject;
+
+int i, iMXDeposit, iN, iOverwrite, iType, iTemplate, iUnLoaded, iInteractive, iRet;
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+	// --- Get Drill Hole Object ---
+
+	EData = Current_EDB();
+	GetName_EDB(EData, sDB);
+	Drill = Create_DH(sDB);
+    Reg = GetREG_DH(Drill);
+    
+    iMXDeposit = iGetInt_SYS("DHREFRESH", "MXDEPOSIT_CALLBACK");
+    if (iMXDeposit != 1)
+    {
+        GetInt_REG(Reg, "DH.MXDEPOSIT", iMXDeposit);
+        if (iMXDeposit == 1)
+        {
+            Destroy_SYS(Reg);
+            Destroy_DH(Drill);
+            // The source import will call back into refresh with DHREFRESH.MXDEPOSIT_CALLBACK == 1
+            iRunGX_SYS("geogxnet.dll(Geosoft.GX.DrillHole.MXDeposit.ImportData;RefreshData)");
+            Exit_SYS();
+        }
+		else
+		{
+			iMXDeposit = 0;
+		}
+        iInteractive = iInteractive_SYS();
+        if (iInteractive)
+        {
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("DHREFRESH");
+
+
+            // --- Set any Defaults ---
+
+            SetInfoSYS_DGW(Diag, _DHREFRESH_0, DGW_LISTALIAS, "DHREFRESH", "OVERWRITE");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+            // --- Get the Strings ---
+
+            GetInfoSYS_DGW(Diag, _DHREFRESH_0, DGW_LISTALIAS, "DHREFRESH", "OVERWRITE");
+
+
+            // --- Destroy the Dialogue ---
+
+            Destroy_DGW(Diag);
+
+        }
+    }
+
+    // --- Get and verify parameters ---
+
+    if (iMXDeposit)
+    {
+        iOverwrite = 1;      // overwrite by default
+        SetInt_SYS("DHREFRESH", "MXDEPOSIT_CALLBACK", 0); // Next run will resume normal path
+    }
+    else
+    {
+        iOverwrite = iGetInt_SYS("DHREFRESH", "OVERWRITE");
+        if (iOverwrite != 0) iOverwrite = 1;      // overwrite by default
+    }
+    
+    Destroy_SYS(Reg);
+    
+
+	// --- Get the databases in the drill project. They
+	//     are always returned in the "desired" order:
+	//     Collar, Dip-Az Survey, EN Survey, Assay-type databases.
+
+	VVf = Create_VV(-STR_FILE, 0);
+	GetDatabasesSortedVV_DH(Drill, VVf);
+
+	// --- Get the project name ---
+
+	GetProjectName_DH(Drill, sProject);
+
+	Destroy_DH(Drill);
+
+
+	// --- For each constituent database, get the template and call the import ---
+
+	Progress_SYS(1);
+	Strcpy_STR(sTemplate, "_refresh.tmp");
+
+	iUnLoaded = 0;
+	iN = iLength_VV(VVf);
+	for (i = 0; i < iN; i++) {
+
+		GetString_VV(VVf, i, sDB);
+		EData = Load_EDB(sDB);
+		Data = Lock_EDB(EData);
+
+		iTemplate = iGetTemplateBlob_DH(Data, sTemplate, iType);
+		UnLock_EDB(EData);
+
+		if (iTemplate) {
+
+			// --- Set the DHIMPORT.GX script parameters ---
+
+			SetInt_SYS("DHIMPORT", "OVERWRITE", iOverwrite);
+			SetInt_SYS("ACQIMPORT", "OVERWRITE", iOverwrite);
+			SetInt_SYS("DHIMPORT", "IMPTYPE", iType);
+			SetInt_SYS("DHIMPORT", "LOG", 1);     // force log file display
+			if (iType == 0)
+				SetString_SYS("DHIMPASC", "TEMPLATE", sTemplate);
+			else if (iType == 1)
+				SetString_SYS("DHIMPDB", "TEMPLATE", sTemplate);
+			else if (iType == 2)
+				SetString_SYS("DHIMPODBC", "TEMPLATE", sTemplate);
+			else if (iType == 4)
+			{
+				SetString_SYS("ACQIMPORT", "PARFILE", sTemplate);
+				SetString_SYS("ACQIMPORT", "PROJECT", sProject);
+			}
+
+
+			// --- Copy the database to temp file, so if any error occurs, the original will be restored ---         
+
+			TempFileExt_SYS("gdb", sBackupDB);
+			UnLoad_EDB(sDB);
+			if (iCopyFile_SYS(sDB, sBackupDB))
+			{
+				Printf_STR(sMsg, sizeof(sMsg), _("Refresh ended because a backup copy of the database \"%s\" could not be created prior to the refresh operation."), sDB);
+				Abort_SYS(sMsg);
+			}
+			Load_EDB(sDB);
+
+			SetInteractive_SYS(0);
+			if (iType == 4)
+				iRet = iRunGX_SYS("acqhole.gx");
+			else
+				iRet = iRunGX_SYS("dhimport.gx");
+			SetInteractive_SYS(iInteractive);
+
+
+			// --- If an error occurred, or the user cancelled, restore/replace the original database with
+			//     the backup copy. ---
+
+			if (iRet != 0)
+			{
+				if (iFileExist_SYS(sDB))
+				{
+					if (iLoaded_EDB(sDB))
+					{
+						UnLoad_EDB(sDB);
+						if (iDeleteFile_SYS(sDB) == 1)
+						{
+							Printf_STR(sMsg, sizeof(sMsg), _("Unable to restore the original database \"%s\" after cancel/error detected because the original database could not be deleted."), sDB);
+							iDeleteFile_SYS(sBackupDB);
+							Abort_SYS(sMsg);
+						}
+					}
+				}
+				if (iCopyFile_SYS(sBackupDB, sDB))
+				{
+					Printf_STR(sMsg, sizeof(sMsg), _("Unable to restore the original database from the backup database \"%s\" after cancel/error detected during the refresh."), sDB);
+					iDeleteFile_SYS(sBackupDB);
+					Abort_SYS(sMsg);
+				}
+
+
+				// --- Delete the backup database and reload the copied original. ---
+
+				iDeleteFile_SYS(sBackupDB);
+
+
+				Load_EDB(sDB);
+
+				Printf_STR(sMsg, sizeof(sMsg), _("Unable to refresh the database \"%s\" after cancel/error detected during the refresh. The original version has been restored."), sDB);
+				Abort_SYS(sMsg);
+			}
+			else
+				iDeleteFile_SYS(sBackupDB);
+
+			if (iType == 4)
+				break;
+		}
+		else {
+			SetString_VV(VVf, iUnLoaded, sDB);
+			iUnLoaded++;
+		}
+	}
+
+	SetInteractive_SYS(iInteractive);
+	Progress_SYS(0);
+
+
+	// --- Clean up ---
+
+	iDeleteFile_SYS(sTemplate);
+
+
+	// --- Announce results ---
+
+	if (iScript_SYS() != 1)
+	{
+		if (iUnLoaded) {
+			if (iUnLoaded == 1) {
+				Strcpy_STR(sMsg, _("The following database:\r\n\r\n"));
+			}
+			else {
+				Strcpy_STR(sMsg, _("The following databases:\r\n\r\n"));
+			}
+			for (i = 0; i < iUnLoaded; i++) {
+				GetString_VV(VVf, i, sDB);
+				Strcat_STR(sMsg, sDB);
+				Strcat_STR(sMsg, "\r\n");
+			}
+			Strcat_STR(sMsg, _("could not be refreshed, either because they were not created\r\nusing the ASCII/XLS/Database/ODBC import, or because they were\r\ncreated before the latest version of the software.\r\nIf the latter is true, import manually using the specific wizard\r\nand the databases will be set up properly for automatic refresh."));
+		}
+		else {
+			Strcat_STR(sMsg, _("The following databases were refreshed:\r\n\r\n"));
+			for (i = 0; i < iN; i++) {
+				GetString_VV(VVf, i, sDB);
+				Strcat_STR(sMsg, sDB);
+				if (i < iN - 1)
+					Strcat_STR(sMsg, "\r\n");
+			}
+			Strcat_STR(sMsg, ".");
+		}
+		DisplayMessage_SYS(_("Refresh Drill Project"), sMsg);
+	}
+}

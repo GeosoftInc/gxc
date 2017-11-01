@@ -1,0 +1,692 @@
+//===========================================================================
+NAME          = "Create a box plot of assay values"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis/GeochemUtilities"
+
+DESCRIPTION   = "
+
+      Create a box plot of assay values. A box plot shows the min, max, 25%,
+      50% and 75% quartiles, and, optionally, the median value.
+
+Parameters:
+
+CHBOXPLOT.SUFFIX  : Suffix added to the original database name for the
+                       new database name.
+CHBOXPLOT.CATCHAN : Channel containing the categorization classes.
+CHBOXPLOT.LEVEL   : Levelling method
+                  0: Subtract mean
+                  1: Subtract median
+                  2. Subtract mode
+                  3. Subtract geometric mean (log mean)
+"
+// Revision History:
+// v7.2: Fixed for non-categorized items.
+// v6.3.0: New GX.
+//===========================================================================
+
+RESOURCE = "CHBOXPLOT.gr"
+#include "CHBOXPLOT.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+DB_SYMB    Ch, ClassCh;
+DGW   Diag;
+LST   ChLST, LineLST, List; 
+VV    VVc, VVcl, VVcn, VVd, VVd2, VVdata, VVdr, VVfs, VVfi, VVind, VVl, VVn, VVnd, VVsi, VVt, VVtd;
+ST    St;
+EMAP  EMap;
+MAP   Map;
+MVIEW View;
+
+string(STR_DEFAULT_LONG) sMsg;
+string(STR_DEFAULT) sClass, sLog, sVal;
+string(STR_DB_SYMBOL) sCh, sClassCh;
+string(STR_FILE) sCurDB, sMap, sDir, sName;
+string(STR_VIEW) sViewName;
+
+int i, iCh, iPrev, iNChans, iN, iNLines, iNProg, iPlotMean, iProg, iStart, iNBars;
+int iNClasses, iNData, iRet, iInteractive, iType, iPow, iScaling, isSingleValued, iPlotUncategorizedData, iIsUncategorizedData;
+
+real rHeight, rWidth, rMin, rMax, rMean, rFirst, rSecond, rThird;
+real rAbsMin, rAbsMax, rInc, rPlus, rRange, rScaleY, rX, rX0, rX1, rX2, rY0, rY1;
+real rTextY, rAxisMin, rAxisMax, rSingleValue, rY, rYVal, rMinPos;
+
+//===========================================================================
+//                           CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   GetName_EDB(EData, sCurDB);
+   Data = Lock_EDB(EData);
+   
+   //--- See if any assay channels are in the database ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   ClassChanLST_DB(Data, ChLST, "ASSAY");
+   SelectedLineLST_DB(Data, LineLST);
+   
+   iNChans = iSize_LST(ChLST);   
+   if(iNChans==0) 
+      Abort_SYS(_("No ASSAY class channels were found in the current database."));
+      
+   iNLines = iSize_LST(LineLST);
+   if(iNLines==0)
+      Abort_SYS(_("There are no lines selected in the current database."));
+      
+
+   // --- Are we running interactively ? ---
+
+   iInteractive = iInteractive_SYS();
+   if (iInteractive) 
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHBOXPLOT");
+      
+      List = GetList_DGW(Diag,_CHBOXPLOT_0);      
+      Copy_LST(List, ChLST);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_CHBOXPLOT_1);      
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      SetInfoSYS_DGW(Diag,_CHBOXPLOT_0, DGW_TEXT, "CHBOXPLOT", "ASSAY");
+      SetInfoSYS_DGW(Diag,_CHBOXPLOT_1, DGW_TEXT, "CHBOXPLOT", "CATCHAN");
+      SetInfoSYS_DGW(Diag,_CHBOXPLOT_2, DGW_LISTALIAS, "CHBOXPLOT", "PLOTMEAN");
+      SetInfoSYS_DGW(Diag,_CHBOXPLOT_3, DGW_TEXT, "CHBOXPLOT", "BOXWIDTH");
+      SetInfoSYS_DGW(Diag,_CHBOXPLOT_4, DGW_TEXT, "CHBOXPLOT", "BOXHEIGHT");
+      SetInfoSYS_DGW(Diag,_CHBOXPLOT_5, DGW_LISTALIAS, "CHBOXPLOT", "SCALING");
+      SetInfoSYS_DGW(Diag,_CHBOXPLOT_6, DGW_LISTALIAS, "CHBOXPLOT", "PLOT_UNCATEGORIZED");
+
+      iRet = iRunDialogue_DGW(Diag);
+      if(iRet==-1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_CHBOXPLOT_0, DGW_TEXT, "CHBOXPLOT", "ASSAY");
+      GetInfoSYS_DGW(Diag,_CHBOXPLOT_1, DGW_TEXT, "CHBOXPLOT", "CATCHAN");
+      GetInfoSYS_DGW(Diag,_CHBOXPLOT_2, DGW_LISTALIAS, "CHBOXPLOT", "PLOTMEAN");
+      GetInfoSYS_DGW(Diag,_CHBOXPLOT_3, DGW_TEXT, "CHBOXPLOT", "BOXWIDTH");
+      GetInfoSYS_DGW(Diag,_CHBOXPLOT_4, DGW_TEXT, "CHBOXPLOT", "BOXHEIGHT");
+      GetInfoSYS_DGW(Diag,_CHBOXPLOT_5, DGW_LISTALIAS, "CHBOXPLOT", "SCALING");
+      GetInfoSYS_DGW(Diag,_CHBOXPLOT_6, DGW_LISTALIAS, "CHBOXPLOT", "PLOT_UNCATEGORIZED");
+
+      Destroy_DGW(Diag);
+   }
+   
+   
+   // --- Get and Validate parameters ---
+
+   GetString_SYS("CHBOXPLOT","ASSAY",sCh);
+   if(!iStrlen_STR(sCh))
+      Abort_SYS(_("No assay channel was defined."));
+            
+   GetString_SYS("CHBOXPLOT","CATCHAN",sClassCh);
+   if(!iStrlen_STR(sClassCh))
+      Abort_SYS(_("No categorization channel was defined."));
+   
+   GetString_SYS("CHBOXPLOT","MAP_DIR",sDir);
+   if(!iStrlen_STR(sDir))
+      Strcpy_STR(sDir, "");
+      
+   iPlotMean = iGetInt_SYS("CHBOXPLOT", "PLOTMEAN");
+   if(iPlotMean!=0) iPlotMean = 1;
+   
+   rWidth = rGetReal_SYS("CHBOXPLOT","BOXWIDTH");
+   if(rWidth==rDUMMY || rWidth<=0.0)
+      Abort_SYS(_("Box width is less than zero or undefined."));
+        
+   rHeight = rGetReal_SYS("CHBOXPLOT","BOXHEIGHT");
+   if(rHeight==rDUMMY || rHeight<=0.0)
+      Abort_SYS(_("Box height is less than zero or undefined."));
+   
+   rPlus = rWidth*0.15;    // (half) plus size
+   
+   iScaling = iGetInt_SYS("CHBOXPLOT", "SCALING");
+   if (iScaling == iDUMMY) iScaling = 0;  // Use linear scaling by default
+   
+   iPlotUncategorizedData = iGetInt_SYS("CHBOXPLOT", "PLOT_UNCATEGORIZED");
+   if(iPlotUncategorizedData == iDUMMY) iPlotUncategorizedData = 0;
+   
+ 
+    // --- Classification channel cannot be in the assay channel list ---
+   
+   if(iFindItem_LST(ChLST, 0, sClassCh)!=-1)
+      Abort_SYS(_("You cannot use a selected assay channel as the classification channel."));
+
+
+
+   // --- Classification channel ---
+   
+   ClassCh = FindChan_DB(Data, sClassCh);
+   if(ClassCh==NULLSYMB) {
+      Printf_STR(sMsg, sizeof(sMsg), _("Unable to locate classification channel %s."), sClassCh);
+      Abort_SYS(sMsg);
+   }
+
+   
+   // --- Reset the LST ---
+   
+   Clear_LST(ChLST);
+   
+   Ch = FindChan_DB(Data, sCh);
+   if(Ch==NULLSYMB)
+      Abort_SYS(_("Unable to find the assay channel."));
+      
+	// --- Get default scaling ---
+	
+	if(iScaling == -1)
+	{
+		LOCK_R(Data, Ch);
+		GetRegSymbSetting_DB(Data, Ch, "LOG", sLog, sizeof(sLog));
+		if(iStrcmp_STR(sLog, _n("Yes"), STR_CASE_TOLERANT)==0)
+			iScaling = 1;
+		else
+			iScaling = 0;
+	}      
+      
+  
+   // --- Add the assay channel(s) and categorization channel to the LST ---
+   
+   iNChans = 1;
+   AddSymbItem_LST(ChLST, sCh, Ch);
+   AddSymbItem_LST(ChLST, sClassCh, ClassCh);
+   
+   
+   // --- Get class chan type ---
+   
+   LOCK_R(Data, ClassCh);
+   iType = iGetChanType_DB(Data, ClassCh);
+   UNLOCK(Data, ClassCh);
+   
+   
+   // --- Set up VVs ---
+   
+   VVt = Create_VV(INT, iNChans+1);
+   SetIntN_VV(VVt, 0, -1, 0);
+   
+   VVdr = Create_VV(INT, iNChans+1); // not used
+   
+   VVd = Create_VV(INT, iNChans+1);
+   for(i=0;i<iNChans;i++)
+   {
+      SetInt_VV(VVd, i, (int)Create_VV(REAL, 0));
+   }
+   
+   VVc = CreateExt_VV(iType, 0);
+   SetInt_VV(VVd, iNChans, (int)VVc);
+   
+   VVl = Create_VV(INT, 0);
+   VVn = Create_VV(INT, 0);
+   VVnd = Create_VV(INT, 0);
+   VVind = Create_VV(INT, 0);
+   VVfs = Create_VV(REAL, 0);
+   VVfi = Create_VV(REAL, 0);
+   
+	GetLithogeochemData_CHIMERA(Data, ChLST, NULLSYMB, VVt, 0, VVdr, 0, VVd, VVl, VVn, VVnd, VVind, VVfs, VVfi);
+   UnLock_EDB(EData);
+                    
+   
+   
+   // --- All the data will be sorted based on the classes ---
+   
+   iNData = iLength_VV(VVc);
+   VVsi = Create_VV(INT, iNData);  
+   InitIndex_VV(VVsi, -1);
+              
+              
+                    
+   // ---  Find out how many classes there are first. ---
+   
+   VVcl = CreateExt_VV(iType, 0);       // temp classification data
+   VVcn = Create_VV(INT, iNData);  // max size possible
+   Copy_VV(VVcl, VVc);
+   SortIndex_VV(VVcl, VVsi);        // Sorts both classes and index
+   IndexOrder_VV(VVsi, VVcl);
+   
+   
+   // --- Find the first non-empty string. All the values not including the first string are single class ---
+      
+   iIsUncategorizedData  = 0;
+   i = iFindDummy_VVU(VVcl, 0, 1, 0, iNData-1);
+   if(i>0)
+	{
+		SetString_VV(VVcl, i-1, "(none)");
+		iIsUncategorizedData = 1;
+	}
+   
+   DummyRepeat_VVU(VVcl, VVU_DUMMYREPEAT_LAST);
+   
+   iNClasses = 0;
+   iPrev = -1;
+   i = iFindDummy_VVU(VVcl, 0, 1, 0, iNData-1);
+   while(i!=-1)
+   {
+      GetString_VV(VVcl, i, sClass);
+      SetInt_VV(VVcn, iNClasses, i-iPrev);
+      iNClasses++;
+      iPrev = i;
+      if(i==iNData-1) break;
+      i = iFindDummy_VVU(VVcl, 0, 1, i+1, iNData-1);
+   }
+   RemoveDummy_VVU(VVcl);
+   
+   
+   // --- Determine the plot size and location in mm. ---
+   
+   iNBars = iNClasses;
+   if(iIsUncategorizedData && iPlotUncategorizedData==0)
+		iNBars--;
+		
+   rX0 = 10.0;
+   rX1 = rX0 + (real)iNBars*rWidth + (real)(iNBars+1)*rWidth/2.0;
+   rY0 = 10.0;
+   rY1 = 10.0 + rHeight;
+   
+                    
+   St = CreateExact_ST();
+
+   VVd2 = Create_VV(REAL, 0);
+   VVdata = Create_VV(REAL, 0);
+   
+   iNProg = iNClasses*iNChans;
+   iProg = 0;
+   
+   Progress_SYS(1);
+   ProgName_SYS(_("Plotting"),1);
+   
+   for(iCh=0;iCh<iNChans;iCh++) {
+
+
+      Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, iCh);     
+      GetItem_LST(ChLST, 0, iCh, sCh);
+      
+      Strcpy_STR(sMsg, _("Plotting: "));
+      Strcat_STR(sMsg, sCh);
+      ProgName_SYS(sMsg, 0);
+      
+      VVtd = (VV)iGetInt_VV(VVd, iCh);
+
+
+      
+      
+      // --- Get a copy of the original data, and sort it based on the classes ---
+      
+      Copy_VV(VVd2, VVtd);
+      IndexOrder_VV(VVsi, VVd2);
+      
+      
+      // --- Create a new map ---
+
+      Strcpy_STR(sName, "BoxPlot_");
+      Strcat_STR(sName, sCh);
+		FileCombineParts_STR("", sDir, sName, "map", "", sMap);
+      
+      if(iFileExist_SYS(sMap))
+      {
+         if(iLoaded_EMAP(sMap))
+            UnLoad_EMAP(sMap);
+         if(iDeleteFile_SYS(sMap))
+         {
+            Printf_STR(sMsg, sizeof(sMsg), _("Unable to delete existing file %s."), sMap);
+            Abort_SYS(sMsg);
+         }
+      }
+      Map = Create_MAP(sMap, MAP_WRITENEW);
+
+
+      // --- Create a new data view ---
+  
+      Strcpy_STR(sViewName, "BoxPlot_");
+      Strcat_STR(sViewName, sCh);
+   
+      View = Create_MVIEW(Map,sViewName,MVIEW_WRITENEW);
+
+      StartGroup_MVIEW(View, sCh, MVIEW_GROUP_NEW);
+      
+      
+      // --- Get full range of the data ---
+      
+      Reset_ST(St);
+      DataVV_ST(St, VVd2);
+      
+      if(iScaling == 0)
+			rAbsMin = rGetInfo_ST(St, ST_MIN);
+		else
+			rAbsMin = rGetInfo_ST(St, ST_MINPOS);
+			
+      rAbsMax = rGetInfo_ST(St, ST_MAX);
+            
+		if (iScaling == 0)
+		{	
+	      if(rAbsMin==rDUMMY) 
+		   {
+	         rAbsMin = 0.0;
+		      rAbsMax = 1.0;
+		   }
+		}
+		else
+		{
+	      if(rAbsMin==rDUMMY || rAbsMax <= 0.0) 
+		   {
+				rAbsMin = 0.1;
+				rAbsMax = 1.0;
+			}
+      }
+      
+      
+      // --- Add 1% ---
+      
+		rRange = rAbsMax - rAbsMin;
+		isSingleValued = 0;
+		if (rRange == 0.0)
+		{
+			isSingleValued = 1;
+			rSingleValue = rAbsMin;
+			rRange = 1.0;
+		}
+		
+      if(iScaling == 0)
+		{
+			rAbsMin -= 0.005*rRange;
+			rAbsMax += 0.005*rRange;
+			NicerScale_MATH(rAbsMin, rAbsMax, rInc, iPow); 
+			rAxisMin = rAbsMin;
+			rAxisMax = rAbsMax;          
+		}
+		else
+		{
+			rRange = rLog10_MATH(rRange);
+			rAbsMin = rPow_MATH(10.0, rLog10_MATH(rAbsMin) - 0.005*rRange);
+			rAbsMax = rPow_MATH(10.0, rLog10_MATH(rAbsMax) + 0.005*rRange);
+			NicerLogScale_MATH(rAbsMin, rAbsMax, 1);
+			rAxisMin = rLog10_MATH(rAbsMin);
+			rAxisMax = rLog10_MATH(rAbsMax);
+		}
+      
+
+      // --- Set up the plot scaling ---
+      
+		FitWindow_MVIEW(View, rX0, rY0, rX1, rY1, rX0, rAxisMin, rX1, rAxisMax);
+		
+      rScaleY = rScaleYMM_MVIEW(View);
+      rTextY = rAxisMin - 1.0*rScaleY;
+      TextSize_MVIEW(View, rWidth*0.5);
+      
+      
+      // --- Plot box ---
+      
+		Rectangle_MVIEW(View, rX0, rAxisMin, rX1, rAxisMax);
+
+
+      // --- Left side axis and labels ---
+      
+      if (iScaling == 0)
+      {      
+	      AxisY_MVIEW(View, rX0, rAbsMin, rAbsMax, rInc, rInc/2.0, 1.0);
+		   LabelY_MVIEW(View, rX0-1.0, rAbsMin, rAbsMax, rInc, MVIEW_LABEL_JUST_RIGHT, MVIEW_LABEL_BOUND_NO, MVIEW_LABEL_ORIENT_HORIZONTAL);
+		}
+		else
+		{
+	      TextRef_MVIEW(View, TEXT_REF_MIDDLE_RIGHT);
+		
+			rInc = 1.0e-10;
+			while(10.0 * rInc<rAbsMin)
+				rInc *= 10.0;
+			
+			rYVal = rInc;
+			while(rYVal <= rAbsMax)
+			{
+				if(rYVal >= rAbsMin)
+				{
+					rY = rLog10_MATH(rYVal);
+					FormatR_STR(rYVal, sVal, 5, 2);
+					if(rYVal == rInc)
+					{
+						Line_MVIEW(View, rX0, rY, rX0 + 1.0, rY);						
+						Text_MVIEW(View, sVal, rX0 - 1.0, rY);
+					}
+					else
+					{
+						Line_MVIEW(View, rX0, rY, rX0 + 0.5, rY);
+						if(rRange <= 1.0)
+							Text_MVIEW(View, sVal, rX0 - 1.0, rY);
+					}
+				}
+				rYVal += rInc;
+				if(rYVal>9.9*rInc)
+				{
+					rInc *= 10.0;
+					rYVal = rInc;
+				}
+			}
+		}
+
+
+      // --- Title ---
+      
+      TextSize_MVIEW(View, rWidth*0.75);
+      TextRef_MVIEW(View, TEXT_REF_BOTTOM_CENTER);
+      Text_MVIEW(View, sCh, 0.5*(rX0+rX1), rAxisMax + 3.0*rScaleY);      
+
+
+      // --- Text for bottom labels ---
+      
+      TextSize_MVIEW(View, rWidth*0.5);
+      TextAngle_MVIEW(View, 90.0);
+
+
+      // --- Plot zero line if it is there ---
+      
+      if(rAbsMin<0.0 && rAbsMax>0.0) 
+      {
+         LineStyle_MVIEW(View, 3, 2.0);
+         Line_MVIEW(View, rX0, 0.0, rX1, 0.0);
+         LineStyle_MVIEW(View, 1, 0.0);
+      }
+      
+      
+      // --- Go through the classes ---
+      
+      iStart = 0;
+      rX = rX0;
+      rX += rWidth;     // horizontal center of box
+      
+      for(i=0;i<iNClasses;i++)
+      {
+            
+         GetString_VV(VVcl, i, sClass);   
+
+			
+			// --- Get the number of values ---
+			         
+         iN = iGetInt_VV(VVcn, i);
+         
+         if(iIsUncategorizedData  && iPlotUncategorizedData == 0)
+         {
+				if(iStrcmp_STR(sClass, "(None)", STR_CASE_TOLERANT)==0)
+				{
+		         iStart += iN;
+					continue;
+				}
+         }
+                 
+         
+         // --- Reset the stats ---
+          
+         Reset_ST(St);
+          
+          
+         // --- Get the data for this class and do the statistics ---
+          
+         SetLen_VV(VVdata, iN);
+         Copy2_VV(VVdata, 0, VVd2, iStart, iN);           
+         DataVV_ST(St, VVdata);
+           
+           
+         // --- Get all the stats ---
+          
+			rMin = rGetInfo_ST(St, ST_MIN);
+			rMinPos = rGetInfo_ST(St, ST_MINPOS);
+         rMax = rGetInfo_ST(St, ST_MAX);
+         rFirst = rEquivalentValue_ST(St, 25.0);
+         rSecond = rEquivalentValue_ST(St, 50.0);
+         rThird = rEquivalentValue_ST(St, 75.0);
+         
+         if (iScaling == 1 && rMinPos != rDUMMY)
+         {
+				if(rMin <= rAbsMin)
+					rMin = rAbsMin;
+				rMin = rLog10_MATH(rMin);
+				
+				rMax = rLog10_MATH(rMax);
+				if(rFirst < rAbsMin)
+					rFirst = rAbsMin;
+				rFirst = rLog10_MATH(rFirst);
+				if(rSecond < rAbsMin)
+					rSecond = rAbsMin;
+				rSecond = rLog10_MATH(rSecond);
+				if (rThird < rAbsMin)
+					rThird = rAbsMin;
+				rThird = rLog10_MATH(rThird);
+			}
+          
+         
+         // --- Plot the Box ---
+         
+         rX1 = rX-0.5*rWidth;
+         rX2 = rX+0.5*rWidth;
+         
+         
+         // --- No valid data? ---
+         
+         if(iScaling==1 && rMinPos == rDUMMY)
+         {
+            TextRef_MVIEW(View, TEXT_REF_MIDDLE_CENTER);
+				TextSize_MVIEW(View, rWidth*0.25);
+            Text_MVIEW(View, _("No positive data"), rX, 0.5*(rAxisMin+rAxisMax));         
+         }
+         else if(iScaling==0 && rMin==rDUMMY) 
+         {         
+            TextRef_MVIEW(View, TEXT_REF_MIDDLE_CENTER);
+				TextSize_MVIEW(View, rWidth*0.25);
+            Text_MVIEW(View, _("No valid data"), rX, 0.5*(rAxisMin+rAxisMax));         
+         }
+         else if (isSingleValued == 1)
+			{
+            TextRef_MVIEW(View, TEXT_REF_MIDDLE_CENTER);
+				TextSize_MVIEW(View, rWidth*0.25);
+            Text_MVIEW(View, _("Single valued data"), rX, 0.5*(rAxisMin+rAxisMax));         
+			}
+         else 
+         {                        
+            // --- Horizontal lines ---
+            
+            LineColor_MVIEW(View, C_BLACK);
+            if(rMin!=rDUMMY)
+					Line_MVIEW(View, rX1, rMin, rX2, rMin);
+            if(rFirst!=rDUMMY)
+	            Line_MVIEW(View, rX1, rFirst, rX2, rFirst);
+            if(rSecond!=rDUMMY)
+	            Line_MVIEW(View, rX1, rSecond, rX2, rSecond);
+            if(rThird!=rDUMMY)
+		         Line_MVIEW(View, rX1, rThird, rX2, rThird);         
+            if(rMax!=rDUMMY)
+	            Line_MVIEW(View, rX1, rMax, rX2, rMax);
+                
+                
+            // --- Vertical lines ---
+            
+            if(rFirst != rDUMMY && rThird!=rDUMMY && rFirst != rThird)
+            {
+					Line_MVIEW(View, rX, rMin, rX, rFirst);
+					Line_MVIEW(View, rX, rMax, rX, rThird);
+	            
+					Line_MVIEW(View, rX1, rFirst, rX1, rThird);
+					Line_MVIEW(View, rX2, rFirst, rX2, rThird);
+				}
+            
+            
+            // --- Mean "+" ---
+            
+            if(iPlotMean)
+            {
+               LineColor_MVIEW(View, C_RED);
+               rMean = rGetInfo_ST(St, ST_MEAN);
+               if (iScaling == 1 && rMean <= 0.0)
+						rMean = rDUMMY;
+						
+               if(rMean != rDUMMY)
+               {
+						if (iScaling == 1)
+							rMean = rLog10_MATH(rMean);
+							
+						Line_MVIEW(View, rX, rMean-rPlus*rScaleY, rX, rMean+rPlus*rScaleY);
+						Line_MVIEW(View, rX-rPlus, rMean, rX+rPlus, rMean);            
+					}
+            }                  
+         }
+
+
+         // --- Bottom label ---
+         
+         TextRef_MVIEW(View, TEXT_REF_MIDDLE_RIGHT);
+			TextSize_MVIEW(View, rWidth*0.5);
+         Text_MVIEW(View, sClass, rX, rTextY);
+         
+         
+         iStart += iN;
+         
+         
+         // --- Move to center of next box ---
+         
+         rX += 1.5*rWidth;
+      }  
+   }            
+
+
+
+   // --- Turn off progress ---
+   
+   Progress_SYS(0);
+
+
+   // --- Save and close the map ---
+   
+   Destroy_MVIEW(View);
+   Destroy_MAP(Map);
+   
+   
+   // --- Set the current view to the new view ---
+   
+   EMap = Load_EMAP(sMap);
+   MakeCurrent_EMAP(EMap);
+   
+   if (iInteractive) {  
+      iChangeCurrentView_EMAP(EMap, sViewName);
+
+      // --- Resize ---
+      
+      DoCommand_SYS("[ID] ID_MEDIT_FULLMAP");
+      DoCommand_SYS("[ID] ID_MEDIT_SHRINK"); // remove once FULLMAP takes text into account.
+   }
+
+   // --- Destroy objects ---
+
+   Destroy_LST(ChLST);
+   Destroy_LST(LineLST);
+   
+}

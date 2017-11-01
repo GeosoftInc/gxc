@@ -1,0 +1,172 @@
+//===========================================================================
+NAME          = "Import Topography grid file"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "ip"
+TRANSLATIONFRIENDLYPATH = "GX/IP/Import/Topography"
+
+DESCRIPTION   = "
+               Import a Topography grid file to the current \"Z\" channel.
+"
+// Revision History:
+// v5.1.7: Creates Topo channel if not present
+// v5.1.3: Using "Current" Z channel
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "IPTOPOGRID.gr"
+#include "IPTOPOGRID.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+IP          Ip;               // IP handle
+DB_SYMB     Ch;               // Channel handle
+LST         StartLST, EndLST; // Channel lists
+VV          IndVV;
+
+int         i, iN;            // Utility 
+
+string(STR_FILE) sFile;
+string(STR_DB_SYMBOL) sZCh, sCh;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- get database ---
+   
+   EData = Current_EDB();   
+   Data = Lock_EDB(EData);
+
+	StartLST = Create_LST(128);
+	EndLST = Create_LST(128);
+	IndVV = Create_VV(INT, 0);
+
+	ChanLST_DB(Data, StartLST);
+
+
+   if(iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("IPTOPOGRID");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_IPTOPOGRID_0,DGW_FILEPATH,"IP","TOPOGRID");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_IPTOPOGRID_0,DGW_FILEPATH,"IP","TOPOGRID");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   } 
+      
+
+   // --- Get Parameters ---
+
+   GetString_SYS("IP","TOPOGRID",sFile);
+
+
+   // --- Create Topo channel? ---
+
+   Ch = FindChan_DB(Data, "Topo");
+   if(Ch==NULLSYMB)
+      Ch = CreateSymb_DB(Data,"Topo",DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
+
+
+   // --- Create the IP object ---
+
+   Ip = Create_IP();
+
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Importing topography grid file"),1);
+
+
+   // --- import ---
+
+   ImportTopoGrid_IP(Ip, Data, sFile);
+
+   // --- Create a maker (only for interactive sessions) ---
+
+   if(iInteractive_SYS()) {
+   
+      Ch = FindSymb_DB(Data, "Topo", DB_SYMB_CHAN);
+
+      LockSymb_DB(Data, Ch, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+      EasyMakerSymb_DB(Data, Ch, _("Import Topography..."), "IP;");
+
+      UnLockSymb_DB(Data, Ch);
+   }
+
+
+   // --- Get current Z channel ---
+
+   GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+
+
+	// --- Get another channel list so we can which ones are new to load them ---
+
+	ChanLST_DB(Data, EndLST);
+
+
+   // --- release database to EDB ---
+   
+   UnLock_EDB(EData);
+   
+   LoadChan_EDB(EData,sZCh);
+   LoadChan_EDB(EData,"Topo");
+   
+	// --- 3D electrode channels ---
+
+	FindItems_LST(StartLST, LST_ITEM_NAME, EndLST, IndVV);
+	iN = iLength_VV(IndVV);
+	for(i=0; i<iN; i++)
+	{
+		// --- Load all the items in the 2nd list not found in the 1st ---
+
+		if (iGetInt_VV(IndVV, i) == -1)
+		{
+			GetItem_LST(EndLST, LST_ITEM_NAME, i, sCh);
+			LoadChan_EDB(EData, sCh);
+		}
+	}
+
+
+   // --- set the topo import file type for future use in the iprecalc GX
+
+   SetString_SYS("IP","TOPOTYPE","GRID");
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+   Destroy_IP(Ip);
+}   

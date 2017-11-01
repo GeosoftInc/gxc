@@ -1,0 +1,197 @@
+//===========================================================================
+NAME          = "Load a plot into current map"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   LOADPLOT.PLT   - plot file name
+   LOADPLOT.NEW   - 1 for new map
+                  - 0 for existing map
+         
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map/Import"
+
+//===========================================================================
+
+RESOURCE = "loadplot.gr"
+#include "loadplot.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+string(STR_FILE) sPlot;
+string(STR_FILE) sMap;
+string(STR_FILE) sMDF;
+
+EMAP  EMap;
+MAP   Map;
+DGW   Diag;
+int   iNew, iRet;
+
+
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("LOADPLOT");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_LOADPLOT_0,DGW_FILEPATH,"LOADPLOT","PLT");     
+
+      // --- Run the Dialogue ---
+
+      iRet = iRunDialogue_DGW(Diag);
+      if(iRet==-1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_LOADPLOT_0,DGW_FILEPATH,"LOADPLOT","PLT");     
+
+      Destroy_DGW(Diag);
+
+   
+      // --- Get the plot name ---
+
+      GetString_SYS("LOADPLOT","PLT",sPlot);
+
+
+      // --- current map ---
+
+      if(iRet==0) {
+
+         SetString_SYS("LOADPLOT","NEW","0");
+
+      }
+      else {
+
+         // --- new map ---
+
+         SetString_SYS("LOADPLOT","NEW","1");
+         
+         // --- Create a default map name from the PLT file ---
+
+         FileExt_STR(sPlot,"map",sMap,FILE_EXT_FORCE);
+         SetString_SYS("LOADPLOT", "MAP", sMap);
+            
+         while(iFileExist_SYS(sMap)) {
+               
+            if (iDisplayQuestion_SYS(_("Map exists"), _("Overwrite existing map?")) == 1) { // "Yes"            
+               break;      
+            }
+            else {
+
+               Diag = Create_DGW("LOADPLOTMAP");
+
+      
+               SetInfoSYS_DGW(Diag,_LOADPLOTMAP_0,DGW_FILEPATH, "LOADPLOT","MAP");  
+
+               if(iRunDialogue_DGW(Diag)!=0) 
+                  Cancel_SYS();
+
+               GetInfoSYS_DGW(Diag,_LOADPLOTMAP_0,DGW_FILEPATH, "LOADPLOT","MAP");
+
+               Destroy_DGW(Diag);            
+               
+               GetString_SYS("LOADPLOT","MAP",sMap);
+            }
+         }      
+      }
+   }
+   else {
+
+      // --- Get Parameters ---
+
+      GetString_SYS("LOADPLOT","PLT",sPlot);
+      iNew = iGetInt_SYS("LOADPLOT","NEW");
+
+
+      // --- Create the map name from the PLT name ---
+
+      if(iNew!=0) {
+
+         FileNamePart_STR(sPlot,sMap,STR_FILE_PART_NAME);
+         FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);
+      }
+   }
+
+
+   iNew = iGetInt_SYS("LOADPLOT","NEW");
+   if (iNew != 0) {
+   
+      // --- Unload the map if it is loaded ---
+
+      if (iLoaded_EMAP(sMap))
+         UnLoad_EMAP(sMap);
+
+
+      // --- Create the map ---
+
+      Map = Create_MAP(sMap,MAP_WRITENEW);
+      
+   
+      // --- create a map from plot file info ---
+
+      FileNamePart_STR(sMap,sMDF,STR_FILE_PART_NAME);
+      Strcat_STR(sMDF,".mdf");
+      if (!iFileExist_SYS(sMDF)) {
+      
+      
+         // --- make views from PLT file ---
+      
+         MapFromPLT_MVU(Map,"*Base","*Data",sPlot,300.0,300.0);
+         
+         
+         // --- create mdf from the map ---
+
+         FileNamePart_STR(sMap,sMDF,STR_FILE_PART_NAME);
+         Strcat_STR(sMDF,".mdf");
+         MapMDF_MVU(Map,sMDF,"*Data");
+         
+      } else {
+      
+         // --- set up views from an MDF ---
+
+         MDF_MVU(Map,sMDF,"*Base","*Data");
+         
+      }
+      
+
+      // --- load the plot into the map ---
+
+      LoadPlot_MVU(Map,sPlot);
+      Destroy_MAP(Map);
+      Load_EMAP(sMap);
+
+   } else {
+   
+   
+      // --- load to current map ---
+
+      EMap = Current_EMAP();
+      Map = Lock_EMAP(EMap);
+      LoadPlot_MVU(Map,sPlot);
+      UnLock_EMAP(EMap);
+      
+   }
+   
+   // --- remap to plot extents ---
+ 
+   if (iNew) {  
+      SetString_SYS("RESZMAP","MARGIN","0");
+      SetString_SYS("RESZMAP","REDRAW","NO");
+      SetString_SYS("RESZMAP","CHILD","1");
+      iRunGX_SYS("reszmap.gx");
+   }
+
+}

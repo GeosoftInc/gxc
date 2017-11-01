@@ -1,0 +1,116 @@
+//===========================================================================
+NAME          = "Apply an FFT2D Transform power spectrum calculation"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP/Spectrum Calculation and Display"
+
+DESCRIPTION   = "
+
+Apply an FFT2D Transform power spectrum calculation.
+
+Parameters: 
+
+    FFT2PSPC.GRD      - Name of the Input Transform grid file
+            .SPC      - Name of the Output Power Spectrum grid file
+"
+
+//===========================================================================
+// Revision History:
+//
+// v6.0.0   Add output grid to the grid explorer
+//===========================================================================
+
+
+RESOURCE = "fft2pspc.gr"
+#include "fft2pspc.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sTrnGrid,sSpcGrid;      // File names
+
+DGW         Diag;              // Dialogue handle
+
+IMG         IMGi;
+
+int         i;       
+
+
+//===========================================================================
+//                            FFT2PSPC CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("FFT2PSPCForm");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_FFT2PSPCFORM_0,DGW_FILEPATH,"FFT2PSPC","TRN");
+      SetInfoSYS_DGW(Diag,_FFT2PSPCFORM_1,DGW_FILEPATH,"FFT2PSPC","SPC");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i==1) Cancel_SYS();    // He hit cancel
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_FFT2PSPCFORM_0,DGW_FILEPATH,"FFT2PSPC","TRN");     
+      GetInfoSYS_DGW(Diag,_FFT2PSPCFORM_1,DGW_FILEPATH,"FFT2PSPC","SPC");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("FFT2PSPC","TRN",sTrnGrid);
+   GetString_SYS("FFT2PSPC","SPC",sSpcGrid);
+
+
+   // --- Check for null input and output channel strings ---
+
+   if (!iStrlen_STR(sTrnGrid))
+      Abort_SYS(_("Input Transform Grid Name not specified"));   
+
+   if (!iStrlen_STR(sSpcGrid))
+      Abort_SYS(_("Output Grid Name not specified"));
+
+
+   // --- Prepare to do the work ---
+
+   Progress_SYS(1);
+
+
+   // --- Power Spectrum ---
+
+   IMGi = CreateFile_IMG(GS_FLOAT,sTrnGrid,IMG_FILE_READONLY);
+
+   PowSpc_FFT2(IMGi, sSpcGrid);
+
+   Destroy_IMG(IMGi);
+
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+
+   // --- Add grids to the current project ---
+
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sSpcGrid,"Grid",1);
+}

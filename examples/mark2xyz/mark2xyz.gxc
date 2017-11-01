@@ -1,0 +1,390 @@
+//===========================================================================
+NAME          = "Extract marked data and place in an XYZ file"
+#include <version.gxh>
+DESCRIPTION   = "
+
+Extracts the currently marked data in an open Oasis database and places
+the data in an XYZ file.  All channels currently displayed are extracted
+and placed in the file.
+
+   MARK2XYZ.FILE     File name.
+           .MODE     \"New\"     for a new file.
+                     \"Append\"  to append to an existing file.
+           .FORMAT   \"Geosoft\" will include Geosoft line headers.
+                     \"Raw\"     will not include Geosoft line headers.
+                     \"CSV\"     comma delimited.
+                     \"REVS\"    REVS compatible format (same as Raw).
+           .LINE     Extraction line name (ie. L100), blank for no name.
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
+
+// Revision History
+// v6.0.0  Revised to handle string channels.
+//===========================================================================
+
+RESOURCE = "mark2xyz.gr"
+#include "mark2xyz.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+// --- formats ---
+
+#define _GEOSOFT  0
+#define _RAW      1
+#define _RAWH     2
+#define _CSV      3
+#define _CSVH     4
+#define _REVS     5
+#define _DAT      6
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sFile;
+string(STR_DB_SYMBOL) sLine,sCurLine;
+string(STR_DEFAULT) sMode,sFormat;
+string(STR_DEFAULT_LONG) sBuff;
+string(STR_DEFAULT_LONG) sTemp;
+string(STR_DB_SYMBOL) sChanName;
+string(20) sVal;
+
+
+int         i, j, ii;
+int         iMode;         // output file mode
+int         iChannels;     // number of displayed channels
+int         iLines;        // number of XYZ lines to be written out
+int         iCols;         // number of columns to be written out
+real        rData;         // data element
+
+EDB         EData;         // database handle
+DB          Data;          // database handle
+DB_SYMB     Chan;
+DGW         Diag;          // dialogue box
+
+VA          hVA;           // temporary VA handle
+VV          vvChannelSymb; // list of displayed channel symbols.
+VV          vvChannels;    // channel handles
+VV          vvChannelTypes;// channel data types
+VV          vvChannelCols; // channel column counts
+
+WA          hWA;           // output file
+int         iForm;         // output format
+real        rStart, rEnd, rIncr;
+int         iWidth, iType;
+
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+
+   // Only works interactively (needs a mark)
+   if (iInteractive_SYS())
+   {
+
+      EData = Current_EDB();
+      rStart = rEnd = rIncr = 0.0;
+      if (iGetCurMark_EDB(EData, rStart, rEnd, rIncr))
+         Abort_SYS(_("No data is marked, or the entire database is marked. Only partial line marks are supported."));
+         
+
+      // ------------------------------
+      // --- Work with the Dialogue ---
+      // ------------------------------
+
+      // create the dialog
+      Diag = Create_DGW("MARK2XYZ");
+
+      // default line name
+      GetCurLine_EDB(EData, sCurLine);
+      SetString_SYS("MARK2XYZ", "LINE", sCurLine);
+
+      // set any defaults
+      SetInfoSYS_DGW(Diag,_MARK2XYZ_0,DGW_FILEPATH,"MARK2XYZ","FILE");     
+      SetInfoSYS_DGW(Diag,_MARK2XYZ_1,DGW_LISTALIAS,"MARK2XYZ","MODE");    
+      SetInfoSYS_DGW(Diag,_MARK2XYZ_2,DGW_LISTALIAS,"MARK2XYZ","FORMAT");    
+      SetInfoSYS_DGW(Diag,_MARK2XYZ_3,DGW_TEXT,"MARK2XYZ","LINE");     
+
+      // run the dialogue
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    
+
+      // get the strings
+      GetInfoSYS_DGW(Diag,_MARK2XYZ_0,DGW_FILEPATH,"MARK2XYZ","FILE");     
+      GetInfoSYS_DGW(Diag,_MARK2XYZ_1,DGW_LISTALIAS,"MARK2XYZ","MODE");    
+      GetInfoSYS_DGW(Diag,_MARK2XYZ_2,DGW_LISTALIAS,"MARK2XYZ","FORMAT");    
+      GetInfoSYS_DGW(Diag,_MARK2XYZ_3,DGW_TEXT,"MARK2XYZ","LINE");     
+
+      // destroy the dialogue
+      Destroy_DGW(Diag);
+
+
+      // --------------------------
+      // --- Parse dialog input ---
+      // --------------------------
+
+      GetString_SYS("MARK2XYZ", "FILE", sFile);
+      GetString_SYS("MARK2XYZ", "LINE", sLine);
+      
+      // line mode
+      GetString_SYS("MARK2XYZ", "MODE", sMode);
+      if (iStrcmp_STR(sMode, "NEW", STR_CASE_TOLERANT) == 0)
+         iMode = 0;
+      else
+         iMode = 1;
+         
+      // decode format
+      GetString_SYS("MARK2XYZ","FORMAT",sFormat);
+      if (iStrcmp_STR(sFormat,"GEOSOFT",STR_CASE_TOLERANT) == 0)
+         iForm = _GEOSOFT;
+      else if (iStrcmp_STR(sFormat,"RAW",STR_CASE_TOLERANT) == 0)
+         iForm = _RAW;
+      else if (iStrcmp_STR(sFormat,"RAWH",STR_CASE_TOLERANT) == 0)
+         iForm = _RAWH;
+      else if (iStrcmp_STR(sFormat,"CSV",STR_CASE_TOLERANT) == 0)
+         iForm = _CSV;
+      else if (iStrcmp_STR(sFormat,"CSVH",STR_CASE_TOLERANT) == 0)
+         iForm = _CSVH;
+      else if (iStrcmp_STR(sFormat,"REVS",STR_CASE_TOLERANT) == 0)
+         iForm = _REVS;
+      else if (iStrcmp_STR(sFormat,"DAT",STR_CASE_TOLERANT) == 0)
+         iForm = _DAT;
+      else
+         Abort_SYS(_("Invalid format."));   
+
+
+      //---------------------------
+      //--- Get the marked data ---
+      //---------------------------
+  
+      // get list of displayed channel symbols
+      vvChannelSymb = Create_VV(INT, 0);
+      iChannels = iDispChanList_EDB(EData, vvChannelSymb);
+  
+      // if no channels displayed, abort
+      if (iChannels == 0)
+         Abort_SYS(_("No displayed channels to export."));
+
+      // arrays for keeping temporary data while working with the channels
+      vvChannelTypes = Create_VV(INT, iChannels);
+      vvChannelCols= Create_VV(INT, iChannels);
+      vvChannels = Create_VV(INT, iChannels);
+
+      // get the channel types and the quantity of columns for each channel
+      Data = Lock_EDB(EData);
+      for (i=0; i<iChannels; i++) 
+      {
+         Chan = (DB_SYMB)iGetInt_VV(vvChannelSymb, i);
+         LOCK_R(Data, Chan);
+         iType = iGetChanType_DB(Data, Chan);
+         iCols = iGetChanArraySize_DB(Data, Chan);
+         UNLOCK(Data, Chan);
+
+         SetInt_VV(vvChannelTypes, i, iType);
+         SetInt_VV(vvChannelCols, i, iCols);
+      }
+      UnLock_EDB(EData); 
+        
+      // show progress bar
+      Progress_SYS(1);
+      ProgName_SYS(_("Get the mark data"), 1);
+
+      // get the marked data
+      iLines = iMAX;
+      for (i=0; i<iChannels; i++)
+      {
+         // create a VA to hold the data from a channel
+         iType = iGetInt_VV(vvChannelTypes, i);
+         iCols = iGetInt_VV(vvChannelCols, i);
+         hVA = CreateExt_VA(iType, 0, iCols);
+         SetInt_VV(vvChannels, i, (int)hVA);
+
+         // get the data from OE
+         if (iGetMarkChanVA_EDB(EData, hVA, (DB_SYMB)iGetInt_VV(vvChannelSymb, i)))
+            Abort_SYS(_("Unable to retrieve mark."));
+ 
+         // set number of lines to smallest in-coming VA
+         if (iLen_VA(hVA) < iLines)
+            iLines = iLen_VA(hVA);
+      }
+
+
+      //-----------------------
+      //--- Export the data ---
+      //-----------------------
+
+      Data = Lock_EDB(EData);
+
+      // check that there is something to export
+      if ((iLines > 0) && (iLines < iMAX))
+      {
+         //open the output file
+         hWA = Create_WA(sFile, iMode);
+
+         // if Geosoft format, write out header
+         GetName_DB(Data, DB_NAME_FILE, sTemp);
+         if (iForm == _GEOSOFT)
+         {
+            // write out original line number as a column
+            Puts_WA(hWA, "// ");
+            Puts_WA(hWA, sTemp); NewLine_WA(hWA);
+            Puts_WA(hWA, "// LINE=");
+            Puts_WA(hWA, sCurLine); NewLine_WA(hWA);
+            Puts_WA(hWA,"//");
+         }
+         else if (iForm == _DAT)
+         {
+            // DAT header
+            Puts_WA(hWA, sTemp); NewLine_WA(hWA);
+            Puts_WA(hWA, "LINE:");
+            Puts_WA(hWA, sCurLine); NewLine_WA(hWA);
+         }
+         
+         // write out channel names for the specified formats
+         if (
+             (iForm == _GEOSOFT) ||
+             (iForm == _RAWH) ||
+             (iForm == _CSVH) ||
+             (iForm == _DAT)
+            )
+         {
+            // write out channel names
+            for (ii=0; ii<iChannels; ii++)
+            {
+               GetChanName_DB(Data, (DB_SYMB)iGetInt_VV(vvChannelSymb, ii), sChanName);
+               iCols = iGetInt_VV(vvChannelCols, ii);
+
+               for(i=0; i<iCols; i++)
+               {
+                  // if the current channel is an array, add element number
+                  Strcpy_STR(sTemp, sChanName);
+                  if(iCols>1)
+                  {
+                     Strcat_STR(sTemp, "[");
+                     FormatI_STR(i, sVal, 4);
+                     Strcat_STR(sTemp, sVal);
+                     Strcat_STR(sTemp, "]");
+                  }
+
+                  if (iForm == _CSVH)
+                     iStrMin_STR(sTemp);
+                  else
+                  {
+                     iWidth = iGetChanWidth_DB(Data, (DB_SYMB)iGetInt_VV(vvChannelSymb, ii));
+                     if (iWidth > iStrlen_STR(sTemp))
+                        Justify_STR(sTemp, sTemp, iWidth, STR_JUSTIFY_RIGHT);
+                  }
+
+                  Puts_WA(hWA,sTemp);
+                  if (ii < (iChannels-1))
+                     if (iForm == _CSVH)
+                        Puts_WA(hWA,",");
+                     else
+                        Puts_WA(hWA," ");
+               }
+            }
+            NewLine_WA(hWA);
+         }               
+
+         if (iForm == _GEOSOFT) 
+         {
+            //add the line number if not blank
+            if (iStrlen_STR(sLine) > 0)
+            {
+               //write out XYZ line number
+               XYZLine_STR(sLine, sTemp);
+               Puts_WA(hWA, sTemp);
+               NewLine_WA(hWA);
+            }
+         }
+         
+         // show progress bas
+         ProgName_SYS(_("Write the mark data"),1);
+
+         // write out the data line by line
+         for (i=0; i<iLines; i++)
+         {
+            ProgUpdateL_SYS(i,iLines);
+            
+            if (iForm == _GEOSOFT)
+               Puts_WA(hWA,"  ");
+
+            // write out the channels of the current line
+            for (ii=0; ii<iChannels; ii++)
+            {
+               iType = iGetInt_VV(vvChannelTypes, ii);
+               iCols = iGetInt_VV(vvChannelCols, ii);
+               hVA = (VA)iGetInt_VV(vvChannels, ii);
+
+               // write out all array elements of the current channel
+               for(j=0; j<iCols; j++)
+               { 
+                  if(iType>=0)
+                  {
+                     rData = rGetReal_VA(hVA, i, j);
+                     FormatChan_DB(Data, (DB_SYMB)iGetInt_VV(vvChannelSymb, ii), rData, sTemp);
+                  }
+                  else
+                  {
+                     GetString_VA(hVA, i, j, sBuff);
+                     TrimSpace_STR(sBuff, STR_TRIMBOTH);
+                     if(
+                        iStrStr_STR(sBuff, " ", STR_CASE_TOLERANT)>=0 ||
+                        iStrStr_STR(sBuff, ",", STR_CASE_TOLERANT)>=0 ||
+                        iStrStr_STR(sBuff, "\"", STR_CASE_TOLERANT)>=0
+                       )
+                     {
+                        Strcpy_STR(sTemp, "\"");
+                        Strcat_STR(sTemp, sBuff);
+                        Strcat_STR(sTemp, "\"");
+                     }
+                     else
+                        Strcpy_STR(sTemp, sBuff);
+                  }
+               
+                  if ((iForm == _CSV) || (iForm == _CSVH)) 
+                  {
+                     TrimSpace_STR(sTemp, STR_TRIMBOTH);
+                     Puts_WA(hWA, sTemp);
+                     if (ii < (iChannels-1))
+                        Puts_WA(hWA,",");
+                  } 
+                  else 
+                  {
+                     if(!iStrlen_STR(sTemp))
+                        Puts_WA(hWA, "\"\"");    // empty string
+                     else
+                        Puts_WA(hWA, sTemp);
+                     
+                     if (ii < (iChannels-1))
+                        Puts_WA(hWA, " ");
+                  }
+               }
+            }
+
+            NewLine_WA(hWA);
+         }
+
+         // hide progress bas
+         Progress_SYS(0);
+         
+         // close the output file
+         Destroy_WA(hWA);
+
+      }
+
+   }
+
+   // cancel the GX to prevent adding it to a GS
+   Cancel_SYS();
+
+}

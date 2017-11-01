@@ -1,0 +1,296 @@
+//===========================================================================
+NAME          = "Draw Radial Average Spectrum Map"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "magmap"
+TRANSLATIONFRIENDLYPATH = "GX/MAGMAP/Spectrum Calculation and Display"
+
+DESCRIPTION   = "
+
+   Create a spectrum map.
+
+Parameters: 
+
+     FFT2SMAP.SPEC     - Name of input radial average spectrum file name
+"
+// Revision History:
+// v6.3:  Enclose spectrum file name in quotes for control file.
+// v6.2:  Modified to work if input spectrum file is not in the local directory.
+
+//===========================================================================
+
+RESOURCE = "fft2smap.gr"
+#include "fft2smap.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+
+string(STR_FILE) sSpec,sSpecAbs,sMap,sTemp,sDirLocal,sDirFile,sFile,sFileAbs;
+string(STR_DEFAULT) sPrompt;
+string(STR_DEFAULT) sVol,sDir,sName,sExt;
+
+DGW    Diag;           // Dialogue handle
+WA     WA_con;         // WA for control file
+MAPL   Mapl;
+EMAP   EMap;
+MAP    Map;
+MVIEW  hView;  
+int    iOK,iTmpFile;
+
+//===========================================================================
+
+{
+   // --- Are we running interactively ?, create control file ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("fft2smapForm");
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_FFT2SMAPFORM_0,DGW_FILEPATH,"FFT2SMAP","SPEC");     
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_FFT2SMAPFORM_0,DGW_FILEPATH,"FFT2SMAP","SPEC");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+   
+
+   // --- Create new map ---
+
+   GetString_SYS("FFT2SMAP","SPEC",sSpec);
+   FileNamePart_STR(sSpec,sMap,STR_FILE_PART_NAME);
+   Strcat_STR(sMap,".map");
+
+   iOK = FALSE;
+   while (iOK == FALSE) {
+      iOK = TRUE;   
+      FileExt_STR(sMap,"map",sMap,FILE_EXT_FORCE);
+      if (iInteractive_SYS() && iFileExist_SYS(sMap)) {
+         Printf_STR(sPrompt, sizeof(sPrompt), _("\"%s\" exists. Overwrite?"), sMap);
+         if (iDisplayQuestion_SYS(_("Map exists"),sPrompt) == 0) {
+            if (Prompt_SYS(_("New map name"),sMap)) Cancel_SYS();
+            iOK = FALSE;
+         }
+      }
+   }
+
+   if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
+   Map = Create_MAP(sMap,MAP_WRITENEW);
+
+   // --- Set up views from an MDF ---
+
+   Mapset_MVU(Map,"*Base","*Data",0.0,1.0,0.0,1.0,"B",0,0,
+              rDUMMY,1.0,0.0,0.0,0.0,0.0,0.5);
+              
+   //Mapset_MVU(Map,"*Base","*Data",rMinX,rMaxX,rMinY,rMaxY,sSize,iPort,iExact,
+   //           rScale,1.0/rConv,rMargXmin,rMargXmax,rMargYmin,rMargYmax,rInside);
+
+   Destroy_SYS(Map);
+   Load_EMAP(sMap);
+
+
+   // --- get the current map ---
+
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+
+   // --- create MDF file ---
+
+   MapMDF_MVU(Map,"_fft2spc.mdf","*Data");
+
+
+   // --- Create con file ---
+
+   iTmpFile = 0;
+   GetDirectory_SYS(SYS_DIR_LOCAL,sDirLocal);
+   GetString_SYS("FFT2SMAP","SPEC",sSpec);
+   AbsoluteFileName_SYS(sSpec,sSpecAbs);
+   FileNamePart_STR(sSpecAbs,sVol,STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sSpecAbs,sDir,STR_FILE_PART_DIRECTORY);
+   FileNamePart_STR(sSpecAbs,sName,STR_FILE_PART_NAME);
+   FileNamePart_STR(sSpecAbs,sExt,STR_FILE_PART_EXTENSION);
+   FileCombineParts_STR (sVol,sDir,"","","",sDirFile);
+   
+   Strcpy_STR(sFile,sName);
+   Strcat_STR(sFile,".");
+   Strcat_STR(sFile,sExt);
+
+   if(iStrcmp_STR(sDirLocal,sDirFile,STR_CASE_TOLERANT)!=0)  {
+      iTmpFile = 1;
+
+      Strcpy_STR(sFile,"_temp_");
+      Strcat_STR(sFile,sName);
+      Strcat_STR(sFile,".");
+      Strcat_STR(sFile,sExt);
+      
+      Strcpy_STR(sFileAbs,sDirLocal);
+      Strcat_STR(sFileAbs,sFile);
+
+      iCopyFile_SYS(sSpecAbs,sFileAbs);
+   }
+
+   WA_con=Create_WA("_fft2spc.con",0); 
+
+   Puts_WA(WA_con,_n("/ MAPPLOT procedure to plot a power spectrum data profile"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("/ draw power spectrum curve"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("MDFF _fft2spc.mdf"));
+   NewLine_WA(WA_con);
+   Strcpy_STR(sTemp,_n("DOPN \""));
+   Strcat_STR(sTemp,sFile);
+   Strcat_STR(sTemp,_n("\",1            /open file and select Z column to plot"));
+   Puts_WA(WA_con,sTemp);
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DXYZ                    /read data"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DSWP Z,Y                /swap Z into Y buffer"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("WIND 10,6,10,20,16      /define a data window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("WDEF ,,,,,,1            /map window to X,Y buffers"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("RPLV .x1.,DMNX          /save x limits"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("RPLV .x2.,DMXX"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("WIND 10,5,9,21,17       /expand data window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("WPAG 4,8,4,2            /define page limits from window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT edge=kt300"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("RECT 12                 /box around window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("RECT 1                    /box around plot"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT p1=kt150"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("LINA 0                  /plot buffer as world coordinates"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("BARV -1,,,0             /annotate y-axis"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     1"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     \"ln(Power)\""));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("BARV  1,,,0             /annotate y-axis"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     1"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     \"ln(Power)\""));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("ANOX ,,,,,,0,-1,-1      /annotate x-axis"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("GRID                    /draw a grid in window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT p1"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT ttl=kt300,,,0.4,,,15"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("TEXT 12,8,8.3,0,\"RADIALLY AVERAGED POWER SPECTRUM\""));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("/ draw source depth estimates curves (5_depth)"));
+   NewLine_WA(WA_con);
+   Strcpy_STR(sTemp,_n("DOPN \""));
+   Strcat_STR(sTemp,sFile);
+   Strcat_STR(sTemp,_n("\",3            /open file and select Z column to plot"));
+   Puts_WA(WA_con,sTemp);
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DXYZ                    /read data"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DSWP Z,Y                /swap Z into Y buffer"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("WIND 10,6,3,20,5.7      /define a data window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("WDEF .x1.,0.0,.x2.,,,,1 /map window to X,Y buffers"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("WIND 10,5,3,21,6.7      /expand data window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT edge"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("RECT 12                 /box around window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("CLIP "));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT p2=rt150           /plot buffer as world coordinates"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("LINA 0                  /plot buffer as world coordinates"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("CLIP "));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT p1"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("BARV -1,,,0             /annotate y-axis"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     1"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     \"Depth(K_unit)\" "));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("BARV  1,,,0             /annotate y-axis"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     1"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("     \"Depth(K_unit)\" "));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("ANOX ,,,,,,0,-1,-1      /annotate bottom (x axis)"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("GRID                    /draw a grid in window"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT p1"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("TEXT 12,8,-1.1,0,\"Wavenumber(1/K_unit)\""));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("DATT ttl"));
+   NewLine_WA(WA_con);
+   Puts_WA(WA_con,_n("TEXT 12,8,4.1,0,\"DEPTH ESTIMATE\""));
+   NewLine_WA(WA_con);
+   
+   Destroy_WA(WA_con);
+
+
+   // --- RUN mapplot ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Loading"),0);
+   Mapl = Create_MAPL("_fft2spc.con","",0);
+   
+   ProgName_SYS(_("Processing"),0);
+   Process_MAPL(Mapl,Map);
+   Progress_SYS(0);
+   
+   Destroy_MAPL(Mapl);
+   
+   iDeleteFile_SYS("_fft2spc.mdf");
+
+   if(iTmpFile) 
+      iDeleteFile_SYS(sFile);
+
+
+   // --- Clean up empty groups from all views in map ---
+
+   Clean_MAP(Map);
+   ResizeAll_MAP(Map);
+
+   // --- Release the map ---
+
+   hView = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   Destroy_MVIEW (hView);
+   UnLock_EMAP(EMap);
+     
+}

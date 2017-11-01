@@ -1,0 +1,70 @@
+//===========================================================================
+NAME          = "WholePlot - Remove unregistered holes"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "drillhole"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data"
+
+DESCRIPTION   = "\
+
+Allows the user to remove unregistered drill holes from the project. 
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DH          Drill;
+
+string(STR_FILE) sDB;
+string(STR_DEFAULT_LONG) sMsg;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+
+   // --- Get DB/DH ---
+   
+   EData = Current_EDB();
+   GetName_EDB(EData, sDB);
+
+
+   // --- Create the DH object ---
+
+   Drill  = Create_DH(sDB);
+   
+
+   // --- Check to see if deleting holes will result in empty (and deleted) databases. ---
+
+   if(iCleanWillDeleteDB_DH(Drill)) {
+
+      Strcpy_STR(sMsg, _("Proceeding will delete one or more databases in\r\n the project. Do you wish to proceed?"));
+      if(!iDisplayQuestion_SYS(_("Delete unregistered holes"), sMsg))
+         Cancel_SYS();
+   }
+
+
+   // --- Delete the holes ---
+
+   Clean_DH(Drill);
+
+
+   // --- Clean up ---
+
+   Destroy_DH(Drill);
+}

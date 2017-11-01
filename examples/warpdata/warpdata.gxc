@@ -1,0 +1,360 @@
+//===========================================================================
+NAME          = "Warp coordinates."
+#include <version.gxh>
+DESCRIPTION   = "
+      WARPDATA.OLDX     Old X, Y channels
+              .OLDY
+              .NEWX     Output X, Y channels
+              .NEWY
+              .WRP      Warp File
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates/Georeferencing"
+
+//===========================================================================
+// Revision History:
+// v6.3.0: No longer overwrite existing channels.
+//         Use current X,Y as defaults.
+// v5.1.6: Now set the projection of the warped data to either the warp 
+//         projection, or if not defined, to the original data projection.
+// v5.1.4: Fixed a bug #521 due to Current X/Y Channels by changing iExistSymb_DB()
+//         and FindSymb_DB() to iExistChan_DB() and FindChan_DB() respectively.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+
+RESOURCE = "warpdata.gr"
+#include "warpdata.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sOldXCh,sOldYCh;        // Channel Names
+string(STR_DB_SYMBOL) sNewXCh,sNewYCh;        // Channel Names
+string(STR_DB_SYMBOL) sXCh,sYCh,sXBackCh,sYBackCh;
+string(STR_FILE) sWarp;
+string(STR_DEFAULT) sTemp,sLabel;
+
+EDB         EData;                  // database handle
+DB          Data;                   // database handle
+
+DB_SYMB     OldXCh,OldYCh;          // Channel Handles
+DB_SYMB     NewXCh,NewYCh;          // Channel Handles
+DB_SYMB     Line;                   // Channel Handles
+DGW         Diag;                   // Dialogue handle
+LST         ChLST;                  // List handle
+IPJ         hOldIPJ,hNewIPJ;
+PJ          Proj;
+
+
+int i,iLines,iTotLines;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   
+   // --- Get current X, Y channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   if(iInteractive_SYS()) 
+   {
+   
+      // --- Set input defaults to current X, Y ---
+      
+      GetString_SYS("WARPDATA","OLDX",sOldXCh);
+      GetString_SYS("WARPDATA","OLDY",sOldYCh);
+      if(!iStrlen_STR(sOldXCh))
+         SetString_SYS("WARPDATA","OLDX",sXCh);
+      if(!iStrlen_STR(sOldYCh))
+         SetString_SYS("WARPDATA","OLDY",sYCh);
+         
+
+      i = 0;
+      while (i == 0) {
+
+         // --- Create the Dialogue ---         
+
+         Diag = Create_DGW("WARPDATA0");
+         
+         
+         // --- Load channels ---
+         
+         ChLST = Create_LST(STR_DB_SYMBOL+20);
+         SymbLST_DB(Data,ChLST,DB_SYMB_CHAN);
+         Sort_LST(ChLST,0,0);
+
+         Copy_LST(GetList_DGW(Diag,_WARPDATA0_0), ChLST);
+         Copy_LST(GetList_DGW(Diag,_WARPDATA0_1), ChLST);
+         Copy_LST(GetList_DGW(Diag,_WARPDATA0_3), ChLST);
+         Copy_LST(GetList_DGW(Diag,_WARPDATA0_4), ChLST);
+
+
+         // --- Run the Dialogue ---
+
+         SetInfoSYS_DGW(Diag,_WARPDATA0_0,DGW_TEXT,"WARPDATA","OLDX");
+         SetInfoSYS_DGW(Diag,_WARPDATA0_1,DGW_TEXT,"WARPDATA","OLDY");
+         SetInfoSYS_DGW(Diag,_WARPDATA0_2,DGW_FILEPATH,"WARPDATA","WRP");
+         SetInfoSYS_DGW(Diag,_WARPDATA0_3,DGW_TEXT,"WARPDATA","NEWX");
+         SetInfoSYS_DGW(Diag,_WARPDATA0_4,DGW_TEXT,"WARPDATA","NEWY");
+         
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
+      
+         GetInfoSYS_DGW(Diag,_WARPDATA0_0,DGW_TEXT,"WARPDATA","OLDX");    
+         GetInfoSYS_DGW(Diag,_WARPDATA0_1,DGW_TEXT,"WARPDATA","OLDY");
+         GetInfoSYS_DGW(Diag,_WARPDATA0_2,DGW_FILEPATH,"WARPDATA","WRP");
+         GetInfoSYS_DGW(Diag,_WARPDATA0_3,DGW_TEXT,"WARPDATA","NEWX");
+         GetInfoSYS_DGW(Diag,_WARPDATA0_4,DGW_TEXT,"WARPDATA","NEWY");
+         
+         Destroy_DGW(Diag);
+      
+
+         // --- Get Parameters ---
+
+         GetString_SYS("WARPDATA","OLDX",sOldXCh);
+         GetString_SYS("WARPDATA","OLDY",sOldYCh);
+         GetString_SYS("WARPDATA","NEWX",sNewXCh);
+         GetString_SYS("WARPDATA","NEWY",sNewYCh);
+      
+      
+         // --- Old channels must be different ---
+      
+         if (iStrcmp_STR(sOldXCh,sOldYCh,STR_CASE_TOLERANT) == 0) {
+            DisplayMessage_SYS(_("Channel error"), _("Coordinate channels must be different."));
+            continue;
+         }
+      
+
+         // --- New channels must be different ---
+      
+         if (iStrcmp_STR(sNewXCh,sNewYCh,STR_CASE_TOLERANT) == 0) {
+            DisplayMessage_SYS(_("Channel error"), _("Coordinate channels must be different."));
+            i = 0;
+            continue;
+         }
+      
+      
+         // --- channels cannot match input ---
+      
+         if ((iStrcmp_STR(sNewXCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+             (iStrcmp_STR(sNewXCh,sOldYCh,STR_CASE_TOLERANT) == 0) ||
+             (iStrcmp_STR(sNewYCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+             (iStrcmp_STR(sNewYCh,sOldYCh,STR_CASE_TOLERANT) == 0)) {
+            DisplayMessage_SYS(_("Channel error"), _("New channels must be different than input channels."));
+            i = 0;
+            continue;
+         }
+      
+         i = 1;
+      }
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("WARPDATA","OLDX",sOldXCh);
+   GetString_SYS("WARPDATA","OLDY",sOldYCh);
+   GetString_SYS("WARPDATA","NEWX",sNewXCh);
+   GetString_SYS("WARPDATA","NEWY",sNewYCh);
+   GetString_SYS("WARPDATA","WRP",sWarp);
+
+
+   // --- Old channels must be different ---
+      
+   if (iStrcmp_STR(sOldXCh,sOldYCh,STR_CASE_TOLERANT) == 0)
+      Abort_SYS(_("Channel error: Old coordinate channels must be different from each other."));
+      
+
+   // --- New channels must be different ---
+      
+   if (iStrcmp_STR(sNewXCh,sNewYCh,STR_CASE_TOLERANT) == 0)
+      Abort_SYS(_("Channel error: New coordinate channels must be different from each other."));
+            
+   
+   // --- channels cannot match input ---
+      
+   if ((iStrcmp_STR(sNewXCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+       (iStrcmp_STR(sNewXCh,sOldYCh,STR_CASE_TOLERANT) == 0) ||
+       (iStrcmp_STR(sNewYCh,sOldXCh,STR_CASE_TOLERANT) == 0) ||
+       (iStrcmp_STR(sNewYCh,sOldYCh,STR_CASE_TOLERANT) == 0)) 
+      Abort_SYS(_("Channel error: new channels must be different than input channels."));
+      
+      
+   // --- Do Channels Exist ? ---
+
+   if (!iExistChan_DB(Data,sOldXCh))  
+      Abort_SYS(_("Original X channel does not exist."));
+   OldXCh = FindChan_DB(Data,sOldXCh);
+
+   if (!iExistChan_DB(Data,sOldYCh))  
+      Abort_SYS(_("Original Y channel does not exist."));
+   OldYCh = FindChan_DB(Data,sOldYCh);
+      
+
+   // --- Validate warp file ---
+   
+   if(!iStrlen_STR(sWarp))
+      Abort_SYS(_("Warp file not defined."));
+      
+   if(!iFileExist_SYS(sWarp))
+      Abort_SYS(_("Warp file not found."));            
+      
+                
+   // --- Do Channels Exist ? ---
+
+   if (iExistChan_DB(Data,sNewXCh))
+      NewXCh = FindChan_DB(Data,sNewXCh);
+   else
+      NewXCh = DupSymbNoLock_DB(Data,OldXCh,sNewXCh);
+
+   if (iExistChan_DB(Data,sNewYCh))
+      NewYCh = FindChan_DB(Data,sNewYCh);
+   else
+      NewYCh = DupSymbNoLock_DB(Data,OldYCh,sNewYCh);
+      
+      
+   // --- Get names of backups to current X, Y channels ---
+   
+   Strcpy_STR(sXBackCh, "__");
+   Strcat_STR(sXBackCh, sXCh);
+   Strcpy_STR(sYBackCh, "__");
+   Strcat_STR(sYBackCh, sYCh);
+   
+  
+   // --- if output is current X and Y and no backups exist, make them ---
+   
+   if ( (iStrcmp_STR(sNewXCh,sXCh,STR_CASE_TOLERANT) == 0) && (iStrcmp_STR(sNewYCh,sYCh,STR_CASE_TOLERANT) == 0) &&
+        (!iExistChan_DB(Data,sXBackCh)) && (!iExistChan_DB(Data,sYBackCh)) )
+   {        
+      UnLock_EDB(EData);
+      iRunGX_SYS("xysave");
+      Data = Lock_EDB(EData);
+   }
+         
+         
+   // --- Create the Projection using the warp file ---
+
+   hOldIPJ = Create_IPJ();
+   hNewIPJ = Create_IPJ();
+
+   Read_IPJ(hOldIPJ,IPJ_TYPE_WRP,sWarp,"","");
+   Copy_IPJ(hOldIPJ,hNewIPJ);
+   ClearWarp_IPJ(hNewIPJ);
+   
+   Proj = CreateIPJ_PJ(hOldIPJ,hNewIPJ);
+
+
+   // ---  new channels projection ---
+
+   if (iSourceType_IPJ(hNewIPJ) == IPJ_TYPE_NONE)
+      GetIPJ_DB(Data, OldXCh, hNewIPJ);   // --- if ward projection not set, same as input ---
+   LockSymb_DB(Data,NewXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,NewYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   SetIPJ_DB(Data,NewXCh,NewYCh,hNewIPJ);
+   UnLockSymb_DB(Data,NewYCh);
+   UnLockSymb_DB(Data,NewXCh);
+
+      
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   // --- Lock the Symbols ---
+
+   LockSymb_DB(Data,OldXCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OldYCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,NewXCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,NewYCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- Set Ouput format ---
+   
+   if (iIsOutputLL_PJ(Proj))
+   {
+     SetChanFormat_DB(Data,NewXCh,DB_CHAN_FORMAT_GEOGR);
+     SetChanFormat_DB(Data,NewYCh,DB_CHAN_FORMAT_GEOGR);
+   } else { 
+     SetChanFormat_DB(Data,NewXCh,DB_CHAN_FORMAT_NORMAL);
+     SetChanFormat_DB(Data,NewYCh,DB_CHAN_FORMAT_NORMAL);
+   }  
+   
+
+   // --- Go through all selected Lines ---
+
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+
+      Strcpy_STR(sLabel,_("Project line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Apply the Correction ---
+
+      ProjectData_DU(Data,Line,OldXCh,OldYCh,NewXCh,NewYCh,Proj);
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+      
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,NewXCh,_("New coordinate"),"WARPDATA;");
+   EasyMakerSymb_DB(Data,NewYCh,_("New coordinate"),"WARPDATA;");
+
+
+   // --- Unlock the Symbol ---
+
+   UnLockSymb_DB(Data,OldXCh);
+   UnLockSymb_DB(Data,OldYCh);
+   UnLockSymb_DB(Data,NewXCh);
+   UnLockSymb_DB(Data,NewYCh);
+   
+   
+   UnLock_EDB(EData);
+   if (iInteractive_SYS())
+   {
+      // --- Display channels ---
+
+      LoadChan_EDB(EData,sNewXCh);
+      LoadChan_EDB(EData,sNewYCh);
+   }
+   
+
+   // --- Done ---
+
+   Destroy_IPJ(hOldIPJ);
+   Destroy_IPJ(hNewIPJ);
+   Destroy_PJ(Proj);
+   Progress_SYS(0);
+   
+
+}

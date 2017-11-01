@@ -1,0 +1,182 @@
+//===========================================================================
+NAME          = "IMGRANGE"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Euler3D/Located Euler Decon"
+
+DESCRIPTION   = "
+
+   Calculates the X,Y range of a given grid file and sets the XYRANGE.MIN_X
+   .MIN_Y, .MAX_X, .MAX_Y and UNITS parameters.
+
+   The input grid image file must be specified in IMGRANGE.FILE.
+
+"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+IMG      hIMG;
+SBF      hSBF;
+BF       hBF;
+IPJ      hIPJ;
+
+int      iCompLL;           // Compute Lat Long ?
+int      iClearWarp;
+int      iRemoveOrientation;
+int      iType;             // Grid element type
+int      iX;                // Elements in X direction
+int      iY;                // Elements in X direction
+real     rXsep;             // X element separation
+real     rYsep;             // Y element separation
+int      iKX;               // KX (storage orientation)
+real     rXoff;             // X offset
+real     rYoff;             // Y offset
+real     rRot;              // rotation
+real     rBase;             // Base removed
+real     rMult;             // Grid multiplier
+real     rMinLon, rMinLat, rMaxLon, rMaxLat;
+real     rFactor;
+
+string(STR_FILE) sImg;            // Name of input grid
+string(STR_DEFAULT_SHORT) sMinX,sMinY,sMaxX,sMaxY,sUnits; 
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   // --- Initialize all parameters ---
+
+   iType    = 0;   
+   iX       = 0;      
+   iY       = 0;   
+   rXsep    = 0.0;   
+   rYsep    = 0.0;   
+   iKX      = 0;   
+   rXoff    = 0.0;   
+   rYoff    = 0.0;   
+   rRot     = 0.0;   
+   rBase    = 0.0;   
+   rMult    = 0.0;
+
+   // --- Compute Lat/Long Flag ---
+   
+   iCompLL = 0;
+   if (iExistInt_SYS("imgrange","compute_lat_long"))
+   {
+      iCompLL = iGetInt_SYS("imgrange","compute_lat_long");
+      SetString_SYS("imgrange","compute_lat_long","");
+   }
+
+	iRemoveOrientation = 0;
+   if (iExistInt_SYS("imgrange","remove_orientation"))
+   {
+      iRemoveOrientation = iGetInt_SYS("imgrange", "remove_orientation");
+      SetString_SYS("imgrange","remove_orientation","");
+   }
+
+
+   // --- Get file name ---
+   
+   if (iExistString_SYS("imgrange","file"))
+      GetString_SYS("imgrange","file",sImg);
+   else
+      Abort_SYS(_("Parameters IMGRANGE.FILE not specified."));
+
+   
+   // --- Turn on progress ---
+   
+   Progress_SYS(1);      
+   ProgName_SYS(_("Calculating Grid Range"),1);
+    
+   // --- get IPJ ---
+   
+   hIMG = CreateFile_IMG(GS_FLOAT,sImg,IMG_FILE_READONLY);
+   hIPJ = Create_IPJ();
+   GetIPJ_IMG(hIMG,hIPJ);
+   
+   
+   // --- remove the warp and get projected IMG ---
+
+   iClearWarp=0;
+   if (iExistInt_SYS("imgrange","no_clear_warp"))
+   {
+      iClearWarp = iGetInt_SYS("imgrange","no_clear_warp");
+      SetInt_SYS("imgrange","no_clear_warp",0);
+   }
+   
+   if (iClearWarp!=100) ClearWarp_IPJ(hIPJ);
+
+	// --- remove orientation ---
+
+	if( iRemoveOrientation )
+		ClearOrientation_IPJ(hIPJ);
+
+   CreateProjected_IMG(hIMG,hIPJ);
+   
+   
+   // --- save IPJ ---
+   
+   hSBF = hGetSYS_SBF();
+   hBF = CreateSBF_BF(hSBF,"_xyrange.ipj",BF_READWRITE_NEW);
+   Serial_IPJ(hIPJ,hBF);
+   
+   
+   // --- Get the statistics ---
+   
+   GetInfo_IMG(hIMG,rXsep,rYsep,rXoff,rYoff,rRot);
+
+   FormatR_STR(rXoff,sMinX,14,8);
+   FormatR_STR(rYoff,sMinY,14,8);
+   FormatR_STR((rXoff+(real)(iNX_IMG(hIMG)-1)*rXsep),sMaxX,14,8);
+   FormatR_STR((rYoff+(real)(iNY_IMG(hIMG)-1)*rYsep),sMaxY,14,8);
+
+   SetString_SYS("XYRANGE","MIN_X",sMinX);
+   SetString_SYS("XYRANGE","MIN_Y",sMinY);
+   SetString_SYS("XYRANGE","MAX_X",sMaxX);
+   SetString_SYS("XYRANGE","MAX_Y",sMaxY);
+
+	GetUnits_IPJ(hIPJ, rFactor, sUnits);
+   SetString_SYS("XYRANGE","UNITS",sUnits);
+
+
+   // --- Initialize Lat/Long limits of the grid data ---
+
+   rMinLat = rDUMMY;
+   rMinLon = rDUMMY;
+   rMaxLat = rDUMMY;
+   rMaxLon = rDUMMY;
+   
+   
+   // --- Calculate Lat/Long limits of the grid data ---
+   
+   if (iCompLL)
+      RangeLL_IMU(hIMG, rMinLat, rMinLon, rMaxLat, rMaxLon);
+ 
+ 
+   // --- Save Lat/Lon Info ---
+
+   SetReal_SYS("XYRANGE","MIN_LON",rMinLon);
+   SetReal_SYS("XYRANGE","MIN_LAT",rMinLat);
+   SetReal_SYS("XYRANGE","MAX_LON",rMaxLon);
+   SetReal_SYS("XYRANGE","MAX_LAT",rMaxLat);
+
+
+   // --- Turn off progress ---
+   
+   Progress_SYS(0);      
+   
+   Destroy_IMG(hIMG);
+   DestroyEx_BF(hBF);
+   Destroy_SBF(hSBF);
+   Destroy_IPJ(hIPJ); 
+   
+}

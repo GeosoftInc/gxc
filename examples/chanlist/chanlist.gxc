@@ -1,0 +1,187 @@
+//===========================================================================
+NAME          = "Channel list utility GX"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Channel Tools"
+
+DESCRIPTION   = "
+   
+   This GX is called to put together a CSV
+   list of channels to use for processing
+
+   CHANLIST.DATA     \"LIST\"
+                     \"ALL\"
+                     \"DISPLAYED\"
+   CHANLIST.GX     Calling GX.
+   CHANLIST.CHANNELS   On output, channels selected
+   CHANLIST.ALLOWED  If defined, the output list can only contain
+                       items from this CSV string list of items.
+   CHANLIST.NOTSORTD If set to 1, channels are returned in the order selected,
+                     instead of in alphabetical order.
+"           
+// Revision History:
+// v7.1:   Add "NOTSORTED" option.
+// v6.4.0: New GX, based on the CHCHANLST.GX.
+//===========================================================================
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EDB        EData;
+DB         Data;
+LST        ChLST,SelChanLST;
+DB_SYMB    Chan;
+
+string(STR_DEFAULT) sData, sGX;
+string(32768) sChannels, sAllowed;
+int        i, iCh, iRet, iRemove;
+int        iNotSorted;
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+   SelChanLST = Create_LST(2*STR_DB_SYMBOL);
+
+
+   EData = Current_EDB();
+
+
+   // --- Get parameters ---
+
+   GetString_SYS("CHANLIST","DATA",sData);
+   GetString_SYS("CHANLIST","GX", sGX);
+   GetString_SYS("CHANLIST","ALLOWED", sAllowed);
+   iNotSorted = iGetInt_SYS("CHANLIST", "NOTSORTED");
+
+
+   // --- Force re-set each time ---
+
+   SetString_SYS("CHANLIST","DATA","");
+   SetString_SYS("CHANLIST","GX", "");
+   SetString_SYS("CHANLIST","CHANNELS", "");
+   SetString_SYS("CHANLIST","ALLOWED", "");
+   SetString_SYS("CHANLIST","NOTSORTED", "");
+   
+   
+   iRemove = 0;   // --- Remove non-numeric items from list? ---
+
+   if (iStrcmp_STR(sData,"DISPLAYED",STR_CASE_TOLERANT) == 0) {
+
+      iDispChanLST_EDB(EData, ChLST);
+      iRemove = 1;
+
+   } else if (iStrcmp_STR(sData,"ALL",STR_CASE_TOLERANT) == 0) {
+
+      Data = Lock_EDB(EData);
+      SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+      UnLock_EDB(EData);
+      iRemove = 1;
+
+   } else if (iStrcmp_STR(sData,"LIST",STR_CASE_TOLERANT) == 0) {
+
+
+      // --- The channels selected from the list are saved
+      //     to unique GX parameters for each calling GX. ---
+
+      // --- Validate "GX" parameter ---
+
+      if(!iStrlen_STR(sGX)) 
+         Abort_SYS(_("GX programming error - must define CHANLIST.GX parameter."));
+
+
+      // --- Start with all channels ---
+
+      Data = Lock_EDB(EData);
+      ChanLST_DB(Data, ChLST);
+      UnLock_EDB(EData);
+
+
+      // --- Remove items not on the "allowed" list ---
+
+      if(iStrlen_STR(sAllowed))
+         SelectCSVStringItems_LST(ChLST, sAllowed, ChLST);
+         
+
+      // --- Get previous selection ---
+      
+      GetString_SYS(sGX, "SELECTED", sChannels);
+
+
+      // --- User selection ---
+
+      if(iInteractive_SYS()) {
+
+
+         // --- Set starting selection for GUI ---
+
+         ConvertFromCSVString_LST(SelChanLST, sChannels);
+         
+         if (iNotSorted != 1)
+           iRet = iTwoPanelSelection_GUI(ChLST, SelChanLST, _("Select Channels to Process"));
+         else
+           iRet = iTwoPanelSelection2_GUI(ChLST, SelChanLST, _("Select Channels to Process"));
+           
+         if(iRet!=0) Cancel_SYS();
+
+         
+         // --- Save selection ---
+      
+         ConvertToCSVString_LST(SelChanLST, sChannels);
+         SetString_SYS(sGX, "SELECTED", sChannels);
+      }
+      else 
+         SelectCSVStringItems_LST(ChLST, sChannels, SelChanLST);
+
+      Copy_LST(ChLST, SelChanLST);
+      if (iNotSorted != 1)
+        Sort_LST(ChLST,0,0);
+
+   } else Abort_SYS(_("Invalid channel selection option."));
+   
+   
+   iCh = iSize_LST(ChLST);   
+
+
+   // --- Remove non-numeric channels from the non-ASSAY lists ---
+
+   if (iRemove) {
+
+      Data = Lock_EDB(EData);
+      for (i=iCh-1; i>=0; i--) {
+         Chan = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+         LockSymb_DB(Data,Chan,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+         if (iGetChanType_DB(Data, Chan) < 0)
+            DelItem_LST(ChLST,i);
+         UnLockSymb_DB(Data, Chan);
+      }
+      UnLock_EDB(EData);
+   }
+         
+
+   // --- Remove items not on the "allowed" list ---
+
+   if(iStrlen_STR(sAllowed)) {
+
+      if (iStrcmp_STR(sData,"LIST",STR_CASE_TOLERANT) != 0)
+         SelectCSVStringItems_LST(ChLST, sAllowed, ChLST);
+   }
+
+
+   // --- Save selected channels to a CSV string ---
+
+   ConvertToCSVString_LST(ChLST, sChannels);
+   SetString_SYS("CHANLIST", "CHANNELS", sChannels);
+}

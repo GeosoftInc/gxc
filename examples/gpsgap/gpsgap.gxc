@@ -1,0 +1,204 @@
+//===========================================================================
+NAME          = "Fill gaps in differential GPS"
+#include <version.gxh>
+DESCRIPTION   = "\
+\r\n\
+Fill gaps in differential GPS data channels with data from raw GPS. The
+raw GPS data will be moved to match the differential GPS at the edges of
+the gaps.\r\n\
+\r\n\
+    GPSGAP.DiffGPS    : Name of the differential GPS, with gaps.\r\n\
+          .RawGPS     : Name of the raw GPS (may be filtered).\r\n\
+          .FilledGPS  : Output filled GPS data.\r\n\
+\r\n"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Coordinates/Differential GPS"
+
+// Revision History
+// v6.3.0: Fixed QA8527. Needed new form of Move_DU function to do what the GX promised.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "gpsgap.gr"
+#include "gpsgap.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sGPS;             // Channel Names
+string(STR_DB_SYMBOL) sRawGPS;
+string(STR_DB_SYMBOL) sFilledGPS;
+
+EDB         EData;
+DB          Data;             // Database handle
+DB_SYMB     GPS;              // Channel Handles
+DB_SYMB     RawGPS;   
+DB_SYMB     FilledGPS;
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+
+int         i;                // Utility 
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("GPSGAPForm");
+
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_GPSGAPFORM_0);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_GPSGAPFORM_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_GPSGAPFORM_2);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_GPSGAPFORM_0,DGW_TEXT,"GPSGAP","DiffGPS");     
+     SetInfoSYS_DGW(Diag,_GPSGAPFORM_1,DGW_TEXT,"GPSGAP","RawGPS");    
+     SetInfoSYS_DGW(Diag,_GPSGAPFORM_2,DGW_TEXT,"GPSGAP","FilledGPS");     
+
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_GPSGAPFORM_0,DGW_TEXT,"GPSGAP","DiffGPS");    
+     GetInfoSYS_DGW(Diag,_GPSGAPFORM_1,DGW_TEXT,"GPSGAP","RawGPS");    
+     GetInfoSYS_DGW(Diag,_GPSGAPFORM_2,DGW_TEXT,"GPSGAP","FilledGPS"); 
+
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GPSGap","DiffGPS",sGPS);
+   GetString_SYS("GPSGap","RawGPS",sRawGPS);
+   GetString_SYS("GPSGap","FilledGPS",sFilledGPS);
+
+
+   // --- Do the Input channels Exist ? ---
+
+   if (!iExistSymb_DB(Data,sGPS,DB_SYMB_CHAN))
+      Abort_SYS(_("GPS Channel does not exist."));
+   if (!iExistSymb_DB(Data,sRawGPS,DB_SYMB_CHAN))
+      Abort_SYS(_("RawGPS Channel does not exist."));
+   GPS = FindSymb_DB(Data,sGPS,DB_SYMB_CHAN);
+   RawGPS = FindSymb_DB(Data,sRawGPS,DB_SYMB_CHAN);
+   
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sFilledGPS,DB_SYMB_CHAN)) 
+      DupSymbNoLock_DB(Data,GPS,sFilledGPS);
+   FilledGPS = FindSymb_DB(Data,sFilledGPS,DB_SYMB_CHAN);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Lock the channel symbols ---
+
+   if (RawGPS != FilledGPS) 
+      LockSymb_DB(Data,RawGPS,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   if (GPS != FilledGPS) 
+      LockSymb_DB(Data,GPS,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,FilledGPS,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+     // --- Update the Progress Bar ---
+
+     LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+     GetSymbName_DB(Data,Line,sTemp);
+     UnLockSymb_DB(Data,Line);
+     Strcpy_STR(sLabel,_("Fill line: "));
+     Strcat_STR(sLabel,sTemp);
+     ProgName_SYS(sLabel,0);
+     ProgUpdateL_SYS(iLines,iTotLines);
+
+     // --- fill gaps ---
+
+     Move_DU(Data,Line,GPS,RawGPS,FilledGPS,DU_MOVE_INTERP);
+
+     // --- Advance to Next Line ---        
+
+     Line = NextSelLine_DB( Data, Line );
+     iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,FilledGPS, _("Fill gaps in differential GPS"),"GPSGAP;");
+
+
+   // --- Unlock the channel symbol ---
+
+   if (RawGPS != FilledGPS) UnLockSymb_DB(Data,RawGPS);
+   if (GPS != FilledGPS) UnLockSymb_DB(Data,GPS);
+   UnLockSymb_DB(Data,FilledGPS);
+
+
+  Progress_SYS(0);
+
+  // --- Release the Database ---
+
+  UnLock_EDB(EData);
+}

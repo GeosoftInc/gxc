@@ -1,0 +1,811 @@
+//===========================================================================
+NAME          = "Create a new subset database"
+#include <version.gxh>
+DESCRIPTION   = "
+
+   Create a new subset database.
+   
+   DBSUBSET.NAME     new database name
+           .LINES    \"Selected\" for selected lines
+                     \"All\" to include all lines
+           .CHANNELS \"Displayed\" for displayed channels
+                     \"All\" to include all channels
+           .DUMMY    \"No masking\" no masking is applied.
+                     \"Leading/Trailing\" masks leading and trailing dummies.
+                     \"All dummies\" masks all dummies.
+                     A mask channel is required to use the masking options.
+           .MASK     The name of a mask channel.  If not specified,
+                     all data in each line is exported, otherwise
+                     leading and trailing dummy parts of mask channel
+                     are trimmed from each line.
+           .DIALOG   \"NO\" to prevent interactive dialog.                     
+           .COMPRESSION  0 - None, 1 - Speed, 2 - Size.       
+           .MAXLINES If defined, explicitly set the maximum number of lines              
+"
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
+
+// Revision History:
+// v7.3:   ISSUE ### Fid problems corrected when first row in mask channel is a dummy.
+// v7.1.1: QA 16622 Output channels' fid increments should be the same as on input.
+// v7.1.0: Improve progress messages. Removed DB_SELECT usage; line selections not changed.
+// v7.0.0: Commit the subset database.
+//       : Use user global preference for default compression.
+//       : QA 12323 Should re-fid each channel to mask channel, not vice-versa.
+// v6.4.1: QA 11021 Fixed All dummy operation when refidding required.
+// v6.3.0: Remove unused "LOADALL" parameter - no longer relevent in 6.X.
+// v6.1.0: Replaced erroneous DuplicateView_EDB call with Load_EDB of new database.
+// v6.0.1: Compare master and subset databases based on full paths.
+// v5.1.8: Tighten up handling of Fiducial increments.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "dbsubset.gr"
+#include "dbsubset.grh"
+
+#define DUMMY_NONE 0
+#define DUMMY_ENDS 1
+#define DUMMY_ALL  2
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EMaster,ESubset;
+DB          Master,Subset;
+DB_SYMB     Line,SubsetLine,Line0;
+DB_SYMB     Ch,MaskCh,SubsetCh;
+DB_SYMB     Blob,SubsetBlob;
+BF          hBF;
+LST         List, LineLST;
+REG         hREG;
+
+DGW         Diag;
+VV          MaskVV,hVV,DataVV;
+VA          DataVA;
+
+string(STR_FILE) sMaster,sMasterN;
+string(STR_FILE) sSubset,sSubsetN;
+string(STR_DB_SYMBOL) sMaskCh,sCh,sLine,sBlob;
+string(1024) sTemp;
+string(STR_DEFAULT_SHORT) sLines,sChans,sDummy;
+string(STR_DEFAULT_LONG) sProg;
+
+int i,iChan,iBlob,iFirst,iLast,iLen;
+int iChType,iMask,iCol,iDataLen, iMaskLen;
+int iLine,iLines,iTotLines,iNoDGW,iProg,iNProg;
+int iComp,iOK,iGroupLine,iSaveAsMode;
+int iMaxLines, iChansMax, iLinesMax, iLinesUsed, iUsers, iPageSize; 
+real rMaskStart,rMaskIncr;
+real rDataStart,rDataIncr,rDataEnd;
+real rStart,rIncr,rEnd;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get the database ---
+
+   EMaster = Current_EDB();
+
+
+   // --- Are we running interactively ? ---
+
+   GetString_SYS("DBSUBSET","DIALOG",sTemp);
+   iNoDGW = (iStrcmp_STR(sTemp,_n("No"),STR_CASE_TOLERANT) == 0);
+   SetString_SYS("DBSUBSET","DIALOG","Yes");
+   
+   
+	// --- Get global user-preference for compression ---
+	
+   iComp = iGetInt_SYS("DBSUBSET","COMPRESSION");
+   if(iComp==iDUMMY)
+   {
+		if (iGlobal_SYS("MONTAJ.DB_COMPRESS",sTemp) == 0)
+		{
+			SetString_SYS("DBSUBSET","COMPRESSION", sTemp);
+		}
+	}
+   
+   // --- Optional max lines ---
+
+   iMaxLines = iGetInt_SYS("DBSUBSET", "MAXLINES");
+   if(iMaxLines!=iDUMMY)
+		SetString_SYS("DBSUBSET","MAXLINES", "");    // Force reset each time
+
+
+   if (iInteractive_SYS() && !iNoDGW)
+   {
+   
+      // --- Create the dialogue ---
+
+      Diag = Create_DGW("DBSUBSET");
+      
+
+      // --- Set up channel list ---
+
+      List = GetList_DGW(Diag,_DBSUBSET_4);
+      Master = Lock_EDB(EMaster);
+      SymbLST_DB(Master,List,DB_SYMB_CHAN);
+      UnLock_EDB(EMaster);
+      Sort_LST(List,0,0);
+      		
+		
+      // --- Set any defaults ---
+
+      SetInfoSYS_DGW(Diag,_DBSUBSET_0,DGW_FILEPATH,"DBSUBSET","NAME");
+      SetInfoSYS_DGW(Diag,_DBSUBSET_1,DGW_LISTALIAS,"DBSUBSET","LINES");
+      SetInfoSYS_DGW(Diag,_DBSUBSET_2,DGW_LISTALIAS,"DBSUBSET","CHANNELS");
+      SetInfoSYS_DGW(Diag,_DBSUBSET_3,DGW_LISTALIAS,"DBSUBSET","DUMMY");
+      SetInfoSYS_DGW(Diag,_DBSUBSET_4,DGW_TEXT,"DBSUBSET","MASK");
+      SetInfoSYS_DGW(Diag,_DBSUBSET_5,DGW_LISTALIAS,"DBSUBSET","COMPRESSION");
+      
+
+      // --- Run the dialogue ---
+
+      iOK = 0;
+      while (iOK == 0) {
+      
+         if (iRunDialogue_DGW(Diag) == -1) Cancel_SYS();
+         
+         iOK = 1;
+         
+         // --- check for mask channel and mask option ---
+         
+         GetInfo_DGW(Diag,_DBSUBSET_3,DGW_TEXT,sDummy);
+         if (!iCharComp_STR(sDummy,"N")) {
+         
+            // --- user askied for masking, must be a mask channel ---
+            
+            GetInfo_DGW(Diag,_DBSUBSET_4,DGW_TEXT,sMaskCh);
+            
+            if (iStrMin_STR(sMaskCh) == 0) {
+               DisplayMessage_SYS(_("Mask channel not specified"), _("A mask channel must be specified in order to mask dummies from your data."));
+               SetInfo_DGW(Diag,_DBSUBSET_3,DGW_TEXT, _("No masking"));
+               iOK = 0;
+            }               
+         } else
+            SetInfo_DGW(Diag,_DBSUBSET_4,DGW_TEXT,"");
+            
+      }         
+      
+
+      // --- Get the strings ---
+
+      GetInfoSYS_DGW(Diag,_DBSUBSET_0,DGW_FILEPATH,"DBSUBSET","NAME");
+      GetInfoSYS_DGW(Diag,_DBSUBSET_1,DGW_LISTALIAS,"DBSUBSET","LINES");
+      GetInfoSYS_DGW(Diag,_DBSUBSET_2,DGW_LISTALIAS,"DBSUBSET","CHANNELS");
+      GetInfoSYS_DGW(Diag,_DBSUBSET_3,DGW_LISTALIAS,"DBSUBSET","DUMMY");
+      GetInfoSYS_DGW(Diag,_DBSUBSET_4,DGW_TEXT,"DBSUBSET","MASK");
+      GetInfoSYS_DGW(Diag,_DBSUBSET_5,DGW_LISTALIAS,"DBSUBSET","COMPRESSION");
+
+  
+      // --- Destroy the dialogue ---
+
+      Destroy_DGW(Diag);      
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("DBSUBSET","NAME",sSubset);
+   GetString_SYS("DBSUBSET","MASK",sMaskCh);
+   
+   iSaveAsMode = iGetInt_SYS("DBSUBSET", "SAVE_AS");
+   SetInt_SYS("DBSUBSET","SAVE_AS",0);  // Must set every time.
+   
+   // --- get line selection ---
+   
+   
+   GetString_SYS("DBSUBSET","LINES",sLines);
+
+   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   Master = Lock_EDB(EMaster);
+   if (iCharComp_STR(sLines,_n("A"))==1) 
+		LineLST_DB(Master, LineLST);
+	else	
+		SelectedLineLST_DB(Master, LineLST);
+	UnLock_EDB(EMaster);
+  
+   
+   
+   // --- get the channel list ---
+   
+   GetString_SYS("DBSUBSET","CHANNELS",sChans);
+   hVV = Create_VV(INT,0);
+   if (iCharComp_STR(sChans,_n("A"))) {
+      Master = Lock_EDB(EMaster);
+      iChan = iSymbList_DB(Master,hVV,DB_SYMB_CHAN);
+   } else {
+      iChan = iDispChanList_EDB(EMaster,hVV);
+      Master = Lock_EDB(EMaster);
+   }
+   
+   // --- Compression ---
+   
+   iComp = iGetInt_SYS("DBSUBSET","COMPRESSION");
+
+
+   // --- Get symbol channel ---
+   
+   iMask = DUMMY_NONE;
+   if (iStrMin_STR(sMaskCh) != 0) {
+   
+      // --- set mask option ---
+      
+      GetString_SYS("DBSUBSET","DUMMY",sDummy);
+      if (iCharComp_STR(sDummy,_n("A")))
+         iMask = DUMMY_ALL;
+      else   
+         iMask = DUMMY_ENDS;
+         
+   
+      // --- get mask channel ---
+      
+      if (!iExistChan_DB(Master,sMaskCh))
+      {
+         Printf_STR(sTemp, sizeof(sTemp), _("The mask channel '%s' does not exist."), sMaskCh);
+         Abort_SYS(sTemp);
+      }
+      MaskCh = FindChan_DB(Master,sMaskCh);
+
+      if (iGetChanType_DB(Master,MaskCh) < 0)
+      {
+         Strcpy_STR(sTemp,_("The mask channel must be a numerical channel."));
+         Abort_SYS(sTemp);
+      }
+      
+   }      
+   
+   
+   // --- Subset and Master databases cannot have the same name ---
+
+   GetName_DB(Master,DB_NAME_FILE,sMaster);
+
+   AbsoluteFileName_SYS(sMaster, sMasterN);
+   AbsoluteFileName_SYS(sSubset, sSubsetN);
+   
+   if (iStrcmp_STR(sSubsetN,sMasterN,STR_CASE_TOLERANT) == 0)
+      Abort_SYS(_("Master database cannot have the same name as Subset database."));
+
+   UnLoad_EDB(sSubset);
+
+   if (iMaxLines == iDUMMY)   
+      CreateDupComp_DB(Master,sSubset,iComp);
+   else
+   {
+      // --- Get current database info ---
+
+      iChansMax = iGetInfo_DB(Master, DB_INFO_CHANS_MAX);
+      iLinesMax = iGetInfo_DB(Master, DB_INFO_LINES_MAX);
+      iLinesUsed = iGetInfo_DB(Master, DB_INFO_LINES_USED);
+      iUsers = iGetInfo_DB(Master, DB_INFO_USERS_MAX);
+      iPageSize = iGetInfo_DB(Master, DB_INFO_PAGE_SIZE);
+
+      if (iMaxLines < iLinesUsed)
+         iMaxLines = iLinesUsed;
+
+      CreateComp_DB(sSubset, iMaxLines, iChansMax, iMaxLines + iChansMax + 20, iUsers, 100, "SUPER", "", iPageSize, iComp);
+   }
+
+
+   Subset = Open_DB(sSubset,"super","");
+   
+
+   // --- turn on progress ---
+
+   Progress_SYS(1);
+   if(iSaveAsMode == 1)
+   {
+		Printf_STR(sProg, sizeof(sProg), _("Saving %s."), sSubset);
+   }
+   else
+   {
+		Printf_STR(sProg, sizeof(sProg), _("Creating %s."), sSubset);
+   }
+   ProgName_SYS(sProg,1);
+
+
+   // --- get a mask VV ---
+   
+   MaskVV = Create_VV(INT,0);
+
+   
+   // --- Go through all selected Lines ---
+
+   iLines = 0;
+   iTotLines = iSize_LST(LineLST);
+   iNProg = iTotLines*(iChan+1);
+
+   for(iLine=0;iLine<iTotLines;iLine++) 
+   {   
+
+      // --- Get the line and label ---
+      
+      Line = (DB_SYMB)iGetInt_LST(LineLST, 1, iLine);
+      GetItem_LST(LineLST, 0, iLine, sLine);      
+
+
+      // --- progress ---
+        
+      iProg = iLine * (iChan + 1);
+	  if(iSaveAsMode == 1)
+	  {
+		Strcpy_STR(sProg, _("Saving line "));
+	  }
+	  else
+	  {
+		Strcpy_STR(sProg, _("Subsetting line "));
+	  }
+	  Strcat_STR(sProg, sLine);
+      ProgName_SYS(sProg, 0);
+      ProgUpdateL_SYS(iProg, iNProg);
+      if(iCheckStop_SYS()) Cancel_SYS();         
+            
+
+      // --- Get mask channel to VV --
+
+      if (iMask != DUMMY_NONE) {
+
+         LockSymb_DB(Master,MaskCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+         GetChanVV_DB(Master,Line,MaskCh,MaskVV);
+         UnLockSymb_DB(Master,MaskCh);
+         
+         
+         // --- if mask all dummies, skip line ---
+         
+         if (iFindDummy_VVU(MaskVV,0,1,0,-1) == -1) {
+            continue;
+         }         
+      
+      
+         // --- get fiducial info of mask ---
+            
+         rMaskStart = rGetFidStart_VV(MaskVV);
+         rMaskIncr  = rGetFidIncr_VV(MaskVV);
+         iMaskLen = iLength_VV(MaskVV);
+
+
+         // --- Fix bad fiducial info (shouldn't need to, but have had an abort!)
+
+         if(rMaskStart == rDUMMY || rMaskIncr <= 0.0) { rMaskStart = 0.0;  rMaskIncr = 1.0;}
+         
+      }
+      
+      
+      // --- Create Line in Subset database ---
+
+      if (iExistSymb_DB(Subset,sLine,DB_SYMB_LINE) == 1)
+         SubsetLine = FindSymb_DB(Subset,sLine,DB_SYMB_LINE);
+      else
+         SubsetLine = DupSymbAcross_DB(Master,Subset,Line);
+
+
+      // --- Is this a group line? ---
+
+      LockSymb_DB(Subset,SubsetLine,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      iGroupLine = (iLineCategory_DB(Subset, SubsetLine) == DB_CATEGORY_LINE_GROUP);
+      UnLockSymb_DB(Subset,SubsetLine);
+
+
+      // --- If this is the first new line and it is not L0, delete
+      //     L0 now, so that if the original database was full to start with,
+      //     this GX won't fail on a "database full" error ---
+
+      if(iLines==0 &&
+         iStrcmp_STR(sLine,"L0", STR_CASE_TOLERANT)) {
+
+         if (iExistSymb_DB(Subset,"L0",DB_SYMB_LINE) == 1) {
+            Line0 = FindSymb_DB(Subset,"L0",DB_SYMB_LINE);
+            LockSymb_DB(Subset,Line0,DB_LOCK_READWRITE,DB_WAIT_NONE);
+            DeleteSymb_DB(Subset,Line0);
+         }
+      }
+         
+      
+      // --- Go through standard channels ---
+   
+      for (i=0;i<iChan;i++) {
+   
+         // --- progress ---
+         
+         ProgUpdateL_SYS(iProg+i+1,iNProg);
+         if(iCheckStop_SYS()) Cancel_SYS();         
+         
+   
+         // --- Get channel name ---
+      
+         Ch = (DB_SYMB)iGetInt_VV(hVV,i);
+         GetChanName_DB(Master,Ch,sCh);
+
+
+         // --- For groups, add only associated channels ---
+
+         if(iGroupLine) {   
+            if(!iIsAssociated_DB(Master, Line, Ch)) continue;
+         }
+
+         
+         // --- add channel if not already there ---
+          
+         if (iExistChan_DB(Subset,sCh))
+            SubsetCh = FindChan_DB(Subset,sCh);
+         else
+            SubsetCh = DupSymbAcross_DB(Master,Subset,Ch);
+
+
+         // --- Associate group channels ---
+
+         if(iGroupLine)
+            Associate_DB(Subset, SubsetLine, SubsetCh);
+
+
+         // --- Get VV from the channel found ---
+
+         iChType = iGetChanType_DB(Master,Ch);
+         iCol    = iGetColVA_DB(Master,Ch);
+
+         if (iCol == 1) {
+         
+            // --- create VV ---
+            
+            DataVV = CreateExt_VV(iChType,0);
+               
+               
+            // --- get the data ---
+            
+            LockSymb_DB(Master,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);      
+            GetChanVV_DB(Master,Line,Ch,DataVV);
+            UnLockSymb_DB(Master,Ch);
+            
+            
+            // --- null DataVA ---
+            
+            DataVA = (VA)0;
+            
+            
+         } else {      
+         
+         
+            // --- create VA ---
+            
+            DataVA = CreateExt_VA(iChType,0,iCol);
+               
+               
+            // --- get the data ---
+            
+            LockSymb_DB(Master,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);      
+            GetChanVA_DB(Master,Line,Ch,DataVA);
+            UnLockSymb_DB(Master,Ch);
+            
+            
+            // --- null DataVV ---
+            
+            DataVV = (VV)0;
+            
+            
+         }
+         
+         
+         // --- use mask? ---
+         
+         if (iMask != DUMMY_NONE) {
+         
+         
+            // --- get data fid ---
+            
+            if (iCol == 1) 
+            {
+               rDataStart = rGetFidStart_VV(DataVV);
+               rDataIncr  = rGetFidIncr_VV(DataVV);
+               iDataLen = iLength_VV(DataVV);
+            } 
+            else 
+            {               
+               rDataStart = rGetFidStart_VA(DataVA);
+               rDataIncr  = rGetFidIncr_VA(DataVA);
+               iDataLen   = iLen_VA(DataVA);
+            }
+
+
+            // --- Set unset or bad fiducial info to the mask values ---
+
+            if(rDataStart == rDUMMY || rDataIncr <= 0.0) 
+				{ 
+					rDataStart = 0.0;  
+					rDataIncr = 1.0;
+					rDataStart = rMaskStart;  
+					rDataIncr = rMaskIncr;
+	            if (iCol == 1) 
+		         {
+						SetFidStart_VV(DataVV, rDataStart);
+						SetFidIncr_VV(DataVV, rDataIncr);
+					}
+					else
+					{
+						SetFidStart_VA(DataVA, rDataStart);
+						SetFidIncr_VA(DataVA, rDataIncr);
+					}
+				}
+
+
+         
+            // --- refid data to mask if necessary ---
+            
+            if ( (rMaskStart != rDataStart) ||
+                 (rMaskIncr != rDataIncr) ||
+                 (iMaskLen != iDataLen)) 
+            {
+					if (iCol == 1) 
+	               ReFid_VV(DataVV,rMaskStart,rMaskIncr,iMaskLen);               
+					else 
+	               ReFid_VA(DataVA,rMaskStart,rMaskIncr,iMaskLen);               
+            } 
+                  
+                  
+            // --- trim dummies depending on option ---
+            
+            switch (iMask) {
+            
+            
+               // --- trim dummies from ends of lines ---
+                        
+               case DUMMY_ENDS:
+               
+                  
+                  // --- find first/last fid to copy ---
+                  
+                  iFirst = iFindDummy_VVU(MaskVV,0,1,0,-1);
+                  
+                  
+                  // --- empty channel if all dummies ---
+                  
+                  if (iFirst == -1) {
+                     
+                     if (iCol == 1)
+                        SetLen_VV(DataVV,0);
+                     else
+                        SetLn_VA(DataVA,0);                  
+                     break;
+                     
+                  }
+                  
+                  
+                  // --- get last non-dummy ---
+                  
+                  iLast  = iFindDummy_VVU(MaskVV,1,1,0,-1);
+                     
+
+                  if (iCol == 1) 
+                  {
+                     rStart = rGetFidStart_VV(DataVV);
+                     rIncr  = rGetFidIncr_VV(DataVV);
+                  }
+                  else
+                  {
+                     rStart = rGetFidStart_VA(DataVA);
+                     rIncr  = rGetFidIncr_VA(DataVA);
+						}
+						
+
+                  // --- trim ---                     
+                  
+                  if ((iFirst > 0) || (iLast != (iDataLen-1))) {
+                  
+							rStart += (real)iFirst * rIncr;
+                     if (iCol == 1) {
+                     
+                        Copy2_VV(DataVV,0,DataVV,iFirst,(iLast-iFirst+1));
+                        SetFidStart_VV(DataVV,rStart);
+                        SetFidIncr_VV(DataVV,rIncr);
+                        SetLen_VV(DataVV,(iLast-iFirst+1));
+                        
+                     } else {
+                                            
+                        Copy2_VA(DataVA,0,0,DataVA,iFirst,0,(iLast-iFirst+1),iCol);
+                        SetFidStart_VA(DataVA,rStart);
+                        SetFidIncr_VA(DataVA,rIncr);
+                        SetLn_VA(DataVA,(iLast-iFirst+1));
+                        
+                     }
+                  }
+                  
+                  break;
+                  
+                  
+               case DUMMY_ALL:
+               
+                  
+                  // --- Prune all dummies ---
+
+                  // --- find first/last fid to copy ---
+                  
+                  iFirst = iFindDummy_VVU(MaskVV,0,1,0,-1);
+                  
+                  if (iCol == 1)
+                  {
+                     rIncr  = rGetFidIncr_VV(DataVV);
+                     rStart = rGetFidStart_VV(DataVV) + (real)iFirst * rIncr;
+                        
+                     Prune_VVU(DataVV,MaskVV,VVU_PRUNE_DUMMY);
+                     SetFidStart_VV(DataVV,rStart);
+                     SetFidIncr_VV(DataVV,rIncr);
+                  }
+                  else
+                  {
+                     rIncr  = rGetFidIncr_VA(DataVA);
+                     rStart = rGetFidStart_VA(DataVA) + (real)iFirst * rIncr;
+                        
+                     Prune_VAU(DataVA,MaskVV,VVU_PRUNE_DUMMY);
+                     SetFidStart_VA(DataVA,rStart);
+                     SetFidIncr_VA(DataVA,rIncr);
+                  }
+                  
+                  break;
+               
+            }           
+            
+            
+            // ---  Output data with the original Fid increment ---
+            
+            if( rIncr != rDataIncr)
+            {
+					if (iCol == 1) 
+						iLen = iLength_VV(DataVV);
+					else
+					   iLen = iLen_VA(DataVA);
+            
+					rEnd = rStart + (real)(iLen -1) * rIncr;
+					if(rDataIncr < rIncr)
+					{
+						rDataStart = rStart;
+						iDataLen = (int)(((real)(iLen-1) * rIncr) / rDataIncr) + 1;
+					}
+					else
+					{
+						rDataStart = rDataIncr * rCeil_MATH(rStart / rDataIncr);
+						rDataEnd = rDataIncr * rFloor_MATH(rEnd / rDataIncr);
+						iDataLen = (int)((rDataStart - rDataEnd) / rDataIncr) + 1;
+					}
+					
+					if (iCol == 1) 
+	               ReFid_VV(DataVV,rDataStart,rDataIncr,iDataLen);               
+					else 
+	               ReFid_VA(DataVA,rDataStart,rDataIncr,iDataLen);               					
+				}
+         }
+         
+         
+         // --- Put data back to subset database ---
+
+         LockSymb_DB(Subset,SubsetCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         if (iCol == 1)
+            PutChanVV_DB(Subset,SubsetLine,SubsetCh,DataVV);
+         else   
+            PutChanVA_DB(Subset,SubsetLine,SubsetCh,DataVA);
+         UnLockSymb_DB(Subset,SubsetCh);
+            
+
+         // --- Destroy VV ---
+
+         if (iCol == 1)
+            Destroy_SYS(DataVV);
+         else   
+            Destroy_SYS(DataVA);
+
+      }
+
+
+      // --- Copy the current line selection status ---
+
+      SetLineSelection_DB(Subset, SubsetLine, iGetLineSelection_DB(Master, Line));
+
+
+      // --- Advance to Next Line ---
+
+      iLines++;
+   }
+   
+
+   // --- copy database REG ---
+   
+   hREG = Create_REG(256);
+   GetRegSymb_DB(Master,NULLSYMB,hREG);
+   SetRegSymb_DB(Subset,NULLSYMB,hREG);
+   Destroy_REG(hREG);
+   
+   
+   // --- copy all blobs ---
+   
+   iBlob = iSymbList_DB(Master,hVV,DB_SYMB_BLOB);
+   if (iBlob)
+      hBF = Create_BF("",BF_READWRITE_NEW);
+      
+   ProgName_SYS(sProg,1);
+   for (i=0;i<iBlob;i++) {
+   
+
+      // --- progress ---
+      
+      ProgUpdateL_SYS(i,iBlob);
+      if(iCheckStop_SYS()) Cancel_SYS();         
+
+
+      // --- get blob and create in nsubset database ---
+      
+      Blob = (DB_SYMB)iGetInt_VV(hVV,i);
+      
+      
+      // --- only copy non-system blobs that do not already exist ---
+      
+      GetSymbName_DB(Master,Blob,sBlob);
+      
+      if (iStrncmp_STR(sBlob,"__",2,STR_CASE_SENSITIVE)==0) continue;
+      
+      if (iExistSymb_DB(Subset,sBlob,DB_SYMB_BLOB) == 0) {      
+      
+         SubsetBlob = DupSymbAcross_DB(Master,Subset,Blob);
+      
+         Seek_BF(hBF,0,0);
+         ChSize_BF(hBF,0);
+         
+         LockSymb_DB(Master,Blob,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+         LockSymb_DB(Subset,SubsetBlob,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+         
+         ReadBlobBF_DB(Master,Blob,hBF);
+         Seek_BF(hBF,0,0);
+         WriteBlobBF_DB(Subset,SubsetBlob,hBF);
+         
+         UnLockSymb_DB(Subset,SubsetBlob);
+         UnLockSymb_DB(Master,Blob);
+         
+      }
+      
+   }      
+   ProgUpdate_SYS(100);
+   
+   SetDestroyStatus_BF(hBF,BF_DELETE);
+   DestroyEx_BF(hBF);
+   
+   
+   // --- Duplicate channel locks ---
+      
+   DupChanLocks_DU(Master,Subset);
+
+   
+   // --- Commit the subset database ---
+   
+   Commit_DB(Subset);
+   
+   
+   // --- Unlock the databases ---
+
+   UnLock_EDB(EMaster);
+   Destroy_DB(Subset);
+   
+
+   // --- Copy the line view info (something else to do here?) ---
+
+   if (iInteractive_SYS())
+      ESubset = LoadWithView_EDB(sSubset,EMaster);
+   
+   Destroy_VV(hVV);
+   Destroy_VV(MaskVV);
+   
+   
+   // --- progress off ---
+
+   Progress_SYS(0);
+
+}

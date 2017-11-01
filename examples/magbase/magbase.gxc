@@ -1,0 +1,238 @@
+//===========================================================================
+NAME          = "Magnetic base station corrections"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Geomagnetic"
+
+DESCRIPTION   = "\
+\r\n\
+   Apply a magnetic base station correction to a magnetic channel.  The\r\n\
+   magnetic base correction must be contained in a Geosoft ASCII table that\r\n\
+   has a date, time and correction field.  Geosoft conversion programs are\r\n\
+   available for converting instrument base dumps to base correction tables.\r\n\
+\r\n\
+   MAGBASE.INDATA   -  Input Channel Name\r\n\
+          .INTIME   -  Input Time Channel Name\r\n\
+          .OUTDATA  -  Corrected data Output Channel Name\r\n\
+          .BASEFILE -  The Base station table filename.\r\n\
+\r\n"
+
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "magbase.gr"
+#include "magbase.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh,sTimeCh,sOutCh;  // Channel Names
+string(STR_FILE) sTable;                // Table Name
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;                  // Database
+DGW         Diag;                  // Dialogue handle
+DB_SYMB     InCh,TimeCh,OutCh;     // Channel Handles
+DB_SYMB     Line;                  // Line Handle
+TB          Table;                 // Table Handle
+LST         List;                  // List handle
+
+int         i;                     // utility
+int         iLines;                // Number of Lines Processed
+int         iTotLines;             // Total Number of Lines to Process
+int         iFirst;
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("MagBaseForm");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_MAGBASEFORM_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_MAGBASEFORM_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag,_MAGBASEFORM_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_MAGBASEFORM_0,DGW_FILEPATH,"MagBase","BaseFile");     
+      SetInfoSYS_DGW(Diag,_MAGBASEFORM_1,DGW_TEXT,"MagBase","InTime");     
+      SetInfoSYS_DGW(Diag,_MAGBASEFORM_2,DGW_TEXT,"MagBase","InData");    
+      SetInfoSYS_DGW(Diag,_MAGBASEFORM_3,DGW_TEXT,"MagBase","OutData");    
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_MAGBASEFORM_0,DGW_FILEPATH,"MagBase","BaseFile");     
+      GetInfoSYS_DGW(Diag,_MAGBASEFORM_1,DGW_TEXT,"MagBase","InTime");     
+      GetInfoSYS_DGW(Diag,_MAGBASEFORM_2,DGW_TEXT,"MagBase","InData");    
+      GetInfoSYS_DGW(Diag,_MAGBASEFORM_3,DGW_TEXT,"MagBase","OutData");    
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("MagBase Correction"),1);
+
+   // --- Get Parameters ---
+
+   GetString_SYS("MAGBASE","InData",sInCh);
+   GetString_SYS("MAGBASE","InTime",sTimeCh);
+   GetString_SYS("MAGBASE","OutData",sOutCh);
+   GetString_SYS("MAGBASE","BaseFile",sTable);
+
+   // --- Does the Input Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))  
+      Abort_SYS(_("Input channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+
+
+   // --- Does the Time Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sTimeCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Time channel does not exist."));
+   TimeCh = FindSymb_DB(Data,sTimeCh,DB_SYMB_CHAN);
+
+
+   // --- Does the Ouput Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) 
+      DupSymbNoLock_DB(Data,InCh,sOutCh); // Create it 
+   OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+
+
+   // --- Load the Table into Memory ---
+
+   Printf_STR(sLabel, sizeof(sLabel), _("Loading \"%s\""), sTable);
+   ProgName_SYS(sLabel,1);
+   Table = Create_TB(sTable);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+   // --- must be different channels ---
+
+   if (InCh == OutCh) 
+      Abort_SYS(_("Input data and output data channels must be different."));
+
+   if (InCh == TimeCh)
+      Abort_SYS(_("Input data channel and time channel must be different."));
+
+   if (OutCh == TimeCh)
+      Abort_SYS(_("Output data channel and time channel must be different."));
+
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+
+
+   // --- Go through all selected Lines ---
+
+   iFirst = 1;
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+     // --- Update the Progress Bar ---
+
+     LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+     GetSymbName_DB(Data,Line,sTemp);
+     UnLockSymb_DB(Data,Line);
+     Strcpy_STR(sLabel,_("Processing line: "));
+     Strcat_STR(sLabel,sTemp);
+     ProgName_SYS(sLabel,0);
+     ProgUpdateL_SYS(iLines,iTotLines);
+
+
+     // --- Apply the Correction ---
+
+     BaseDataEx_DU(Data,Line,InCh,TimeCh,OutCh,Table,iFirst);
+     iFirst = 0;
+
+
+     // --- Advance to Next Line ---        
+
+     Line = NextSelLine_DB(Data, Line );
+     iLines++;
+  }
+
+
+  // --- Add maker ---
+
+  EasyMakerSymb_DB(Data,OutCh,_("Magbase"),"MAGBASE;");
+
+  // --- Unlock the channel symbol ---
+
+  UnLockSymb_DB(Data,InCh);
+  UnLockSymb_DB(Data,TimeCh);
+  UnLockSymb_DB(Data,OutCh);
+
+  // --- Done ---
+
+  Destroy_TB(Table);
+  Progress_SYS(0);
+
+
+   // --- Update the activity log ---
+
+   AddTimeComment_DB(Data, _n("MAGBASE GX (Mag base station correction)"), FALSE);
+   AddComment_DB(Data, "Base file", sTable, TRUE);
+   AddComment_DB(Data, "Input channel", sInCh, TRUE);
+   AddComment_DB(Data, "Time channel", sTimeCh, TRUE);
+   AddComment_DB(Data, "Output channel", sOutCh, TRUE);
+
+
+   // --- Release the Database ---
+
+  UnLock_EDB(EData);
+}

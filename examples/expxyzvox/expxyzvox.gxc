@@ -1,0 +1,135 @@
+//===========================================================================
+NAME          = "Voxel export to XYZ"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel"
+
+DESCRIPTION   = "
+
+Exports a Geosoft VOXEL into XYZ
+
+   EXPXYZVOX.VOXEL:     Voxel File.
+   EXPXYZVOX.XYZ:       XYZ file
+   EXPXYZVOX.DIRECTION: What direction to export
+   EXPXYZVOX.DUMMY:     Support Dummies?
+
+"
+// Revision History:
+// v7.3.0   Changed workflow to always provide user choice of output voxel, and not always show the voxel viewer.
+// v6.3.0   First version
+//===========================================================================
+
+RESOURCE = "expxyzvox.gr"
+#include "expxyzvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW  hDGW;   
+VOX  hVOX;
+EDOC hEDOC;
+
+
+string(STR_FILE) sVoxel,sNew,sXYZ,sFile;
+int              i,iDummy,iDirection;
+
+string(64) sLicClass;
+int iArcGIS;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGIS = iStrcmp_STR(sLicClass, _n("ArcGIS"), STR_CASE_TOLERANT) == 0;
+ 
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+		// --- Set the defaults from the voxel in the voxel viewer, if present ---
+
+		if (!iArcGIS && iHaveCurrent_EDOC(EDOC_TYPE_VOXEL))
+		{
+			hEDOC = Current_EDOC(EDOC_TYPE_VOXEL);
+			GetName_EDOC(hEDOC, sVoxel);				
+			
+			FileNamePart_STR(sVoxel, sNew, STR_FILE_PART_NAME);
+			FileExt_STR(sNew, "xyz", sNew, FILE_EXT_FORCE);
+			SetString_SYS("EXPXYZVOX", "VOXEL", sVoxel);		
+			SetString_SYS("EXPXYZVOX", "XYZ", sNew);				
+		}
+
+
+	   // --- Create the Dialogue ---
+
+	   hDGW = Create_DGW("EXPXYZVOX");
+
+	     
+	   // --- Set any Defaults ---
+
+	   SetInfoSYS_DGW(hDGW,_EXPXYZVOX_0,DGW_FILEPATH,"EXPXYZVOX","VOXEL");     
+	   SetInfoSYS_DGW(hDGW,_EXPXYZVOX_1,DGW_FILEPATH,"EXPXYZVOX","XYZ");     
+	   SetInfoSYS_DGW(hDGW,_EXPXYZVOX_2,DGW_LISTALIAS,"EXPXYZVOX","DIRECTION");     
+	   SetInfoSYS_DGW(hDGW,_EXPXYZVOX_3,DGW_LISTALIAS,"EXPXYZVOX","DUMMY");     
+	     
+	   // --- Run the Dialogue ---
+
+	   i = iRunDialogue_DGW(hDGW);
+	   if (i == -1) Cancel_SYS();    // The user hit cancel
+
+	     
+	   // --- Get the Strings ---
+
+	   GetInfoSYS_DGW(hDGW,_EXPXYZVOX_0,DGW_FILEPATH,"EXPXYZVOX","VOXEL");     
+	   GetInfoSYS_DGW(hDGW,_EXPXYZVOX_1,DGW_FILEPATH,"EXPXYZVOX","XYZ");     
+	   GetInfoSYS_DGW(hDGW,_EXPXYZVOX_2,DGW_LISTALIAS,"EXPXYZVOX","DIRECTION");     
+	   GetInfoSYS_DGW(hDGW,_EXPXYZVOX_3,DGW_LISTALIAS,"EXPXYZVOX","DUMMY");     
+	     
+	     
+	   // --- Destroy the Dialogue ---
+
+	   Destroy_DGW(hDGW);
+	}
+        
+   
+   // --- Get and verify parameters ---
+
+   GetString_SYS("EXPXYZVOX","VOXEL",sVoxel);
+   GetString_SYS("EXPXYZVOX","XYZ",sXYZ);
+   iDummy = iGetInt_SYS("EXPXYZVOX","DUMMY");
+   iDirection = iGetInt_SYS("EXPXYZVOX","DIRECTION");
+   
+   
+   // --- Generate Names ---
+   
+   FileExt_STR(sXYZ,".xyz",sFile,FILE_EXT_ADD_IF_NONE);   
+   
+   
+   // --- Progress ---
+   
+   Progress_SYS(1);
+   
+   
+   // --- Open the Voxel ---
+   
+   hVOX = Create_VOX(sVoxel);
+   
+   
+   // --- Write the XYZ File ---
+   
+   ExportXYZ_VOX(hVOX,sFile,iDirection,0,0,0,iDummy);
+   
+   
+   // --- Done ---
+   
+   Progress_SYS(0);
+}

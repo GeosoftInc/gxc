@@ -1,0 +1,330 @@
+//===========================================================================
+NAME          = "Mask X,Y to a mask polygon"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools/Window Data"
+
+DESCRIPTION   = "
+
+   Mask a a channel in the database against one or more polygons
+   defined in a polygon file.  Data points inside or outside the
+   polygons will be dummied in the reference channel.
+
+     WINXY.MASK     -  Mask polygon file.
+          .DUMMY    -  \"INSIDE\"  dummy data inside polygons.
+                    -  \"OUTSIDE\" dummy data outside polygons.
+"
+// Revision History:
+// v5.1.7: User prompted if backup channels already exist and will be overwritten.
+// v5.1.3: Using "Current" X and Y channels
+//         Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "winxy.gr"
+#include   "winxy.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_FILE) sMask;                     // Mask name
+string(STR_DEFAULT_SHORT) sDummy;                    // Dummy option
+
+EDB         EData;
+DB          Data;                      // database handle
+DB_SELECT   Sel;                       // selection
+
+DB_SYMB     XCh,YCh;                   // Channel Handles
+DB_SYMB     __XCh,__YCh;               // Channel Handles
+DB_SYMB     Line;                      // Line Handle
+DGW         Diag;                      // Dialogue handle
+PLY         Polygon;                   // Polygon Object
+
+int         iDummy;                    // Inside/Outside option
+int         iLines;                    // Number of Lines Processed
+int         iTotLines;                 // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;                     // temporary number formating string
+string(STR_DEFAULT) sLabel;
+string(STR_DB_SYMBOL) sXCh,sYCh,sXBackCh,sYBackCh;
+string(1024) sMsg;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("WINXY");
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_WINXY_0,DGW_FILEPATH,"WINXY","MASK");    
+      SetInfoSYS_DGW(Diag,_WINXY_1,DGW_TEXT,"WINXY","DUMMY");    
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS(); 
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_WINXY_0,DGW_FILEPATH,"WINXY","MASK");  
+      GetInfoSYS_DGW(Diag,_WINXY_1,DGW_TEXT,"WINXY","DUMMY");  
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Turn On Progress ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Mask X,Y to polygons"),1);
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("WINXY","MASK",sMask);
+   GetString_SYS("WINXY","DUMMY",sDummy);
+
+
+   // --- Get current X, Y channels ---
+
+   GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+   GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+   
+   
+   // --- Get names of backups to current X, Y channels ---
+   
+   Strcpy_STR(sXBackCh, "__");
+   Strcat_STR(sXBackCh, sXCh);
+   Strcpy_STR(sYBackCh, "__");
+   Strcat_STR(sYBackCh, sYCh);
+   
+
+   // --- Do X and Y Exist ? ---
+
+   XCh = FindChan_DB(Data,sXCh);
+   if (XCh == NULLSYMB)  
+      Abort_SYS(_("Input current X channel does not exist."));
+
+   YCh = FindChan_DB(Data,sYCh);
+   if (YCh == NULLSYMB)  
+      Abort_SYS(_("Input current Y channel does not exist."));
+   
+   
+   // --- make a backup copy of the current X and Y. Check to see if
+   //     the backup channels already exist and warn user ---
+
+
+   if(iInteractive_SYS()) {
+
+      if (iExistChan_DB(Data,sXBackCh) ||
+          iExistChan_DB(Data,sYBackCh)) {
+
+         Printf_STR(sMsg, sizeof(sMsg), _("One or both of the backup channels \r\n\"%s\" and \"%s\" already exists.\r\nProceeding will overwrite any backed-up XY data.\r\nAre you sure you wish to continue?"), sXBackCh, sYBackCh);
+
+         if(!iDisplayQuestion_SYS(_("Backup X, Y channels already exist."),  sMsg)) {
+
+            Abort_SYS(_("Back-up channels not overwritten... process terminated."));
+         }         
+      }
+   }
+
+
+
+   // --- save selection ---
+
+   Sel = GetSelect_DB(Data);
+   Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+
+
+   // --- re-create master channels ---
+
+   if (iExistChan_DB(Data,sXBackCh)) {
+      __XCh = FindChan_DB(Data,sXBackCh);
+      LockSymb_DB(Data,__XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      DeleteSymb_DB(Data,__XCh);
+   }
+   __XCh = DupSymb_DB(Data,XCh,sXBackCh);
+
+   if (iExistChan_DB(Data,sYBackCh)) {
+      __YCh = FindChan_DB(Data,sYBackCh);
+      LockSymb_DB(Data,__YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      DeleteSymb_DB(Data,__YCh);
+   }
+   __YCh = DupSymb_DB(Data,YCh,sYBackCh);
+
+
+   // --- copy ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+   ProgName_SYS(_("Make backup __X and __Y"),1);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+
+      Strcpy_STR(sLabel,_("Line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Copy ---
+
+      Decimate_DU(Data,Line,XCh,__XCh,1);
+      Decimate_DU(Data,Line,YCh,__YCh,1);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+
+   }
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,__XCh);
+   UnLockSymb_DB(Data,__YCh);
+
+
+   // --- put back selection ---
+
+   SetSelect_DB(Data,Sel);
+
+   
+   // --- dummy setting ---
+
+   if (iStrcmp_STR(sDummy,"INSIDE",STR_CASE_TOLERANT)==0)
+      iDummy = DU_MASK_INSIDE;
+   else
+      iDummy = DU_MASK_OUTSIDE;
+
+
+   // --- Create the Polygon ---
+
+   Polygon = Create_PLY();
+
+
+   // --- Load the Data ---
+
+   LoadTable_PLY(Polygon,sMask);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+
+
+   // --- Lock the Symbols ---
+
+   LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(Data,__XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+   LockSymb_DB(Data,__YCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+
+
+   // --- unlock current X and Y ---
+   
+   SetChanProtect_DB(Data,XCh,DB_CHAN_UNPROTECTED);
+   SetChanProtect_DB(Data,YCh,DB_CHAN_UNPROTECTED);
+
+
+   // --- Go through all selected Lines ---
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+     // --- Update the Progress Bar ---
+
+     LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_NONE);
+     GetSymbName_DB(Data,Line,sTemp);
+     UnLockSymb_DB(Data,Line);
+
+     Strcpy_STR(sLabel,_("Mask line: "));
+     Strcat_STR(sLabel,sTemp);
+     ProgName_SYS(sLabel,0);
+     ProgUpdateL_SYS(iLines,iTotLines);
+
+
+     // --- Mask ---
+
+     PolyMask_DU(Data,Line,__XCh,__YCh,XCh,Polygon,iDummy);
+     PolyMask_DU(Data,Line,__XCh,__YCh,YCh,Polygon,iDummy);
+
+
+
+     // --- Advance to Next Line ---        
+
+     Line = NextSelLine_DB(Data,Line);
+     iLines++;
+
+  }
+
+
+   // --- Add makers ---
+
+   EasyMakerSymb_DB(Data,XCh,_("Mask to polygons"),"WINXY;");
+   EasyMakerSymb_DB(Data,YCh,_("Mask to polygons"),"WINXY;");
+
+
+   // --- Unlock the Symbol ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data,__XCh);
+   UnLockSymb_DB(Data,__YCh);
+
+
+   // --- Done ---
+
+   Destroy_PLY(Polygon);
+   Progress_SYS(0);
+   UnLock_EDB(EData);   
+
+}

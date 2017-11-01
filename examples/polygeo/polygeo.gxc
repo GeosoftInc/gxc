@@ -1,0 +1,316 @@
+//===========================================================================
+
+NAME          = "Create a mask polygon file from geographic coordinates"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Map Tools"
+
+DESCRIPTION   = "
+		POLYGEO.PLYFILE  	polygon file name
+		       .APPEND  	1 to append file
+             .LONMIN    minimum logitude
+             .LONMAX    maximum logitude
+             .LATMIN    minimum latitude
+             .LATMAX    maximum latitude
+             .DIVSIDE   divisions per side
+		       .INEXCL  	inclusive or exclusive
+          IPJ.NAME        projection name
+          IPJ.DATUM       datum (name, major axis, ellipticity)
+          IPJ.METHOD      projection method (name,p1,p2,... see GXF)
+          IPJ.UNITS       distance units (name,m/unit)
+          IPJ.LOCALDATUM  local datum (name,dx,dy,dz,rx,ry,rz,scale)		       
+"
+// Revision History:
+// v7.0.0: Switch to new GX.Net projection wizard.
+// v5.1.4: Error for oriented views.
+// v5.1.3: Using "Current" X and Y channels
+//===========================================================================
+
+RESOURCE = "polygeo.gr"
+#include "polygeo.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sPlyFile;
+string(STR_GXF) s1,s2,s3,s4,s5;
+int         i,k,iLen,iMode,iDivSide,iOrient;
+int         iExclusive;
+real        rLonMin,rLonMax,rLatMin,rLatMax;
+real        rLon,rLat,rLon1,rLat1;
+
+DGW         Diag;             // Dialogue handle
+PLY			Poly;					// polygon object
+VV          VVx,VVy;				// polyline VV's
+
+IPJ         hIPJ;             // Projection
+PJ          hPJ;              // Projection conversion
+
+EDB         EData;
+DB          Data;
+DB_SYMB     XCh;
+EMAP        EMap;
+MAP         Map;
+MVIEW       View;
+
+
+//===========================================================================
+
+{
+
+   // --- create an IPJ ---
+
+   hIPJ = Create_IPJ();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+   
+      
+   
+      // --- get projection ---
+      
+      if (iHaveCurrent_EMAP()) {
+      
+         // --- if there is a current map, get the data view projection ---
+         
+         EMap = Current_EMAP();
+         Map = Lock_EMAP(EMap);
+         SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
+         if (iExistView_MAP(Map,"*Data")) {
+            View = Create_MVIEW(Map,"*Data",MVIEW_READ);
+            GetIPJ_MVIEW(View,hIPJ);
+
+            iOrient = iGetOrientation_IPJ(hIPJ);
+            
+            if(iOrient!=IPJ_ORIENT_DEFAULT &&
+               iOrient!=IPJ_ORIENT_PLAN) {
+
+               Abort_SYS(_("Masking operations cannot currently be performed on specially oriented (non-plan) views."));
+            }
+
+         }            
+         UnLock_EMAP(EMap);
+         
+         
+      } else if (iHaveCurrent_EDB()) {
+      
+         // --- if there is a current database, get the X channel projection ---
+         
+         EData = Current_EDB();
+         Data  = Lock_EDB(EData);
+         XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+         if (XCh!=NULLSYMB) {
+            LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+            GetIPJ_DB(Data,XCh,hIPJ);
+            UnLockSymb_DB(Data,XCh);
+         }
+         UnLock_EDB(EData);
+         
+      }
+      
+       
+      // --- Create the 1st Dialogue ---
+
+      Diag = Create_DGW("POLYGEO");
+      
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_POLYGEO_0,DGW_FILEPATH,"POLYGEO","PLYFILE");     
+      SetInfoSYS_DGW(Diag,_POLYGEO_1,DGW_LISTALIAS,"POLYGEO","APPEND");     
+      SetInfoSYS_DGW(Diag,_POLYGEO_2,DGW_TEXT,    "POLYGEO","LONMIN");     
+      SetInfoSYS_DGW(Diag,_POLYGEO_3,DGW_TEXT,    "POLYGEO","LONMAX");     
+      SetInfoSYS_DGW(Diag,_POLYGEO_4,DGW_TEXT,    "POLYGEO","LATMIN");     
+      SetInfoSYS_DGW(Diag,_POLYGEO_5,DGW_TEXT,    "POLYGEO","LATMAX");     
+      SetInfoSYS_DGW(Diag,_POLYGEO_6,DGW_TEXT,    "POLYGEO","DIVSIDE");     
+      SetInfoSYS_DGW(Diag,_POLYGEO_7,DGW_LISTALIAS,"POLYGEO","INEXCL");     
+
+      // --- Run the Dialogue ---
+
+      iMode = iRunDialogue_DGW(Diag);
+      if (iMode < 0) Cancel_SYS();
+    
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_POLYGEO_0,DGW_FILEPATH,"POLYGEO","PLYFILE");     
+      GetInfoSYS_DGW(Diag,_POLYGEO_1,DGW_LISTALIAS,"POLYGEO","APPEND");     
+      GetInfoSYS_DGW(Diag,_POLYGEO_2,DGW_TEXT,    "POLYGEO","LONMIN");     
+      GetInfoSYS_DGW(Diag,_POLYGEO_3,DGW_TEXT,    "POLYGEO","LONMAX");     
+      GetInfoSYS_DGW(Diag,_POLYGEO_4,DGW_TEXT,    "POLYGEO","LATMIN");     
+      GetInfoSYS_DGW(Diag,_POLYGEO_5,DGW_TEXT,    "POLYGEO","LATMAX");     
+      GetInfoSYS_DGW(Diag,_POLYGEO_6,DGW_TEXT,    "POLYGEO","DIVSIDE");     
+      GetInfoSYS_DGW(Diag,_POLYGEO_7,DGW_LISTALIAS,"POLYGEO","INEXCL");     
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+      
+            
+      // --- Edit/modify the IPJ ---
+   
+      iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Polygon file"), sPlyFile);
+
+
+      // --- Export IPJ parameters as GXF strings for scripting. ---
+      
+      GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
+      
+      SetString_SYS("IPJ", "NAME", s1);
+      SetString_SYS("IPJ", "DATUM", s2);
+      SetString_SYS("IPJ", "METHOD", s3);
+      SetString_SYS("IPJ", "UNITS", s4);
+      SetString_SYS("IPJ", "LOCALDATUM", s5);
+      
+      
+      // --- Read them back in - this will ensure they are used for lineage ---
+      
+      GetString_SYS("IPJ", "NAME", s1);
+      GetString_SYS("IPJ", "DATUM", s2);
+      GetString_SYS("IPJ", "METHOD", s3);
+      GetString_SYS("IPJ", "UNITS", s4);
+      GetString_SYS("IPJ", "LOCALDATUM", s5);
+   }
+   else
+   {
+      // --- Get and validate the IPJ parameters from the INI ---
+      
+      GetString_SYS("IPJ","NAME",s1);
+      GetString_SYS("IPJ","DATUM",s2);
+      GetString_SYS("IPJ","METHOD",s3);
+      GetString_SYS("IPJ","UNITS",s4);
+      GetString_SYS("IPJ","LOCALDATUM",s5);
+
+      if(!iStrlen_STR(s1) &&
+         !iStrlen_STR(s2) &&
+         !iStrlen_STR(s3) &&
+         !iStrlen_STR(s4) &&
+         !iStrlen_STR(s5))
+      {
+         Abort_SYS(_("GXF projection strings IPJ.NAME, IPJ.DATUM, IPJ.METHOD, IPJ.UNITS and IPJ.LOCALDATUM not set for non-interactive use of the POLYGEO.GX."));
+      }
+
+      SetGXF_IPJ(hIPJ,s1,s2,s3,s4,s5);
+   }
+
+
+   // --- Get file ---
+
+   GetString_SYS("POLYGEO","PLYFILE",sPlyFile);
+   
+
+   // --- Get parameters ---
+
+   rLonMin = rGetReal_SYS("POLYGEO","LONMIN");
+   rLonMax = rGetReal_SYS("POLYGEO","LONMAX");
+   rLatMin = rGetReal_SYS("POLYGEO","LATMIN");
+   rLatMax = rGetReal_SYS("POLYGEO","LATMAX");
+   
+   iDivSide = 16;
+   GetString_SYS("POLYGEO","DIVSIDE",s1);     
+   if (iStrlen_STR(s1))
+      iDivSide = iGetInt_SYS("POLYGEO","DIVSIDE");     
+   if(iDivSide < 1)   
+      Abort_SYS(_("Division per side must be a positive number."));
+   
+   iExclusive = 0;
+   GetString_SYS("POLYGEO","INEXCL",s1);     
+   if (iStrlen_STR(s1))
+      iExclusive = iGetInt_SYS("POLYGEO","INEXCL");
+      
+
+	// --- create polygon ---
+
+ 	Poly = Create_PLY();
+   
+
+	// --- if append, load current file ---
+
+	if (iMode == 1) {
+
+		// --- file must exist ---
+
+		if (!iFileExist_SYS(sPlyFile))
+			Abort_SYS(_("Cannot append to a file that does not exist."));
+
+		LoadTable_PLY(Poly,sPlyFile);
+	}
+	
+   // --- create VV's ---
+
+   iLen = 4*iDivSide;   
+   VVx = Create_VV(REAL,iLen);
+   VVy = Create_VV(REAL,iLen);
+
+   // --- set VVx and VVy ---
+
+   k = 0;
+   rLon1 = (rLonMax - rLonMin)/(real)iDivSide;
+   rLat1 = (rLatMax - rLatMin)/(real)iDivSide;
+   
+   rLon = rLonMin;
+   rLat = rLatMin;
+   for(i=0; i<iDivSide; i++)  {
+      SetReal_VV(VVx,k,rLon);
+      SetReal_VV(VVy,k,rLat);
+      rLon += rLon1;
+      k++;
+   }
+   rLon = rLonMax;
+   rLat = rLatMin;
+   for(i=0; i<iDivSide; i++)  {
+      SetReal_VV(VVx,k,rLon);
+      SetReal_VV(VVy,k,rLat);
+      rLat += rLat1;
+      k++;
+   }
+   rLon = rLonMax;
+   rLat = rLatMax;
+   for(i=0; i<iDivSide; i++)  {
+      SetReal_VV(VVx,k,rLon);
+      SetReal_VV(VVy,k,rLat);
+      rLon -= rLon1;
+      k++;
+   }
+   rLon = rLonMin;
+   rLat = rLatMax;
+   for(i=0; i<iDivSide; i++)  {
+      SetReal_VV(VVx,k,rLon);
+      SetReal_VV(VVy,k,rLat);
+      rLat -= rLat1;
+      k++;
+   }
+   
+   
+   // --- Create the Projection ---
+
+   hPJ = CreateIPJ_PJ((IPJ)0,hIPJ);
+   
+
+   // --- get projected points ---
+   
+   ConvertVV_PJ(hPJ,VVx,VVy);
+   
+   
+   // --- add polygon points to file ---
+
+   SetIPJ_PLY(Poly,hIPJ);
+	AddPolygonEx_PLY(Poly,VVx,VVy,iExclusive);
+	SaveTable_PLY(Poly,sPlyFile);
+   
+   	
+   // --- done ---   
+      
+   Destroy_SYS(VVx);
+   Destroy_SYS(VVy);
+   Destroy_SYS(Poly);
+
+}

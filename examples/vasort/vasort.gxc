@@ -1,0 +1,223 @@
+//===========================================================================
+NAME          = "Sort the contents of an array channel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Array Channels"
+
+DESCRIPTION   = "
+
+  VASORT.CHANNEL    channel name
+        .ORDER      0: ASCENDING
+                    1: DESCENDING
+        .SORT       0: Rows
+                    1: Columns
+
+NOTE: Sort by rows or by columns.
+"
+// Revision History:
+// v5.1.5: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "vasort.gr"
+#include "vasort.grh"
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sCh;
+
+string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT) sLabel;
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch;
+DB_SYMB     Line;
+DGW         Diag;
+LST         List;                  // list handle
+VA          DataVA;
+VV          DataVV;
+int         iOrder;                // sort order
+int         iLine,iTotLines;       // counters
+int         i,iSort,iRows,iCols,iType;
+
+//===========================================================================
+//                              CODE
+//===========================================================================
+
+{
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("VASORT");
+
+
+      // --- Set up input and output lists ---
+
+      List = GetList_DGW(Diag,_VASORT_0);
+      ArrayLST_DB(Data, List);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+ 
+      SetInfoSYS_DGW(Diag,_VASORT_0,DGW_TEXT,"VASORT","CHANNEL");
+      SetInfoSYS_DGW(Diag,_VASORT_1,DGW_LISTALIAS,"VASORT","SORT");
+      SetInfoSYS_DGW(Diag,_VASORT_2,DGW_LISTALIAS,"VASORT","ORDER");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();    
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_VASORT_0,DGW_TEXT,"VASORT","CHANNEL");
+      GetInfoSYS_DGW(Diag,_VASORT_1,DGW_LISTALIAS,"VASORT","SORT");
+      GetInfoSYS_DGW(Diag,_VASORT_2,DGW_LISTALIAS,"VASORT","ORDER");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VASORT","CHANNEL",sCh);
+   iSort = iGetInt_SYS("VASORT","SORT");
+   iOrder = iGetInt_SYS("VASORT","ORDER");
+
+
+   // --- Does the Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sCh,DB_SYMB_CHAN))
+      Abort_SYS(_("Channel does not exist."));
+   Ch = FindChan_DB(Data,sCh);
+   
+
+   // --- Lock the channel symbols ---
+
+   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Create work VA, VV ---
+
+   iType = iGetChanType_DB(Data, Ch);
+   iCols = iGetChanArraySize_DB(Data, Ch);
+
+   DataVA = CreateExt_VA(iType, 0, iCols);
+   DataVV = CreateExt_VV(iType, 0);
+
+
+   // --- Prepare to do the work ---
+
+   iLine = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Process line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLine,iTotLines);        
+
+
+      // --- process ---
+
+      GetChanVA_DB(Data, Line, Ch, DataVA);
+	
+      if(iSort==VA_ROW) {
+      
+         iRows = iLen_VA(DataVA);
+         for(i=0;i<iRows;i++) {
+
+            GetVV_VA (DataVA, i, VA_ROW, DataVV);
+
+            Sort_VV(DataVV, iOrder);	// *** One step... NOT UNTIL 5.1.5
+
+            SetVV_VA (DataVA, i, VA_ROW, DataVV);
+         }
+      }
+      else {
+
+         for(i=0;i<iCols;i++) {
+
+            GetVV_VA (DataVA, i, VA_COL, DataVV);
+
+            Sort_VV(DataVV, iOrder);	// *** One step... NOT UNTIL 5.1.5
+
+            SetVV_VA (DataVA, i, VA_COL, DataVV);
+         }
+      }
+
+      PutChanVA_DB(Data, Line, Ch, DataVA);	
+
+
+
+      // --- Advance to Next Line ---    
+
+      Line = NextSelLine_DB(Data, Line);
+      iLine++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,Ch,_("Sort array channel"),"VASORT;");
+
+   // --- Clean up ---
+
+   UnLockSymb_DB(Data,Ch);
+
+
+   // --- Done ---
+
+   Progress_SYS(0);
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+
+   // --- Clean up ---
+
+   Destroy_VA(DataVA);
+   Destroy_VV(DataVV);
+}

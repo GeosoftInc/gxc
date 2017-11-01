@@ -1,0 +1,96 @@
+//===========================================================================
+NAME          = "Make an HGD from an input grid"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/DAP Prep/Prepare Hyper Datasets"
+
+DESCRIPTION   = "
+
+   HGDIMG.INPUT  - Input Grid.
+
+"
+
+//===========================================================================
+
+RESOURCE = "hgdimg.gr"
+#include "hgdimg.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sInput,sOutput;
+DGW   Diag;
+IMG   hIMG;
+HGD   hHGD;
+
+
+//===========================================================================
+//                           HGDIMG CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+   
+      // --- first dialog ---
+
+      Diag = Create_DGW("HGDIMG");
+      
+      SetInfoSYS_DGW(Diag,_HGDIMG_0,DGW_FILEPATH, "HGDIMG","INPUT");     
+                              
+      if (iRunDialogue_DGW(Diag) == -1) Cancel_SYS();
+
+      GetInfoSYS_DGW(Diag,_HGDIMG_0,DGW_FILEPATH, "HGDIMG","INPUT");     
+      
+      Destroy_DGW(Diag);
+         
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("HGDIMG","INPUT",sInput);
+   
+   
+   // --- create output HGD name ---
+   
+   FileExt_STR(sInput,"hgd",sOutput,FILE_EXT_FORCE);
+
+
+   // --- Do work ---
+   
+   Progress_SYS(1);
+
+
+   // --- Open Image ---
+
+   hIMG = CreateFile_IMG(GS_DOUBLE,sInput,IMG_FILE_READONLY);
+
+
+   // --- Generate a HGD from the Image ---
+
+   Progress_SYS(1);
+   hHGD = hCreateIMG_HGD(hIMG,sOutput);
+   Progress_SYS(0);
+
+   
+   // --- Destroy Objects ---
+
+   Destroy_HGD(hHGD);
+   Destroy_IMG(hIMG);
+
+
+   // --- Finished ---
+
+   Progress_SYS(0);
+}

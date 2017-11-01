@@ -1,0 +1,179 @@
+//===========================================================================
+NAME          = "GRIDAGC"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Filters"
+
+DESCRIPTION   = "\Apply automatic gain compensation to a grid.
+Parameters:
+        GRIDAGC.GRD      File Name of the Input Grid.
+               .NEW      File Name of New Grid.                          
+               .WIDTH    Width of the filter used to estimate the local
+                         signal gain.
+               .MAXGAIN  The Maximum gain applied to the signal at any
+                         location in the grid.
+               .METHOD   Use full amplitude or local amplitude method.
+"						 
+
+//===========================================================================
+
+RESOURCE = "gridagc.gr"
+#include "gridagc.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+int        i;                 // utility int
+int        iWidth;            // Width of filter used to find "signal"
+
+string(STR_FILE)  sGrd;            // Name of input grid
+string(STR_FILE)  sNew;            // Name of new resultant grid
+
+string(STR_DEFAULT_SHORT) sMethod;           // Method string
+
+string(STR_DEFAULT) sTemp;           // Temporary string
+
+IMG         IMG1;             // Image tied to the input grid
+IMG         IMGO;             // Image for the output grid
+
+real        rMaxGain;         // Maximum Gain applied to any signal values
+int         iMethod;          // AGC method
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDAGCForm");
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDAGCFORM_0,DGW_FILEPATH,"GRIDAGC","GRD");     
+      SetInfoSYS_DGW(Diag,_GRIDAGCFORM_1,DGW_FILEPATH,"GRIDAGC","NEW");    
+      SetInfoSYS_DGW(Diag,_GRIDAGCFORM_2,DGW_TEXT,"GRIDAGC","WIDTH");     
+      SetInfoSYS_DGW(Diag,_GRIDAGCFORM_3,DGW_TEXT,"GRIDAGC","MAXGAIN");
+      SetInfoSYS_DGW(Diag,_GRIDAGCFORM_4,DGW_LISTALIAS,"GRIDAGC","METHOD");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDAGCFORM_0,DGW_FILEPATH,"GRIDAGC","GRD");     
+      GetInfoSYS_DGW(Diag,_GRIDAGCFORM_1,DGW_FILEPATH,"GRIDAGC","NEW");    
+      GetInfoSYS_DGW(Diag,_GRIDAGCFORM_2,DGW_TEXT,"GRIDAGC","WIDTH");
+      GetInfoSYS_DGW(Diag,_GRIDAGCFORM_3,DGW_TEXT,"GRIDAGC","MAXGAIN");     
+      GetInfoSYS_DGW(Diag,_GRIDAGCFORM_4,DGW_LISTALIAS,"GRIDAGC","METHOD");     
+           
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDAGC","GRD",sGrd);
+   GetString_SYS("GRIDAGC","NEW",sNew);
+   
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrlen_STR(sGrd))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   if (!iStrlen_STR(sNew))
+      Abort_SYS(_("New Resultant Grid Not Specified!"));   
+
+   if (!iStrcmp_STR(sGrd,sNew,STR_CASE_TOLERANT))
+      Abort_SYS(_("Names of Input Grid and New Resultant Grid Must be Different!"));
+
+   // --- Check for null width and maximum gain, and 
+   //     set to default values if blank ---
+
+   GetString_SYS("GRIDAGC","WIDTH",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      iWidth = 10;
+   else
+      iWidth = iGetInt_SYS("GRIDAGC","WIDTH");
+
+   GetString_SYS("GRIDAGC","MAXGAIN",sTemp);
+
+   if (!iStrlen_STR(sTemp))
+      rMaxGain = 10.0;
+   else
+      rMaxGain = rGetReal_SYS("GRIDAGC","MAXGAIN");
+
+   GetString_SYS("GRIDAGC","METHOD",sMethod);
+
+   if (iStrcmp_STR(sMethod,_n("Full Amplitude"),STR_CASE_TOLERANT) == 0)
+      iMethod = 0;		// IMU_AGC_FULL_AMP
+   else	
+      iMethod = 1;		// IMU_AGC_LOCAL_AMP
+
+   // --- Check the width and maximum gain parameters ---
+
+   if ((iWidth < 3) || (iWidth > iMAX))
+   {
+      Abort_SYS(_("Filter Width is Invalid. Must be an integer from 3 to 2147483647"));
+   }
+
+   if ((rMaxGain < 1.0) || (rMaxGain > 100.0))
+   {
+      Abort_SYS(_("Multiplier Value is Invalid. Must be a number from 1 to 100"));
+   }
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."),1); 
+
+   // --- Create Images tied to the grids ---  
+   
+   IMG1 = CreateFile_IMG(GS_FLOAT,sGrd,IMG_FILE_READONLY);
+   
+   IMGO = CreateOutFile_IMG(GS_FLOAT,sNew,IMG1); 
+
+   ProgName_SYS(_("Gain Compensating the Grid..."),1);
+   
+
+   // --- Process the grid ---
+
+   GridAGC_IMU(IMG1,IMGO,iWidth,rMaxGain,iMethod);
+   
+
+   // --- Destroy the Images ---
+   
+   Destroy_IMG(IMG1);
+   Destroy_IMG(IMGO);
+   
+
+   // --- done ---
+   
+   Progress_SYS(0);
+   
+   
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())   
+      iAddDocument_PROJ(sNew,"Grid",1);
+      
+}

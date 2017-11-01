@@ -1,0 +1,292 @@
+//===========================================================================
+NAME          = "Datamine Polygon Editor - Redraw"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/PopupMap"
+
+DESCRIPTION   = "
+   Redraw the currently plotted polygon in the current maps \"Section\" view.
+   This is normally called as a subroutine from other DM GXs.
+
+    DMEDIT.FILE : Datamine polygon file
+"
+// Revision History:
+// v6.0.0: New GX.
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+VV          VVx, VVy, VVz, VVj;
+DMPPLY      DMPoly;
+IPJ         UserIPJ, EmptyIPJ;
+MVIEW       View;
+EMAP        EMap;
+MAP         Map;
+REG         Reg;
+PLY         Ply;
+CRC         Crc;
+
+
+real rAz, rHeight, rWidth, rThick, rSwing;
+real rScaleMM, rXC, rYC, rZC;
+real rB, rX, rY, rXMin, rXMax, rYMin, rYMax;
+real rDX, rDY, rS, rF;
+int  i, iN, iNP, iPoly, iJ, iP;
+
+string(STR_DEFAULT) sCol, sCRC, sVal;
+string(STR_FILE) sFile;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   if(!iInteractive_SYS())
+      Abort_SYS(_("This GX must be run interactively"));
+
+
+   // --- Get the current map ---
+   
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
+   
+
+   // --- Get the Datamine polygon file name and the polygon number ---
+   
+   View = Create_MVIEW(Map, "Section", MVIEW_WRITEOLD);
+   Reg = GetREG_MVIEW(View);
+
+   Get_REG(Reg, "DMPOLY.FILE", sFile, sizeof(sFile));
+   GetInt_REG(Reg, "DMPOLY.POLY", iPoly);
+
+
+   if(!iStrlen_STR(sFile) || iPoly==iDUMMY)
+      Abort_SYS(_("The current map does not appear to contain a Datamine polygon"));
+       
+
+   // --- Open the Datamine polygon file ---
+
+   DMPoly = Create_DMPPLY();
+   Load_DMPPLY(DMPoly, sFile);
+
+
+   // --- Make a list of the available polygons to edit ---
+
+   iNP = iNumPolys_DMPPLY(DMPoly);
+   if(iPoly<1 || iPoly>iNP)
+      Abort_SYS(_("Invalid polygon index stored in map."));
+
+
+   // --- Allocate some vectors ---
+
+   VVx = Create_VV(REAL, 0);
+   VVy = Create_VV(REAL, 0);
+   VVz = Create_VV(REAL, 0);
+
+
+   // --- Get the azimuth and extents of the selected polygon ---
+
+   GetAzimuth_DMPPLY(DMPoly, iPoly, rAz);
+   GetSwing_DMPPLY(DMPoly, iPoly, rSwing);
+   GetExtents_DMPPLY(DMPoly, iPoly, rXC, rYC, rZC, rWidth, rHeight);
+
+
+   // --- Project the polygon onto the created section ---
+
+   ProjectPoly_DMPPLY(DMPoly, iPoly, rXC, rYC, rZC, rAz, rSwing, VVx, VVy, VVz);
+
+   
+   // --- Temporarily clear the User IPJ ---
+
+   UserIPJ = Create_IPJ();
+   EmptyIPJ = Create_IPJ();
+
+   GetUserIPJ_MVIEW(View, UserIPJ);
+   SetUserIPJ_MVIEW(View, EmptyIPJ);
+
+
+   // --- Adjust the polygons to the view projection; adjust "X" and "Y" to the
+   //     view center. The values in VVx are locations w.r.t the center of the
+   //     current view in view coordinates. For NS and EW sections, the X coordinate
+   //     is true NS and true EW, but for angled sections, the X coordinate begins
+   //     at zero on the left side. ---
+
+   iN = iLength_VV(VVx);
+   for(i=0;i<iN;i++) {
+      if(rAz==0.0)
+         rX = rGetReal_VV(VVx, i) + rYC;
+      else if(rAz==90.0)
+         rX = rGetReal_VV(VVx, i) + rXC;
+      else {
+      
+         // --- Get the current view extents ---
+         
+         Extent_MVIEW(View, MVIEW_EXTENT_CLIP, MVIEW_EXTENT_UNIT_VIEW, rXMin, rYMin, rXMax, rYMax);
+         rX = rGetReal_VV(VVx, i) + 0.5*(rXMax - rXMin);
+      
+      }
+      rY = rGetReal_VV(VVy, i) + rZC;
+      SetReal_VV(VVx, i, rX);
+      SetReal_VV(VVy, i, rY);
+   }
+
+   
+   // --- Get scale and drawing parameters ---
+
+   rScaleMM = rScaleMM_MVIEW(View);
+
+   rThick = rGetReal_SYS("DMPLOT", "LINE_THICKNESS");
+   if(rThick==rDUMMY) rThick = 1.0;
+   rThick *= rScaleMM;
+
+   rB = rGetReal_SYS("DMPLOT", "BOX_SIZE");
+   if(rB==rDUMMY) rB = 3.0;
+
+
+   // --- Save the vertex box size to the map REG ---
+
+   rB *= 0.5*rScaleMM;     // use half-size in plotting
+   SetReal_REG(Reg, "DMPLOT.BOX_SIZE", rB);
+
+
+   GetString_SYS("DMPLOT", "LINE_COLOUR", sCol);
+   if(!iStrlen_STR(sCol))
+      Strcpy_STR(sCol, "R");
+
+
+   // --- Plot the polygon ---
+
+   StartGroup_MVIEW(View, "Polygon", MVIEW_GROUP_NEW);
+
+   LineColor_MVIEW(View,  iColor_MVIEW(sCol));
+   LineThick_MVIEW(View, rThick);
+
+   Ply = Create_PLY();
+   AddPolygon_PLY(Ply, VVx, VVy);
+   PolygonPLY_MVIEW(View, Ply);
+   
+   
+   // --- Get the CRC from the map-based polygon and store it in the view REG ---
+   
+   Crc = CRC_VV(VVx, CRC_INIT_VALUE);
+   Crc = CRC_VV(VVy, Crc);
+
+   FormatCRC_STR(Crc, sCRC, 8);
+   Set_REG(Reg, "DMPOLY.MAP_CRC", sCRC);
+   
+
+
+   // --- Plot boxes at each point; get the center at same time ---
+
+   for(i=0;i<iN;i++) {
+
+      rX = rGetReal_VV(VVx, i);
+      rY = rGetReal_VV(VVy, i);
+
+      Rectangle_MVIEW(View, rX-rB, rY-rB, rX+rB, rY+rB);
+      
+      if(i==0) {
+         rXMin = rX;
+         rXMax = rX;
+         rYMin = rY;
+         rYMax = rY;
+      }
+      else {
+         if(rX<rXMin) rXMin = rX;
+         if(rX>rXMax) rXMax = rX;
+         if(rY<rYMin) rYMin = rY;
+         if(rY>rYMax) rYMax = rY;
+      }
+   }
+   rXC = 0.5*(rXMin + rXMax);
+   rYC = 0.5*(rYMin + rYMax);
+   
+   
+   // --- Plot join line labels? ---
+   
+   VVj = Create_VV(INT, 0);      // join line indices         
+   GetJoins_DMPPLY(DMPoly, iPoly, VVj);
+         
+   rF = 4.0;  // factor to scale text size from box size.         
+   iP = 0;         
+   for(i=0;i<iN;i++) {
+         
+      iJ = iGetInt_VV(VVj, i);
+      if(iJ!=0) {
+         if(iP==0) {
+            StartGroup_MVIEW(View, "PolygonLinks", MVIEW_GROUP_NEW);
+            LineColor_MVIEW(View,  C_BLACK);
+            LineThick_MVIEW(View, rThick);
+            TextSize_MVIEW(View, rF*rB);
+            TextRef_MVIEW(View, TEXT_REF_MIDDLE_CENTER);
+            TextColor_MVIEW(View,  C_BLACK);
+            iP = 1;
+         }         
+         
+         // --- Get vertex location ---
+         
+         rX = rGetReal_VV(VVx, i);
+         rY = rGetReal_VV(VVy, i);
+         
+         
+         // --- Get unit vectors pointing away from the center ---
+         
+         rDX = rX - rXC;
+         rDY = rY - rYC;
+         rS = rHypot_MATH(rDX, rDY);
+         
+         if(rS!=0.0) {
+            rDX = rDX/rS*(rF+0.5)*rB;
+            rDY = rDY/rS*(rF+0.5)*rB;
+         }
+         else {
+            rDX = rF*rB;
+            rDY = 0.0;
+         }
+         
+         FormatI_STR(iJ,sVal,4);
+         Text_MVIEW(View, sVal, rX+rDX, rY+rDY);
+         
+         // --- Draw a joining line from the text to the vertex ---
+         
+         Line_MVIEW(View, rX, rY, rX+0.6*rDX, rY+0.6*rDY);
+      }
+   }
+
+
+   // --- Restore the User IPJ ---
+
+   SetUserIPJ_MVIEW(View, UserIPJ);
+
+
+   // --- Get the CRC from the polygon and store it in the view REG ---
+
+   GetPoly_DMPPLY(DMPoly, iPoly, VVx, VVy, VVz);
+   
+   Crc = CRC_VV(VVx, CRC_INIT_VALUE);
+   Crc = CRC_VV(VVy, Crc);
+   Crc = CRC_VV(VVz, Crc);
+
+   FormatCRC_STR(Crc, sCRC, 8);
+   Set_REG(Reg, "DMPOLY.CRC", sCRC);
+
+   Destroy_MVIEW(View);
+
+   Commit_MAP(Map);
+   UnLock_EMAP(EMap);
+
+   Destroy_IPJ(UserIPJ);
+   Destroy_IPJ(EmptyIPJ);
+}

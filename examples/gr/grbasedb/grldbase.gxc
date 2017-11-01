@@ -1,0 +1,279 @@
+//===========================================================================
+NAME          = "Load/import base station data."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity/Base Stations"
+
+DESCRIPTION   = "
+
+   This GX uses the workspace REG to obtain the following parameters:
+   
+   GRAVRED.BASE_DATABASE   base station database
+   GRAVRED.BASE_FILE       base station file to import
+
+"
+// Revision History
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v7.0.0: Delete empty "GravData" line.
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "grldbase.gr"
+#include "grldbase.grh"
+
+//===========================================================================
+//                               INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+EDB         eDB;                  // Database
+DB          hDB;                  // Database
+EDB         eLdDB;                // Load from database
+DB          hLdDB;                // Load from database
+DGW         hDGW;                 // Dialogue handle
+LTB         hLTB;                 // Table Handle
+DB_SYMB     Group,Ch;
+REG         hWorkREG;
+
+string(STR_FILE) sDB,sFile;
+string(STR_DEFAULT_SHORT) sType;
+int i,i0,iNew,iType;
+
+#define TYPE_CSV 0
+#define TYPE_GDB 1
+
+//===========================================================================
+//                                CODE
+//===========================================================================
+
+{
+
+   // --- get workspace REG and parameters ---
+   
+   hWorkREG = Create_REG(156);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sDB,sizeof(sDB));
+   Get_REG(hWorkREG,"GRAVRED.BASE_FILE",sFile,sizeof(sFile));
+   
+   
+   // --- determine type ---
+   
+   if (iStriMask_STR("*.gdb",sFile))
+      Strcpy_STR(sType,_n("Geosoft database (gdb)"));
+   else    
+      Strcpy_STR(sType,_n("ASCII CSV file"));
+      
+
+   // --- Are we running interactively ? ---
+
+   iNew = FALSE;
+   if (iInteractive_SYS()) {
+   
+      i = 0;
+      while (i != 2) switch (i) {
+         
+         case 0:
+         
+            hDGW = Create_DGW("GRLDBASE");
+            SetInfo_DGW(hDGW,_GRLDBASE_0,DGW_FILEPATH,sDB);
+            SetInfo_DGW(hDGW,_GRLDBASE_1,DGW_TEXT,sType);
+      
+            i0 = 0;
+            while(!i0) {
+      
+               i = iRunDialogue_DGW(hDGW);
+               if (i == -1) Cancel_SYS();
+               GetInfo_DGW(hDGW,_GRLDBASE_0,DGW_FILEPATH,sDB);
+               GetInfo_DGW(hDGW,_GRLDBASE_1,DGW_TEXT,sType);
+         
+   
+               // --- check database exists ---
+   
+               if (!iFileExist_SYS(sDB)) {
+                  i0 = iDisplayQuestion_SYS(sDB,_("Database does not exist.  Create new?"));
+                  if (i0) iNew = TRUE;
+               } else
+                  i0 = 1;   
+            }
+      
+            Destroy_DGW(hDGW);
+            break;      
+      
+         case 1:
+         
+         
+            // --- determine file type ---
+            
+            if (iCharComp_STR(sType,"G")) {
+            
+               iType = TYPE_GDB;
+               hDGW = Create_DGW("GRLDBASE_GDB");
+               SetInfo_DGW(hDGW,_GRLDBASE_GDB_0,DGW_FILEPATH,sFile);
+               i = iRunDialogue_DGW(hDGW);
+               if (i == -1) Cancel_SYS();
+               if (i == 2)
+                  GetInfo_DGW(hDGW,_GRLDBASE_GDB_0,DGW_FILEPATH,sFile);
+               Destroy_DGW(hDGW);
+               
+            } else {
+            
+               iType = TYPE_CSV;
+               hDGW = Create_DGW("GRLDBASE_CSV");
+               SetInfo_DGW(hDGW,_GRLDBASE_CSV_0,DGW_FILEPATH,sFile);
+               i = iRunDialogue_DGW(hDGW);
+               if (i == -1) Cancel_SYS();
+               if (i == 2)
+                  GetInfo_DGW(hDGW,_GRLDBASE_CSV_0,DGW_FILEPATH,sFile);
+               Destroy_DGW(hDGW);
+               
+            }
+            
+            break;
+         
+         default:
+            Abort_SYS(_("I'm lost"));   
+      }
+      
+   } else {
+		if (iCharComp_STR(sType,"G")) {
+            iType = TYPE_GDB;
+        } else {
+            iType = TYPE_CSV;
+        }
+   }
+
+   // --- load/create the new database ---
+
+   if (iNew) {
+   
+      if (iRunGX_SYS("grbasenew")) 
+         Abort_SYS(_("Unable to create a new base station database."));
+   
+   } else {
+   
+      eDB = Load_EDB(sDB);
+      hDB = Lock_EDB(eDB);
+            
+      Group = CreateSymb_DB(hDB,"GravData",DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_GROUP);
+      
+      
+      // --- refid to match station ---
+      
+      if (iExistSymb_DB(hDB,"Station",DB_SYMB_CHAN)) {
+         Ch = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
+         LockSymb_DB(hDB,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
+         ReFidAllCh_DU(hDB,Group,FindSymb_DB(hDB,"Station",DB_SYMB_CHAN));
+         UnLockSymb_DB(hDB,Ch);
+      } else {
+         Ch = CreateSymb_DB(hDB,"Station",DB_SYMB_CHAN,DB_OWN_SHARED,-24);
+         LOCK_RW(hDB,Ch);
+         SetChanWidth_DB(hDB,Ch,10);
+         UNLOCK(hDB,Ch);
+      }
+      
+      
+      // --- gravity channel ---
+      
+      Ch = FindSymb_DB(hDB,"Gravity",DB_SYMB_CHAN);
+      if (Ch == NULLSYMB) {
+         Ch = CreateSymb_DB(hDB,"Gravity",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+         LOCK_RW(hDB,Ch);
+         SetChanWidth_DB(hDB,Ch,12);
+         SetChanDecimal_DB(hDB,Ch,2);
+         SetChanUnit_DB(hDB,Ch,_("mgal"));
+         UNLOCK(hDB,Ch);
+      }
+      
+
+      // --- create geographic channels ---
+   
+      Ch = FindSymb_DB(hDB,"Longitude",DB_SYMB_CHAN);
+      if (Ch == NULLSYMB) {
+         Ch = CreateSymb_DB(hDB,"Longitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+         LOCK_RW(hDB,Ch);
+         SetChanWidth_DB(hDB,Ch,13);
+         SetChanDecimal_DB(hDB,Ch,2);
+         SetChanFormat_DB(hDB,Ch,DB_CHAN_FORMAT_GEOGR);
+         SetChanUnit_DB(hDB,Ch,_("dega"));
+         UNLOCK(hDB,Ch);
+      }
+
+      Ch = FindSymb_DB(hDB,"Latitude",DB_SYMB_CHAN);
+      if (Ch == NULLSYMB) {
+         Ch = CreateSymb_DB(hDB,"Latitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
+         LOCK_RW(hDB,Ch);
+         SetChanWidth_DB(hDB,Ch,13);
+         SetChanDecimal_DB(hDB,Ch,2);
+         SetChanFormat_DB(hDB,Ch,DB_CHAN_FORMAT_GEOGR);
+         SetChanUnit_DB(hDB,Ch,_("dega"));
+         UNLOCK(hDB,Ch);
+      }
+   
+      if (iType == TYPE_CSV) {
+      
+      
+         // --- load from CSV ---
+   
+         hLTB = CreateCSV_LTB(sFile);
+         LoadLTB_DU(hDB,Group,hLTB,DU_LOADLTB_APPEND);
+         Destroy_SYS(hLTB);
+         
+      
+      } else {
+      
+      
+         // --- load from separate database ---
+
+         if (iLoaded_EDB(sFile)) {
+            eLdDB = Load_EDB(sFile);
+            hLdDB = Lock_EDB(eLdDB);
+         } else   
+            hLdDB = Open_DB(sFile,"SUPER","");
+         
+         Append_DU(hLdDB,hDB,TRUE);
+         
+      }
+      
+               
+      // --- update the reg ---
+   
+      Set_REG(hWorkREG,"GRAVRED.BASE_DATABASE",sDB);
+      Set_REG(hWorkREG,"GRAVRED.BASE_FILE",sFile);
+      SetWorkspaceREG_SYS(hWorkREG);
+      Destroy_SYS(hWorkREG);
+   
+
+      // --- refid to match station if there is station data ---
+      
+      Ch = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
+      LOCK_R(hDB,Ch);
+      if (iGetChannelLength_DB(hDB,Group,Ch) > 0)
+         ReFidAllCh_DU(hDB,Group,FindSymb_DB(hDB,"Station",DB_SYMB_CHAN));
+      UNLOCK(hDB,Ch);
+         
+
+		// --- Delete the "GRAVDATA" group if it is empty (load from separate database
+		//     can result in this). ---
+		
+		if(iIsLineEmpty_DB(hDB, Group))
+		{
+			LOCK_RW(hDB, Group);
+			DeleteSymb_DB(hDB, Group);
+		}
+		
+		
+      // --- delete line 0 ---
+
+      UnLock_EDB(eDB);
+      DelLine0_EDB(eDB);
+      
+   }      
+
+}

@@ -1,0 +1,371 @@
+//===========================================================================
+
+NAME          = "3D Surface from a grid/image"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/3D"
+
+DESCRIPTION   = "
+
+      V3DIMG.GRID          surface relief grid
+            .IMAGE         image to draw on surface
+            .METHOD        colouring method
+            .TABLE         colour table
+            .CONTOUR       contour interval
+            .BRIGHT        brightness (-1 to +1, 0 is normal)
+            .PLANEBASE     Horizontal plane offset on the Z axis
+            .GRIDBASE      base value in grid units to plaxer at model 0 Z
+            .GRIDSCALE     vertical scale in Z units/grid unit
+            .GRIDMIN       surface grid clip minimum, maximum
+            .GRIDMAX      
+            .GRIDSAMPLE    grid surface sampling, multiples of 16
+            .VIEW          name of 3D view to plot to in scripting (defaults to 3D)
+				.OVERWRITE     set to 1 to force overwriting of an existing group of the same name
+            
+"
+
+//===========================================================================
+// Revision History:
+// v9.1:   Add ability to overwrite existing groups of the same name (script only)
+// v7.1.0: Change how 3D imports are handled (only from within 3D viewer, but supports scripting with name)
+// v7.0.1  Would not have worked if current view was not 3D when plotting to current map.
+// v7.0.0  Placement using GX parameters only should be done in Script mode only.
+//         Always make the 3D view the current data view.
+// v6.4.2  QA 10970: Clear orientation after duplicating current data view.
+//         Display 3D controls in non-interactive mode, but not in script mode.
+//         Should set NEWMAP.MAP not DEFMAP.MAP, because GX runs NEWMAP.GX, not DEFMAP.GX
+// v6.4.0  Hide current/new map setting in ArcGIS
+// v6.3.0  Call GetDisplayAreaRaw_EMAP only in interactive mode.
+//         Allow plotting to existing 3D view.
+//         Remove 3D controls from interactive mode
+//         Use "Default" of topographic scaling (0, 1), and "Rescale" for Mag on Mag type.
+// v6.0.0  Add image to the grid explorer
+//===========================================================================
+
+RESOURCE="v3dimg.gr"
+#include "v3dimg.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+EMAP  EMap;
+MAP   Map;
+DGW   Diag;
+MVIEW View;
+AGG   hAGG;
+IMG   hIMG;
+
+string(STR_MAX_PATH) sStartGrid,sGrid,sImage,sName,sTemp,sColor,sPlane;
+string(STR_VIEW) s3DView, sGroup, sAgg;
+
+int i,iPlane,iSample;
+int iElem,iDum,iZone;
+
+real rPlaneBase,rContour;
+real rBase,rScale,rMin,rMax;
+real rDminZ,rDmaxZ,rMean,rStdDev;
+real r,rDxC,rDyC,rDx,rDy,rDz,rXo,rYo,rBright;
+
+#define GETR(a,b,c,d) if (iExistReal_SYS(b,c)) a=rGetReal_SYS(b,c); else a = d;
+#define GETI(a,b,c,d) if (iExistInt_SYS(b,c)) a=iGetInt_SYS(b,c); else a = d;
+#define GETB(a,b,c,d) if (iExistInt_SYS(b,c)) a=iGetYesNo_SYS(b,c); else a = d;
+
+//===========================================================================
+//                           CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+		if (iHaveCurrent_EMAP())
+		{
+		   EMap = Current_EMAP();
+			if (!iIs3DView_EMAP(EMap))
+				Abort_SYS(_("This GX only works from within the 3D viewer"));
+		}
+		else
+			Abort_SYS(_("This GX only works from within the 3D viewer"));
+
+
+        // --- starting surface grid ---
+        
+        GetString_SYS("V3DIMG","GRID",sStartGrid);
+        
+        
+        // --- Create the Dialogue ---
+        
+        Diag = Create_DGW("V3DIMG");
+        SetInfoSYS_DGW(Diag,_V3DIMG_0,DGW_FILEPATH, "V3DIMG","GRID");
+        SetInfoSYS_DGW(Diag,_V3DIMG_1,DGW_FILEPATH, "V3DIMG","IMAGE");
+        SetInfoSYS_DGW(Diag,_V3DIMG_2,DGW_LISTALIAS,"V3DIMG","METHOD");
+        SetInfoSYS_DGW(Diag,_V3DIMG_3,DGW_FILEPATH, "V3DIMG","TABLE");
+        SetInfoSYS_DGW(Diag,_V3DIMG_4,DGW_TEXT,     "V3DIMG","CONTOUR");
+        SetInfoSYS_DGW(Diag,_V3DIMG_5,DGW_LISTALIAS,"V3DIMG","BRIGHT");
+
+        // --- Run the Dialogue ---
+
+        i = iRunDialogue_DGW(Diag);
+        if (i==-1) Cancel_SYS(); 
+
+
+        // --- Get Information ---
+  
+        GetInfoSYS_DGW(Diag,_V3DIMG_0,DGW_FILEPATH, "V3DIMG","GRID");
+        GetInfoSYS_DGW(Diag,_V3DIMG_1,DGW_FILEPATH, "V3DIMG","IMAGE");
+        GetInfoSYS_DGW(Diag,_V3DIMG_2,DGW_LISTALIAS,"V3DIMG","METHOD");
+        GetInfoSYS_DGW(Diag,_V3DIMG_3,DGW_FILEPATH, "V3DIMG","TABLE");
+        GetInfoSYS_DGW(Diag,_V3DIMG_4,DGW_TEXT,     "V3DIMG","CONTOUR");
+        GetInfoSYS_DGW(Diag,_V3DIMG_5,DGW_LISTALIAS,"V3DIMG","BRIGHT");
+        Destroy_DGW(Diag);
+
+        GetString_SYS("V3DIMG","IMAGE",sImage);
+        GetString_SYS("V3DIMG","GRID",sGrid);
+        if (iStrlen_STR(sImage) == 0)
+           Strcpy_STR(sImage,sGrid);
+        else if (iStrlen_STR(sGrid) == 0)
+           Strcpy_STR(sGrid,sImage);
+        SetString_SYS("V3DIMG","IMAGE",sImage);
+        SetString_SYS("V3DIMG","GRID",sGrid);
+  
+        // --- set grid defaults or rescaling factors ---
+           
+       GridStatExt_IMU(sGrid,IMU_STAT_FORCED_NO,iElem,iDum,rDminZ,rDmaxZ,rMean,rStdDev);
+       hIMG = CreateFile_IMG(GS_FLOAT,sGrid,IMG_FILE_READONLY);
+       GetInfo_IMG(hIMG,rDxC,rDyC,rXo,rYo,r);
+       rDx = rDxC * (real)(iNX_IMG(hIMG)-1); 
+       rDy = rDyC * (real)(iNY_IMG(hIMG)-1);
+	   rDz = rDmaxZ-rDminZ;
+       Destroy_IMG(hIMG);
+ 
+       SetInt_SYS("V3DIMG","GRIDSAMPLE",128);
+       SetReal_SYS("V3DIMG","GRIDMIN",rFloor_MATH(rDminZ));
+       SetReal_SYS("V3DIMG","GRIDMAX",rCeil_MATH(rDmaxZ));
+       
+      
+       // --- Default to "Topographic" scaling of 0 and 1 if it looks like topo data, i.e: ---
+       // --- If the vertical scale of the data is LESS that 1/2 the x-y range, and MORE   ---
+       // --- than 1/2 of the cell dimension, it is likely topo data, so use a scale of 1. ---
+       // --- Otherwise, rescale to the data.                                              ---
+       if(rDz < 0.5*rDx && rDz < 0.5*rDy && rDz > 0.5*rDxC && rDz > 0.5*rDyC)
+       {
+          SetReal_SYS("V3DIMG","GRIDBASE",0.0);
+          SetReal_SYS("V3DIMG","GRIDSCALE",1.0);
+       }
+       else  //--- For "Mag on Mag" type scaling ---
+       {
+          SetReal_SYS("V3DIMG","GRIDBASE",rDminZ);
+          if ((rDmaxZ-rDminZ) <= 0.0)
+             rScale = 1.0;
+          else {                     
+             if (rDx < rDy)
+                rScale = 0.25 * rDx / rDz;
+             else   
+                rScale = 0.25 * rDy / rDz;
+          }
+          SetReal_SYS("V3DIMG","GRIDSCALE",rScale);
+       }                                    
+   }
+
+   // --- Get Parameters ---
+      
+   GetString_SYS("V3DIMG","GRID",sGrid);
+   GetString_SYS("V3DIMG","IMAGE",sImage);
+   if (iStrlen_STR(sImage) == 0)
+      Strcpy_STR(sImage,sGrid);
+   else if (iStrlen_STR(sGrid) == 0)
+      Strcpy_STR(sGrid,sImage);
+   GetString_SYS("V3DIMG","TABLE",sColor);
+   GETI(iZone,"V3DIMG","METHOD",0)
+   GETR(rBright,"V3DIMG","BRIGHT",0.0)
+   
+
+   // --- Get the map and the 3d view ---
+   
+   EMap = Current_EMAP();   
+   Map  = Lock_EMAP(EMap);
+          
+	// --- Handle interactive/scripting ---
+
+	if (iInteractive_SYS())
+	{
+		Get3DViewName_EMAP(EMap, s3DView);
+		SetString_SYS("V3DIMG", "VIEW", s3DView);
+	}
+	else
+	{
+		GetString_SYS("V3DIMG", "VIEW", s3DView);
+		if (iStrlen_STR(s3DView) == 0)
+			Strcpy_STR(s3DView, "3D");
+	}
+   
+   // --- create a new view? ---
+   
+   View = Create_MVIEW(Map,s3DView,MVIEW_WRITEOLD);
+
+	if (!iIsView3D_MVIEW(View))
+	{
+      Printf_STR(sTemp, sizeof(sTemp), _("Importing to 3D View '%s' but it is not a 3D view."), s3DView);
+      Abort_SYS(sTemp);
+	}
+
+   // --- Generate a valid group name ---
+
+   FileNamePart_STR(sImage,sName,STR_FILE_PART_NAME);
+
+   Strcpy_STR(sTemp,"");
+   if (iZone == 4)
+      Strcat_STR(sTemp,_n("s"));
+
+   GenGroupName_STR("AGG", sName, sTemp, sGroup);
+      
+
+   // --- Always ensure that the group name is unique, because planes share a common pool of groups. ---
+
+	if(iGetInt_SYS("V3DIMG", "OVERWRITE") == 1 && iExistGroup_MVIEW(View, sGroup))
+	{
+		DeleteGroup_MVIEW(View, sGroup);
+		Strcpy_STR(sAgg, sGroup);
+		SetString_SYS("V3DIMG", "OVERWRITE", "");		// Force reset every time
+	}
+	else
+		GenNewGroupName_MVIEW(View, sGroup, sAgg);
+  
+
+   // --- Create the Plane ---
+
+   FileNamePart_STR(sGrid,sName,STR_FILE_PART_NAME);
+
+   Strcpy_STR(sPlane, "Surface_");
+   Strcat_STR(sPlane, sName);
+
+   iPlane = iFindPlane_MVIEW(View,sPlane);
+   if(iPlane==-1)
+      iPlane = iCreatePlane_MVIEW(View,sPlane);
+   GETR(rPlaneBase, "V3DIMG","PLANEBASE",0.0)
+   SetPlaneEquation_MVIEW(View,iPlane,0.0,0.0,0.0,0.0,0.0,rPlaneBase,1.0,1.0,1.0);
+
+
+   // --- Handle Surface Information ---
+   
+   GetString_SYS("V3DIMG","GRID",sGrid);
+   if (iStrlen_STR(sGrid)) {
+   
+      GETI(iSample,"V3DIMG","GRIDSAMPLE",128)
+      GETR(rBase, "V3DIMG","GRIDBASE",rDUMMY)
+      GETR(rScale,"V3DIMG","GRIDSCALE",rDUMMY)
+      GETR(rMin,  "V3DIMG","GRIDMIN",rDUMMY)
+      GETR(rMax,  "V3DIMG","GRIDMAX",rDUMMY)
+
+      // --- correct sample to nearest 16 ---
+      
+      iSample = (iSample + 15)/16;
+      if (iSample < 1) iSample = 1;
+      if (iSample > 48) iSample = 48;
+      SetInt_SYS("V3DIMG","GRIDSAMPLE",iSample*16);
+      
+      
+      // --- grid defaults ---
+      
+      if (rBase == rDUMMY) rBase = rMin;
+      
+      if ( (rBase == rDUMMY) ||
+           (rScale == rDUMMY) || (rScale == 0.0) ) {
+           
+         // --- set grid specs ---
+                    
+         GridStatExt_IMU(sGrid,IMU_STAT_FORCED_NO,iElem,iDum,rDminZ,rDmaxZ,rMean,rStdDev);
+         hIMG = CreateFile_IMG(GS_FLOAT,sGrid,IMG_FILE_READONLY);
+         GetInfo_IMG(hIMG,rDx,rDy,rXo,rYo,r);
+         rDx *= (real)(iNX_IMG(hIMG)-1); 
+         rDy *= (real)(iNY_IMG(hIMG)-1);
+         if ((rDx <= 0.0) || (rDy <= 0.0))
+            Abort_SYS(_("Topography grid invalid."));
+         Destroy_IMG(hIMG);
+           
+      }
+      
+      if (rBase == rDUMMY) 
+         rBase = rDminZ;
+      
+      if (rScale == rDUMMY || rScale == 0.0) {
+
+         // --- Z scale ---
+   
+         if ((rDmaxZ-rDminZ) <= 0.0)
+            rScale = 1.0;
+         else {                     
+            if (rDx < rDy)
+               rScale = 0.25 * rDx / (rDmaxZ-rDminZ);
+            else   
+               rScale = 0.25 * rDy / (rDmaxZ-rDminZ);
+         }
+         
+      }
+               
+      
+      // --- set the surface plane ---
+      
+      SetPlaneSurface_MVIEW(View,iPlane,sGrid);
+      SetPlaneSurfInfo_MVIEW(View,iPlane,iSample,rBase,rScale,rMin,rMax);
+      
+   }      
+   
+
+   // --- create an aggregate ---
+   
+   hAGG = Create_AGG();
+   if (iStrlen_STR(sColor) == 0)                             // undefined in dialogue
+      if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor) == 1)  // undefined in parm block
+         Strcpy_STR(sColor,"colour.tbl");                    // hardwire
+         
+   if (iExistReal_SYS("V3DIMG","CONTOUR"))
+      rContour = rGetReal_SYS("V3DIMG","CONTOUR");
+   else
+      rContour = rDUMMY;
+      
+   Progress_SYS(1);
+   ProgName_SYS(_("Layer"),1);
+   LayerIMG_AGG(hAGG,sImage,iZone,sColor,rContour);
+   Progress_SYS(0);
+   
+   
+   // --- adjust the brightness ---
+
+   if ((rBright != rDUMMY) && (rBright != 0.0))
+      ChangeBrightness_AGG(hAGG,rBright);
+
+      
+   // --- put aggregate in the view ---
+
+   Aggregate_MVIEW(View,hAGG,sAgg);
+   
+
+	// --- Make this the current data view ---
+	
+   SetClassName_MAP(Map,"Data",s3DView);
+
+
+   // --- done ---
+
+   Destroy_MVIEW(View);
+ 
+   // --- Add to the current project ---
+
+   if (!iScript_SYS()) {   
+      iAddDocument_PROJ(sGrid,"Grid",0);
+      iAddDocument_PROJ(sImage,"Grid",0);
+   }
+
+   UnLock_EMAP(EMap);
+ 
+}

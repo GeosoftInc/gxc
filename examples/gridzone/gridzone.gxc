@@ -1,0 +1,245 @@
+//===========================================================================
+NAME          = "Create a colour zone file from up to 5 grids"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Display"
+
+DESCRIPTION   = "
+
+   GRIDZONE.FILE     - Output zone file 
+           .GRID1    - first grid name
+           .GRID2    - second grid name (optional)
+           .GRID3    - third grid name (optional)
+           .GRID4    - fourth grid name (optional)
+           .GRID5    - fourth grid name (optional)
+           .COLOR    - color table file name (.TBL, .ZON .ITR or .AGG)
+           .ZONE     - zoning method:  1 - linear
+                                       2 - normal distribution
+                                       3 - histogram equalization
+                                       5 - log-linear
+           .CONTOUR - optional contour interval
+"
+
+//===========================================================================
+
+RESOURCE = "GRIDZONE.gr"
+#include "GRIDZONE.grh"
+
+
+//===========================================================================
+
+#include <all.gxh>
+
+#define RANGE(A) \
+   if(iStrlen_STR(A)) { \
+      GridStatExt_IMU(A,IMU_STAT_FORCED_NO,iN,iDum,rMn,rMx,rMean,rStdDev); \
+      if(iN>0) {  \
+         if(rMn < rMin) rMin = rMn; \
+         if(rMx > rMax) rMax = rMx; \
+         iNTot += iN;   \
+      }  \
+   }
+
+#define GRIDST(A) \
+   if(iStrlen_STR(A)) { \
+      GridST_IMU(A,hST); \
+   }
+   
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW  Diag;
+ITR  hITR;
+BF   hBF;
+ST   hST;
+
+string(STR_FILE) sGrid1,sGrid2,sGrid3,sGrid4,sGrid5,sColor,sFile,sExt;
+int  iMethod, iST, iN, iNTot, iDum, iRun, iSt;
+real rMn, rMx, rMean, rStdDev, rMin, rMax, rContour;
+
+
+//===========================================================================
+//                           GRIDZONE CODE
+//===========================================================================
+
+{
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDZONE");
+
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_GRIDZONE_0,DGW_FILEPATH, "GRIDZONE","FILE");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_1,DGW_FILEPATH, "GRIDZONE","GRID1");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_2,DGW_FILEPATH, "GRIDZONE","GRID2");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_3,DGW_FILEPATH, "GRIDZONE","GRID3");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_4,DGW_FILEPATH, "GRIDZONE","GRID4");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_5,DGW_FILEPATH, "GRIDZONE","GRID5");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_6,DGW_FILEPATH, "GRIDZONE","COLOR");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_7,DGW_LISTALIAS,"GRIDZONE","METHOD");     
+      SetInfoSYS_DGW(Diag,_GRIDZONE_8,DGW_TEXT,"GRIDZONE","CONTOUR");     
+                                    
+
+      // --- Run the Dialogue ---
+
+      iRun = iRunDialogue_DGW(Diag);
+      if (iRun == -1)    Cancel_SYS();
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_GRIDZONE_0,DGW_FILEPATH, "GRIDZONE","FILE");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_1,DGW_FILEPATH, "GRIDZONE","GRID1");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_2,DGW_FILEPATH, "GRIDZONE","GRID2");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_3,DGW_FILEPATH, "GRIDZONE","GRID3");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_4,DGW_FILEPATH, "GRIDZONE","GRID4");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_5,DGW_FILEPATH, "GRIDZONE","GRID5");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_6,DGW_FILEPATH, "GRIDZONE","COLOR");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_7,DGW_LISTALIAS,"GRIDZONE","METHOD");     
+      GetInfoSYS_DGW(Diag,_GRIDZONE_8,DGW_TEXT,"GRIDZONE","CONTOUR");     
+                                    
+      Destroy_DGW(Diag);
+   }
+
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDZONE","FILE",sFile);
+   GetString_SYS("GRIDZONE","GRID1",sGrid1);
+   GetString_SYS("GRIDZONE","GRID2",sGrid2);
+   GetString_SYS("GRIDZONE","GRID3",sGrid3);
+   GetString_SYS("GRIDZONE","GRID4",sGrid4);
+   GetString_SYS("GRIDZONE","GRID5",sGrid5);
+   GetString_SYS("GRIDZONE","COLOR",sColor);
+   iMethod = iGetInt_SYS("GRIDZONE","METHOD");
+   rContour = rGetReal_SYS("GRIDZONE","CONTOUR");
+
+
+   // --- Validate ---
+
+   if(!iStrlen_STR(sGrid1)) 
+      Abort_SYS(_("The first grid must be defined."));
+
+   if(!iStrlen_STR(sFile))
+      Abort_SYS(_("No output colour zone file specified."));
+
+   FileNamePart_STR(sFile,sExt,STR_FILE_PART_EXTENSION);
+   if(iStrcmp_STR(sExt, "ITR", STR_CASE_TOLERANT) &&
+      iStrcmp_STR(sExt, "LUT", STR_CASE_TOLERANT) &&
+      iStrcmp_STR(sExt, "ZON", STR_CASE_TOLERANT)) {
+
+      Abort_SYS(_("Output colour zone file must be of type ITR, LUT or ZON"));
+   }
+
+   if(iMethod != ITR_ZONE_LOGLINEAR &&
+      iMethod != ITR_ZONE_LINEAR &&
+      iMethod != ITR_ZONE_NORMAL &&
+      iMethod != ITR_ZONE_EQUALAREA)
+      Abort_SYS(_("Invalid transform selected."));
+
+
+   // --- Get the range of values ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Ranging Grids"), 0);
+
+
+   rMin = rMAX;
+   rMax = rMIN;
+
+   iNTot = 0;
+   RANGE(sGrid1)
+   RANGE(sGrid2)
+   RANGE(sGrid3)
+   RANGE(sGrid4)
+   RANGE(sGrid5)
+
+   if(iNTot == 0) 
+      Abort_SYS(_("There appears to be no data in the grid(s)."));
+
+
+   if(rMin==rMax)
+      Abort_SYS(_("The data is a constant value, cannot create zone file"));
+
+
+   // --- Do stats if necessary ---
+
+   iST = 0;
+   if(iMethod == ITR_ZONE_LOGLINEAR ||
+      iMethod == ITR_ZONE_EQUALAREA) {
+
+
+      ProgName_SYS(_("Collecting Grid Statistics"), 0);
+
+      // --- Set histogram range for ST ---
+
+      hST = Create_ST();
+      Histogram2_ST(hST, 4096, rMin, rMax);
+
+      GRIDST(sGrid1)
+      GRIDST(sGrid2)
+      GRIDST(sGrid3)
+      GRIDST(sGrid4)
+      GRIDST(sGrid5)
+
+      rStdDev = rGetInfo_ST(hST, ST_STDDEV);
+      rMean   = rGetInfo_ST(hST, ST_MEAN);
+      iSt = 1;
+   }
+
+
+   // --- Create the ITR ---
+   
+   hITR = CreateFile_ITR(sColor);
+
+
+   // --- Do the transform ---
+
+   if(iMethod == ITR_ZONE_LINEAR)
+
+      Linear_ITR(hITR, rMin, rMax, rContour);
+
+   else if(iMethod == ITR_ZONE_NORMAL)
+
+      Normal_ITR(hITR, rStdDev, rMean, 1.0, rContour);
+
+   else if(iMethod == ITR_ZONE_LOGLINEAR)
+
+      LogLinear_ITR(hITR, rMin, rMax, rContour);
+
+   else if(iMethod == ITR_ZONE_EQUALAREA)
+
+      EqualArea_ITR(hITR, hST, rContour);
+
+
+
+   // --- Output the zone file ---
+
+   if(!iStrcmp_STR(sExt, "ITR", STR_CASE_TOLERANT)) {
+
+      hBF = Create_BF(sFile, BF_READWRITE_NEW);
+      Serial_ITR(hITR, hBF);
+
+      DestroyEx_BF(hBF);
+
+   }
+   else 
+      
+      SaveA_ITR(hITR, sFile);
+
+   
+   Progress_SYS(0);
+
+   Destroy_ITR(hITR);
+   if(iST) Destroy_ST(hST);
+
+}

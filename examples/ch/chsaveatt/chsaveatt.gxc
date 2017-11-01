@@ -1,0 +1,213 @@
+//===========================================================================
+NAME          = "CHSAVEATT GX"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport/Assay Attributes"
+
+DESCRIPTION   = "
+
+   CHSAVEATT.CHAN   \"ASSAY\"
+                    \"DISPLAYED_ASSAY\"
+                    \"LIST\"
+"
+// Revision History:
+// v5.1.8: Calls CHCHANLST.GX for channel selection.
+//         Converted to use LSTs, not channel VVs.
+//         Doesn't need to be interactive.
+//===========================================================================
+//                                 RESOURCES
+
+RESOURCE = "CHSAVEATT.gr"
+#include "CHSAVEATT.grh"
+
+//===========================================================================
+
+
+//===========================================================================
+//                                 INCLUDES
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Ch;
+DGW         Diag;              // dialogue handle
+LST         ChLST;
+LTB         Ltb, LtbTmp, LtbM;
+REG         Reg;
+WA          Wa;
+
+
+string(GS_MAX_PATH)        sFile,sTmpFile;
+string(DB_SYMB_NAME_SIZE)  sChan;
+string(256) sUnits,sLabel,sDetLim,sOutlierLim,sMethod,sLog;
+string(256) sStdMin,sStdMax,sSymbScl;
+string(STR_DEFAULT_LONG) sBuff;
+string(32768) sChannels;
+int i, iChans;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+   // --- Open current database ---
+
+   EData = Current_EDB();
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the 1st dialogue ---
+
+      Diag = Create_DGW("CHSAVEATT");
+      SetInfoSYS_DGW(Diag,_CHSAVEATT_0,DGW_FILEPATH,"CHSAVEATT","FILE");
+      SetInfoSYS_DGW(Diag,_CHSAVEATT_1,DGW_LISTALIAS,"CHSAVEATT","CHAN");
+
+      if (iRunDialogue_DGW(Diag) == -1) Cancel_SYS();   
+
+      GetInfoSYS_DGW(Diag,_CHSAVEATT_0,DGW_FILEPATH,"CHSAVEATT","FILE");
+      GetInfoSYS_DGW(Diag,_CHSAVEATT_1,DGW_LISTALIAS,"CHSAVEATT","CHAN");
+
+      Destroy_DGW(Diag);
+   }
+   
+   // --- Get parameters ---
+
+   GetString_SYS("CHSAVEATT","FILE",sFile);
+   GetString_SYS("CHSAVEATT","CHAN",sChan);
+   
+
+   // --- Do the channel selection by calling the CHCHANLST GX ---
+
+   SetString_SYS("CHCHANLST","DATA",sChan);
+   SetString_SYS("CHCHANLST","GX","CHSAVEATT");
+   
+   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
+   
+   
+   // --- create LSTs to hold channel lists ---
+   
+   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   Data = Lock_EDB(EData);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+   SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
+
+   iChans = iSize_LST(ChLST);   
+   if(iChans==0) 
+      Abort_SYS(_("No ASSAY channels were found for export."));
+
+
+   // --- Create a temporary file from the current data ---
+
+   Strcpy_STR(sTmpFile, "_chsaveatt.csv");
+   Wa = Create_WA(sTmpFile,WA_NEW);
+   Puts_WA(Wa,"Channel,Label,Units,Detection,Outlier,StdMin,StdMax,Log,SymbScl,Method");
+   NewLine_WA(Wa);
+
+     
+   Reg = Create_REG(128);
+ 
+   // --- Go through each channel ---
+   
+   for (i = 0; i < iChans; i++)
+   {
+   
+      // --- Get channel name ---
+      
+      Ch = (DB_SYMB)iGetInt_LST(ChLST,1,i);
+      GetItem_LST(ChLST,0,i,sChan);
+
+
+      // --- get current settings ---
+   
+      GetRegSymb_DB(Data,Ch,Reg);
+
+      Get_REG(Reg,"LABEL",sLabel,sizeof(sLabel));      
+      Get_REG(Reg,"UNITS",sUnits,sizeof(sUnits));
+      Get_REG(Reg,"DETECTLIMIT",sDetLim,sizeof(sDetLim));
+      Get_REG(Reg,"OUTLIERLIMIT",sOutlierLim,sizeof(sOutlierLim));
+      Get_REG(Reg,"STANDARDMIN",sStdMin,sizeof(sStdMin));
+      Get_REG(Reg,"STANDARDMAX",sStdMax,sizeof(sStdMax));
+      Get_REG(Reg,"LOG",sLog,sizeof(sLog));
+      Get_REG(Reg,"SYMBOL_SCALING",sSymbScl,sizeof(sSymbScl));
+      Get_REG(Reg,"ASSAYMETHOD",sMethod,sizeof(sMethod));
+
+      Strcpy_STR(sBuff,sChan);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sLabel);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sUnits);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sDetLim);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sOutlierLim);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sStdMin);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sStdMax);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sLog);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sSymbScl);
+      Strcat_STR(sBuff,",");
+      Strcat_STR(sBuff,sMethod);
+
+      Puts_WA(Wa, sBuff);
+      NewLine_WA(Wa);
+
+   }
+
+   Destroy_WA(Wa);
+   
+
+   // --- Open the file as an LTB ---
+   
+   LtbTmp = CreateCSV_LTB(sTmpFile);
+
+
+   // --- Does the selected file exist? ---
+
+   if(iFileExist_SYS(sFile)) {
+      
+      // --- Open and merge the old file with the new.
+
+      Ltb = CreateCSV_LTB(sFile);
+      LtbM = Merge_LTB(LtbTmp, Ltb);
+      Destroy_LTB(Ltb);
+
+      Save_LTB(LtbM, sFile);
+      Destroy_LTB(LtbM);
+
+   }
+   else
+      Save_LTB(LtbTmp, sFile);
+
+
+      
+   // --- Remove the temp file ---
+
+   iDeleteFile_SYS(sTmpFile);
+
+   
+   // ---- Done ---
+   
+   UnLock_EDB(EData);
+
+   Destroy_LTB(LtbTmp);
+   Destroy_LST(ChLST);
+ 
+}

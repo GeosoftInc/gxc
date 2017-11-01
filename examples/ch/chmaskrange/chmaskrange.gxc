@@ -1,0 +1,279 @@
+//===========================================================================
+NAME          = "Set Mask Channel based on a range of data"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemAnalysis"
+
+DESCRIPTION   = "
+
+ CHMASKRANGE.CHAN    data channel name
+            .MASK 	Mask channel - default is \"ChemMask\"
+            .MIN     Minimum value in range
+            .MAX     Maximum value in range
+            .INSIDE  If 1, set values outside range to dummy, inside to 1.
+            .INCMIN  If 1, include minimum value as part of the range
+            .INCMAX  If 1, include maximum value as part of the range
+"
+// Revision History:
+// v5.1.8 Use "Mask" as default mask channel only if user is not licenced for CHIMERA
+// v5.1.4: Changes to accomodate new Geophysical Stats licence.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "CHMASKRANGE.gr"
+#include "CHMASKRANGE.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+
+//===========================================================================
+//                             VARIABLES
+//===========================================================================
+
+
+EDB        EData;
+DB         Data;
+DB_SYMB    XCh, MCh;   // Channel handles
+DB_SYMB    Line;       // Line handle
+DGW   Diag;
+VV    VVx, VVm;
+LST   List;
+
+string(STR_DB_SYMBOL) sChan,sLine,sMask;
+string(STR_DEFAULT_LONG) sLabel;
+string(STR_DEFAULT_SHORT) sTemp;
+int i, iLines, iTotLines;
+int   iIncMin, iIncMax, iInside;
+real  rMin, rMax;
+
+
+
+
+//===========================================================================
+//                           MAP CODE
+//===========================================================================
+
+{
+
+   // --- get current database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+
+   // --- Get Default Mask Channel if required, and if it exists, and if it is
+   //     not set to "None" ---
+
+   if(iGlobal_SYS("CHIMERA.MASK",sMask) == 0 &&
+      iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
+      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
+         if(iScanI_STR(sTemp)==1 && iExistChan_DB(Data,sMask))
+            SetString_SYS("CHMASKRANGE","MASK",sMask);
+      }
+   }
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHMASKRANGE");
+
+      // --- Set up mask channel list ---
+
+      List = GetList_DGW(Diag,_CHMASKRANGE_0);
+      MaskChanLST_CHIMERA(Data,List);
+      Sort_LST(List,0,0);
+
+      // --- Remove "None" from the list ---
+
+      i = iFindItem_LST(List,0, "None");
+      if(i!=-1) DelItem_LST(List, i);
+
+      // --- Set up all channel list ---
+
+      List = GetList_DGW(Diag,_CHMASKRANGE_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+      
+      
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CHMASKRANGE_0,DGW_TEXT,  "CHMASKRANGE","MASK");
+
+      SetInfoSYS_DGW(Diag,_CHMASKRANGE_1,DGW_TEXT,     "CHMASKRANGE","CHAN");
+      SetInfoSYS_DGW(Diag,_CHMASKRANGE_2,DGW_TEXT,     "CHMASKRANGE","MIN");
+      SetInfoSYS_DGW(Diag,_CHMASKRANGE_3,DGW_TEXT,     "CHMASKRANGE","MAX");
+      SetInfoSYS_DGW(Diag,_CHMASKRANGE_4,DGW_LISTALIAS,"CHMASKRANGE","INSIDE");
+      SetInfoSYS_DGW(Diag,_CHMASKRANGE_5,DGW_LISTALIAS,"CHMASKRANGE","INCMIN");
+      SetInfoSYS_DGW(Diag,_CHMASKRANGE_6,DGW_LISTALIAS,"CHMASKRANGE","INCMAX");
+     
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+
+      
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag,_CHMASKRANGE_0,DGW_TEXT,     "CHMASKRANGE","MASK");
+      GetInfoSYS_DGW(Diag,_CHMASKRANGE_1,DGW_TEXT,     "CHMASKRANGE","CHAN");
+      GetInfoSYS_DGW(Diag,_CHMASKRANGE_2,DGW_TEXT,     "CHMASKRANGE","MIN");
+      GetInfoSYS_DGW(Diag,_CHMASKRANGE_3,DGW_TEXT,     "CHMASKRANGE","MAX");
+      GetInfoSYS_DGW(Diag,_CHMASKRANGE_4,DGW_LISTALIAS,"CHMASKRANGE","INSIDE");
+      GetInfoSYS_DGW(Diag,_CHMASKRANGE_5,DGW_LISTALIAS,"CHMASKRANGE","INCMIN");
+      GetInfoSYS_DGW(Diag,_CHMASKRANGE_6,DGW_LISTALIAS,"CHMASKRANGE","INCMAX");
+      
+    }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHMASKRANGE","MASK",sMask);    
+   GetString_SYS("CHMASKRANGE","CHAN",sChan);    
+   rMin = rGetReal_SYS("CHMASKRANGE","MIN");    
+   rMax = rGetReal_SYS("CHMASKRANGE","MAX");    
+   iInside = iGetInt_SYS("CHMASKRANGE","INSIDE");    
+   iIncMin = iGetInt_SYS("CHMASKRANGE","INCMIN");    
+   iIncMax = iGetInt_SYS("CHMASKRANGE","INCMAX");    
+
+
+   // --- Mask channel must be specified ---
+
+   if(!iStrlen_STR(sMask) || !iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))
+      Abort_SYS(_("A Mask Channel must be specified."));
+
+
+   // --- Validate ---
+      
+   if(!iStrlen_STR(sChan))
+      Abort_SYS(_("No data channel is defined"));
+
+   if(!iExistChan_DB(Data,sChan))  
+      Abort_SYS(_("Data channel does not exist."));
+
+
+   // --- Create or open mask channel ---
+      
+   if (!iExistChan_DB(Data,sMask)) {
+      MCh = CreateSymb_DB(Data,sMask,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
+      SetRegSymbSetting_DB(Data,MCh,"CLASS","MASK");
+   }
+   else
+      MCh = FindChan_DB(Data,sMask);
+
+   if(rMin!=rDUMMY && rMax!=rDUMMY && rMin > rMax)
+      Abort_SYS(_("Minimum range value must be less than maximum range value."));
+
+
+   if(iInside!=0) iInside = 1; // default
+   if(iIncMin!=0) iIncMin = 1; // default
+   if(iIncMax!=0) iIncMax = 1; // default
+
+   // --- Handle open-ended ranges ---
+
+   if(rMin==rDUMMY) {
+      rMin = rMIN;
+      iIncMin = 1;
+   }
+
+   if(rMax==rDUMMY) {
+      rMax = rMAX;
+      iIncMax = 1;
+   }
+   
+
+   MCh = FindChan_DB(Data,sMask);
+   LockSymb_DB(Data,MCh,DB_LOCK_READWRITE,DB_WAIT_NONE);     
+
+   XCh = FindChan_DB(Data,sChan);
+   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   
+   // --- get some VV's ---
+
+   VVx = Create_VV(REAL,0);
+   VVm = Create_VV(INT,0);
+
+
+   // --- process lines ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+
+      // --- get line label ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data,Line);
+
+
+      // --- Update the Progress Bar ---
+
+      Strcpy_STR(sLabel,_("Processing line: "));
+      Strcat_STR(sLabel,sLine);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- Get data ---
+
+      GetChanVV_DB(Data,Line,XCh,VVx);
+      GetChanVV_DB(Data,Line,MCh,VVm);
+      ReFidVV_VV(VVm,VVx);
+
+    
+      // --- Set values outside intended data range to dummies ---
+
+      DummyRangeEx_VVU(VVx, rMin, rMax, iInside, iIncMin, iIncMax);
+
+      // --- Set mask values to "1" to begin ---
+
+      SetIntN_VV(VVm, 0, -1, 1);
+
+      // --- Set mask based on dummies in data ---
+
+      Mask_VVU(VVm, VVx);
+
+
+      // --- Replace the data ---
+
+      PutChanVV_DB(Data,Line,MCh,VVm);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data,Line);
+      iLines++;
+
+   }
+
+
+   // --- Unlock the channel symbols ---
+
+   UnLockSymb_DB(Data,XCh);
+   UnLockSymb_DB(Data,MCh);
+
+
+   // --- done ---
+
+   Destroy_SYS(VVx);
+   Destroy_SYS(VVm);
+   
+   
+   Progress_SYS(0);
+   
+   
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);  
+   LoadChan_EDB(EData, sMask);    
+
+}

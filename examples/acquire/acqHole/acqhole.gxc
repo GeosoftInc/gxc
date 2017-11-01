@@ -1,0 +1,478 @@
+//===========================================================================
+NAME          = "Import Drillhole information from acQuire database"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/DH-Data/Import"
+
+DESCRIPTION   = ""
+// Revision History:
+// v6.3.0: Test for illegal project name fixed. Style changes.
+//         Select all holes.
+//         Slight change to overwrite databases question (again!)
+// v6.1.0: Slightly modified the overwrite databases question.
+// v6.0.1: Restored prompt to save changes in selection.
+//         Added Cancel to "Import Wholeplot data?" question.
+//         Delete newly created empty databases.
+// v6.0.0: Can now select project directory.
+//         Adjusted string lengths for project name, messages.
+//         User does not need to delete existing project.
+// v5.1.7: Added auto-convert negatives option.
+// v5.1.6: Cleaned up code.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "acqHole.gr"
+#include "acqHole.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+DGW      Diag;             // Dialogue handle
+VV       NameVV;
+VV       GeologyNameVV;
+VV       VVDatabases;
+ACQUIRE  hAcquire;
+
+
+string(STR_DB_SYMBOL)      sProject;
+string(1024)               sMessage;
+string(2)                  sCheck;
+string(STR_FILE)           sGdbName;
+string(STR_FILE)           sParFile, sParTemp;
+string(STR_DEFAULT)        sMsg;
+
+DH          Drill;
+EDB         EData;
+DB          Data;
+
+int   i, iRc, iDelete, iType;
+int   iLength, iStatus, iCheck;
+
+string(STR_FILE)           sWorkVol;
+string(STR_FILE)           sWorkDir, sWorhDir;
+string(STR_FILE)           sGdbFile;
+string(STR_FILE)           sGdbDir;
+string(STR_FILE)           sGdbVol;
+string(STR_FILE)           sProjectGeo, sProj;
+string(2)                  sDirSeparatorChar;
+
+int      iGdbLst, iProjectGeo, iHasDataBases;
+int      iImportNegatives;
+
+LST GdbLst;
+CRC CRC1, CRC2;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+#define MESSAGE_0 _("Import Database")
+#define MESSAGE_1 _("Import acQuire data into the current Geosoft database ?")
+
+{ 
+
+   // --- Get the current project database directory ---
+
+   GetString_SYS("DH", "PROJECT_DIR", sWorkDir);
+   if(!iStrlen_STR(sWorkDir) || !iDirExist_SYS(sWorkDir))
+      GetDirectory_SYS(SYS_DIR_LOCAL, sWorkDir);    // default to workspace directory
+
+   // Ensure that sWorkDir ends with a path separator
+   Strcpy_STR(sDirSeparatorChar, "\\");
+   if (iCharN_STR(sWorkDir, iStrlen_STR(sWorkDir) - 1) != iCharN_STR(sDirSeparatorChar, 0))
+      Strcat_STR(sWorkDir, "\\");
+
+   iDelete = FALSE;
+   if(iInteractive_SYS()) {
+         
+      Diag = Create_DGW("ACQIMPORT");
+   
+      iStatus = TRUE;
+      while(iStatus) {
+
+         SetInfoSYS_DGW(Diag, _ACQIMPORT_0, DGW_TEXT, "ACQIMPORT", "PROJECT");
+         SetInfo_DGW(Diag,_ACQIMPORT_1,DGW_TEXT,sWorkDir);
+         SetInfoSYS_DGW(Diag, _ACQIMPORT_2, DGW_FILEPATH, "ACQIMPORT", "PARFILE");
+         SetInfoSYS_DGW(Diag, _ACQIMPORT_3, DGW_LISTALIAS, "ACQIMPORT", "CONVERT_NEGATIVES");
+
+         i = iRunDialogue_DGW(Diag);
+         if(-1 == i) Cancel_SYS();
+
+         if(i==1) 
+         {
+            // --- Get the new directory to look in ---
+
+            iBrowseDir_GUI(_("Select directory containing Drill project"), sWorkDir, sWorkDir);
+            continue;
+         }
+
+         GetInfoSYS_DGW(Diag, _ACQIMPORT_0, DGW_TEXT, "ACQIMPORT", "PROJECT");
+         GetInfoSYS_DGW(Diag, _ACQIMPORT_2, DGW_FILEPATH, "ACQIMPORT", "PARFILE");
+         GetInfoSYS_DGW(Diag, _ACQIMPORT_3, DGW_LISTALIAS, "ACQIMPORT", "CONVERT_NEGATIVES");
+         
+         
+         // --- check project name ---
+
+         GetString_SYS("ACQIMPORT", "PROJECT", sProject);
+         iLength = iStrlen_STR(sProject);
+         if(iLength==0) 
+         {
+            DisplayMessage_SYS(_("WARNING"), _("Input Project Name...."));
+            
+         } else {    
+            
+            iCheck = TRUE;
+            for(i = 0 ; iCheck && i < iLength ; i++) 
+            {
+               Substr_STR(sCheck, sProject, i, 1);
+               
+               if(iStrncmp_STR(sCheck, ".", 1, STR_CASE_TOLERANT) == 0) 
+                  iCheck = FALSE;
+               
+               if(iStrncmp_STR(sCheck, "_", 1, STR_CASE_TOLERANT) == 0)
+                  iCheck = FALSE;
+            }
+            
+            if(!iCheck) {
+            
+               DisplayMessage_SYS(_("WARNING"), _("Do not use \".\" or \"_\" in project name..."));
+               SetString_SYS("ACQIMPORT", "PROJECT", "");
+            
+            } else {
+   
+               // --- check if GDB project GDB exists --- 
+            
+               Strcpy_STR(sGdbName, sWorkDir);
+               Strcat_STR(sGdbName, sProject);
+               Strcat_STR(sGdbName, "_Collar.gdb");
+               if(iFileExist_SYS(sGdbName) == 1) iCheck = FALSE;
+
+               Strcpy_STR(sGdbName, sWorkDir);
+               Strcat_STR(sGdbName, sProject);
+               Strcat_STR(sGdbName, "_assays.gdb");
+               if(iFileExist_SYS(sGdbName) == 1) iCheck = FALSE;
+                        
+               Strcpy_STR(sGdbName, sWorkDir);
+               Strcat_STR(sGdbName, sProject);
+               Strcat_STR(sGdbName, "_survey.gdb");
+               
+               if(iFileExist_SYS(sGdbName) == 1) iCheck = FALSE;
+               
+               if(!iCheck) 
+               {
+               
+                  Printf_STR(sMessage, sizeof(sMessage), _("The drillhole project \"%s\" already exists.\r\nClick \"Yes\" to delete and replace the existing drillhole project.\r\nClick \"No\" to overwrite the existing project and retain pre-existing holes."), sProject);
+                  iDelete = iDisplayQuestionWithCancel_SYS(_("Drillhole Project"), sMessage);
+                  if(iDelete!=2)
+                     iStatus = FALSE;
+                  
+               } else {
+               
+                  iStatus = FALSE;
+               }
+
+            }
+
+         }
+         
+      }
+      
+         
+      Destroy_DGW(Diag);    
+   }
+   else
+   {
+      if (iExistInt_SYS("ACQIMPORT", "OVERWRITE"))
+         iDelete = iGetInt_SYS("ACQIMPORT", "OVERWRITE");
+   }
+   
+   
+   // --- Get Parameters ---
+
+   GetString_SYS("ACQIMPORT", "PROJECT", sProject);
+   GetString_SYS("ACQIMPORT", "PARFILE", sParFile);
+   iImportNegatives = iGetInt_SYS("ACQIMPORT","CONVERT_NEGATIVES");
+
+
+
+   // --- make list of project database names ---
+
+   NameVV = Create_VV(-STR_FILE, 3);
+
+   Strcpy_STR(sGdbName, sWorkDir);
+   Strcat_STR(sGdbName, sProject);
+   Strcat_STR(sGdbName, "_Collar.gdb");
+   SetString_VV(NameVV, 0, sGdbName); 
+
+   Strcpy_STR(sGdbName, sWorkDir);
+   Strcat_STR(sGdbName, sProject);
+   Strcat_STR(sGdbName, "_assays.gdb");
+   SetString_VV(NameVV, 1, sGdbName); 
+
+   Strcpy_STR(sGdbName, sWorkDir);
+   Strcat_STR(sGdbName, sProject);
+   Strcat_STR(sGdbName, "_survey.gdb");
+   SetString_VV(NameVV, 2, sGdbName); 
+
+
+   // --- Delete existing databases? ---
+   
+   if(iDelete) 
+   {
+      for(i = 0 ; i < iLength_VV(NameVV) ; i++) 
+      {
+         GetString_VV(NameVV, i, sGdbName); 
+
+         UnLoad_EDB(sGdbName);
+         if(iFileExist_SYS(sGdbName) == 1) 
+         {
+            if(iDeleteFile_SYS(sGdbName) != 0) 
+            {
+               Abort_SYS(_("ERROR: Failed to delete GDB file...."));
+            }
+         }
+      }
+   }
+
+
+   // --- close  possible geology databases for this project ---
+
+   Strcpy_STR(sProjectGeo, sWorkDir);
+   Strcat_STR(sProjectGeo, sProject);
+   Strcat_STR(sProjectGeo, "_a.gdb");
+   iProjectGeo = iStrlen_STR(sProject)+1;
+
+   FileNamePart_STR(sProjectGeo, sWorhDir, STR_FILE_PART_DIRECTORY);
+   FileNamePart_STR(sProjectGeo, sWorkVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sProjectGeo, sProj, STR_FILE_PART_NAME);
+
+   GdbLst = Create_LST(STR_MAX_PATH); 
+   iGdbLst = iGetDatabasesLST_EDB(GdbLst, EDB_PATH_FULL);
+   for(i = 0 ; i < iGdbLst ; i++) 
+   {
+      GetItem_LST(GdbLst, 0, i, sGdbFile);
+
+      FileNamePart_STR(sGdbFile, sGdbName, STR_FILE_PART_NAME);
+      FileNamePart_STR(sGdbFile, sGdbDir, STR_FILE_PART_DIRECTORY);
+      FileNamePart_STR(sGdbFile, sGdbVol, STR_FILE_PART_VOLUME);
+
+      if(iStrcmp_STR(sGdbVol, sWorkVol, STR_CASE_TOLERANT) != 0) continue;
+      if(iStrcmp_STR(sGdbDir, sWorhDir, STR_CASE_TOLERANT) != 0) continue;
+      if(iStrncmp_STR(sGdbName, sProj, iProjectGeo, STR_CASE_TOLERANT) != 0) continue;
+
+      if(iLoaded_EDB(sGdbFile)) UnLoad_EDB(sGdbFile);
+   }
+
+
+   // --- list of geology database names ---
+   
+   GeologyNameVV = Create_VV(-STR_FILE, 0);
+
+
+   // --- Create Acquire Object ---
+   
+   hAcquire = Create_ACQUIRE();   
+   
+   
+   // --- Run the Selection Tool ---
+   
+   if(iInteractive_SYS()) {
+      
+      
+      // --- Save all selection changes to a temporary file ---
+      
+      Strcpy_STR(sParTemp, "_acqhole.sel");
+      if(iFileExist_SYS(sParTemp))
+         iDeleteFile_SYS(sParTemp);
+      
+      CRC1 =(CRC)0;
+      if(iFileExist_SYS(sParFile)) {   
+         if(iCopyFile_SYS(sParFile, sParTemp))
+            Abort_SYS(_("Unable to make temp copy of the parameter file."));
+         CRC1 = CRCFile_SYS(sParTemp);
+      }
+                                    
+                        
+      // --- Run the selection tool ---
+                              
+      if(iSelectionTool_ACQUIRE(hAcquire,sParTemp,ACQUIRE_SEL_HOLES)==0) 
+      { 
+      
+         // --- Has the parameter file changed? ---
+         
+         CRC2 = CRCFile_SYS(sParTemp);
+         if(CRC1 != CRC2) {
+         
+            if(CRC1==(CRC)0) 
+               Strcat_STR(sMsg, _("Save parameters?"));
+            else
+               Strcat_STR(sMsg, _("Save modified parameters?"));
+            if(iDisplayQuestion_SYS(_("acQuire Selections"), sMsg))
+            {
+            
+               // --- Save the changes? ---
+               
+               if(!iFileSave_GUI(_("Save acQuire parameters"), FILE_FILTER_SEL, sParFile, sParFile))
+               {
+                  if(iCopyFile_SYS(sParTemp, sParFile))
+                     Abort_SYS(_("Unable to save the parameter file."));            
+               }                      
+            }
+         }
+      }
+      else if(CRC1==(CRC)0) {
+         Abort_SYS(_("No acQuire selection parameter file was specified or saved; cancelling import."));
+      }
+      
+      
+      // --- Use the temporary file name from now on. If the user cancelled out
+      //     of the selection tool, then the original settings are still saved in it. ---
+      
+      Strcpy_STR(sParFile, sParTemp);
+   }   
+   
+   
+   // --- Import Acquire Data ---
+
+   iRc = iImportHole_ACQUIRE(hAcquire, sProject, sWorkDir, sParFile, GeologyNameVV, iDelete, iImportNegatives);
+
+
+
+   // --- If there was an error on import, and if deleting, delete the new databases ---
+   
+   if(iRc != 0 && iDelete) 
+   {
+      for(i = 0 ; i < iLength_VV(NameVV) ; i++) 
+      {
+         GetString_VV(NameVV, i, sGdbName); 
+         if(iFileExist_SYS(sGdbName)) {
+            UnLoad_EDB(sGdbName);
+            iDeleteFile_SYS(sGdbName);
+         }
+      }
+
+      Abort_SYS(_("acQuire: Import Failed"));
+   }
+   
+   
+   // --- Delete any empty database created ---
+
+   iHasDataBases = FALSE;
+   
+   for(i = 0 ; i < iLength_VV(NameVV) ; i++) 
+   {
+      GetString_VV(NameVV, i, sGdbName); 
+      if(iFileExist_SYS(sGdbName)) {
+         EData = Load_EDB(sGdbName);
+         Data = Lock_EDB(EData);
+         if(iIsEmpty_DB(Data)) {
+            UnLock_EDB(EData);
+            UnLoad_EDB(sGdbName);
+            if(iInteractive_SYS())
+               iRemoveDocument_PROJ(sGdbName);
+            iDeleteFile_SYS(sGdbName);
+         }
+         else {
+            UnLock_EDB(EData);
+            iHasDataBases = TRUE;
+         }
+      }
+   }
+   
+   for(i = 0 ; i < iLength_VV(GeologyNameVV) ; i++) 
+   {
+      GetString_VV(GeologyNameVV, i, sGdbName); 
+      if(iFileExist_SYS(sGdbName)) {
+         EData = Load_EDB(sGdbName);
+         Data = Lock_EDB(EData);
+         if(iIsEmpty_DB(Data)) {
+            UnLock_EDB(EData);
+            UnLoad_EDB(sGdbName);
+            if(iInteractive_SYS())
+               iRemoveDocument_PROJ(sGdbName);
+            iDeleteFile_SYS(sGdbName);
+         } else {
+            UnLock_EDB(EData);
+            iHasDataBases = TRUE;
+         }
+      }
+   }
+   
+   // --- Close The Acquire Connection ---
+   
+   Destroy_ACQUIRE(hAcquire);
+   
+   if(!iHasDataBases)
+      Abort_SYS(_("The acQuire DrillHole Database import failed because no information was found in query."));
+
+   // --- Open the Wholeplot project ---
+
+   SetString_SYS("DHOPENPRJ","NAME",sProject);
+   SetString_SYS("DH", "PROJECT_DIR", sWorkDir);
+
+   SetInteractive_SYS(0);
+   iRunGX_SYS("geogxnet.dll(Geosoft.GX.DrillHole.DHOpenPrj;Run)");
+   SetInteractive_SYS(1);
+
+
+   Strcpy_STR(sGdbName, sWorkDir);
+   Strcat_STR(sGdbName, sProject);
+   Strcat_STR(sGdbName, "_Collar.gdb");
+
+   Drill  = Create_DH(sGdbName);
+   
+
+   // --- Select all holes ---
+   
+   SelectAllHoles_DH(Drill);
+
+      
+   // --- Re-Compute XYZ locations for surveys and assay data ---
+
+   Progress_SYS(1);
+   ComputeXYZ_DH(Drill);
+   UpdateCollarTable_DH(Drill);
+   Progress_SYS(0);
+
+   VVDatabases = Create_VV(-STR_FILE, 0);
+   GetDatabasesVV_DH(Drill, VVDatabases);
+   Destroy_DH(Drill);
+   iLength = iLength_VV(VVDatabases);
+   for (i = 0; i < iLength; i++)
+   { 
+      GetString_VV(VVDatabases, i, sGdbName);
+      if (iFileExist_SYS(sGdbName))
+      {
+         EData = Load_EDB(sGdbName);
+         Data = Lock_EDB(EData);
+         if (iDelete || 0 == iGetTemplateBlob_DH(Data, sParFile, iType))
+            SetTemplateBlob_DH(Data, sParFile, 4);
+         UnLock_EDB(EData);
+      }
+   }
+   Destroy_VV(VVDatabases);
+
+
+   // --- Done ---
+
+   Destroy_VV(NameVV);
+   Destroy_VV(GeologyNameVV);
+   
+
+   // --- Remove the temporary selection file ---
+      
+   if(iFileExist_SYS(sParTemp))
+      iDeleteFile_SYS(sParTemp);
+   
+}
+

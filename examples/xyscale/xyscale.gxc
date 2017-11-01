@@ -1,0 +1,168 @@
+//===========================================================================
+NAME          = "Set the X and Y scales in a map separately"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/GMSYS-3D Tools/Cross Sections"
+
+DESCRIPTION   = "
+
+      XYSCALE.VIEW     Name of data view to adjust
+                 .XSCL     X Scale in units/mm
+                 .YSCL     Y Scale in units/mm
+"
+
+// Revision History
+// v5.1.7  New GX.
+//===========================================================================
+
+RESOURCE="xyscale.gr"
+#include "xyscale.grh"
+
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+
+string(STR_VIEW) sView;
+
+EMAP   EMap;
+MAP    Map;
+LST    hViewLST;
+MVIEW  View;
+DGW    hDGW;
+
+int    i;
+real   rXScale, rYScale, rX0, rY0;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   if (!iHaveCurrent_EMAP())
+      Abort_SYS(_("A current map is required."));
+
+   EMap  = Current_EMAP();
+   Map  = Lock_EMAP(EMap);
+
+
+   if (iInteractive_SYS()) {
+   
+
+	   // --- get view list ---
+
+      hViewLST = Create_LST(256);
+	   ViewListEx_MAP(Map,hViewLST,MAP_LIST_MODE_NOT3D);
+
+
+      // --- remove the base view from the list ---
+      
+      GetClassName_MAP(Map,"Base",sView);
+      i = iFindItem_LST(hViewLST,0,sView);
+      if (i != -1)
+         DelItem_LST(hViewLST,i);
+
+
+      // --- If no base views, exit ---
+
+      if(iSize_LST(hViewLST)==0)
+         Abort_SYS(_("There are no data views in the current map."));
+
+      
+      i = 0;
+      while (i != 99) switch (i) {
+      
+         case 0:
+   
+            hDGW = Create_DGW("SETVIEW");
+            Copy_LST(GetList_DGW(hDGW,_SETVIEW_0),hViewLST);
+   
+
+            // --- if current default is in the list, display it ---
+
+            GetString_SYS("XYSCALE", "VIEW", sView);
+            
+            if(!iStrlen_STR(sView) ||
+               iFindItem_LST(hViewLST, 0, sView)==-1) {
+                
+               GetClassName_MAP(Map,"Data",sView);
+               if (iFindItem_LST(hViewLST,0,sView) != -1)
+                  SetString_SYS("XYSCALE", "VIEW", sView);
+            }
+
+
+            SetInfoSYS_DGW(hDGW,_SETVIEW_0,DGW_TEXT,"XYSCALE","VIEW");
+   
+            i = iRunDialogue_DGW(hDGW);
+            if (i==-1) Cancel_SYS(); 
+   
+            GetInfoSYS_DGW(hDGW,_SETVIEW_0,DGW_TEXT,"XYSCALE","VIEW");
+            Destroy_DGW(hDGW);
+   
+			   break;
+
+         case 1:
+
+            // --- get X, Y scaling ---
+
+            View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
+
+            rXScale = rRound_MATH(rScaleMM_MVIEW(View), 5);
+            rYScale = rRound_MATH(rScaleYMM_MVIEW(View), 5);
+      
+            SetReal_SYS("XYSCALE","XSCL",rXScale);
+            SetReal_SYS("XYSCALE","YSCL",rYScale);
+
+            hDGW = Create_DGW("SETSCALE");
+                                
+            SetInfoSYS_DGW(hDGW,_SETVIEW_0,DGW_TEXT,"XYSCALE","XSCL");
+            SetInfoSYS_DGW(hDGW,_SETVIEW_1,DGW_TEXT,"XYSCALE","YSCL");
+
+            i = iRunDialogue_DGW(hDGW);
+            if (i==-1) Cancel_SYS(); 
+
+            GetInfoSYS_DGW(hDGW,_SETVIEW_0,DGW_TEXT,"XYSCALE","XSCL");
+            GetInfoSYS_DGW(hDGW,_SETVIEW_1,DGW_TEXT,"XYSCALE","YSCL");
+
+            Destroy_DGW(hDGW);
+
+            Destroy_MVIEW(View);
+        
+            break;                                               
+      }                 
+   }      
+
+   
+   // --- Get parameters ---
+
+   GetString_SYS("XYSCALE","VIEW",sView);
+   rXScale = rGetReal_SYS("XYSCALE","XSCL");
+   rYScale = rGetReal_SYS("XYSCALE","YSCL");
+   
+      
+   // --- Validate ---
+
+   if(!iStrlen_STR(sView))
+      Abort_SYS(_("No view selected"));
+
+   if(rXScale <= 0.0 ||
+      rYScale <= 0.0)
+      Abort_SYS(_("X and Y Scales must be defined and greater than 0"));
+
+   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+
+
+   // --- Set scales ---
+
+   MapOrigin_MVIEW(View, rX0, rY0);
+   TranScale_MVIEW (View, rX0, rY0, 1.0/rXScale, 1.0/rYScale);
+
+
+   Destroy_MVIEW(View);
+   
+   UnLock_EMAP(EMap);   
+      
+}

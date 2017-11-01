@@ -1,0 +1,428 @@
+//===========================================================================
+NAME          = "Append gravity survey to master database."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/Gravity"
+
+DESCRIPTION   = "
+
+    GRAPPEND.MASTER   Master database
+            .SURVEY   Survey database
+
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v7.1.0: Delete empty L0 and display channels even for existing master GDB.
+// v5.1.3: Using "Current" X and Y channels
+
+//===========================================================================
+
+RESOURCE = "grappend.gr"
+#include "grappend.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW      hDGW;              // Dialogue handle
+
+EDB      eDBi,eDBo;
+DB       hDBi,hDBo;
+DB_SYMB  Chan,TypeChan,StnChan,Group,SrcChan,Ch,ChX,ChY;
+REG      hDataREG;         // Gravity data REG
+REG      hWorkREG;         // Gravity work REG
+VV       hTypeVV,hStnVV,hSrcVV;
+IPJ      hIPJ;
+LST      hLST;
+
+string(STR_FILE)  sMaster,sSurvey; 
+string(STR_DEFAULT_SHORT) sType;
+string(STR_DEFAULT_SHORT) sSrc,sSrcNew;
+int i,ii,iNew,iLen,iNChan;
+int iGscale,iClosure,iType,iCheck;
+real rStart,rIncr;
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+#define REMOVE(A,B) if (A && iExistSymb_DB(hDBo,B,DB_SYMB_CHAN))\
+   {Chan=FindSymb_DB(hDBo,B,DB_SYMB_CHAN); LOCK_RW(hDBo,Chan); DeleteSymb_DB(hDBo,Chan);}
+
+{
+
+   // --- get master database name ---
+   
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+   
+   GetString_SYS("GRAPPEND","MASTER",sMaster);
+   if (iStrlen_STR(sMaster) == 0)
+      Get_REG(hWorkREG,"GRAVRED.MASTER_DATABASE",sMaster,sizeof(sMaster));
+   SetString_SYS("GRAPPEND","MASTER","");
+      
+   GetString_SYS("GRAPPEND","SURVEY",sSurvey);
+   if (iStrlen_STR(sSurvey) == 0)
+      Get_REG(hWorkREG,"GRAVRED.SURVEY_DATABASE",sSurvey,sizeof(sSurvey));
+   SetString_SYS("GRAPPEND","SURVEY","");
+   
+   
+   // --- get current database REG and name ---
+   
+   hDataREG = Create_REG(256);
+   if (iHaveCurrent_EDB()) {
+   
+      eDBi = Current_EDB();
+      hDBi = Lock_EDB(eDBi);
+      hDataREG = Create_REG(256);
+      GetRegSymb_DB(hDBi,NULLSYMB,hDataREG);
+      
+      
+      // --- if a survey database, set the name ---
+   
+      Get_REG(hDataREG,"GRAVRED.TYPE",sType,sizeof(sType));
+      if (iCharComp_STR(sType,"S"))
+         GetName_DB(hDBi,DB_NAME_FILE,sSurvey);
+            
+      UnLock_EDB(eDBi);   
+      
+   }
+   
+   
+   if (iInteractive_SYS()) {
+
+
+      hDGW = Create_DGW("GRAPPEND");
+      
+      
+      // --- Create the Dialogue ---
+
+      SetInfo_DGW(hDGW,_GRAPPEND_0,DGW_FILEPATH,sSurvey);     
+      SetInfo_DGW(hDGW,_GRAPPEND_1,DGW_FILEPATH,sMaster);     
+
+      i = 0;
+      iNew = FALSE;
+      while (i == 0) {
+      
+
+         // --- Run the Dialogue ---
+
+         if (iRunDialogue_DGW(hDGW) != 0) Cancel_SYS();   
+
+
+         // --- Get the Strings and replace in INI ---
+
+         GetInfo_DGW(hDGW,_GRAPPEND_0,DGW_FILEPATH,sSurvey);
+         GetInfo_DGW(hDGW,_GRAPPEND_1,DGW_FILEPATH,sMaster);
+         
+         if (!iFileExist_SYS(sMaster)) {
+            i = iDisplayQuestion_SYS(sMaster,_("Master database does not exist.  Create new?"));
+            if (i) iNew = TRUE;
+         } else
+            i = 1;   
+      }         
+      
+      Destroy_DGW(hDGW);
+
+   }
+
+   Set_REG(hWorkREG,"GRAVRED.MASTER_DATABASE",sMaster);
+   Set_REG(hWorkREG,"GRAVRED.SURVEY_DATABASE",sSurvey);
+   SetWorkspaceREG_SYS(hWorkREG);
+   
+
+   // --- Check for null input and output strings ---
+
+   if (!iStrlen_STR(sMaster))
+      Abort_SYS(_("Master database Not Specified!"));   
+   if (!iStrlen_STR(sSurvey))
+      Abort_SYS(_("Survey database Not Specified!"));   
+      
+
+   // --- set the master workspoace in the workspace REG ---
+   
+   Set_REG(hWorkREG,"GRAVRED.MASTER_DATABASE",sMaster);
+   SetWorkspaceREG_SYS(hWorkREG);
+   
+
+   // --- get VV's ---
+   
+   hTypeVV = Create_VV(INT,0);
+   hStnVV = Create_VV(-24,0);
+   hSrcVV = Create_VV(-32,0);
+   
+   
+   // --- Load the databases ---
+
+   eDBi = Load_EDB(sSurvey);
+   hDBi = Lock_EDB(eDBi);
+   
+   
+   // --- new master database? ---
+      
+   if (iNew) {
+   
+   
+      // --- create new database ---
+      
+      iDeleteFile_SYS(sMaster);
+      Create_DB(sMaster,100,100,250,10,100,"SUPER","");
+   
+   }
+      
+   eDBo = Load_EDB(sMaster);
+   hDBo = Lock_EDB(eDBo);
+   
+   
+   // --- check existing channels ---
+   
+   iGscale  = !iExistSymb_DB(hDBo,"_Gscale",DB_SYMB_CHAN);
+   iClosure = !iExistSymb_DB(hDBo,"Closure",DB_SYMB_CHAN);
+   iType    = !iExistSymb_DB(hDBo,"Type",DB_SYMB_CHAN);
+   
+
+   // --- duplicate target channels ---
+   
+   DupChans_DU(hDBi,hDBo);
+   
+   
+   // --- remove unwanted channels ---
+   
+   REMOVE(iGscale ,"_Gscale")
+   REMOVE(iClosure,_n("Closure"))
+   
+   
+   // --- get the gravity group, normalize all channels ---
+   
+   Group = CreateSymb_DB(hDBo,"GravData",DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_GROUP);
+   AssociateAll_DB(hDBo,Group);
+   StnChan  = FindSymb_DB(hDBo,"Station",DB_SYMB_CHAN);
+   
+   
+   // --- unprotect all channels ---
+   
+   UnLock_EDB(eDBo);
+   MakeCurrent_EDB(eDBo);
+   iRunGX_SYS("chanpoff");
+   hDBo = Lock_EDB(eDBo);
+
+
+   // --- refid to station channel ---
+   
+   LOCK_RW(hDBo,StnChan);
+   ReFidAllCh_DU(hDBo,Group,StnChan);
+   iLen = iGetChannelLength_DB(hDBo,Group,StnChan);
+   UNLOCK(hDBo,StnChan);
+   
+
+   // --- find/create a source file channel ---
+   
+   FileNamePart_STR(sSurvey,sSrcNew,STR_FILE_PART_NAME);
+   SrcChan = FindSymb_DB(hDBo,"Source",DB_SYMB_CHAN);
+   if (SrcChan == NULLSYMB) {
+   
+      // --- create a source channel ---
+      
+      SrcChan = CreateSymb_DB(hDBo,"Source",DB_SYMB_CHAN,DB_OWN_SHARED,-32);
+      Associate_DB(hDBo,Group,SrcChan);
+      
+      SetLen_VV(hSrcVV,iLen);
+      FillString_VV(hSrcVV,_n("unknown"));
+      
+   } else {
+   
+      // --- source channel exists, look for survey ---
+      
+      LOCK_R(hDBo,SrcChan);
+      GetChanVV_DB(hDBo,Group,SrcChan,hSrcVV);
+      UNLOCK(hDBo,SrcChan);
+      
+      rStart = rGetFidStart_VV(hSrcVV);
+      rIncr  = rGetFidIncr_VV(hSrcVV);
+      iCheck = TRUE && iInteractive_SYS();
+      for(i=0;i<iLen;i++) {
+      
+         GetString_VV(hSrcVV,i,sSrc);
+         TrimSpace_STR(sSrc, STR_TRIMBOTH);
+         if (iStrcmp_STR(sSrc,sSrcNew,STR_CASE_TOLERANT)==0) {
+
+
+            // --- survey already loaded ---
+
+            if (iCheck) {
+               if (!iDisplayQuestion_SYS(sSurvey,_("Survey already merged. Do you want to replace previous survey?")))
+                  Exit_SYS();
+               iCheck = FALSE;
+            }
+            
+            
+            // --- remove this data ---
+            
+            ModFidRange_DU(hDBo,Group,rStart,rIncr,i,1,DU_MODFID_DELETE);
+            if (i+1<iLen) Copy2_VV(hSrcVV,i,hSrcVV,i+1,(iLen-i-1));
+            i--;
+            iLen--;
+            
+         } else if (iStrlen_STR(sSrc) == 0)
+            SetString_VV(hSrcVV,i,_n("unknown"));
+      }
+      
+   }
+   
+   // --- put source back ---
+   
+   LOCK_RW(hDBo,SrcChan);
+   PutChanVV_DB(hDBo,Group,SrcChan,hSrcVV);
+   UNLOCK(hDBo,SrcChan);
+   
+   
+   // --- Normalize the output data, append input data, then normalize output again ---
+
+   Append_DU(hDBi,hDBo,TRUE);
+   LOCK_RW(hDBo,StnChan);
+   ReFidAllCh_DU(hDBo,Group,StnChan);
+   UNLOCK(hDBo,StnChan);
+   
+   
+   // --- set new source data ---
+   
+   LOCK_RW(hDBo,SrcChan);
+   GetChanVV_DB(hDBo,Group,SrcChan,hSrcVV);
+   for (i=iLen;i<iLength_VV(hSrcVV);i++)
+      SetString_VV(hSrcVV,i,sSrcNew);
+   PutChanVV_DB(hDBo,Group,SrcChan,hSrcVV);
+   UNLOCK(hDBo,SrcChan);
+   
+   
+   // --- remove non-stations ---
+   
+   TypeChan = FindSymb_DB(hDBo,"Type",DB_SYMB_CHAN);
+   if (TypeChan != NULLSYMB) {
+   
+      LOCK_RW(hDBo,TypeChan);
+      GetChanVV_DB(hDBo,Group,TypeChan,hTypeVV);
+      UNLOCK(hDBo,TypeChan);
+      
+      rStart = rGetFidStart_VV(hTypeVV);
+      rIncr  = rGetFidIncr_VV(hTypeVV);
+      iLen = iLength_VV(hTypeVV);
+      for (i=0;i<iLen;i++) {
+      
+         ii = iGetInt_VV(hTypeVV,i);
+         if (ii != iDUMMY && ii != 1) {
+         
+            // --- not a reading, remove it ---
+            
+            ModFidRange_DU(hDBo,Group,rStart,rIncr,i,1,DU_MODFID_DELETE);
+            if (i+1<iLen) Copy2_VV(hTypeVV,i,hTypeVV,i+1,(iLen-i-1));
+            i--;
+            iLen--;
+            
+         }               
+            
+      }
+      
+      // --- don't need type any more ---
+   
+      REMOVE(iType   ,_n("Type"))
+      
+   }
+   
+   
+   
+   // --- sort line/stations ---
+   
+   if (iExistSymb_DB(hDBo,"Line",DB_SYMB_CHAN)) {
+   
+      // --- sort by line/station ---
+      
+      SetString_SYS("SORTALL2","CHANNEL1","Line");
+      SetString_SYS("SORTALL2","ORDER1","ASCENDING");
+      SetString_SYS("SORTALL2","CHANNEL2","Station");
+      SetString_SYS("SORTALL2","ORDER2","ASCENDING");
+      SetString_SYS("SORTALL2","READONLY","YES");
+
+      UnLock_EDB(eDBo);
+      if (iRunGX_SYS("sortal2") != 0)
+         Abort_SYS(_("Sort failed."));
+      hDBo = Lock_EDB(eDBo);
+
+   } else {
+   
+   
+      // --- sort by  station ---
+      
+      SetString_SYS("SORTALL","CHANNEL","Station");
+      SetString_SYS("SORTALL","ORDER"  ,"ASCENDING");
+      SetString_SYS("SORTALL","READONLY","YES");
+
+      UnLock_EDB(eDBo);
+      if (iRunGX_SYS("sortal") != 0)
+         Abort_SYS(_("Sort failed."));
+      hDBo = Lock_EDB(eDBo);
+
+   }   
+
+   
+   // --- copy projections if not set ---
+   
+   hIPJ = Create_IPJ();
+   Ch = GetXYZChanSymb_DB(hDBi, DB_CHAN_X);
+   if (Ch != NULLSYMB) {
+      ChX = GetXYZChanSymb_DB(hDBo, DB_CHAN_X);
+      if (ChX != NULLSYMB) {
+         GetIPJ_DB(hDBo,ChX,hIPJ);
+         if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE) { 
+            ChY = GetXYZChanSymb_DB(hDBo, DB_CHAN_Y);
+            if (ChY != NULLSYMB) {
+               GetIPJ_DB(hDBi,Ch,hIPJ);         
+               SetIPJ_DB(hDBo,ChX,ChY,hIPJ);
+            }
+         }
+      }                     
+   }   
+   Ch = FindSymb_DB(hDBi,"longitude",DB_SYMB_CHAN);
+   if (Ch != NULLSYMB) {
+      ChX = FindSymb_DB(hDBo,"longitude",DB_SYMB_CHAN);
+      if (ChX != NULLSYMB) {
+         GetIPJ_DB(hDBo,ChX,hIPJ);
+         if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE) { 
+            ChY = FindSymb_DB(hDBo,"latitude",DB_SYMB_CHAN);
+            if (ChY != NULLSYMB) {
+               GetIPJ_DB(hDBi,Ch,hIPJ);         
+               SetIPJ_DB(hDBo,ChX,ChY,hIPJ);
+            }
+         }
+      }                              
+   }   
+   Destroy_IPJ(hIPJ);   
+   
+
+   // --- delete line 0 and display all ---
+   
+   UnLock_EDB(eDBi);
+   UnLock_EDB(eDBo);
+   DelLine0_EDB(eDBo);
+   
+   iNChan = 1;
+   if(!iScript_SYS())
+   {
+	   hLST = Create_LST(64);
+		iNChan = iDispChanLST_EDB(eDBo, hLST);
+	}
+      
+   if (iNew || iNChan == 0)   
+      LoadAllChans_EDB(eDBo);
+
+   Destroy_SYS(hTypeVV);
+   Destroy_SYS(hStnVV);
+   Destroy_SYS(hSrcVV);
+   
+   UnLoad_EDB(sSurvey);
+   
+}

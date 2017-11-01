@@ -1,0 +1,165 @@
+//===========================================================================
+NAME          = "Append one database to another."
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "geochemistry"
+TRANSLATIONFRIENDLYPATH = "GX/GeochemImport"
+
+DESCRIPTION   = "
+
+    CHAPPEND.MASTER   Master database
+    CHAPPEND.WORK     Working database to append
+
+"
+// Revision History
+// 5.1.5: If master DB is new, duplicate original channel order.
+// 5.1.4: Current X,Y transferred to new Master DB.
+// 5.1.3: Using FindChan_DB and iExistChan_DB
+//===========================================================================
+
+RESOURCE = "chappend.gr"
+#include "chappend.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW        Diag;              // Dialogue handle
+
+DB         DBi,DBo;
+EDB        EDBi,EDBo;
+DB_SYMB    Chan;
+LST        hLST;
+
+string(STR_FILE)  sMaster,sWork; 
+string(STR_DB_SYMBOL) sXCh, sYCh, sChan;
+int        i, iNew, iN;
+
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+   if (iInteractive_SYS()) {
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("CHAPPEND");
+
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_CHAPPEND_0,DGW_FILEPATH,"CHAPPEND","WORK");     
+      SetInfoSYS_DGW(Diag,_CHAPPEND_1,DGW_FILEPATH,"CHAPPEND","MASTER");     
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0)
+         Cancel_SYS();   
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_CHAPPEND_0,DGW_FILEPATH,"CHAPPEND","WORK");
+      GetInfoSYS_DGW(Diag,_CHAPPEND_1,DGW_FILEPATH,"CHAPPEND","MASTER");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("CHAPPEND","WORK",sWork);
+   GetString_SYS("CHAPPEND","MASTER",sMaster);
+
+
+   // --- Check for null input and output strings ---
+
+   if (!iStrlen_STR(sWork))
+      Abort_SYS(_("Source Database Not Specified!"));   
+   if (!iStrlen_STR(sMaster))
+      Abort_SYS(_("Master Database Not Specified!"));   
+
+   // --- Load the Work database ---
+
+   EDBi = Load_EDB(sWork);
+
+
+   // --- Get displayed channel order ---
+
+   hLST = Create_LST(2*STR_DB_SYMBOL);
+   
+   if (iInteractive_SYS())
+      iN = iDispChanLST_EDB(EDBi, hLST);
+
+   DBi  = Lock_EDB(EDBi);
+
+
+   // --- Master database not exist ---
+
+   if (iFileExist_SYS(sMaster) == 0) {
+      iNew = TRUE;
+      CreateDup_DB(DBi,sMaster);
+
+   } else   
+      iNew = FALSE;
+
+
+   // --- Load Master database ---
+   
+   EDBo = Load_EDB(sMaster);
+   DBo  = Lock_EDB(EDBo);
+   
+   DupChans_DU(DBi,DBo);
+
+   Chan = FindChan_DB(DBo,"Sample");
+
+   Progress_SYS(1);   
+
+
+   // --- Normalize the output data, append input data, then normalize output again ---
+
+   Normal_DU(DBo,Chan,TRUE);
+   Append_DU(DBi,DBo,TRUE);
+   Normal_DU(DBo,Chan,TRUE);
+
+   if (iNew) {
+
+      // --- Set Current X and Y channels to be the same as in the original database ---
+
+      GetXYZChan_DB(DBi, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(DBi, DB_CHAN_Y, sYCh);
+      SetXYZChan_DB(DBo, DB_CHAN_X, sXCh);
+      SetXYZChan_DB(DBo, DB_CHAN_Y, sYCh);
+      
+      DupChanLocks_DU(DBi,DBo);
+      UnLock_EDB(EDBo);
+      DelLine0_EDB(EDBo);
+
+
+      // --- Duplicate the displayed channel order ---
+      if (iInteractive_SYS()) {
+         for(i=0;i<iN;i++) {
+            GetItem_LST(hLST, 0, i, sChan);
+            LoadChan_EDB(EDBo,sChan);
+         }
+      }
+   }
+   UnLock_EDB(EDBi);
+   
+   Progress_SYS(0);     
+
+   Destroy_LST(hLST);
+  
+}

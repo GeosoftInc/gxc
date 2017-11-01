@@ -1,0 +1,286 @@
+//===========================================================================
+NAME          = "Calculate Eotvos correction"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   AGEOTVOS.LAT         Latitude channel
+           .LONG        Longitude channel 
+           .HEIGHTCHAN  Height channel
+           .HEIGHTVALUE Height value
+           .OUTCH       Output Eotvos correction channel
+"
+// Revision History:
+// v8.1.0: Replaced iGetLength_DB with iGetChannelLength_DB.
+// v6.4.0: Added "hours" to warning about missing "Time" channel.
+// v6.3.0: New GX.    
+//===========================================================================
+//                               RESOURCES
+//===========================================================================
+
+RESOURCE = "ageotvos.gr"
+#include "ageotvos.grh"
+
+//===========================================================================
+//                                INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
+
+DB          Data;                   // Database handle
+EDB         EData;                  // Edited database handle
+DGW         Diag;                   // Dialogue handle
+LST         List;                   // Channel list handle
+EXP         Exp;
+VV          hVV;
+
+DB_SYMB     Line,LatCh,LongCh,HeightCh,OutCh,LatDCh,LongDCh,TimeCh,TimeDCh;
+
+int         i,iHeight;
+real        rHeight;
+
+string(STR_DEFAULT)  sLatCh,sLongCh,sHeightCh,sHeightValue,sOutCh,sLatDCh,sLongDCh,sTimeDCh;
+string(512)          sFormula;
+
+//===========================================================================
+//                                 CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGEOTVOS");
+                                                 
+
+      // --- Set up channel lists ---
+      
+      List = GetList_DGW(Diag,_AGEOTVOS_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGEOTVOS_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+      List = GetList_DGW(Diag,_AGEOTVOS_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+      List = GetList_DGW(Diag,_AGEOTVOS_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+     
+
+      // --- Set any Defaults ---
+  
+      SetInfoSYS_DGW(Diag,_AGEOTVOS_0,DGW_TEXT,"AGEOTVOS","LAT");
+      SetInfoSYS_DGW(Diag,_AGEOTVOS_1,DGW_TEXT,"AGEOTVOS","LONG");
+      SetInfoSYS_DGW(Diag,_AGEOTVOS_2,DGW_TEXT,"AGEOTVOS","HEIGHTCHAN");
+      SetInfoSYS_DGW(Diag,_AGEOTVOS_3,DGW_TEXT,"AGEOTVOS","HEIGHTVALUE");
+      SetInfoSYS_DGW(Diag,_AGEOTVOS_4,DGW_TEXT,"AGEOTVOS","OUTCH");
+
+     
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();           // They hit cancel
+                                                 
+     
+      // --- Read inputs from the dialogue box ---
+      
+      GetInfoSYS_DGW(Diag,_AGEOTVOS_0,DGW_TEXT,"AGEOTVOS","LAT");
+      GetInfoSYS_DGW(Diag,_AGEOTVOS_1,DGW_TEXT,"AGEOTVOS","LONG");
+      GetInfoSYS_DGW(Diag,_AGEOTVOS_2,DGW_TEXT,"AGEOTVOS","HEIGHTCHAN");
+      GetInfoSYS_DGW(Diag,_AGEOTVOS_3,DGW_TEXT,"AGEOTVOS","HEIGHTVALUE");
+      GetInfoSYS_DGW(Diag,_AGEOTVOS_4,DGW_TEXT,"AGEOTVOS","OUTCH");
+     
+      // --- Destroy the Dialogue ---
+     
+      Destroy_DGW(Diag);
+   }
+
+   // --- Get Parameters ---
+
+   GetString_SYS("AGEOTVOS","LAT",sLatCh);
+   GetString_SYS("AGEOTVOS","LONG",sLongCh);
+   GetString_SYS("AGEOTVOS","HEIGHTCHAN",sHeightCh);
+   GetString_SYS("AGEOTVOS","HEIGHTVALUE",sHeightValue);
+   GetString_SYS("AGEOTVOS","OUTCH",sOutCh);
+    
+   if(iStrlen_STR(sHeightCh)>0)  {
+      if (!iExistChan_DB(Data,sHeightCh)) 
+         Abort_SYS(_("The height channel does not exist."));
+      HeightCh = FindChan_DB(Data,sHeightCh);
+      LockSymb_DB(Data,HeightCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      iHeight = 1;
+   } else {
+      if(iStrlen_STR(sHeightValue)>0)  {
+         rHeight = rGetReal_SYS("AGEOTVOS","HEIGHTVALUE");
+         iHeight = 0;
+      } else{
+         Abort_SYS(_("Either height channel or height value need to exist."));
+      } 
+   } 
+
+   
+   // --- Get handles to the input data channels ---
+
+   if (!iExistChan_DB(Data,sLatCh))
+      Abort_SYS(_("The latitude channel does not exist."));
+   if (!iExistChan_DB(Data,sLongCh))
+      Abort_SYS(_("The longitude channel does not exist."));
+   if (!iExistChan_DB(Data,"Time")) 
+      Abort_SYS(_("The \"Time\" channel (measured in hours) does not exist."));
+
+   LatCh  = FindChan_DB(Data,sLatCh);
+   LongCh = FindChan_DB(Data,sLongCh);
+   TimeCh = FindChan_DB(Data,"Time");                       
+   LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,LongCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+   // --- Get handle to the output channel ---
+
+   if (!iExistChan_DB(Data,sOutCh)) {
+      OutCh = DupSymb_DB(Data,TimeCh,sOutCh);
+      SetChanFormat_DB(Data,OutCh,DB_CHAN_FORMAT_NORMAL);
+   } else {
+      OutCh = FindChan_DB(Data,sOutCh);
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+      SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);     
+   }   
+                         
+
+   // --- Create First derivative of Lat and Long channels ---
+
+   Strcpy_STR(sLatDCh,"Lat_Deriv");
+   if (iExistChan_DB(Data,sLatDCh)) {
+      LatDCh = FindChan_DB(Data,sLatDCh);
+      LockSymb_DB(Data,LatDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   } else
+      LatDCh = DupSymb_DB(Data,LatCh,sLatDCh);        
+
+   Strcpy_STR(sLongDCh,"Long_Deriv");
+   if (iExistChan_DB(Data,sLongDCh)) {
+      LongDCh = FindChan_DB(Data,sLongDCh);
+      LockSymb_DB(Data,LongDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   } else
+      LongDCh = DupSymb_DB(Data,LongCh,sLongDCh);        
+
+   Strcpy_STR(sTimeDCh,"Time_Deriv");
+   if (iExistChan_DB(Data,sTimeDCh)) {
+      TimeDCh = FindChan_DB(Data,sTimeDCh);
+      LockSymb_DB(Data,TimeDCh,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
+   } else
+      TimeDCh = DupSymb_DB(Data,TimeCh,sTimeDCh);        
+
+
+   // --- Create expression ---
+
+   if(iHeight)
+      Strcpy_STR(sFormula,_n("@r2d=57.29578;@a=6378137.0; @f=1/298.2572221; @w=0.000072921151467; @ha=1+$sHeightCh/@a;"));
+   else
+      Strcpy_STR(sFormula,_n("@r2d=57.29578;@a=6378137.0; @f=1/298.2572221; @w=0.000072921151467; @ha=1+$rHeight/@a;"));
+   Strcat_STR(sFormula,"@lat=$sLatCh/@r2d;@long=$sLongCh/@r2d;@slat2=sin(@lat)**2;@clat2=cos(@lat)**2;");
+   Strcat_STR(sFormula,"@td=$sTimeDCh*3600;@latd=$sLatDCh/@r2d/@td;@longd=$sLongDCh/@r2d/@td;@latd2=@latd**2;@longd2=@longd**2;");
+   Strcat_STR(sFormula,"@eotvos=(@a*@latd2)*((3*@slat2-2)*@f+@ha)+(@a*@clat2*(@longd2+2*@w*@longd))*(@ha+@f*@slat2);");
+   Strcat_STR(sFormula,"$sOutCh=100000*@eotvos;");
+
+   Exp = Create_EXP(Data,sFormula,512);
+
+   hVV = Create_VV(REAL,0);
+
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Calculating Eotvos correction"),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, TimeCh) > 0) {
+
+         GetChanVV_DB(Data,Line,TimeCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,TimeDCh,hVV);
+
+         GetChanVV_DB(Data,Line,LatCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,LatDCh,hVV);
+
+         GetChanVV_DB(Data,Line,LongCh,hVV);
+         Diff_VV(hVV,1);
+         PutChanVV_DB(Data,Line,LongDCh,hVV);
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+      }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Eotvos correction"),"AGEOTVOS;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Eotvos Correction"));
+   SetChanDecimal_DB(Data,OutCh,3);
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Release GDB ---
+
+   if(iHeight)
+      UnLockSymb_DB(Data,HeightCh);
+   UnLockSymb_DB(Data,LatCh);
+   UnLockSymb_DB(Data,LongCh);
+   UnLockSymb_DB(Data,LatDCh);
+   UnLockSymb_DB(Data,LongDCh);
+   UnLockSymb_DB(Data,TimeCh);
+   UnLockSymb_DB(Data,TimeDCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+
+
+   // --- Set default for AGFREEAIR GX ---
+
+   SetString_SYS("AGFREEAIR","EOTVOSCORCH", sOutCh);
+
+   // --- Load channel ---
+
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);      
+}

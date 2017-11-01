@@ -1,0 +1,237 @@
+//===========================================================================
+NAME          = "TRENDDB"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Database Tools"
+
+DESCRIPTION   = "Produce tie lines of trends in the data in a preferred direction
+Parameters:
+
+    TRENDDB.ZCHAN      Channel to use for trending
+           .WINDOW     Size of window for max/min search along the lines
+           .ANGLE      The preferred trend angle in degrees ccw from X-axis
+           .DEVIATION  Maximum deviation from preferred angle in degrees
+           .MAXLENGTH  Maximum length for joins in meters.
+           .DEFLECTION Maximum deflection in meters (optional)
+           .MINLENGTH  Minimum length for trend line (optional)
+           .RESAMPLE   Resampling interval along lines (optional)
+           .BRANGLE    The angle at which to break trend lines
+           .APPEND     Overwrite R0 and R1 or create new trend lines?
+                       0: Overwrite R0 and R1.
+                       1: Create first pair of available RN and RN+1, where
+                          N is an even number.
+"						 
+// Revision History:
+// v5.1.5: Added Append/Overwrite option for output trend lines.
+// v5.1.3: Using FindChan_DB and iExistChan_DB
+
+//===========================================================================
+
+RESOURCE = "trenddb.gr"
+#include "trenddb.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_DEFAULT_SHORT) sZChan;      // Trend channel
+real       rWindow;     // Size of window for max/min search along the lines
+real       rAngle;      // The preferred trend angle in degrees
+real       rDeviation;  // Maximum deviation from preferred angle in degrees
+real       rMaxLength;  // Maximum length for joins in meters.
+real       rDeflection; // Maximum deflection in meters (optional)
+real       rMinLength;  // Minimum length for trend line
+real       rResample;   // Resampling interval along lines (optional)
+real       rBrAngle;    // The angle at which to break trend lines (optional)
+
+EDB        EData;			      // Current Database handle
+DB         Data;			      // Current Database handle
+
+DGW        Diag;              // Dialogue handle
+DB_SYMB    ZChan, Line;
+LST        List;               
+
+string(STR_DEFAULT) sTemp;           // Temporary string
+int        i;                 // utility int
+int        iAppend;
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+
+   // --- Get the Database ---
+
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   if (iInteractive_SYS())
+   {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("TRENDDBForm");
+
+      // --- Set up channel list ---
+
+      List = GetList_DGW(Diag,_TRENDDBFORM_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+   
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_0,DGW_TEXT,"TRENDDB","ZCHAN");     
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_1,DGW_TEXT,"TRENDDB","WINDOW");     
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_2,DGW_TEXT,"TRENDDB","ANGLE");
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_3,DGW_TEXT,"TRENDDB","DEVIATION");
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_4,DGW_TEXT,"TRENDDB","MAXLENGTH");     
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_5,DGW_TEXT,"TRENDDB","DEFLECTION");     
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_6,DGW_TEXT,"TRENDDB","MINLENGTH");     
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_7,DGW_TEXT,"TRENDDB","RESAMPLE");     
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_8,DGW_TEXT,"TRENDDB","BRANGLE");
+      SetInfoSYS_DGW(Diag,_TRENDDBFORM_9,DGW_LISTALIAS,"TRENDDB","APPEND");
+
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_0,DGW_TEXT,"TRENDDB","ZCHAN");     
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_1,DGW_TEXT,"TRENDDB","WINDOW");     
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_2,DGW_TEXT,"TRENDDB","ANGLE");
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_3,DGW_TEXT,"TRENDDB","DEVIATION");
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_4,DGW_TEXT,"TRENDDB","MAXLENGTH");     
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_5,DGW_TEXT,"TRENDDB","DEFLECTION");     
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_6,DGW_TEXT,"TRENDDB","MINLENGTH");     
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_7,DGW_TEXT,"TRENDDB","RESAMPLE");     
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_8,DGW_TEXT,"TRENDDB","BRANGLE");
+      GetInfoSYS_DGW(Diag,_TRENDDBFORM_9,DGW_LISTALIAS,"TRENDDB","APPEND");
+           
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+
+   }
+
+   // --- Does the reference channel exist ? ---
+
+   GetString_SYS("TRENDDB","ZCHAN",sZChan);
+   if (!iExistChan_DB(Data,sZChan)) 
+      Abort_SYS(_("Requested trend channel does not exist."));
+   ZChan = FindChan_DB(Data,sZChan);
+
+   // --- Check for null width and maximum gain, and 
+   //     set to default values if blank ---
+
+   //  --- WINDOW ---
+
+   rWindow = rGetReal_SYS("TRENDDB","WINDOW");
+   if(rWindow==rDUMMY)
+      Abort_SYS(_("Window for Max-Min search required"));
+   if (rWindow <= 0.0)
+      Abort_SYS(_("Window Width is Invalid. Must be > 0.0"));
+
+   
+   // --- ANGLE ---
+
+   rAngle = rGetReal_SYS("TRENDDB","ANGLE");
+   if(rAngle==rDUMMY)
+      Abort_SYS(_("Preferred trend angle required"));
+
+   // --- DEVIATION ---
+
+   rDeviation = rGetReal_SYS("TRENDDB","DEVIATION");
+   if(rDeviation==rDUMMY)
+      Abort_SYS(_("Allowable deviation from trend angle required"));
+   if (rDeviation < 10.0)
+      Abort_SYS(_("Deviation angle is Invalid. Must be >= 10"));
+
+   // --- MAXLENGTH ---
+
+   rMaxLength = rGetReal_SYS("TRENDDB","MAXLENGTH");
+   if(rMaxLength==rDUMMY)
+      Abort_SYS(_("Maximum join length is required"));
+   if (rMaxLength <= 0.0)
+      Abort_SYS(_("Maximum Join Length Invalid. Must be > 0"));
+
+   // --- DEFLECTION ---
+
+   GetString_SYS("TRENDDB","DEFLECTION",sTemp);
+
+   rDeflection = rGetReal_SYS("TRENDDB","DEFLECTION");
+   if (rDeflection!=rDUMMY && rDeflection <= 0.0)
+   {
+      Abort_SYS(_("Deflection Invalid. Must be > 0"));
+   }
+
+   // --- MINLENGTH ---
+
+   rMinLength = rGetReal_SYS("TRENDDB","MINLENGTH");
+   if(rMinLength!=rDUMMY && rMinLength<=0.0)
+      Abort_SYS(_("Minimum length is Invalid. Must be > 0"));
+
+   // --- ReSample Distance ---
+
+   rResample = rGetReal_SYS("TRENDDB","RESAMPLE");
+   if(rResample!=rDUMMY && rResample <= 0.0)
+      Abort_SYS(_("Maximum Join Length Invalid. Must be > 0"));
+
+   // --- BREAKING ANGLE (optional) ---
+
+   rBrAngle = rGetReal_SYS("TRENDDB","BRANGLE");
+
+
+   // --- APPEND ---
+
+   iAppend = iGetInt_SYS("TRENDDB", "APPEND");
+   if(iAppend!=1) iAppend = 0;      // overwrite by default
+
+   Progress_SYS(1);
+   
+
+   // --- If overwriting, delete existing "R0" and "R1" lines ---
+
+   if(!iAppend) {
+
+      Line = FindSymb_DB(Data, "R0", DB_SYMB_LINE);
+      if(Line!=NULLSYMB) {
+         LOCK_RW(Data,Line);
+         DeleteSymb_DB(Data, Line);
+      }
+      Line = FindSymb_DB(Data, "R1", DB_SYMB_LINE);
+      if(Line!=NULLSYMB) {
+         LOCK_RW(Data,Line);
+         DeleteSymb_DB(Data, Line);
+      }
+   }
+
+
+   // --- Process the database ---
+
+   TrndDB_TRND(Data, sZChan, rWindow, rAngle, rDeviation, rMaxLength,
+                   rDeflection, rMinLength, rResample,  rBrAngle);
+                   
+                   
+   // --- select trend lines ---
+   
+   Select_DB(Data,"R",DB_LINE_SELECT_INCLUDE);
+                      
+   
+   // --- done ---
+   
+   UnLock_EDB(EData);
+   Progress_SYS(0);
+
+}

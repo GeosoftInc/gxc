@@ -1,0 +1,247 @@
+//===========================================================================
+NAME          = "Window an array channel"
+#include <version.gxh>
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Array Channels"
+
+DESCRIPTION   = "\
+
+Extract the sum of a window from an array channel.
+
+Parameters: 
+
+   VAWINDOW.VA       VA channel to window
+           .VV       VV channel for result.
+           .START    Start element in the VA, 0 is the first
+           .LENGTH   Number of elements in the window
+           .MODE     AVERAGE or SUM
+        
+"
+
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "vawindow.gr"
+#include "vawindow.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+string(STR_DB_SYMBOL) sInCh;            // Channel Names
+string(STR_DB_SYMBOL) sOutCh;           // Channel Names
+
+EDB         EData;            // Database handle
+DB          Data;             // Database handle
+DB_SYMB     InCh;             // Channel Handle
+DB_SYMB     OutCh;            // Channel Handle
+DB_SYMB     Line;             // Line Handle
+DGW         Diag;             // Dialogue handle
+LST         List;             // List handle
+VV          hVV;
+VA          hVA;
+
+int         i,iType,iStart,iLength,iN;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+
+string(STR_DEFAULT_SHORT) sTemp;            // Temp string
+string(STR_DEFAULT) sLabel,sMode;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+
+     // --- Create the Dialogue ---
+
+     Diag = Create_DGW("VAWINDOW");
+
+     // --- Set up lists ---
+
+     List = GetList_DGW(Diag,_VAWINDOW_0);
+     ArrayLST_DB(Data,List);
+     Sort_LST(List,0,0);
+     List = GetList_DGW(Diag,_VAWINDOW_1);
+     SymbLST_DB(Data,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
+     
+
+     // --- Set any Defaults ---
+
+     SetInfoSYS_DGW(Diag,_VAWINDOW_0,DGW_TEXT,"VAWINDOW","VA");
+     SetInfoSYS_DGW(Diag,_VAWINDOW_1,DGW_TEXT,"VAWINDOW","VV");
+     SetInfoSYS_DGW(Diag,_VAWINDOW_2,DGW_TEXT,"VAWINDOW","START");
+     SetInfoSYS_DGW(Diag,_VAWINDOW_3,DGW_TEXT,"VAWINDOW","LENGTH");
+     SetInfoSYS_DGW(Diag,_VAWINDOW_4,DGW_TEXT,"VAWINDOW","MODE");
+     
+
+     // --- Run the Dialogue ---
+
+     i = iRunDialogue_DGW(Diag);
+     if (i != 0) Cancel_SYS();    // He hit cancel
+
+
+     // --- Get the Strings ---
+
+     GetInfoSYS_DGW(Diag,_VAWINDOW_0,DGW_TEXT,"VAWINDOW","VA");    
+     GetInfoSYS_DGW(Diag,_VAWINDOW_1,DGW_TEXT,"VAWINDOW","VV");    
+     GetInfoSYS_DGW(Diag,_VAWINDOW_2,DGW_TEXT,"VAWINDOW","START");
+     GetInfoSYS_DGW(Diag,_VAWINDOW_3,DGW_TEXT,"VAWINDOW","LENGTH");
+     GetInfoSYS_DGW(Diag,_VAWINDOW_4,DGW_TEXT,"VAWINDOW","MODE");
+     
+
+     // --- Destroy the Dialogue ---
+
+     Destroy_DGW(Diag);
+     
+   }
+   
+
+   // --- Get Parameters ---
+
+   GetString_SYS("VAWINDOW","VA",sInCh);
+   GetString_SYS("VAWINDOW","VV",sOutCh);
+   iStart = iGetInt_SYS("VAWINDOW","START");
+   iLength = iGetInt_SYS("VAWINDOW","LENGTH");
+   GetString_SYS("VAWINDOW","MODE",sMode);
+   if (iCharComp_STR(sMode,"A"))
+      iN = iLength;
+   else
+      iN = 1;
+   
+
+   // --- Do the Input Channels Exist ? ---
+
+   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+      Abort_SYS(_("channel does not exist."));
+   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   
+
+   // --- create VA ---
+   
+   iType = iGetChanType_DB(Data,InCh);
+   GS_SIMPLE_TYPE(iType)
+   hVA = Create_VA(iType,0,iGetColVA_DB(Data,InCh));      
+
+
+   // --- Does the Output Channel Exist ? ---
+
+   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) {
+      OutCh = CreateSymb_DB(Data,sOutCh,DB_SYMB_CHAN,DB_OWN_SHARED,iGetChanType_DB(Data,InCh));
+      LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      GetChanUnit_DB(Data,InCh,sLabel);
+      SetChanUnit_DB(Data,OutCh,sLabel);
+      SetChanFormat_DB(Data,OutCh,iGetChanFormat_DB(Data,InCh));
+      SetChanWidth_DB(Data,OutCh,iGetChanWidth_DB(Data,InCh));
+      SetChanDecimal_DB(Data,OutCh,iGetChanDecimal_DB(Data,InCh));
+      UnLockSymb_DB(Data,OutCh);
+   } else   
+      OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
+      
+      
+   // --- create VV ---
+   
+   iType = iGetChanType_DB(Data,OutCh);
+   GS_SIMPLE_TYPE(iType)
+   hVV = Create_VV(iType,0);      
+
+
+   // --- Lock the channel symbols ---
+
+   if (InCh == OutCh) Abort_SYS(_("Input and output channels cannot be the same."));
+   LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+   // --- Prepare to do the work ---
+
+   iLines = 0;
+   iTotLines = iCountSelLines_DB(Data);
+   Progress_SYS(1);
+   
+
+   // --- Go through all selected Lines ---
+
+   ProgName_SYS("",1);
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+   
+      // --- Update the Progress Bar ---
+
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      GetSymbName_DB(Data,Line,sTemp);
+      UnLockSymb_DB(Data,Line);
+      Strcpy_STR(sLabel,_("Window VA line: "));
+      Strcat_STR(sLabel,sTemp);
+      ProgName_SYS(sLabel,0);
+      ProgUpdateL_SYS(iLines,iTotLines);
+
+
+      // --- get VA ---
+
+      GetChanVA_DB(Data,Line,InCh,hVA);
+      
+      
+      // --- window ---
+      
+      Window_VA(hVA,iStart,iLength,hVV);
+      
+      
+      // --- average? ---
+      
+      if (iN > 1)
+         _Trans_VV(hVV,0.0,1.0/(real)iN);
+         
+      
+      
+      // --- write it out ---
+      
+      PutChanVV_DB(Data,Line,OutCh,hVV);
+
+
+      // --- Advance to Next Line ---        
+
+      Line = NextSelLine_DB(Data, Line );
+      iLines++;
+
+   }
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Window VA"),"VAWINDOW;");
+   
+
+   // --- Unlock the channel symbol ---
+
+   UnLockSymb_DB(Data,InCh);
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+   Destroy_VA(hVA);
+   Destroy_VV(hVV);
+   
+
+   // --- done ---
+
+   Progress_SYS(0);
+   
+}
