@@ -10,5 +10,4 @@ Also see the [Geosoft Inc . organization on Github](https://github.com/GeosoftIn
 
 License
 -------
-
-Any source code found here are released under the BSD 2-clause license. Core functionality exposed by the GX API may have additional license implications. For more information consult the License page in the GX Developer Wiki
+Any source code found here are released under the [BSD 2-clause license](https://github.com/GeosoftInc/gxpy/blob/master/LICENSE). Core functionality exposed by the GX API may have additional license implications. For more information consult the [License page in the GX Developer Wiki](https://geosoftgxdev.atlassian.net/wiki/spaces/GD/pages/2359406/License)
