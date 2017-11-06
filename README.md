@@ -31,7 +31,7 @@ set include=c:\gxc-9\include
 
 A GX will have a _.gxc_ source file and an optional _.grc_ resorce file.  There may also be _.hlp_ files that are used by the resource file.  Compiling is a 2-step process.  For this example navigate to the __gxc-9.3\examples\agggrid__ folder:
 
-``
+```
 grc agggrid
 gxc agggrid
 ```
