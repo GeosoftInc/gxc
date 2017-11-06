@@ -13,23 +13,23 @@ Quick Start
 
 ### Configuration
 
-Select a __[Release](https://github.com/GeosoftInc/gxc/releases)__ and download the source code compressed file.  Extract to a folder (e.g. ___c:\gxc-9___) on your system. This will contain the following sub-folders:
+Select a __[Release](https://github.com/GeosoftInc/gxc/releases)__ and download the source code compressed file.  Extract to a folder (e.g. ___c:\geosoft\gxc___) on your system. This will contain the following sub-folders:
 
    | Folder | Content |
    |:------:| ------- |
    | ___examples___ | source code for all Geosoft GXs |
    | ___include___ | GXC header files that document the GX API |
 
-The compiler and support tools are part of your Geosoft Desktop installation. You will need to add the Geosoft Desktop bin directory to your system path so the compiler programs can be found, and set the environment variable __INCLUDE__ to your ___gxc-9\include___ folder.  For example:
+The compiler and support tools are part of your Geosoft Desktop installation. You will need to add the Geosoft Desktop bin directory to your system path so the compiler programs can be found, and set the environment variable __INCLUDE__ to your ___gxc\include___ folder.  For example:
 
 ```
 set PATH="%PATH%;C:\Program Files\Geosoft\Desktop Applications 9\bin"
-set include=c:\gxc-9\include
+set include=c:\gxc\include
 ```
 
 #### Compile a GX
 
-A GX will have a _.gxc_ source file and an optional _.grc_ resorce file.  There may also be _.hlp_ files that are used by the resource file.  Compiling is a 2-step process.  For this example navigate to the __gxc-9.3\examples\agggrid__ folder:
+A GX will have a _.gxc_ source file and an optional _.grc_ resorce file.  There may also be _.hlp_ files that are used by the resource file.  Compiling is a 2-step process.  For this example navigate to the __gxc\examples\agggrid__ folder:
 
 ```
 grc agggrid
