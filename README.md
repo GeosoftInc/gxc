@@ -13,7 +13,7 @@ Quick Start
 
 ### Configuration
 
-Select a __[Release](https://github.com/GeosoftInc/gxc/releases)__ and download the source code compressed file.  Extract to a folder (e.g. ___c:\geosoft\gxc___) on your system. This will contain the following sub-folders:
+Select a __[Release](https://github.com/GeosoftInc/gxc/releases)__ and download the source code compressed file.  Extract to a folder (e.g. ___c:\geosoft_code\gxc___) on your system. This will contain the following sub-folders:
 
    | Folder | Content |
    |:------:| ------- |
@@ -24,7 +24,7 @@ The compiler and support tools are part of your Geosoft Desktop installation. Yo
 
 ```
 set PATH="%PATH%;C:\Program Files\Geosoft\Desktop Applications 9\bin"
-set include=c:\gxc\include
+set include=c:\geosoft_code\gxc\include
 ```
 
 #### Compile a GX
