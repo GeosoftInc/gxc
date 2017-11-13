@@ -331,22 +331,22 @@ string(STR_DEFAULT) sLabel;
 
       iLen = iGetChannelLength_DB(Data, Line, RefCh);
 
-      if(RefCh!=OutCh) {
-         rFidStart = rGetFidStart_DB(Data, Line, RefCh);
-         rFidIncr  = rGetFidIncr_DB(Data, Line, RefCh);
-         SetFidStart_VV(VVx, rFidStart);
-         SetFidIncr_VV(VVx, rFidIncr);
-         SetFid_DB(Data, Line, OutCh, rFidStart, rFidIncr);
-      }
-
-      GetChanVV_DB(Data, Line, OutCh, VVx);
+      rFidStart = rGetFidStart_DB(Data, Line, RefCh);
+      rFidIncr  = rGetFidIncr_DB(Data, Line, RefCh);
+      if (rFidStart == rDUMMY)
+         rFidStart = 0.0;
+      if (rFidIncr == rDUMMY)
+         rFidIncr = 1.0;
 
       if(iType==0)
          UniformDist_VVU(VVx, iSeed, rMin, rMax, iLen);
       else if(iType==1)
          ExpDist_VVU(VVx, iSeed, rMean, iLen);
-      else if(iType==2)
+      else // if(iType==2)
          NormalDist_VVU(VVx, iSeed, rMean, rStdDev*rStdDev, iLen);
+
+      SetFidStart_VV(VVx, rFidStart);
+      SetFidIncr_VV(VVx, rFidIncr);
 
       PutChanVV_DB(Data, Line, OutCh, VVx);
 
