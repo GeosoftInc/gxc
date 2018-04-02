@@ -1,0 +1,179 @@
+               /CS
+               /XMIN,YMIN,XMAX,YMAX,BCLIP
+               /CHAN,ZB,ZM,LOGOPT,LOGMIN
+               /IDSF,BKD,SRD,IWT,EDGCLP
+               /TOL,PASTOL,ITRMAX,TI,ICGR
+/===============================================================================
+/
+/  PARAMETER DESCRIPTIONS:
+/
+/ ---------- Line 1 ----------
+/
+/  CS    - The grid cell size in reference system units.
+/          This is the only parameter that must be provided by
+/          the user.  The remaining parameters, if not given, are set to
+/          their default values.
+/
+/ ---------- Line 2 ----------
+/
+/  XMIN,YMIN,XMAX,YMAX
+/        - The coordinates (in reference system units) of the lower left
+/          and upper right corner of the area to be gridded.  The default
+/          is to use the limits of the input data.
+/          Entering limits of 0,0,0,0 will result in limits based on the
+/          extremes of the data plus the blanking distance.
+/
+/  BCLIP - Controls use of all data or boundary clipped data from an Oasis
+/          GDB file.  Options are:
+/
+/              0 - use all the data (default)
+/              1 - only use data within boundary clip region.
+/
+/          See BOUNDARY GX for more details on boundary clipping.         
+/
+/ ---------- Line 3 ----------
+/
+/  CHAN  - Selects the channel to be gridded.  The default is to grid channel "1".
+/
+/  ZB,ZM - The base level and multiplier that are used to convert the final
+/          grid values to integer grid values.    The default values will be
+/          acceptable unless sharp peaks are present in the data, in which
+/          case the multiplier should be decreased by a factor of 2.
+/
+/  LOGOPT - logarithmic gridding option (log base 10):
+/
+/              0  grid data as is (no log).
+/              1  grid log(Z); for Z < LOGMIN, use log(LOGMIN)
+/              2  grid LOGMIN + log(Z/LOGMIN) in range outside +/- LOGMIN;
+/                 use actual Z inside range +/- LOGMIN
+/
+/          Options 1 and 2 will store the log of the data in the final grid.
+/          Using -1 and -2 will recover the Z value (10**Z) before storing
+/          in the final grid. 
+/
+/  LOGMIN - The minimum allowable Z value when using the logarithmic option.
+/          It must be a positive non-zero number. The default is 1.0.
+/          Any data less than LOGMIN is set to LOGMIN, then all data are
+/          divided by LOGMIN before the logarithm is calculated.
+/
+/ ---------- Line 4 ----------
+/
+/  IDSF  - The initial sampling factor as a function of the grid cell size.
+/          This factor effectively acts as a low-pass filter by averaging all
+/          X,Y points into the nearest cell defined by this factor.
+/          For example, a factor of 3 would average data points into the
+/          nearest 3,6,9,12...etc. grid cells before calculating the surface.
+/          The default is 1, which produces no pre-filtering other than de-
+/          aliasing by the average of points within one cell.
+/
+/  BKD   - The blanking distance.  All grid cells farther than the blanking
+/          distance from a valid point will be dummied out in the output grid.
+/          The default is the nominal sample interval, i.e. sqrt(area/#data).
+/          This parameter should be set to just greater than the maximum
+/          sampling interval through which interpolation is desired.
+/          If there are too many holes in the resulting grid, 
+/          increase BKD appropriately.
+/
+/  SRD   - The maximum search radius to use for establishing the starting
+/          values for the coarse grid.  The default is four times the coarse
+/          grid size defined by ICGR.  If no data is found within the maximum
+/          search radius, the mean of the data is used as the starting value.
+/          If the search radius is too small, the starting grid can be a poor
+/          approximation of the desired grid, resulting in excessive processing
+/          time.  If too large, too much time will be consummed establishing
+/          the original coarse grid.
+/
+/  IWT   - The weighting power to use to establish the coarse starting grid.
+/          The default is 2, for inverse distance squared.  There is little
+/          reason to change this from the default.
+/
+/  EDGCLP- Edge clipping parameter, the number of grid cells to extend beyond
+/          the outside limits of the data. The default (-1) is not to apply 
+/          edge clipping to the blanking distanced grid.
+/          Use this parameter to ensure the grid does not extend too far
+/          beyond the actual data limits, which can occur when using a large
+/          blanking distance with widely spaced data.
+/          
+/          
+/ ---------- Line 5 ----------
+/
+/  TOL   - The tolerance required for each grid cell. The default is 0.1 
+/          percent of the range of the data. Decrease for a more accurate grid.
+/
+/  PASTOL- The required percentage of points passed the tolerance. The
+/          iteration process will stop when the percentage of points change
+/          by higher than this required percentage in iteration. The default
+/          is 99.0 percent. Decrease for rough data and earlier 
+/          stop of the iteration needed. Increase for a more accurate grid.
+/
+/  ITRMAX- Maximum number of iterations to use in solving the minimum curvature
+/          function.  The default is 200 iterations.  Increase for a more
+/          accurate grid.
+/
+/  TI    - The degree of internal tension ( between 0 and 1 ).
+/          The default is no tension (0.0) which produces a true minimum
+/          curvature grid.  Increasing tension can prevent overshooting of
+/          valid data in sparce areas, although curvature in the vicinity of
+/          real data will increase.
+/
+/  ICGR  - The course grid size relative to the final grid size.  Allowable
+/          factors are 16,8,4,2 or 1.  The default is 8.  The optimum is a
+/          factor close to half the nominal data spacing, although in most
+/          situations the default is fine.  This parameter only effects the
+/          length of time it takes to find a solution.  Erring on the low side
+/          can result in significant time increases, while erring on the high
+/          side will only increase the processing time moderately.
+/
+/===============================================================================
+/
+/  Notes and Guidelines:
+/
+/     1. Do not grid to a cell size much less than half the nominal data 
+/        interval in those areas of interest.  If a finer cell size is
+/        required, it is better to re-grid the grid using BIGRID, which is
+/        much faster.  Too small a cell size in RANGRID simply consumes time
+/        and may require reduction of the tolerance and as increase in the 
+/        maximum number of iterations in order to achieve an acceptable grid.
+/
+/     2. If the grid has too much over-shoot is sparce areas, this may be due 
+/        to one of two things:
+/  
+/           a) The minimum curvature solution is still far from a good fit
+/              because the starting grid was not very close and there are
+/              too few points to rapidly pull in the grid during the iteration
+/              process.
+/
+/              Corrective action:   
+/
+/              Reduce the tolerance and increase the maximum number of 
+/              iterations if the default is exceeded.  You can also increase
+/              the pass tolerance to 100%, which will force the maximum
+/              iterations.
+/
+/           b) A good solution is being reached, but the over-shoot represents
+/              the best minimum-curvature surface through the data.
+/                          
+/              Corrective action:   
+/
+/              Increase the internal tension parameter.  This will cause more
+/              curvature around real data points, but it will decrease over-
+/              shoot.  Note that if high frequency filters are to be applied
+/              with MAGMAP (such as vertical derivatives, or downward
+/              continuations, increasing tension will increase high-frequency
+/              components around the data points and can result in bulls-eye
+/              effects.
+/
+/
+/     3. The low-pass filter effect of the de-sampling factor (IDSF) is
+/        very effective for removing high frequency components that are not
+/        of interest.  Don't be afraid to use it.
+/
+/     4. For line data that is gridded using RANGRID, the blanking distance
+/        should be set to just greater than the maximum line separation.
+/        This will result in a grid that extends beyond the actual data by
+/        that distance.  If this is undesirable, you can grid the same data
+/        using BIGRID (which trims to the edge of the actual data) and use 
+/        the BIGRID grid as the reference mask to trim off the excess parts
+/        of the grid with GRIDBOOL.
+/
+/==============================================================================

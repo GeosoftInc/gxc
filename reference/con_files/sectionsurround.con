@@ -1,0 +1,128 @@
+/ This MAPPLOT Control file produces a surround for section views.
+/ Users may create their own version of this file and place
+/ it in the user\etc directory, and it will override the
+/ Geosoft default found in the etc directory, when the SectionSurround GX.Net 
+/ method is run.
+
+/  TEXT refp,xoff,yoff,just,"text string",angle|(x2,y2)
+/       att,height,width,space,slant,font
+
+DATT s1=kt100
+DATT s2=kt200
+DATT s3=kt300
+
+// == Plot reference grid for a section view ==
+IFEQ %MAPPLOT_REFERENCE_GRID%, 1
+
+	MGRP Coordinates,0,1
+
+	IFNE %GROUND_LINE_TYPE%,0
+
+		DATT refgrid=%GROUND_LINE_COLOUR%t%GROUND_LINE_THICKNESS%
+		DATT easting=%EASTING_LINE_COLOUR%t%EASTING_LINE_THICKNESS%
+		DATT northing=%NORTHING_LINE_COLOUR%t%NORTHING_LINE_THICKNESS%
+
+		DATT easting
+		ANOE %X0%,%Y0%,%X1%,%Y1%,%EASTING_SPACING%,0.1,1,,-1,,,0.05,,1
+			  cg=kt50,%EASTING_TEXT_SIZE%
+
+		DATT northing
+		ANON %X0%,%Y0%,%X1%,%Y1%,%NORTHING_SPACING%,0.1,1,,-1,,,0.05,,1
+			  cg=kt50,%NORTHING_TEXT_SIZE%
+
+		DATT refgrid
+		ANOY ,%X0%,%Y0%,%X1%,%Y1%,%ELEVATION_SPACING%,0.1,-1,-1,%ELEVATION_ORIENTATION%,,,0.05,,1
+			  cg=kt50,%GROUND_TEXT_SIZE%
+     
+		IFNE %GROUND_LINE_TYPE%,-1
+			DATT refgrid
+			GRD2 %GROUND_LINE_TYPE%,,,,,%X0%,%Y0%,%X1%,%Y1%
+		ENDF
+
+	ENDF
+
+	IFNE %ANNOTATE_DISTANCE_ALONG_SECTION%,0
+		DATT refgrid
+		ASDI %X0%,%Y0%,%X1%,%Y1%,,0.1,-1,,0,,,0.05,,1
+			  cg=kt50,%GROUND_TEXT_SIZE%
+	ENDF
+
+	IFNE %GEOGRAPHIC_LINE_TYPE%,0
+
+		DATT llgrid=%GEOGRAPHIC_LINE_COLOUR%t%GEOGRAPHIC_LINE_THICKNESS%
+		DATT longitude=%LONGITUDE_LINE_COLOUR%t%LONGITUDE_LINE_THICKNESS%
+		DATT latitude=%LATITUDE_LINE_COLOUR%t%LATITUDE_LINE_THICKNESS%
+
+		DATT longitude
+		ALNS %X0%,%Y0%,%X1%,%Y1%,%LONGITUDE_SPACING%,0.1,1,,-1,,,%GEOGRAPHIC_VERTICAL_OFFSET%,1
+			  cg=kt50,%LONGITUDE_TEXT_SIZE%
+
+		DATT latitude
+		ALTS %X0%,%Y0%,%X1%,%Y1%,%LATITUDE_SPACING%,0.1,1,,-1,,,%GEOGRAPHIC_VERTICAL_OFFSET%,1
+			  cg=kt50,%LATITUDE_TEXT_SIZE%
+  
+		IFNE %GEOGRAPHIC_LINE_TYPE%,-1
+			DATT llgrid
+			GRD2 %GEOGRAPHIC_LINE_TYPE%  
+		ENDF
+	ENDF
+
+	// Rectangle around a reference grid
+	DATT s1
+	RECT 0,%X0%,%Y0%,%X1%,%Y1%
+
+	// Section name
+	IFEQ %PLOT_SECTION_NAME%,1
+		MGRP SectionName,0,1
+			TEXT 0,%SECTION_VIEW_X_LEFT%,%SECTION_VIEW_Y_MIDDLE%,0,"%SECTION_LABEL_NAME%",90
+			     t1=kt300,%SECTION_LABEL_SIZE%
+	ENDF
+
+ENDF
+
+
+// == Plot map surrounds (except reference grids) ==
+IFEQ %MAPPLOT_SURROUNDS%, 1
+
+	// Plot surround box around section views
+	IFNE %PLOT_SURROUND_BOX%, 0
+		MGRP Surround,0,0
+		SURR s3
+	ENDF
+
+	IFEQ %PLOT_SECTIONS_TITLE%, 1
+		MGRP SectionsTitle,0,0
+			TEXT 1,%SECTIONS_TITLE_X_CM%,%SECTIONS_TITLE_Y_CM%,0,"%SECTIONS_TITLE_TEXT%"
+				  t1=kt300,%SECTIONS_TITLE_TEXT_SIZE%
+	ENDF
+
+	// Plot legend
+	IFNE %PLOT_LEGEND%,0
+		
+		MGRP LegendBox,0,0
+			REFP 3
+			DATT s3
+			RECT 3,0,0,%LEGEND_WIDTH%,%SECTION_PLOT_HEIGHT_CM%
+			RECT 3,0,0,%LEGEND_WIDTH%,%TITLE_BOX_HEIGHT%
+
+		MGRP Titles,0,0
+			REFP 3,%LEGEND_HALF_WIDTH%,0
+
+			TEXT 11,0,%TITLE_OFFSET%,0,"%TITLE_TEXT%"
+				  t1=kt300,%TITLE_TEXT_SIZE%
+
+			TEXT 11,0,%SUBTITLE_OFFSET%,0,"%SUBTITLE_TEXT%"
+				  t2=kt100,%SUBTITLE_TEXT_SIZE%
+		
+			TEXT 11,0,%VERT_EXAG_OFFSET%,0,"%VERT_EXAG_TEXT%"
+				  t2=kt100,%SUBTITLE_TEXT_SIZE%
+
+		IFNE %DISPLAY_SCALE_BAR%,0
+			MGRP Scale_Bar,0,0
+			SCAL 3,%LEGEND_HALF_WIDTH%,%SCALE_BAR_OFFSET%,,,5,,,2
+				 scale=kt100,0.18
+		ENDF
+	
+	ENDF
+
+ENDF

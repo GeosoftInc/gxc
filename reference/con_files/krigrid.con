@@ -1,0 +1,278 @@
+               /CS
+               /XMIN,YMIN,XMAX,YMAX,BCLIP
+               /IZ,ZB,ZM,LOGOPT,LOGMIN,CLIP
+               /DESAMP,BLANK,SEARCH,MINRAD,MAXRAD,MINPTS,MAXPTS
+               /MODEL,NUGGET,RANGE(or SLOPE),SILL,POWER(N),HMAX,DH,TREND
+/===============================================================================
+/
+/  KRIGRID control file
+/
+/  Griding program KRIGRID performs Ordinary Kriging or Universal Kriging
+/  (for 1st or 2nd order of drift) for randomly distributed data.  Linear,
+/  spharical, gaussian and exponential variogram models are supported, as 
+/  well as numerical interpolation of a user input variogram model.
+/
+/  The data search algorithm has three options: universal search, ocatant 
+/  search and use of all data points for small data sets (up to 500 points).
+/  Universal and octant searches both use a nearest neighbor algorithm that
+/  includes nearest data within a defined maximum radius and/or maximum
+/  number of points.  Octant searching attempts to find a minimum number of
+/  points within each octant surrounding the data point being calculated.
+/
+/
+/  PARAMETER DESCRIPTIONS:
+/
+/ ---------- Line 1 ----------
+/
+/  CS    - The grid cell size in reference system units.  You should choose
+/          a size about one quarter the nominal sample interval.  The default
+/          is one quarter the statically average sample interval:
+/
+/                             sqrt(area/#points)/4
+/
+/
+/ ---------- Line 2 ----------
+/
+/  XMIN,YMIN,XMAX,YMAX
+/        - The coordinates (in reference system units) of the lower left
+/          and upper right corner of the area to be gridded.  The default
+/          is to use the limits of the input data.
+/          Entering limits of 0,0,0,0 will result in limits based on the
+/          extremes of the data PLUS the blanking distance.
+/
+/  BCLIP - Controls use of all data or boundary clipped data from an Oasis
+/          GDB file.  Options are:
+/
+/              0 - use all the data (default)
+/              1 - only use data within boundary clip region.
+/
+/          See BOUNDARY GX for more details on boundary clipping.         
+/
+/
+/ ---------- Line 3 ----------
+/
+/  IZ    - Selects which Z column will be gridded.  The default is to grid
+/          Z column 1 (the third column of the XYZ file).
+/
+/  ZB,ZM - The base level and multiplier that are used to convert the final
+/          grid values to integer grid values.    The default values will be
+/          acceptable unless sharp peaks are present in the data, in which
+/          case the multiplier should be decreased by a factor of 2. 
+/
+/  LOGOPT - logarithmic gridding option (log base 10):
+/
+/              0  grid data as is (no log).
+/              1  grid log(Z); for Z < LOGMIN, use log(LOGMIN)
+/              2  grid LOGMIN*(log(Z/LOGMIN)+1) in range outside +/- LOGMIN;
+/                 use actual Z inside range +/- LOGMIN
+/
+/          Options 1 and 2 will store the log of the data in the final grid.
+/          Using -1 and -2 will recover the Z value (10**Z) before storing
+/          in the final grid. 
+/
+/  LOGMIN - The minimum allowable Z value when using the logarithmic option.
+/          It must be a positive non-zero number. The default is 1.0.
+/
+/  CLIP  - 0 - blank out values that exceed range
+/          1 - clip values that exceed range (default)
+/
+/
+/ ---------- Line 4 ----------
+/
+/  DESAMP- The initial sampling factor as a function of the grid cell size.
+/          This factor effectively acts as a low-pass filter by averaging all
+/          X,Y points in an area defined by this factor.  For example, a factor
+/          of 3 would average data points within areas three times the cell
+/          size before calculating the surface.  The default is 1, which 
+/          produces no pre-filtering other than de-aliasing by averaging
+/          points within one cell.
+/
+/  BLANK - The blanking distance.  All grid cells farther than the blanking
+/          distance from a valid point will be dummied out in the output grid.
+/          The default is the twice of nominal sample interval, i.e. 
+/          2*sqrt(area/#data).
+/          This parameter should be set to just greater than the maximum
+/          sampling interval through which interpolation is desired.
+/          If there are too many holes in the resulting grid, increase BLANK
+/          appropriately.
+/
+/  SEARCH- Ssearch option:        
+/
+/          1 - Univeral search - use nearest points disregarding direction.
+/          2 - Octant Search - use nearest points in each octant surrounding
+/              the grid point to be calculated.  Searching continues until
+/              each octant has between MINPTS/8 and MAXPTS/8 points, or until
+/              MAXRAD is reached.
+/          3 - use all data points without searching.  This option can only
+/              be used for 500 or fewer data points.  The following parameters
+/              on this line are ignored for this option.      
+/
+/          If there are 500 or fewer data points, option 3 is used, otherwise
+/          option 1 is the default.
+/
+/  MINRAD- The minimum search radius. The default is 8 times the grid size.
+/          If data found is less than MINPTS within this MINRAD,
+/          the search radius will be doubled and the data searched again
+/          until either MINRAD are found, or MAXRAD is reached.
+/          Only applies for Universal and Octant searches.
+/
+/  MAXRAD- The maximum search radius. The default is 32 times the grid size.
+/          If less than MINPTS data points are found within MAXRAD radius,
+/          a dummy value is assigned to the grid point.
+/          Only applies for Universal and Octant searches.
+/
+/  MINPTS- The minimum number of points required before a grid value will be
+/          calculated.  The default is 8.
+/          Only applies for Universal and Octant searches.
+/
+/  MAXPTS- The maximum number of points that can be used to calculate a grid
+/          value.  The default is 16.  Only the nearesT MAXPTS points will be
+/          used regardless of the search radius.
+/          Only applies for Universal and Octant searches.
+/          
+/ ---------- Line 5 ----------
+/
+/  MODEL,NUGGET(PA),RANGE(PB),SILL(S),POWER(N)
+/        - Variogram model and parameters:
+/          
+/          MODEL=0 - interpolation of an input variogram. (PA, PB, N and SILL
+/                    are ignored).  A variogram is defined in a file by
+/                    listing h and g(h) in two columns.  The defined
+/                    variogram is linearly interpolated to obtain g(h)
+/                    at any required h.  The file name must is specified by 
+/                    the -VI= command line parameter.
+/
+/          MODEL=1 - Power model:  (default)
+/
+/                      g(h) = PA + PB * h**N.
+/
+/                    N defaults to 1 (Linear model), and PA and PB, if not
+/                    specified, are calculated by least squared fitting to
+/                    the actual data variogram.
+/
+/          MODEL=2 - Spherical Model:
+/
+/                      g(h) = PA + (S-PA)*(1.5h/PB-0.5(h/PB)**3) if h <  PB
+/                      g(h) = S                                  if h >= PB
+/
+/                    This is the most common model for geological situations.
+/                    PA is called the NUGGET, PB is called the RANGE and S is
+/                    called the SILL as shown in the following diagram.
+/                    These values must be defined from an analysis of the 
+/                    variogram.  Run KRIGRID to first produce a variogram for 
+/                    analysis.
+/
+/                             g(h)
+/                               |     
+/                               |                            
+/                      (S) SILL |_ _ _ _ _ _ _ _ _ _  .       .       .
+/                               |            .
+/                               |        .
+/                               |     .               |
+/                               |   .
+/                               |  .                  |
+/                               | .
+/                               |.                    |
+/                   (PA) NUGGET .
+/                               |                     |
+/                               ----------------------------------------> h
+/                                                   RANGE
+/                                                    (PB)
+/
+/          MODEL=3 - Gaussian Model:
+/
+/                       g(h) = PA + (S-PA)*(1 - exp(-3*(h/PB)**2))
+/
+/                       e.g. g(h) = 0.632 * S, when h=PB/1.732 & PA=0
+/                            g(h) = 0.950 * S, when h=PB       & PA=0
+/
+/                    PA, PB and S are termed the NUGGET, RANGE and SILL as
+/                    shown in the above diagram.  These values must be defined
+/                    from an analysis of the variogram.  Run KRIGRID to first
+/                    produce a variogram for analysis.
+/
+/          MODEL=4 - Exponential model:
+/
+/                       g(h) = PA + (S-PA)*(1 - exp(-3*h/PB))
+/
+/                       e.g. g(h) = 0.632 * S, when h=PB/3 & PA=0
+/                            g(h) = 0.950 * S, when h=PB   & PA=0
+/
+/                    PA, PB and S are termed the NUGGET, RANGE and SILL as
+/                    shown in the above diagram.  These values must be defined
+/                    from an analysis of the variogram.  Run KRIGRID to first
+/                    produce a variogram for analysis.
+/
+/  HMAX  - Maximum distance (h) to which to calculate the variogram.
+/
+/  DH    - Distance increment for calculating the variogram. The default
+/          is default=HMAX/50.  The maximum variogram length is 50 points.
+/
+/  TREND - Order of background trend of the data (0, 1 or 2).  The default
+/          is 0, which assumes the background is flat.  Use a trend of 1 if 
+/          there is a linear regional trend through the data, or a trend of
+/          2 of there is a curved regional trend through the data.
+/
+/===============================================================================
+/
+/
+/  Notes and Guidelines:
+/
+/  1. Do not grid to a cell size much less than one quarter the nominal data 
+/     interval.  If a finer cell size is required, it is better to re-grid 
+/     the grid using BIGRID, which is much faster.  Too small a cell size
+/     simply consumes time.
+/
+/  2. The low-pass filter effect of the de-sampling factor (IDSF) is
+/     very effective for removing high frequency components that are not
+/     of interest. This is particularly useful for clustered data.
+/
+/  3. For line data that is gridded using KRIGRID, the blanking distance
+/     should be set to just greater than the maximum line separation.
+/     This will result in a grid that extends beyond the actual data by
+/     that distance.  If this is undesirable, you can grid the same data
+/     using BIGRID (which trims to the edge of the actual data) and use 
+/     the BIGRID grid as the reference mask to trim off the excess parts
+/     of the grid with GRIDBOOL.
+/
+/  4. Suggested procedures of runing KRIGRID are as follows:
+/
+/    1). Do the variogram analysis with the following cammond line:
+/                                                           
+/        KRIGRID  in.CON in.XYZ  out.GRD err.GRD  -VO=out.VAR  -VS
+/        ---------------------------------------------------------
+/        (You may type KRIGRID to see an explanation of this command line)
+/
+/    2). View the variogram (need MAPPLOT.EXE & MAPVIEW.EXE):
+/
+/        VARIOPLT  infile(.var file)  out.PLT  modeltype(linear, spherical, etc.)
+/        --------  ------             -------  ---------
+/        (You may type VARIOPLT to see an explanation of this command line)
+/
+/    3). Update the variogram model parameters by changing the last line
+/      
+/        (line 5) of control file with more suitable values of IMODEL,
+/        PA(Nugget, usualy 0), PB(Range) and SILL.
+/        (In most cases the SPHERICAL MODEL would give better results due to 
+/         it's stability in solving kriging system euqations)
+/
+/    Loop on the procedures 1 to 3, until obtain the satisfied variogram model.
+/
+/    4). Do griding with kriging method:
+/
+/        KRIGRID  in.CON in.XYZ  out.GRD err.GRD  -VO=out.VAR
+/        ----------------------------------------------------
+/
+/  5. Run time estimate:
+/
+/        About 4 grid points per second (on 25 MHz 386 machine) with default 
+/     8 to 16 nearest data points used in kriging calculation for each grid 
+/     point, e.g. 50x50 grid size will need about 10 minutes to finish.
+/     However, for small data set (# of points <= 500), the process
+/     will be much faster and get better results due to useing all
+/     data set points in kriging system equations for each grid point. 
+/     In this case, run time estimate is about 12 or 24 grid points 
+/     per second for data set of 100 or 50, respectively.
+/
+/
+/==============================================================================

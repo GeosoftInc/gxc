@@ -1,0 +1,237 @@
+Title Line
+                          /CS,NEX,ISRT
+                          /XMIN,YMIN,XMAX,YMAX
+                          /TRA,KX
+                          /SLM,SMX,GAPLIM,LSEL,BCLIP
+                          /SCL,SX,SY,ANGS
+                          /CHAN,LOGOPT,LOGMIN
+                          /BL,XX,CLIP
+                          /WS,WL,FDX,FT,NC
+                          /NFLT,TOLN
+                          /ISP1,ISP2
+                          /AFACT,AZB
+                          /PRJIN,PRJOUT
+                          /GRAD,GSEP,GCOR,GLEV,GNOISE
+/---------------------------------------------------------------------------
+/
+/  PARAMETER DESCRIPTIONS:
+/
+/  CS    - The grid cell size in reference system units after scaling
+/          (see SCL).  This is the only parameter that must be provided by
+/          the user.  The remaining parameters, if not given, are set to
+/          their default values.  For re-gridding existing grids, the input
+/          grid cell size is used unless otherwise specified.
+/
+/  NEX   - Number of grid cells beyond edges of lines to extend grid.  This
+/          may be used to prevent single grid cell gaps allong the edges of
+/          lines.  The default is to extend 1 grid cell (NEX=1).
+/
+/
+/  ISRT  - Option to pre-sort the data:   ISRT = 0, no pre-sort;
+/                                         ISRT = 1, pre-sort;
+/                                         ISRT = 2, remove backtracks
+/          By default the data is not pre-sorted.  Caution should
+/          be exercised if pre-sorting or removing backtracks since data 
+/          entry errors may be result in the data being sorted out of order.
+/
+/          NOTE: Pre-sorting and backtrack removal MUST NOT be applied if 
+/          the data contains tie lines unless the tie lines are constantly 
+/          increasing or decreasing across the grid trend direction.
+/
+/  XMIN,YMIN,XMAX,YMAX
+/        - The coordinates (in reference system units) of the lower left
+/          and upper right corner of the area to be gridded.  The default
+/          is to use the limits of the input data.
+/
+/  TRA   - The predominant geologic trend direction in degrees counter-
+/          clockwise relative to the +X axis.  The output grid X axis will
+/          be oriented in this direction (see note 2.  below).  By default,
+/          a trend parallel to the X or Y axis (depending on line
+/          direction) is assumed.
+/
+/  KX    - The grid sense: KX = 0, grid rows parallel to grid X axis.
+/                          KX = 1, grid rows parallel to grid Y axis.
+/          In almost all cases the BIGRID default will be chosen correctly.
+/
+/  SLM,SMX
+/        - The minimum and maximum allowable line separations.  Points on
+/          adjacent or crossing lines closer that SLM are averaged.  Gaps
+/          between lines separated by more than SMX are not interpolated.
+/          The default for SLM is the grid cell size, for SMX, 15 times the
+/          grid cell size.
+/
+/  GAPLIM
+/        - The maximum separation to allow between stations on a line.
+/          Gaps in lines wider than GAPLIM are not interpolated.  The
+/          default is to use the SMX value.  NOTE - GAPLIM is ignored
+/          for trend lines.
+/
+/  LSEL  - A word that specifies which line types are to be included in the
+/          gridding.   Types to be included are specified by including the
+/          type letter in the LSEL word:  L - for survey Lines;  B - for Base
+/          lines;  T - for Tie lines;  R - for trend lines;  S - for test lines.
+/
+/          The default is LBTR
+/
+/          For example, LR would mean to include regular lines and trend
+/          lines only;  LBTRS would include all lines.
+/
+/  BCLIP - Controls use of all data or boundary clipped data from an Oasis
+/          GDB file.  Options are:
+/
+/              0 - use all the data (default)
+/              1 - only use data within boundary clip region.
+/
+/          See BOUNDARY GX for more details on boundary clipping.         
+/
+/  SCL,SX,SY,ANGS - REFERENCE SYSTEM PARAMETERS
+/
+/          All parameters, including units, are relative to the user's
+/          standard reference system.  The coordinate system of the XYZ
+/          file is referred to the user's reference system by the SCL,SX,SY
+/          and SANG parameters provided in line 2:
+/
+/             SCL - scale factor to convert XYZ distance units to the
+/                   user's reference system units (orginal X,Y units per
+/                   user's standard reference system units).  The default
+/                   is SCL = 1.0 (ie. use same units as input data).
+/
+/           SX,SY - location of the XYZ coordinate system origin in
+/                   terms of the user's standard reference system.  The
+/                   default is 0.0,0.0 (ie. same origin as input data).
+/
+/            SANG - angle of the XYZ coordinate system relative to
+/                   the user's standard reference system in degrees
+/                   counter-clockwise.  The default is 0.0.
+/
+/  CHAN  - Selects the channel to be gridded.  The default is to grid 
+/          channel "1".
+/
+/  LOGOPT -  logarithmic gridding option (log base 10):
+/		
+/              0  grid data as is (no log).
+/              1  grid log(Z); for Z < LOGMIN, use log(LOGMIN)
+/              2  grid LOGMIN + log(Z/LOGMIN) in range outside +/- LOGMIN;
+/                 use actual Z inside range +/- LOGMIN
+/
+/          Options 1 and 2 will store the log of the data in the final grid.
+/          Using -1 and -2 will recover the Z value (10**Z) before storing
+/          in the final grid. 
+/
+/  LOGMIN  - minimum Z value used in the log options.
+/
+/  BL,XX - The base level and multiplier that are used to convert the final
+/          grid values to integer grid values.  The default values will be
+/          acceptable unless sharp peaks are present in the data, in which
+/          case the multiplier should be decreased by a factor of 2.
+/
+/  CLIP  - 0 - blank out values that exceed range
+/          1 - clip values that exceed range (default)
+/          The base and multiplier may cause some grid values to exceed the
+/          allowabel range of +/- 32767.
+/
+/  WS,WL,FDX,FT,NC
+/        - Linear filter short and long wavelength cut-offs (in reference
+/          system units), sample interval at which to apply filter, and
+/          re-sampling tolerance in %.  If the distance between each data
+/          point on a line differs from FDX by more than the tolerance FT,
+/          the line is  first re-sampled at an interval of FDX using the
+/          down-line spline.  The data is then filtered and splined for
+/          gridding.  We recommend always specifying FDX to be the same as
+/          the known minimum data interval.
+/
+/          NC specifies the number of coefficients to use in the linear filter.
+/          The default is enough to cover one wavelength of the longest
+/          wavelength being filtered and should be adequate for most
+/          situations.  The maximum is 512.
+/
+/          For a low-pass filter (smoothing) specify the cut-off wavelength
+/          in WS and leave WL blank.  For a high-pass filter, leave WS blank.
+/
+/          Defaults are to apply no filters and not to re-sample before
+/          filtering.
+/
+/  NFLT,TOLN
+/        - Non-linear filter option (NFLT=1), and noise tolerance.  By
+/          default, a non linear filter is applied whenever a linear
+/          filter is applied, and the tolerance is set to roughly 1% of the
+/          average data range.
+/
+/  ISP1,ISP2
+/        - Down line and across line spline:
+/                       0 - piecewise linear
+/                       1 - cubic spline
+/                       2 - akima spline
+/                       3 - nearest value (montaj only)
+/          The defaults are linear down lines, and Akima across lines.
+/
+/  AFACT,AXB
+/        - Stereo correction factor and base.  By default no correction is
+/          applied.  If a factor 0 is entered, an appropriate factor is
+/          calculated based on the distribution of the data.
+/          The stereo base is the level at which there is no correction.
+/          Data below the base is shifted right and data above the base is
+/          shifted right.  The default base is the minimum level of the data.
+/
+/  PRJIN,PRJOUT
+/        - Input and output data projection definitition files.  By default,
+/          the output grid is assumed to be in the same projection as the 
+/          data.  If the projections are different, define the projections 
+/          in two PRJ files (see MAPPROJ.PRJ).  Since BIGRID can read
+/          grids as input, this provides a way to re-project a grid.
+/
+/  GRAD    Set to 1 to perform gradient-assisted gridding.
+/
+/  GSEP    The apparent gradient sensor separation.  For systems that measure
+/          gradients using two sensors, this should be the sensor separation.
+/          by default 1/50 of the cell size is used.
+/
+/  GCOR    0 gradient is in the cross-line gridding direction (TRA above)
+/            This is the default
+/          1 The gradient is measured to the right relative to the line 
+/            direction.
+/          
+/
+/  GLEV    0 do not correct the gradient base level (default).
+/          1 automatically correct the gradient for base level.
+/
+/          The gradient base level can be corrected by removing the
+/          average difference between the measured gradient and the 
+/          calculated gradient. This corrects gradient data for constant
+/          systematic base level errors.
+/
+/  GNOISE  The gradient noise threshold.  If specified, the gradient calculated from
+/          the total field is blended with the measured gradient so that the 
+/          more accurate calculated gradient is used in low-gradient areas.
+/          This prevents introducing gradient noise in areas of very low magnetic 
+/          gradient.
+/
+/          The blending algorithm is:
+/
+/              G = (Gg + Gm * SN) / (1 + SN)
+/              SN = Gm/N
+/
+/          where
+/
+/              G  merged gradient to use in gradient gridding.
+/              Gg gradient calculated from gridded total field.
+/              Gm measured gradient.
+/              N  measured gradient noise threshold.
+/
+/          If GNOISE is 0.0, or not specified, the measured gradient is used
+/          without blending.
+/
+/  NOTES:
+/
+/  1. All parameter lines MUST end with a slash character ('/'), which
+/     can preceed optional comments (as illustrated in this file).  The
+/     location of the slash and the presence or content of comments is
+/     not relevent to BIGRID.
+/
+/  2. TREND ENHANCEMENT:  TRA sets the trend direction as an angle
+/     (CCW+) from the positive X axis of the users standard reference
+/     system.  The resulting grid will be rotated by this angle but the
+/     grid origin co-ordinates will be relative to the original
+/     (un-rotated) co-ordinate system.  To re-orient the trend enhanced
+/     grid back to the original system, simply run BIGRID again and
+/     provide a control file with a trend angle of 0 degrees.
