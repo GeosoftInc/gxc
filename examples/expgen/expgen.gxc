@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Export data to a Generic Format."
 #include <version.gxh>
 DESCRIPTION   = "
@@ -37,38 +38,37 @@ RESOURCE = "expgen.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_FILE) sFile;
-string(STR_DB_SYMBOL) sLine,sChan,sCurLine;
+   string(STR_FILE) sFile;
+string(STR_DB_SYMBOL) sLine, sChan, sCurLine;
 string(STR_DEFAULT_SHORT) sFormat;
 string(32768) sChannels;
 
-int         i, iList, iCh, iNCh;
-int         iLine;         // Output line selections
-int         iChan;         // Output channel selections
-int         iDummies,iComment,iLineNames;
-int         iFormat;
-int         iNotSorted;    // Allow unsorted output
-EDB         EData;         // database handle
-DB          Data;          // database handle
-DGW         Diag;          // dialogue box
-LST         ChLST;         // Channel LST
-VV          ChanVV;        // Channels
-DB_SELECT   Select;        // current selection mode
+int i, iList, iCh, iNCh;
+int iLine;  // Output line selections
+int iChan;  // Output channel selections
+int iDummies, iComment, iLineNames;
+int iFormat;
+int iNotSorted;    // Allow unsorted output
+EDB EData;         // database handle
+DB Data;           // database handle
+DGW Diag;          // dialogue box
+LST ChLST;         // Channel LST
+VV ChanVV;         // Channels
+DB_SELECT Select;  // current selection mode
 
 //===========================================================================
 //                              CODE
 //===========================================================================
 
 {
-
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("EXPGEN");
@@ -76,83 +76,90 @@ DB_SELECT   Select;        // current selection mode
 
       // --- Set any Defaults ---
 
-      SetInfoSYS_DGW(Diag,_EXPGEN_0,DGW_LISTALIAS,"EXPGEN","FORMAT");    
-      SetInfoSYS_DGW(Diag,_EXPGEN_1,DGW_FILEPATH,"EXPGEN","FILE");     
-      SetInfoSYS_DGW(Diag,_EXPGEN_2,DGW_LISTALIAS,"EXPGEN","CHAN");    
-      SetInfoSYS_DGW(Diag,_EXPGEN_3,DGW_LISTALIAS,"EXPGEN","LINE");     
-      SetInfoSYS_DGW(Diag,_EXPGEN_4,DGW_LISTALIAS,"EXPGEN","DUMMIES");     
-      SetInfoSYS_DGW(Diag,_EXPGEN_5,DGW_LISTALIAS,"EXPGEN","HEADER");     
-      SetInfoSYS_DGW(Diag,_EXPGEN_6,DGW_LISTALIAS,"EXPGEN","LINENAMES");
+      SetInfoSYS_DGW(Diag, _EXPGEN_0, DGW_LISTALIAS, "EXPGEN", "FORMAT");
+      SetInfoSYS_DGW(Diag, _EXPGEN_1, DGW_FILEPATH, "EXPGEN", "FILE");
+      SetInfoSYS_DGW(Diag, _EXPGEN_2, DGW_LISTALIAS, "EXPGEN", "CHAN");
+      SetInfoSYS_DGW(Diag, _EXPGEN_3, DGW_LISTALIAS, "EXPGEN", "LINE");
+      SetInfoSYS_DGW(Diag, _EXPGEN_4, DGW_LISTALIAS, "EXPGEN", "DUMMIES");
+      SetInfoSYS_DGW(Diag, _EXPGEN_5, DGW_LISTALIAS, "EXPGEN", "HEADER");
+      SetInfoSYS_DGW(Diag, _EXPGEN_6, DGW_LISTALIAS, "EXPGEN", "LINENAMES");
 
 
       // --- Run the Dialogue ---
 
       i = iRunDialogue_DGW(Diag);
-      if (i != 0) Cancel_SYS();    // He hit cancel
+      if (i != 0) Cancel_SYS();  // He hit cancel
 
 
       // --- Get the Strings ---
 
-      GetInfoSYS_DGW(Diag,_EXPGEN_0,DGW_LISTALIAS,"EXPGEN","FORMAT");    
-      GetInfoSYS_DGW(Diag,_EXPGEN_1,DGW_FILEPATH,"EXPGEN","FILE");
-      GetInfoSYS_DGW(Diag,_EXPGEN_2,DGW_LISTALIAS,"EXPGEN","CHAN");    
-      GetInfoSYS_DGW(Diag,_EXPGEN_3,DGW_LISTALIAS,"EXPGEN","LINE");     
-      GetInfoSYS_DGW(Diag,_EXPGEN_4,DGW_LISTALIAS,"EXPGEN","DUMMIES");     
-      GetInfoSYS_DGW(Diag,_EXPGEN_5,DGW_LISTALIAS,"EXPGEN","HEADER");     
-      GetInfoSYS_DGW(Diag,_EXPGEN_6,DGW_LISTALIAS,"EXPGEN","LINENAMES");
+      GetInfoSYS_DGW(Diag, _EXPGEN_0, DGW_LISTALIAS, "EXPGEN", "FORMAT");
+      GetInfoSYS_DGW(Diag, _EXPGEN_1, DGW_FILEPATH, "EXPGEN", "FILE");
+      GetInfoSYS_DGW(Diag, _EXPGEN_2, DGW_LISTALIAS, "EXPGEN", "CHAN");
+      GetInfoSYS_DGW(Diag, _EXPGEN_3, DGW_LISTALIAS, "EXPGEN", "LINE");
+      GetInfoSYS_DGW(Diag, _EXPGEN_4, DGW_LISTALIAS, "EXPGEN", "DUMMIES");
+      GetInfoSYS_DGW(Diag, _EXPGEN_5, DGW_LISTALIAS, "EXPGEN", "HEADER");
+      GetInfoSYS_DGW(Diag, _EXPGEN_6, DGW_LISTALIAS, "EXPGEN", "LINENAMES");
 
 
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
 
 
    // --- read the dialogue ---
 
-   GetString_SYS("EXPGEN","FORMAT",sFormat);
-   GetString_SYS("EXPGEN","FILE",sFile);
-   GetString_SYS("EXPGEN","LINE",sLine);
-   GetString_SYS("EXPGEN","CHAN",sChan);
-   iDummies = iGetInt_SYS("EXPGEN","DUMMIES");     
-   iComment = iGetInt_SYS("EXPGEN","HEADER");
-   iLineNames = iGetInt_SYS("EXPGEN","LINENAMES");
+   GetString_SYS("EXPGEN", "FORMAT", sFormat);
+   GetString_SYS("EXPGEN", "FILE", sFile);
+   GetString_SYS("EXPGEN", "LINE", sLine);
+   GetString_SYS("EXPGEN", "CHAN", sChan);
+   iDummies = iGetInt_SYS("EXPGEN", "DUMMIES");
+   iComment = iGetInt_SYS("EXPGEN", "HEADER");
+   iLineNames = iGetInt_SYS("EXPGEN", "LINENAMES");
 
-   if (iChar_STR(sFormat) == iChar_STR("C")) {
+   if (iChar_STR(sFormat) == iChar_STR("C"))
+   {
       iFormat = DU_EXPORT_CSV;
-      FileExt_STR(sFile,"csv",sFile,FILE_EXT_ADD_IF_NONE);
-   } else if (iChar_STR(sFormat) == iChar_STR("O")) {
+      FileExt_STR(sFile, "csv", sFile, FILE_EXT_ADD_IF_NONE);
+   }
+   else if (iChar_STR(sFormat) == iChar_STR("O"))
+   {
       iFormat = DU_EXPORT_ODDF;
-      FileExt_STR(sFile,"odf",sFile,FILE_EXT_ADD_IF_NONE);
-   } else if (iChar_STR(sFormat) == iChar_STR("P")) {
+      FileExt_STR(sFile, "odf", sFile, FILE_EXT_ADD_IF_NONE);
+   }
+   else if (iChar_STR(sFormat) == iChar_STR("P"))
+   {
       iFormat = DU_EXPORT_POST_PC;
-      FileExt_STR(sFile,"pst",sFile,FILE_EXT_ADD_IF_NONE);
-   } else if (iChar_STR(sFormat) == iChar_STR("U")) {
+      FileExt_STR(sFile, "pst", sFile, FILE_EXT_ADD_IF_NONE);
+   }
+   else if (iChar_STR(sFormat) == iChar_STR("U"))
+   {
       iFormat = DU_EXPORT_POST_UNIX;
-      FileExt_STR(sFile,"pst",sFile,FILE_EXT_ADD_IF_NONE);
-   } else
+      FileExt_STR(sFile, "pst", sFile, FILE_EXT_ADD_IF_NONE);
+   }
+   else
       Abort_SYS(_("Format selection invalid"));
 
    if (iStrlen_STR(sFile) == 0)
       Abort_SYS(_("CSV Export failed: No output data file was specified."));
-   SetString_SYS("EXPGEN","FILE",sFile);
+   SetString_SYS("EXPGEN", "FILE", sFile);
 
-   if (iChar_STR(sLine) == iChar_STR("D")) 
+   if (iChar_STR(sLine) == iChar_STR("D"))
       iLine = DU_LINES_DISPLAYED;
-   else if (iChar_STR(sLine) == iChar_STR("S")) 
+   else if (iChar_STR(sLine) == iChar_STR("S"))
       iLine = DU_LINES_SELECTED;
-   else if (iChar_STR(sLine) == iChar_STR("A")) 
+   else if (iChar_STR(sLine) == iChar_STR("A"))
       iLine = DU_LINES_ALL;
    else
       Abort_SYS(_("Line selection invalid"));
 
    iList = 0;
-   if (iChar_STR(sChan) == iChar_STR("D")) 
+   if (iChar_STR(sChan) == iChar_STR("D"))
       iChan = DU_CHANNELS_DISPLAYED;
-   else if (iChar_STR(sChan) == iChar_STR("A")) 
+   else if (iChar_STR(sChan) == iChar_STR("A"))
       iChan = DU_CHANNELS_ALL;
-   else if (iChar_STR(sChan) == iChar_STR("L")) 
+   else if (iChar_STR(sChan) == iChar_STR("L"))
    {
       iChan = DU_CHANNELS_DISPLAYED;
       iList = 1;
@@ -160,51 +167,51 @@ DB_SELECT   Select;        // current selection mode
    else
       Abort_SYS(_("Channel selection invalid"));
 
-   if(iDummies!=0) iDummies = 1;
-   if(iComment!=0) iComment = 1;
-   if(iLineNames!=1) iLineNames = 0;
+   if (iDummies != 0) iDummies = 1;
+   if (iComment != 0) iComment = 1;
+   if (iLineNames != 1) iLineNames = 0;
 
    EData = Current_EDB();
 
    // --- Get currently selected line ---
 
-   GetCurLine_EDB(EData,sCurLine);
+   GetCurLine_EDB(EData, sCurLine);
 
 
    // --- VV to hold channel symbols ---
-   
-   ChanVV = Create_VV(INT,0);
-   
-   if(iChan==DU_CHANNELS_DISPLAYED)
+
+   ChanVV = Create_VV(INT, 0);
+
+   if (iChan == DU_CHANNELS_DISPLAYED)
    {
-      if(iList)
+      if (iList)
       {
-         SetString_SYS("CHANLIST","DATA", "LIST");
-         SetString_SYS("CHANLIST","GX","EXPGEN");
-         
+         SetString_SYS("CHANLIST", "DATA", "LIST");
+         SetString_SYS("CHANLIST", "GX", "EXPGEN");
+
          iNotSorted = 1;
          SetInt_SYS("CHANLIST", "NOTSORTED", iNotSorted);
-      
-         if(iRunGX_SYS("CHANLIST.GX")) Cancel_SYS();
 
-         GetString_SYS("CHANLIST","CHANNELS", sChannels);
-      
-      
+         if (iRunGX_SYS("CHANLIST.GX")) Cancel_SYS();
+
+         GetString_SYS("CHANLIST", "CHANNELS", sChannels);
+
+
          // --- create LSTs to hold channel lists ---
-         
-         ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+         ChLST = Create_LST(2 * STR_DB_SYMBOL);
 
          Data = Lock_EDB(EData);
          SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
          UnLock_EDB(EData);
          SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
-         
-         
-         // --- Transfer channel symbols to the VV --         
-         
+
+
+         // --- Transfer channel symbols to the VV --
+
          iNCh = iSize_LST(ChLST);
          SetLen_VV(ChanVV, iNCh);
-         for(i=0;i<iNCh;i++)
+         for (i = 0; i < iNCh; i++)
          {
             iCh = iGetInt_LST(ChLST, LST_ITEM_VALUE, i);
             SetInt_VV(ChanVV, i, iCh);
@@ -212,31 +219,32 @@ DB_SELECT   Select;        // current selection mode
       }
       else
       {
-
          // --- Get currently displayed channels ---
 
          iDispChanList_EDB(EData, ChanVV);
       }
    }
 
-   
+
    Data = Lock_EDB(EData);
 
-   if(iLine != DU_LINES_SELECTED) {
+   if (iLine != DU_LINES_SELECTED)
+   {
       Select = GetSelect_DB(Data);
-      if (iLine == DU_LINES_DISPLAYED) {
-         Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
-         Select_DB(Data,sCurLine,DB_LINE_SELECT_INCLUDE);
+      if (iLine == DU_LINES_DISPLAYED)
+      {
+         Select_DB(Data, "", DB_LINE_SELECT_EXCLUDE);
+         Select_DB(Data, sCurLine, DB_LINE_SELECT_INCLUDE);
       }
       else if (iLine == DU_LINES_ALL)
-         Select_DB(Data,"",DB_LINE_SELECT_INCLUDE);
+         Select_DB(Data, "", DB_LINE_SELECT_INCLUDE);
    }
 
 
    // --- export data ---
 
    Progress_SYS(1);
-   Export2_DU(Data,iFormat,sCurLine,ChanVV,iChan, sFile, iDummies, iComment, iLineNames);
+   Export2_DU(Data, iFormat, sCurLine, ChanVV, iChan, sFile, iDummies, iComment, iLineNames);
    Progress_SYS(0);
 
    Destroy_VV(ChanVV);
@@ -244,6 +252,5 @@ DB_SELECT   Select;        // current selection mode
    // --- reset starting selections
 
    if (iLine != DU_LINES_SELECTED)
-      SetSelect_DB(Data,Select);
-
+      SetSelect_DB(Data, Select);
 }

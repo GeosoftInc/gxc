@@ -54,7 +54,7 @@ real        rW0,rA,rB,rC0,rC1,rC2,rD0,rD1,rD2;
 real        rX0,rX1,rX2,rY0,rY1,rY2,rZ0,rZ1,rZ2;
 //real        rXa,rYa,rXz,rYz,rXc,rYc,rHacc;
 
-string(STR_DEFAULT)  sLatCh,sLongCh,sOutCh,sLatDCh,sLongDCh,sTimeDCh;
+string(STR_DEFAULT)  sLatCh,sLongCh,sTimeCh,sOutCh,sLatDCh,sLongDCh,sTimeDCh;
 string(STR_DEFAULT)  sXDCh,sYDCh,sXZCh,sYZCh;
 string(STR_DEFAULT)  sDamping,sPeriod;
 string(STR_DEFAULT)  sTemp,sLabel;
@@ -91,7 +91,11 @@ string(1024)         sFormula1,sFormula2;
       SymbLST_DB(Data,List,DB_SYMB_CHAN);
       Sort_LST(List,0,0);
      
-      List = GetList_DGW(Diag,_AGHACCOR_4);
+      List = GetList_DGW(Diag,_AGHACCOR_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGHACCOR_5);
       SymbLST_DB(Data,List,DB_SYMB_CHAN);
       Sort_LST(List,0,0);
      
@@ -100,9 +104,10 @@ string(1024)         sFormula1,sFormula2;
   
       SetInfoSYS_DGW(Diag,_AGHACCOR_0,DGW_TEXT,"AGHACCOR","LAT");
       SetInfoSYS_DGW(Diag,_AGHACCOR_1,DGW_TEXT,"AGHACCOR","LONG");
-      SetInfoSYS_DGW(Diag,_AGHACCOR_2,DGW_TEXT,"AGHACCOR","DAMPING");
-      SetInfoSYS_DGW(Diag,_AGHACCOR_3,DGW_TEXT,"AGHACCOR","PERIOD");
-      SetInfoSYS_DGW(Diag,_AGHACCOR_4,DGW_TEXT,"AGHACCOR","OUTCH");
+	  SetInfoSYS_DGW(Diag,_AGHACCOR_2,DGW_TEXT,"AGHACCOR","TIME");
+      SetInfoSYS_DGW(Diag,_AGHACCOR_3,DGW_TEXT,"AGHACCOR","DAMPING");
+      SetInfoSYS_DGW(Diag,_AGHACCOR_4,DGW_TEXT,"AGHACCOR","PERIOD");
+      SetInfoSYS_DGW(Diag,_AGHACCOR_5,DGW_TEXT,"AGHACCOR","OUTCH");
 
      
       // --- Run the Dialogue ---
@@ -115,9 +120,10 @@ string(1024)         sFormula1,sFormula2;
       
       GetInfoSYS_DGW(Diag,_AGHACCOR_0,DGW_TEXT,"AGHACCOR","LAT");
       GetInfoSYS_DGW(Diag,_AGHACCOR_1,DGW_TEXT,"AGHACCOR","LONG");
-      GetInfoSYS_DGW(Diag,_AGHACCOR_2,DGW_TEXT,"AGHACCOR","DAMPING");
-      GetInfoSYS_DGW(Diag,_AGHACCOR_3,DGW_TEXT,"AGHACCOR","PERIOD");
-      GetInfoSYS_DGW(Diag,_AGHACCOR_4,DGW_TEXT,"AGHACCOR","OUTCH");
+	  GetInfoSYS_DGW(Diag,_AGHACCOR_2,DGW_TEXT,"AGHACCOR","TIME");
+      GetInfoSYS_DGW(Diag,_AGHACCOR_3,DGW_TEXT,"AGHACCOR","DAMPING");
+      GetInfoSYS_DGW(Diag,_AGHACCOR_4,DGW_TEXT,"AGHACCOR","PERIOD");
+      GetInfoSYS_DGW(Diag,_AGHACCOR_5,DGW_TEXT,"AGHACCOR","OUTCH");
      
       // --- Destroy the Dialogue ---
      
@@ -128,6 +134,7 @@ string(1024)         sFormula1,sFormula2;
 
    GetString_SYS("AGHACCOR","LAT",sLatCh);
    GetString_SYS("AGHACCOR","LONG",sLongCh);
+   GetString_SYS("AGHACCOR","TIME",sTimeCh);
    GetString_SYS("AGHACCOR","DAMPING",sDamping);
    GetString_SYS("AGHACCOR","PERIOD",sPeriod);
    GetString_SYS("AGHACCOR","OUTCH",sOutCh);
@@ -153,12 +160,12 @@ string(1024)         sFormula1,sFormula2;
       Abort_SYS(_("The latitude channel does not exist."));
    if (!iExistChan_DB(Data,sLongCh))
       Abort_SYS(_("The longitude channel does not exist."));
-   if (!iExistChan_DB(Data,"Time")) 
+   if (!iExistChan_DB(Data,sTimeCh)) 
       Abort_SYS(_("The Time channel does not exist."));
 
    LatCh  = FindChan_DB(Data,sLatCh);
    LongCh = FindChan_DB(Data,sLongCh);
-   TimeCh = FindChan_DB(Data,"Time");                       
+   TimeCh = FindChan_DB(Data,sTimeCh);                       
    LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
    LockSymb_DB(Data,LongCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
    LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
@@ -322,6 +329,9 @@ string(1024)         sFormula1,sFormula2;
    //
    //            X(I) = (XA(I) + YA(I)) * FACT
    //
+   //     C. J. Swain 1996 Short Note (Geophysics, Vol 61, No1, p. 273-276)
+   //
+   //         eg = -x'' * Alfa - y'' * Beta - g * (Alfa**2 + Beta**2)/2    (6)
 
 
    hVVx = Create_VV(REAL,0);

@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Make HyperGrid from a grid mosaic"
 #include <version.gxh>
 
@@ -21,18 +22,19 @@ RESOURCE = "hgdmosaic.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_MULTI_FILE) sGrids;
-string(STR_FILE)       sGrid,sHGD;
-DGW                    Diag;
-IMG                    hIMG;
-HGD                    hHGD;
-int                    iRun,iGrids;
+   string(STR_MULTI_FILE) sGrids;
+string(STR_FILE) sGrid, sHGD;
+DGW Diag;
+IMG hIMG;
+HGD hHGD;
+int iRun, iGrids;
 
 
 //===========================================================================
@@ -40,64 +42,58 @@ int                    iRun,iGrids;
 //===========================================================================
 
 {
-
    // --- Are we running interactively ? ---
 
-   if (iInteractive_SYS()) {
-   
+   if (iInteractive_SYS())
+   {
       // --- first dialog ---
 
       Diag = Create_DGW("HGDMOSAIC");
-      
-      SetInfoSYS_DGW(Diag,_HGDMOSAIC_0,DGW_FILEPATH, "HGDMOSAIC","GRIDS");     
-      SetInfoSYS_DGW(Diag,_HGDMOSAIC_1,DGW_FILEPATH, "HGDMOSAIC","HGD");     
-                              
-      iRun = iRunDialogue_DGW(Diag);
-      if (iRun == -1)    Cancel_SYS();
-      SetInt_SYS("HGDMOSAIC","NEW",iRun);
 
-      GetInfoSYS_DGW(Diag,_HGDMOSAIC_0,DGW_FILEPATH, "HGDMOSAIC","GRIDS");     
-      GetInfoSYS_DGW(Diag,_HGDMOSAIC_1,DGW_FILEPATH, "HGDMOSAIC","HGD");     
-      
+      SetInfoSYS_DGW(Diag, _HGDMOSAIC_0, DGW_FILEPATH, "HGDMOSAIC", "GRIDS");
+      SetInfoSYS_DGW(Diag, _HGDMOSAIC_1, DGW_FILEPATH, "HGDMOSAIC", "HGD");
+
+      iRun = iRunDialogue_DGW(Diag);
+      if (iRun == -1) Cancel_SYS();
+      SetInt_SYS("HGDMOSAIC", "NEW", iRun);
+
+      GetInfoSYS_DGW(Diag, _HGDMOSAIC_0, DGW_FILEPATH, "HGDMOSAIC", "GRIDS");
+      GetInfoSYS_DGW(Diag, _HGDMOSAIC_1, DGW_FILEPATH, "HGDMOSAIC", "HGD");
+
       Destroy_DGW(Diag);
-         
    }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("HGDMOSAIC","GRIDS",sGrids);
-   GetString_SYS("HGDMOSAIC","HGD",sHGD);
+   GetString_SYS("HGDMOSAIC", "GRIDS", sGrids);
+   GetString_SYS("HGDMOSAIC", "HGD", sHGD);
 
    Progress_SYS(1);
 
-   iGrids = iCountTokens_STR(sGrids,"|");
-   if (iGrids == 1) {
-
-   
+   iGrids = iCountTokens_STR(sGrids, "|");
+   if (iGrids == 1)
+   {
       // --- Convert to HGD ---
 
-      GetMFile_STR(sGrids,sGrid,0);  
+      GetMFile_STR(sGrids, sGrid, 0);
 
 
       // --- Open Image ---
 
-      hIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
-
-
-   } else {
-   
-
+      hIMG = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READONLY);
+   }
+   else
+   {
       // --- Create Memory only image ---
 
-      hIMG = Mosaic_IMU(sGrids,"",(IPJ)0,rDUMMY);
-      
-   }      
+      hIMG = Mosaic_IMU(sGrids, "", (IPJ)0, rDUMMY);
+   }
 
 
    // --- Generate a HGD from the Image ---
 
-   hHGD = hCreateIMG_HGD(hIMG,sHGD);
+   hHGD = hCreateIMG_HGD(hIMG, sHGD);
    Progress_SYS(0);
 
 
@@ -105,5 +101,4 @@ int                    iRun,iGrids;
 
    Destroy_HGD(hHGD);
    Destroy_IMG(hIMG);
-   
 }

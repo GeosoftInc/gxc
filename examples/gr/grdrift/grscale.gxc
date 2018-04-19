@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Cravity scale factor calculation"
 #include <version.gxh>
 
@@ -24,23 +25,24 @@ DESCRIPTION   = "
 
 
 #include <all.gxh>
+                 // clang-format on
 
-//===========================================================================
-//                                 VARIABLES
-//===========================================================================
+                 //===========================================================================
+                 //                                 VARIABLES
+                 //===========================================================================
 
-EDB         eDB;                     // database handle
-DB          hDB;                     // database handle
-DB_SYMB     Line;                    // Line Handle
-DB_SYMB     ReadCh,GCh;
-EXP         Exp;
-TB          hTB;
-LTB         hLTB;
-REG         hDataREG;                // gravity reg
+                 EDB eDB;  // database handle
+DB hDB;                    // database handle
+DB_SYMB Line;              // Line Handle
+DB_SYMB ReadCh, GCh;
+EXP Exp;
+TB hTB;
+LTB hLTB;
+REG hDataREG;  // gravity reg
 
 string(STR_DEFAULT_LONG) sScale, sLine, sMsg;
 string(STR_FILE) sDB;
-real        rScale;   
+real rScale;
 
 
 //===========================================================================
@@ -51,91 +53,86 @@ real        rScale;
    // --- get current line and REG ---
 
    eDB = Current_EDB();
-   
-   if(iScript_SYS())
-   {
-		GetString_SYS("GRSCALE","LINE",sLine);
-		if(iStrlen_STR(sLine)==0)
-		   Abort_SYS(_("The GRSCALE.LINE parameter must be defined for the GRSCALE.GX for script mode."));
 
-      hDB = Lock_EDB(eDB);   
-		Line = FindSymb_DB(hDB, sLine, DB_SYMB_LINE);
-		if (Line == NULLSYMB)
-		{
-		   GetName_DB(hDB, DB_NAME_FILE, sDB);
-		   Printf_STR(sMsg, sizeof(sMsg), _("Unable to find the line \"%s\" in the database %s."), sLine, sDB);
-		   Abort_SYS(sMsg);
-		}
-	}
-	else
+   if (iScript_SYS())
    {
-	   Line = GetCurLineSymb_EDB(eDB);
-	   if (Line == NULLSYMB) Abort_SYS(_("No line displayed in current database."));
-      hDB = Lock_EDB(eDB);   
+      GetString_SYS("GRSCALE", "LINE", sLine);
+      if (iStrlen_STR(sLine) == 0)
+         Abort_SYS(_("The GRSCALE.LINE parameter must be defined for the GRSCALE.GX for script mode."));
+
+      hDB = Lock_EDB(eDB);
+      Line = FindSymb_DB(hDB, sLine, DB_SYMB_LINE);
+      if (Line == NULLSYMB)
+      {
+         GetName_DB(hDB, DB_NAME_FILE, sDB);
+         Printf_STR(sMsg, sizeof(sMsg), _("Unable to find the line \"%s\" in the database %s."), sLine, sDB);
+         Abort_SYS(sMsg);
+      }
    }
-      
+   else
+   {
+      Line = GetCurLineSymb_EDB(eDB);
+      if (Line == NULLSYMB) Abort_SYS(_("No line displayed in current database."));
+      hDB = Lock_EDB(eDB);
+   }
+
 
    // --- get _Gscale ---
 
-   GCh = FindSymb_DB(hDB,"_Gscale",DB_SYMB_CHAN);
+   GCh = FindSymb_DB(hDB, "_Gscale", DB_SYMB_CHAN);
 
 
    // --- get scale ---
 
    hDataREG = Create_REG(256);
-   GetRegSymb_DB(hDB,NULLSYMB,hDataREG);
-   Get_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",sScale,sizeof(sScale));
-   
+   GetRegSymb_DB(hDB, NULLSYMB, hDataREG);
+   Get_REG(hDataREG, "GRAVRED.INSTRUMENT_SCALE", sScale, sizeof(sScale));
+
 
    // --- if its a file, correct from a table ---
 
-   if (iFileExist_SYS(sScale)) {
-
-      ReadCh = FindSymb_DB(hDB,"Reading",DB_SYMB_CHAN);
-      if(ReadCh==NULLSYMB)
+   if (iFileExist_SYS(sScale))
+   {
+      ReadCh = FindSymb_DB(hDB, "Reading", DB_SYMB_CHAN);
+      if (ReadCh == NULLSYMB)
          Abort_SYS(_("Unable to locate the \"Reading\" channel in the current database."));
-      LockSymb_DB(hDB,ReadCh,DB_LOCK_READONLY,DB_WAIT_NONE);
-      LockSymb_DB(hDB,GCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+      LockSymb_DB(hDB, ReadCh, DB_LOCK_READONLY, DB_WAIT_NONE);
+      LockSymb_DB(hDB, GCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
 
       hLTB = CreateCSV_LTB(sScale);
-      hTB  = CreateLTB_TB(hLTB);
+      hTB = CreateLTB_TB(hLTB);
       Destroy_LTB(hLTB);
 
-      TableLook1_DU(hDB,Line,ReadCh,GCh,"Instrument","milligal",DU_LOOKUP_INTERPOLATE,0.0,hTB);
+      TableLook1_DU(hDB, Line, ReadCh, GCh, "Instrument", "milligal", DU_LOOKUP_INTERPOLATE, 0.0, hTB);
 
-      UnLockSymb_DB(hDB,ReadCh);
-      UnLockSymb_DB(hDB,GCh);
+      UnLockSymb_DB(hDB, ReadCh);
+      UnLockSymb_DB(hDB, GCh);
 
       Destroy_TB(hTB);
-
-
-   } else {
-
-
+   }
+   else
+   {
       // --- constant scale factor ---
 
       if (iChar_STR(sScale) == 0)
          rScale = 1.0;
-      else   
-         GetReal_REG(hDataREG,"GRAVRED.INSTRUMENT_SCALE",rScale);
-         
+      else
+         GetReal_REG(hDataREG, "GRAVRED.INSTRUMENT_SCALE", rScale);
+
       if (rScale == rDUMMY) Abort_SYS(_("Invalid scale factor."));
 
 
       // --- create and apply expression ---
 
-      Exp = Create_EXP(hDB,"_Gscale=Reading*$rScale;",60);
+      Exp = Create_EXP(hDB, "_Gscale=Reading*$rScale;", 60);
 
-      Math_DU(hDB,Line,Exp);
+      Math_DU(hDB, Line, Exp);
 
       Destroy_EXP(Exp);
-
    }
 
 
    // --- Done ---
 
    UnLock_EDB(eDB);
-   
 }
-

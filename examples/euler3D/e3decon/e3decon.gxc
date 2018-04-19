@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Standard Euler Deconvolution"
 #include <version.gxh>
 
@@ -33,46 +34,49 @@ RESOURCE = "E3DECON.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 
-#define  SETREAL(A, B, C)        \
-   A = rGetReal_SYS("EULER3D",B); \
-   if(A==rDUMMY) A = C;
+#define SETREAL(A, B, C)           \
+   A = rGetReal_SYS("EULER3D", B); \
+   if (A == rDUMMY) A = C;
 
-#define  SETINT(A, B, C)        \
-   A = iGetInt_SYS("EULER3D",B); \
-   if(A==iDUMMY) A = C;
+#define SETINT(A, B, C)           \
+   A = iGetInt_SYS("EULER3D", B); \
+   if (A == iDUMMY) A = C;
 
-#define GETCHAN(A, B, C, D, E, F)   \
-   A = FindChan_DB(Data, B);        \
-   if(A==NULLSYMB) {               \
-      A=CreateSymb_DB(Data, B, DB_SYMB_CHAN,DB_OWN_SHARED, C); \
-      LockSymb_DB(Data,A,DB_LOCK_READWRITE,DB_WAIT_NONE);      \
-      SetChanFormat_DB(Data,A,DB_CHAN_FORMAT_NORMAL);          \
-      SetChanWidth_DB(Data,A,D);       \
-      SetChanDecimal_DB(Data,A,E);     \
-      SetChanProtect_DB(Data,A,F); \
-      Associate_DB(Data, Solutions, A);  \
-   } else  \
-      LockSymb_DB(Data,A,DB_LOCK_READWRITE,DB_WAIT_NONE);      \
+#define GETCHAN(A, B, C, D, E, F)                                 \
+   A = FindChan_DB(Data, B);                                      \
+   if (A == NULLSYMB)                                             \
+   {                                                              \
+      A = CreateSymb_DB(Data, B, DB_SYMB_CHAN, DB_OWN_SHARED, C); \
+      LockSymb_DB(Data, A, DB_LOCK_READWRITE, DB_WAIT_NONE);      \
+      SetChanFormat_DB(Data, A, DB_CHAN_FORMAT_NORMAL);           \
+      SetChanWidth_DB(Data, A, D);                                \
+      SetChanDecimal_DB(Data, A, E);                              \
+      SetChanProtect_DB(Data, A, F);                              \
+      Associate_DB(Data, Solutions, A);                           \
+   }                                                              \
+   else                                                           \
+      LockSymb_DB(Data, A, DB_LOCK_READWRITE, DB_WAIT_NONE);
 
-#define DO_EXPRESSION(A, B)   \
+#define DO_EXPRESSION(A, B)                         \
    iProtected = iGetChanProtect_DB(Data, A);        \
-   SetChanProtect_DB(Data, A, DB_CHAN_UNPROTECTED);\
-   Math_DU(Data,Solutions,B);               \
+   SetChanProtect_DB(Data, A, DB_CHAN_UNPROTECTED); \
+   Math_DU(Data, Solutions, B);                     \
    SetChanProtect_DB(Data, A, iProtected);
 
-#define SET_IPJ(A,B,C,D)                            \
-   iProtected = iGetChanProtect_DB(A,B);            \
-   iProtected = iGetChanProtect_DB(A,C);            \
-   SetIPJ_DB(A,B,C,D);                              \
-   SetChanProtect_DB(A,B,iProtected);               \
-   SetChanProtect_DB(A,C,iProtected);
-   
-#define SET_UNITS(A,B,C)                            \
-   iProtected = iGetChanProtect_DB(A,B);            \
-   SetChanUnit_DB(A,B,C);                           \
-   SetChanProtect_DB(A,B,iProtected);
+#define SET_IPJ(A, B, C, D)               \
+   iProtected = iGetChanProtect_DB(A, B); \
+   iProtected = iGetChanProtect_DB(A, C); \
+   SetIPJ_DB(A, B, C, D);                 \
+   SetChanProtect_DB(A, B, iProtected);   \
+   SetChanProtect_DB(A, C, iProtected);
+
+#define SET_UNITS(A, B, C)                \
+   iProtected = iGetChanProtect_DB(A, B); \
+   SetChanUnit_DB(A, B, C);               \
+   SetChanProtect_DB(A, B, iProtected);
    
 //===========================================================================
 //                             GLOBAL VARIABLES
@@ -80,34 +84,34 @@ RESOURCE = "E3DECON.gr"
 
 DGW         Diag;              // Dialogue handle
 
-EDB         EData;                          // output solution database Edited
-DB          Data;                           // output solution database
-DB_SYMB     Solutions;                      // the output solution group.
+EDB EData;          // output solution database Edited
+DB Data;            // output solution database
+DB_SYMB Solutions;  // the output solution group.
 
-LST         List;
-IMG         ImgT,ImgTX,ImgTY,ImgTZ;         
-EUL3        EUL3G;                          
-VV          SOLN_VV;                        
-DB_SYMB     XWndCh,YWndCh,XEulCh,YEulCh,ZEulCh,BgCh,ZErCh,XYErCh;
-DB_SYMB     XOffCh,YOffCh,MaskCh,WndSzCh; // channel handles
-EXP         XOff_Exp,YOff_Exp,Mask_Exp;         // math expressions
-IPJ         hIPJ;
+LST List;
+IMG ImgT, ImgTX, ImgTY, ImgTZ;
+EUL3 EUL3G;
+VV SOLN_VV;
+DB_SYMB XWndCh, YWndCh, XEulCh, YEulCh, ZEulCh, BgCh, ZErCh, XYErCh;
+DB_SYMB XOffCh, YOffCh, MaskCh, WndSzCh;  // channel handles
+EXP XOff_Exp, YOff_Exp, Mask_Exp;         // math expressions
+IPJ hIPJ;
 
-int         i, iProtected;
-int         iWndSz,iObsFlg;     
-int         iChans, iLines, iBlobs;     
-real        rGI,rTolrnc,rMaxDis,rObsHght,rObsElev; // user set parameters
-real        rCellSize,rF;
+int i, iProtected;
+int iWndSz, iObsFlg;
+int iChans, iLines, iBlobs;
+real rGI, rTolrnc, rMaxDis, rObsHght, rObsElev;  // user set parameters
+real rCellSize, rF;
 
-string(STR_DB_SYMBOL) sSolutions; 
+string(STR_DB_SYMBOL) sSolutions;
 string(DB_GROUP_CLASS_SIZE) sClass;
-string(STR_DB_SYMBOL) sXEulCh,sYEulCh,sZEulCh,sBgCh,sZerCh,sXYerCh;
-string(STR_DB_SYMBOL) sWndSzCh,sMaskCh,sXWndCh,sYWndCh,sXOffCh,sYOffCh;
+string(STR_DB_SYMBOL) sXEulCh, sYEulCh, sZEulCh, sBgCh, sZerCh, sXYerCh;
+string(STR_DB_SYMBOL) sWndSzCh, sMaskCh, sXWndCh, sYWndCh, sXOffCh, sYOffCh;
 
-string(STR_FILE) sGrdT,sDx,sDy,sDz;     // Name of input grids 
+string(STR_FILE) sGrdT, sDx, sDy, sDz;  // Name of input grids
 string(STR_FILE) sSolDB;                // Name of output database
 string(STR_DEFAULT_LONG) sExp;
-string(STR_DEFAULT)      sUnits;
+string(STR_DEFAULT) sUnits;
 
 
 //===========================================================================
@@ -125,9 +129,9 @@ string(STR_DEFAULT)      sUnits;
    Strcpy_STR(sXEulCh, _n("X_Euler"));
    Strcpy_STR(sYEulCh, _n("Y_Euler"));
    Strcpy_STR(sZEulCh, _n("Depth"));
-   Strcpy_STR(sWndSzCh,_n("WndSize"));
-   Strcpy_STR(sBgCh,   _n("Backgrnd"));
-   Strcpy_STR(sZerCh,  _n("dZ"));
+   Strcpy_STR(sWndSzCh, _n("WndSize"));
+   Strcpy_STR(sBgCh, _n("Backgrnd"));
+   Strcpy_STR(sZerCh, _n("dZ"));
    Strcpy_STR(sXYerCh, _n("dXY"));
    Strcpy_STR(sXWndCh, _n("X"));
    Strcpy_STR(sYWndCh, _n("Y"));
@@ -138,20 +142,20 @@ string(STR_DEFAULT)      sUnits;
 
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("E3DECON");
-   
+
 
       // --- Create the group list from the current database ---
 
-      if(iHaveCurrent_EDB()) {
+      if (iHaveCurrent_EDB())
+      {
          EData = Current_EDB();
          Data = Lock_EDB(EData);
-      
-         List = GetList_DGW(Diag,_E3DECON_5);
-         ClassGroupLST_DB (Data, List, sClass);
+
+         List = GetList_DGW(Diag, _E3DECON_5);
+         ClassGroupLST_DB(Data, List, sClass);
 
          UnLock_EDB(EData);
       }
@@ -159,18 +163,18 @@ string(STR_DEFAULT)      sUnits;
 
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_E3DECON_0, DGW_FILEPATH,"E3DECON","GRID");
-      SetInfoSYS_DGW(Diag,_E3DECON_1, DGW_FILEPATH,"EULER3D","DX");
-      SetInfoSYS_DGW(Diag,_E3DECON_2, DGW_FILEPATH,"EULER3D","DY");
-      SetInfoSYS_DGW(Diag,_E3DECON_3, DGW_FILEPATH,"EULER3D","DZ");
-      SetInfoSYS_DGW(Diag,_E3DECON_4, DGW_FILEPATH,"EULER3D","SOLDB");     
-      SetInfoSYS_DGW(Diag,_E3DECON_5, DGW_TEXT,    "EULER3D","SOLGRP");     
-      SetInfoSYS_DGW(Diag,_E3DECON_6, DGW_TEXT,    "EULER3D","GI"); 
-      SetInfoSYS_DGW(Diag,_E3DECON_7, DGW_TEXT,    "EULER3D","TOLRNC"); 
-      SetInfoSYS_DGW(Diag,_E3DECON_8, DGW_TEXT,    "EULER3D","WNDSIZ"); 
-      SetInfoSYS_DGW(Diag,_E3DECON_9, DGW_TEXT,    "EULER3D","MAXDIS"); 
-      SetInfoSYS_DGW(Diag,_E3DECON_10,DGW_TEXT,    "EULER3D","OBSHGHT"); 
-      SetInfoSYS_DGW(Diag,_E3DECON_11,DGW_TEXT,    "EULER3D","OBSELEV"); 
+      SetInfoSYS_DGW(Diag, _E3DECON_0, DGW_FILEPATH, "E3DECON", "GRID");
+      SetInfoSYS_DGW(Diag, _E3DECON_1, DGW_FILEPATH, "EULER3D", "DX");
+      SetInfoSYS_DGW(Diag, _E3DECON_2, DGW_FILEPATH, "EULER3D", "DY");
+      SetInfoSYS_DGW(Diag, _E3DECON_3, DGW_FILEPATH, "EULER3D", "DZ");
+      SetInfoSYS_DGW(Diag, _E3DECON_4, DGW_FILEPATH, "EULER3D", "SOLDB");
+      SetInfoSYS_DGW(Diag, _E3DECON_5, DGW_TEXT, "EULER3D", "SOLGRP");
+      SetInfoSYS_DGW(Diag, _E3DECON_6, DGW_TEXT, "EULER3D", "GI");
+      SetInfoSYS_DGW(Diag, _E3DECON_7, DGW_TEXT, "EULER3D", "TOLRNC");
+      SetInfoSYS_DGW(Diag, _E3DECON_8, DGW_TEXT, "EULER3D", "WNDSIZ");
+      SetInfoSYS_DGW(Diag, _E3DECON_9, DGW_TEXT, "EULER3D", "MAXDIS");
+      SetInfoSYS_DGW(Diag, _E3DECON_10, DGW_TEXT, "EULER3D", "OBSHGHT");
+      SetInfoSYS_DGW(Diag, _E3DECON_11, DGW_TEXT, "EULER3D", "OBSELEV");
 
 
       // --- Run the Dialogue ---
@@ -181,18 +185,18 @@ string(STR_DEFAULT)      sUnits;
 
       // --- Get the Strings and replace in INI ---
 
-      GetInfoSYS_DGW(Diag,_E3DECON_0, DGW_FILEPATH,"E3DECON","GRID");
-      GetInfoSYS_DGW(Diag,_E3DECON_1, DGW_FILEPATH,"EULER3D","DX");
-      GetInfoSYS_DGW(Diag,_E3DECON_2, DGW_FILEPATH,"EULER3D","DY");
-      GetInfoSYS_DGW(Diag,_E3DECON_3, DGW_FILEPATH,"EULER3D","DZ");
-      GetInfoSYS_DGW(Diag,_E3DECON_4, DGW_FILEPATH,"EULER3D","SOLDB");     
-      GetInfoSYS_DGW(Diag,_E3DECON_5, DGW_TEXT,    "EULER3D","SOLGRP");     
-      GetInfoSYS_DGW(Diag,_E3DECON_6, DGW_TEXT,    "EULER3D","GI"); 
-      GetInfoSYS_DGW(Diag,_E3DECON_7, DGW_TEXT,    "EULER3D","TOLRNC"); 
-      GetInfoSYS_DGW(Diag,_E3DECON_8, DGW_TEXT,    "EULER3D","WNDSIZ"); 
-      GetInfoSYS_DGW(Diag,_E3DECON_9, DGW_TEXT,    "EULER3D","MAXDIS"); 
-      GetInfoSYS_DGW(Diag,_E3DECON_10,DGW_TEXT,    "EULER3D","OBSHGHT"); 
-      GetInfoSYS_DGW(Diag,_E3DECON_11,DGW_TEXT,    "EULER3D","OBSELEV"); 
+      GetInfoSYS_DGW(Diag, _E3DECON_0, DGW_FILEPATH, "E3DECON", "GRID");
+      GetInfoSYS_DGW(Diag, _E3DECON_1, DGW_FILEPATH, "EULER3D", "DX");
+      GetInfoSYS_DGW(Diag, _E3DECON_2, DGW_FILEPATH, "EULER3D", "DY");
+      GetInfoSYS_DGW(Diag, _E3DECON_3, DGW_FILEPATH, "EULER3D", "DZ");
+      GetInfoSYS_DGW(Diag, _E3DECON_4, DGW_FILEPATH, "EULER3D", "SOLDB");
+      GetInfoSYS_DGW(Diag, _E3DECON_5, DGW_TEXT, "EULER3D", "SOLGRP");
+      GetInfoSYS_DGW(Diag, _E3DECON_6, DGW_TEXT, "EULER3D", "GI");
+      GetInfoSYS_DGW(Diag, _E3DECON_7, DGW_TEXT, "EULER3D", "TOLRNC");
+      GetInfoSYS_DGW(Diag, _E3DECON_8, DGW_TEXT, "EULER3D", "WNDSIZ");
+      GetInfoSYS_DGW(Diag, _E3DECON_9, DGW_TEXT, "EULER3D", "MAXDIS");
+      GetInfoSYS_DGW(Diag, _E3DECON_10, DGW_TEXT, "EULER3D", "OBSHGHT");
+      GetInfoSYS_DGW(Diag, _E3DECON_11, DGW_TEXT, "EULER3D", "OBSELEV");
 
       // --- Destroy the Dialogue ---
 
@@ -201,12 +205,12 @@ string(STR_DEFAULT)      sUnits;
 
    // --- Get Parameters ---
 
-   GetString_SYS("E3DECON","GRID", sGrdT);
-   GetString_SYS("EULER3D","DX",sDx);
-   GetString_SYS("EULER3D","DY",sDy);
-   GetString_SYS("EULER3D","DZ",sDz);
-   GetString_SYS("EULER3D","SOLDB", sSolDB);
-   GetString_SYS("EULER3D","SOLGRP", sSolutions);
+   GetString_SYS("E3DECON", "GRID", sGrdT);
+   GetString_SYS("EULER3D", "DX", sDx);
+   GetString_SYS("EULER3D", "DY", sDy);
+   GetString_SYS("EULER3D", "DZ", sDz);
+   GetString_SYS("EULER3D", "SOLDB", sSolDB);
+   GetString_SYS("EULER3D", "SOLGRP", sSolutions);
 
 
    // --- Check for null input and output file name strings ---
@@ -229,19 +233,19 @@ string(STR_DEFAULT)      sUnits;
 
    // --- Check for null parameter strings and set to default values if blank
 
-   SETREAL(rGI,      "GI",      1.0)
-   SETREAL(rTolrnc,  "TOLRNC", 15.0)
-   SETREAL(rMaxDis,  "MAXDIS",  0.0)
+   SETREAL(rGI, "GI", 1.0)
+   SETREAL(rTolrnc, "TOLRNC", 15.0)
+   SETREAL(rMaxDis, "MAXDIS", 0.0)
    SETREAL(rObsHght, "OBSHGHT", 0.0)
-   SETINT(iWndSz,    "WNDSIZ",  10)
+   SETINT(iWndSz, "WNDSIZ", 10)
 
-   rObsElev = rGetReal_SYS("EULER3D","OBSELEV");
+   rObsElev = rGetReal_SYS("EULER3D", "OBSELEV");
    iObsFlg = 1;
-   if(rObsElev==rDUMMY) iObsFlg = 0;
+   if (rObsElev == rDUMMY) iObsFlg = 0;
 
    // --- If using elevation, change the channel name ---
 
-   if(iObsFlg)
+   if (iObsFlg)
       Strcpy_STR(sZEulCh, _n("Elevation"));
 
 
@@ -263,24 +267,25 @@ string(STR_DEFAULT)      sUnits;
    // --- Start Progress ---
 
    Progress_SYS(1);
-   ProgName_SYS(_("Euler Deconvolution for Depth"),1);
+   ProgName_SYS(_("Euler Deconvolution for Depth"), 1);
 
 
    // --- Create IMGs for input grids ---
-   
-   ImgT  = CreateFile_IMG(GS_FLOAT,sGrdT, IMG_FILE_READONLY); 
-   ImgTX = CreateFile_IMG(GS_FLOAT,sDx,IMG_FILE_READONLY); 
-   ImgTY = CreateFile_IMG(GS_FLOAT,sDy,IMG_FILE_READONLY); 
-   ImgTZ = CreateFile_IMG(GS_FLOAT,sDz,IMG_FILE_READONLY); 
-   
+
+   ImgT = CreateFile_IMG(GS_FLOAT, sGrdT, IMG_FILE_READONLY);
+   ImgTX = CreateFile_IMG(GS_FLOAT, sDx, IMG_FILE_READONLY);
+   ImgTY = CreateFile_IMG(GS_FLOAT, sDy, IMG_FILE_READONLY);
+   ImgTZ = CreateFile_IMG(GS_FLOAT, sDz, IMG_FILE_READONLY);
+
 
    // --- Create Solution Database if it doesn't exist ---
 
-   if(!iFileExist_SYS(sSolDB)) {
+   if (!iFileExist_SYS(sSolDB))
+   {
       iLines = 20;
       iChans = 20;
       iBlobs = iLines + iChans + 20;
-      Create_DB(sSolDB,iLines,iChans,iBlobs,20,10,"super","");
+      Create_DB(sSolDB, iLines, iChans, iBlobs, 20, 10, "super", "");
    }
 
    EData = Load_EDB(sSolDB);
@@ -289,23 +294,24 @@ string(STR_DEFAULT)      sUnits;
 
    // --- Create EUL3 object ---
 
-   EUL3G = Creat_EUL3(ImgT,ImgTX,ImgTY,ImgTZ,
-                      iWndSz,rGI,rTolrnc,rMaxDis,iObsFlg,rObsHght,rObsElev);
+   EUL3G = Creat_EUL3(ImgT, ImgTX, ImgTY, ImgTZ,
+                      iWndSz, rGI, rTolrnc, rMaxDis, iObsFlg, rObsHght, rObsElev);
 
 
    // --- Create a group line to store the solutions in. Make it a different
    //     class than the located Euler solutions ---
 
-   Solutions = FindSymb_DB(Data,sSolutions,DB_SYMB_LINE);
-   if(Solutions != NULLSYMB) {
-      LockSymb_DB(Data,Solutions,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   Solutions = FindSymb_DB(Data, sSolutions, DB_SYMB_LINE);
+   if (Solutions != NULLSYMB)
+   {
+      LockSymb_DB(Data, Solutions, DB_LOCK_READWRITE, DB_WAIT_NONE);
       DeleteSymb_DB(Data, Solutions);
    }
-   Solutions=CreateSymb_DB(Data,sSolutions,DB_SYMB_LINE,DB_OWN_SHARED,DB_CATEGORY_LINE_GROUP);
-   
-   LockSymb_DB(Data,Solutions,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   Solutions = CreateSymb_DB(Data, sSolutions, DB_SYMB_LINE, DB_OWN_SHARED, DB_CATEGORY_LINE_GROUP);
+
+   LockSymb_DB(Data, Solutions, DB_LOCK_READWRITE, DB_WAIT_NONE);
    SetGroupClass_DB(Data, Solutions, sClass);
-   UnLockSymb_DB(Data,Solutions);
+   UnLockSymb_DB(Data, Solutions);
 
 
    // --- Create the window center x, y channels ---
@@ -315,7 +321,7 @@ string(STR_DEFAULT)      sUnits;
 
 
    // --- Create the solution x, y position channels ---
-   
+
    GETCHAN(XEulCh, sXEulCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)
    GETCHAN(YEulCh, sYEulCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)
    GETCHAN(ZEulCh, sZEulCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_PROTECTED)
@@ -323,124 +329,123 @@ string(STR_DEFAULT)      sUnits;
 
    // --- Create the solution background level channel ---
 
-   GETCHAN(BgCh, sBgCh, DB_CATEGORY_CHAN_DOUBLE,  9, 2, DB_CHAN_PROTECTED)
-   
+   GETCHAN(BgCh, sBgCh, DB_CATEGORY_CHAN_DOUBLE, 9, 2, DB_CHAN_PROTECTED)
+
 
    // --- Create the window size channel ---
 
-   GETCHAN(WndSzCh, sWndSzCh, DB_CATEGORY_CHAN_DOUBLE,  8, 2, DB_CHAN_PROTECTED)
+   GETCHAN(WndSzCh, sWndSzCh, DB_CATEGORY_CHAN_DOUBLE, 8, 2, DB_CHAN_PROTECTED)
 
 
    // --- Create the depth error channel ---
 
-   GETCHAN(ZErCh, sZerCh, DB_CATEGORY_CHAN_DOUBLE,  6, 2, DB_CHAN_PROTECTED)
-   
+   GETCHAN(ZErCh, sZerCh, DB_CATEGORY_CHAN_DOUBLE, 6, 2, DB_CHAN_PROTECTED)
+
 
    // --- Create the location error channel ---
 
-   GETCHAN(XYErCh, sXYerCh, DB_CATEGORY_CHAN_DOUBLE,  6, 2, DB_CHAN_PROTECTED)
-  
+   GETCHAN(XYErCh, sXYerCh, DB_CATEGORY_CHAN_DOUBLE, 6, 2, DB_CHAN_PROTECTED)
+
 
    // --- Create a VV to hold solutions from EUL3 ---
 
-   SOLN_VV=Create_VV(REAL,0);
+   SOLN_VV = Create_VV(REAL, 0);
 
    // --- Read solutions into database ---
 
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_X);
-   PutChanVV_DB(Data,Solutions,XEulCh,SOLN_VV);
-   
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_Y);
-   PutChanVV_DB(Data,Solutions,YEulCh,SOLN_VV);
-  
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_DEPTH);
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_X);
+   PutChanVV_DB(Data, Solutions, XEulCh, SOLN_VV);
+
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_Y);
+   PutChanVV_DB(Data, Solutions, YEulCh, SOLN_VV);
+
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_DEPTH);
    //if(iObsFlg==0)   Clip_VVU(SOLN_VV,0.0,rDUMMY,VVU_CLIP_LIMIT);  // Clip the negative results
-   PutChanVV_DB(Data,Solutions,ZEulCh,SOLN_VV);
-  
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_BACKGROUND);
-   PutChanVV_DB(Data,Solutions,BgCh,SOLN_VV);
-   
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_DEPTHERROR);
-   PutChanVV_DB(Data,Solutions,ZErCh,SOLN_VV);
-   
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_LOCATIONERROR);
-   PutChanVV_DB(Data,Solutions,XYErCh,SOLN_VV);
-   
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_WINDOWX);
-   PutChanVV_DB(Data,Solutions,XWndCh,SOLN_VV);
-   
-   GetResult_EUL3(EUL3G,SOLN_VV,EUL3_RESULT_WINDOWY);
-   PutChanVV_DB(Data,Solutions,YWndCh,SOLN_VV);
+   PutChanVV_DB(Data, Solutions, ZEulCh, SOLN_VV);
+
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_BACKGROUND);
+   PutChanVV_DB(Data, Solutions, BgCh, SOLN_VV);
+
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_DEPTHERROR);
+   PutChanVV_DB(Data, Solutions, ZErCh, SOLN_VV);
+
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_LOCATIONERROR);
+   PutChanVV_DB(Data, Solutions, XYErCh, SOLN_VV);
+
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_WINDOWX);
+   PutChanVV_DB(Data, Solutions, XWndCh, SOLN_VV);
+
+   GetResult_EUL3(EUL3G, SOLN_VV, EUL3_RESULT_WINDOWY);
+   PutChanVV_DB(Data, Solutions, YWndCh, SOLN_VV);
 
 
    // --- Write the window size ---
 
    rCellSize = rQuery_IMG(ImgT, IMG_QUERY_rDX);
-   SetRealN_VV(SOLN_VV, 0, -1, (real)iWndSz*rCellSize);
-   PutChanVV_DB(Data,Solutions,WndSzCh,SOLN_VV);
+   SetRealN_VV(SOLN_VV, 0, -1, (real)iWndSz * rCellSize);
+   PutChanVV_DB(Data, Solutions, WndSzCh, SOLN_VV);
 
 
    // --- Copy projection and units to output gdb ---
-   
+
    hIPJ = Create_IPJ();
    GetIPJ_IMG(ImgT, hIPJ);
    GetUnits_IPJ(hIPJ, rF, sUnits);
-   
-   SET_IPJ(Data,XEulCh,YEulCh,hIPJ)
-   SET_IPJ(Data,XWndCh,YWndCh,hIPJ)
 
-   SET_UNITS(Data,XEulCh,sUnits)
-   SET_UNITS(Data,YEulCh,sUnits)
-   SET_UNITS(Data,ZEulCh,sUnits)
-   SET_UNITS(Data,XWndCh,sUnits)
-   SET_UNITS(Data,YWndCh,sUnits)
-   SET_UNITS(Data,WndSzCh,sUnits)
-   SET_UNITS(Data,ZErCh,"%")
-   SET_UNITS(Data,XYErCh,"%")
+   SET_IPJ(Data, XEulCh, YEulCh, hIPJ)
+   SET_IPJ(Data, XWndCh, YWndCh, hIPJ)
+
+   SET_UNITS(Data, XEulCh, sUnits)
+   SET_UNITS(Data, YEulCh, sUnits)
+   SET_UNITS(Data, ZEulCh, sUnits)
+   SET_UNITS(Data, XWndCh, sUnits)
+   SET_UNITS(Data, YWndCh, sUnits)
+   SET_UNITS(Data, WndSzCh, sUnits)
+   SET_UNITS(Data, ZErCh, "%")
+   SET_UNITS(Data, XYErCh, "%")
 
 
    // --- Unlock ---
 
-   UnLockSymb_DB(Data,XEulCh);
-   UnLockSymb_DB(Data,YEulCh);
-   UnLockSymb_DB(Data,ZEulCh);
-   
-   UnLockSymb_DB(Data,BgCh);
-   UnLockSymb_DB(Data,ZErCh);
-   UnLockSymb_DB(Data,XYErCh);
-   UnLockSymb_DB(Data,XWndCh);
-   UnLockSymb_DB(Data,YWndCh);
-   UnLockSymb_DB(Data,WndSzCh);
+   UnLockSymb_DB(Data, XEulCh);
+   UnLockSymb_DB(Data, YEulCh);
+   UnLockSymb_DB(Data, ZEulCh);
 
+   UnLockSymb_DB(Data, BgCh);
+   UnLockSymb_DB(Data, ZErCh);
+   UnLockSymb_DB(Data, XYErCh);
+   UnLockSymb_DB(Data, XWndCh);
+   UnLockSymb_DB(Data, YWndCh);
+   UnLockSymb_DB(Data, WndSzCh);
 
 
    // --- Destroy objects ---
 
    Destr_EUL3(EUL3G);
    Destroy_VV(SOLN_VV);
-   Destroy_IMG(ImgT);       
-   Destroy_IMG(ImgTX);       
-   Destroy_IMG(ImgTY);       
-   Destroy_IMG(ImgTZ);       
-   Destroy_IPJ(hIPJ);       
-                
+   Destroy_IMG(ImgT);
+   Destroy_IMG(ImgTX);
+   Destroy_IMG(ImgTY);
+   Destroy_IMG(ImgTZ);
+   Destroy_IPJ(hIPJ);
+
 
    // CREATE NEW CHANNELS FOR USE IN E3WINDOW.GX:
-   
+
    // --- Create the x and y-offset channel ---
 
-   GETCHAN(XOffCh, sXOffCh, DB_CATEGORY_CHAN_DOUBLE,  10, 2, DB_CHAN_UNPROTECTED)
-   GETCHAN(YOffCh, sYOffCh, DB_CATEGORY_CHAN_DOUBLE,  10, 2, DB_CHAN_UNPROTECTED)
+   GETCHAN(XOffCh, sXOffCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_UNPROTECTED)
+   GETCHAN(YOffCh, sYOffCh, DB_CATEGORY_CHAN_DOUBLE, 10, 2, DB_CHAN_UNPROTECTED)
 
-   SET_UNITS(Data,XOffCh,sUnits)
-   SET_UNITS(Data,YOffCh,sUnits)
+   SET_UNITS(Data, XOffCh, sUnits)
+   SET_UNITS(Data, YOffCh, sUnits)
 
 
    // --- Create the mask channel ---
 
-   GETCHAN(MaskCh, _n("Mask"), DB_CATEGORY_CHAN_LONG,  5, 0, DB_CHAN_UNPROTECTED)
+   GETCHAN(MaskCh, _n("Mask"), DB_CATEGORY_CHAN_LONG, 5, 0, DB_CHAN_UNPROTECTED)
    SetRegSymbSetting_DB(Data, MaskCh, "CLASS", "Mask");
-   
+
 
    // --- Create expressions to calculate new channel values ---
 
@@ -450,7 +455,7 @@ string(STR_DEFAULT)      sUnits;
    Strcat_STR(sExp, "-");
    Strcat_STR(sExp, sXWndCh);
    Strcat_STR(sExp, ";");
-   XOff_Exp=Create_EXP(Data,sExp,50);
+   XOff_Exp = Create_EXP(Data, sExp, 50);
 
    Strcpy_STR(sExp, sYOffCh);
    Strcat_STR(sExp, "=");
@@ -458,7 +463,7 @@ string(STR_DEFAULT)      sUnits;
    Strcat_STR(sExp, "-");
    Strcat_STR(sExp, sYWndCh);
    Strcat_STR(sExp, ";");
-   YOff_Exp=Create_EXP(Data,sExp,50);
+   YOff_Exp = Create_EXP(Data, sExp, 50);
 
    Strcpy_STR(sExp, sMaskCh);
    Strcat_STR(sExp, "=");
@@ -466,7 +471,7 @@ string(STR_DEFAULT)      sUnits;
    Strcat_STR(sExp, "-");
    Strcat_STR(sExp, sXEulCh);
    Strcat_STR(sExp, "+1;");
-   Mask_Exp=Create_EXP(Data,sExp,50);
+   Mask_Exp = Create_EXP(Data, sExp, 50);
 
 
    // --- Apply formulas to set values in new channels ---
@@ -485,25 +490,25 @@ string(STR_DEFAULT)      sUnits;
 
    // --- Unlock ---
 
-   UnLockSymb_DB(Data,XOffCh);
-   UnLockSymb_DB(Data,YOffCh);
-   UnLockSymb_DB(Data,MaskCh);
+   UnLockSymb_DB(Data, XOffCh);
+   UnLockSymb_DB(Data, YOffCh);
+   UnLockSymb_DB(Data, MaskCh);
 
-   
+
    // --- Load the channels ---
 
-   AddAssociatedLoad_DB(Data, Solutions, XEulCh);     
-   AddAssociatedLoad_DB(Data, Solutions, YEulCh);     
-   AddAssociatedLoad_DB(Data, Solutions, ZEulCh);     
-   AddAssociatedLoad_DB(Data, Solutions, BgCh);    
-   AddAssociatedLoad_DB(Data, Solutions, WndSzCh); 
-   AddAssociatedLoad_DB(Data, Solutions, ZErCh);   
-   AddAssociatedLoad_DB(Data, Solutions, XYErCh);  
-   AddAssociatedLoad_DB(Data, Solutions, MaskCh);  
-   AddAssociatedLoad_DB(Data, Solutions, XWndCh);  
-   AddAssociatedLoad_DB(Data, Solutions, YWndCh);  
-   AddAssociatedLoad_DB(Data, Solutions, XOffCh);  
-   AddAssociatedLoad_DB(Data, Solutions, YOffCh);  
+   AddAssociatedLoad_DB(Data, Solutions, XEulCh);
+   AddAssociatedLoad_DB(Data, Solutions, YEulCh);
+   AddAssociatedLoad_DB(Data, Solutions, ZEulCh);
+   AddAssociatedLoad_DB(Data, Solutions, BgCh);
+   AddAssociatedLoad_DB(Data, Solutions, WndSzCh);
+   AddAssociatedLoad_DB(Data, Solutions, ZErCh);
+   AddAssociatedLoad_DB(Data, Solutions, XYErCh);
+   AddAssociatedLoad_DB(Data, Solutions, MaskCh);
+   AddAssociatedLoad_DB(Data, Solutions, XWndCh);
+   AddAssociatedLoad_DB(Data, Solutions, YWndCh);
+   AddAssociatedLoad_DB(Data, Solutions, XOffCh);
+   AddAssociatedLoad_DB(Data, Solutions, YOffCh);
 
 
    // --- Update the activity log ---
@@ -517,8 +522,8 @@ string(STR_DEFAULT)      sUnits;
    AddComment_DB(Data, "Depth error channel", sZerCh, TRUE);
    AddComment_DB(Data, "X channel", sXWndCh, TRUE);
    AddComment_DB(Data, "Y channel", sYWndCh, TRUE);
-   AddComment_DB(Data, "X_Euler channel",  sXEulCh, TRUE);
-   AddComment_DB(Data, "Y_Euler channel",  sYEulCh, TRUE);
+   AddComment_DB(Data, "X_Euler channel", sXEulCh, TRUE);
+   AddComment_DB(Data, "Y_Euler channel", sYEulCh, TRUE);
    AddComment_DB(Data, "X_Offset channel", sXOffCh, TRUE);
    AddComment_DB(Data, "Y_Offset channel", sYOffCh, TRUE);
 
@@ -533,9 +538,9 @@ string(STR_DEFAULT)      sUnits;
 
    UnLock_EDB(EData);
 
-   
+
    // --- Delete empty line 0 ---
-   
+
    DelLine0_EDB(EData);
 
 
@@ -547,5 +552,4 @@ string(STR_DEFAULT)      sUnits;
    // --- Done ---
 
    Progress_SYS(0);
-
 }

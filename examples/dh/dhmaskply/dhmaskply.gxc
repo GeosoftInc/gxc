@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Update a mask channel with a selection polygon"
 #include <version.gxh>
 
@@ -35,6 +36,7 @@ RESOURCE = "dhmaskply.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 //===========================================================================
 // dialogs
@@ -44,23 +46,23 @@ RESOURCE = "dhmaskply.gr"
 //                                 VARIABLES
 //===========================================================================
 
-#define ARAD  57.29577951
+#define ARAD 57.29577951
 
-DGW      Diag;
-EDB      EData;
-DB       Data;
-EMAP     EMap;
-MAP      Map;
-DH       Drill;
-REG      Reg;
-LST      List;
-VV       VVx, VVy;
-IPJ      Ipj, Ipj2;
-PLY      Poly;
-MVIEW    View;
+   DGW Diag;
+EDB EData;
+DB Data;
+EMAP EMap;
+MAP Map;
+DH Drill;
+REG Reg;
+LST List;
+VV VVx, VVy;
+IPJ Ipj, Ipj2;
+PLY Poly;
+MVIEW View;
 
-int         i, iPlotType, iAppend, iSelect, iType, iTraceType, iFullPlan, iInteractive;
-real        rTol;
+int i, iPlotType, iAppend, iSelect, iType, iTraceType, iFullPlan, iInteractive;
+real rTol;
 string(STR_FILE) sDB, sJob, sMap, sPly;
 string(STR_DB_SYMBOL) sMaskCh;
 string(STR_VIEW) sView;
@@ -70,22 +72,20 @@ string(STR_VIEW) sView;
 //===========================================================================
 
 {
-
-
    // --- This GX is normally interactive, but can be scripted with a supplied polygon file and map view name defined. ---
 
-	iInteractive = iInteractive_SYS();
+   iInteractive = iInteractive_SYS();
 
 
    // --- get database and current map ---
-   
+
    EData = Current_EDB();
    GetName_EDB(EData, sDB);
 
    EMap = Current_EMAP();
    GetName_EMAP(EMap, sMap);
    Map = Lock_EMAP(EMap);
-   
+
 
    // -- Get the map REG and create an INI file ---
 
@@ -100,198 +100,201 @@ string(STR_VIEW) sView;
    // --- Get the plot type ---
 
    GetInt_REG(Reg, "DH.PLOT_TYPE", iPlotType);
-   if(iPlotType != DH_PLOT_PLAN &&
-      iPlotType != DH_PLOT_SECTION &&
-      iPlotType != DH_PLOT_SECTION_STACK &&
-      iPlotType != DH_PLOT_HOLE_TRACES)
+   if (iPlotType != DH_PLOT_PLAN &&
+       iPlotType != DH_PLOT_SECTION &&
+       iPlotType != DH_PLOT_SECTION_STACK &&
+       iPlotType != DH_PLOT_HOLE_TRACES)
       Abort_SYS(_("The current map is not recognized as a Wholeplot plan, or section plot."));
 
 
-	if (iInteractive)
-	{
-		// --- Run the dialog to set mask options ---
+   if (iInteractive)
+   {
+      // --- Run the dialog to set mask options ---
 
-		Diag = Create_DGW("DHMASKPLY");
-
-     
-		// --- Set up mask channel list ---
-
-		Data = Lock_EDB(EData);    // Use the current database as reference
-
-		List = GetList_DGW(Diag,_DHMASKPLY_0);
-		MaskChanLST_DB(Data,List);
-		i = iFindItem_LST(List, LST_ITEM_NAME, "None");
-		if(i!=-1) DelItem_LST(List, i);
-		Sort_LST(List,0,0);
-   
-		UnLock_EDB(EData);
+      Diag = Create_DGW("DHMASKPLY");
 
 
-		// --- Set default mask channel ---
+      // --- Set up mask channel list ---
 
-		GetString_SYS("DHMASKPLY","MASK",sMaskCh);
-		if(!iStrlen_STR(sMaskCh)) {
-			if (iGlobal_SYS("WHOLEPLOT.MASK",sMaskCh) == 0) {
-				SetString_SYS("DHMASKPLY","MASK",sMaskCh);
-			}
-		}
+      Data = Lock_EDB(EData);  // Use the current database as reference
 
+      List = GetList_DGW(Diag, _DHMASKPLY_0);
+      MaskChanLST_DB(Data, List);
+      i = iFindItem_LST(List, LST_ITEM_NAME, "None");
+      if (i != -1) DelItem_LST(List, i);
+      Sort_LST(List, 0, 0);
 
-		// --- Set any Defaults ---
-
-		SetInfoSYS_DGW(Diag,_DHMASKPLY_0,DGW_TEXT,"DHMASKPLY","MASK");     
-		SetInfoSYS_DGW(Diag,_DHMASKPLY_1,DGW_LISTALIAS,"DHMASKPLY","APPEND");
-		SetInfoSYS_DGW(Diag,_DHMASKPLY_2,DGW_LISTALIAS,"DHMASKPLY","SELECT");
-
-		if(iRunDialogue_DGW(Diag)==-1) Cancel_SYS();
-
-		GetInfoSYS_DGW(Diag,_DHMASKPLY_0,DGW_TEXT,"DHMASKPLY","MASK");     
-		GetInfoSYS_DGW(Diag,_DHMASKPLY_1,DGW_LISTALIAS,"DHMASKPLY","APPEND");
-		GetInfoSYS_DGW(Diag,_DHMASKPLY_2,DGW_LISTALIAS,"DHMASKPLY","SELECT");
-
-		Destroy_DGW(Diag);
-	}
-
-   
-	// --- Get parameters ---
-
-	GetString_SYS("DHMASKPLY","MASK", sMaskCh);
-	if (iStrlen_STR(sMaskCh) == 0)
-		Abort_SYS(_("A value for the mask channel DHMASKPLY.MASK must be defined"));
-	iAppend = iGetInt_SYS("DHMASKPLY","APPEND");
-	if (iAppend != 0 && iAppend != 1)
-		Abort_SYS(_("A value for the append/new DHMASKPLY.APPEND must be defined"));
-	iSelect = iGetInt_SYS("DHMASKPLY","SELECT");
-	if (iSelect != 0 && iSelect != 1)
-		Abort_SYS(_("A value for all holes/selected holes DHMASKPLY.SELECT must be defined"));
+      UnLock_EDB(EData);
 
 
-	if (!iInteractive)
-	{
-		GetString_SYS("DHMASKPLY", "VIEW", sView);
-		if (iStrlen_STR(sView) == 0)
-			Abort_SYS(_("A value for the current view DHMASKPLY.VIEW must be defined"));
-	}
-	else
-	{
-		// --- Set the current view ---
+      // --- Set default mask channel ---
 
-		if(iPlotType == DH_PLOT_PLAN ||
-			iPlotType == DH_PLOT_HOLE_TRACES) {
-      
-			if(iSetCurrentView_EMAP(EMap, "*data"))
-				Abort_SYS(_("Unable to locate the Data view in the plan map."));
-		}
-		else {
-      
-			if(iSetCurrentView_EMAP(EMap, "Section"))
-				Abort_SYS(_("Unable to locate the \"Section\" view in the section map."));
-		}
-		GetCurrentView_EMAP(EMap, sView);
-	}
+      GetString_SYS("DHMASKPLY", "MASK", sMaskCh);
+      if (!iStrlen_STR(sMaskCh))
+      {
+         if (iGlobal_SYS("WHOLEPLOT.MASK", sMaskCh) == 0)
+         {
+            SetString_SYS("DHMASKPLY", "MASK", sMaskCh);
+         }
+      }
 
 
-	// --- create VV's ---
+      // --- Set any Defaults ---
 
-	VVx = Create_VV(REAL,0);
-	VVy = Create_VV(REAL,0);
+      SetInfoSYS_DGW(Diag, _DHMASKPLY_0, DGW_TEXT, "DHMASKPLY", "MASK");
+      SetInfoSYS_DGW(Diag, _DHMASKPLY_1, DGW_LISTALIAS, "DHMASKPLY", "APPEND");
+      SetInfoSYS_DGW(Diag, _DHMASKPLY_2, DGW_LISTALIAS, "DHMASKPLY", "SELECT");
 
+      if (iRunDialogue_DGW(Diag) == -1) Cancel_SYS();
 
-	// --- Get the view projection ---
+      GetInfoSYS_DGW(Diag, _DHMASKPLY_0, DGW_TEXT, "DHMASKPLY", "MASK");
+      GetInfoSYS_DGW(Diag, _DHMASKPLY_1, DGW_LISTALIAS, "DHMASKPLY", "APPEND");
+      GetInfoSYS_DGW(Diag, _DHMASKPLY_2, DGW_LISTALIAS, "DHMASKPLY", "SELECT");
 
-	Ipj = Create_IPJ();
-
-	Map = Lock_EMAP(EMap);
-	View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
-	GetIPJ_MVIEW(View, Ipj);
-
-	if (iInteractive)
-	{
-		// --- Clear the working projection ---
-
-		Ipj2 = Create_IPJ();
-		Copy_IPJ(Ipj, Ipj2);
-		ClearWarp_IPJ(Ipj2);
-
-		SetIPJ_MVIEW(View, Ipj2);
-	}
-	UnLock_EMAP(EMap);
+      Destroy_DGW(Diag);
+   }
 
 
-	if (!iInteractive)
-	{
-		GetString_SYS("DHMASKPLY", "POLYGON", sPly);
-		if (iStrlen_STR(sPly) == 0)
-			Abort_SYS(_("A value for the polygon DHMASKPLY.POLYGON must be defined"));
+   // --- Get parameters ---
 
-		Poly = Create_PLY();
-		LoadTable_PLY(Poly, sPly);
-	}
-	else
-	{
-		// --- Restore the map if it is minimized ---
-   
-		if(iGetWindowState_EMAP(EMap)==EMAP_WINDOW_MINIMIZE)
-			SetWindowState_EMAP(EMap, EMAP_WINDOW_RESTORE);
-      
-
-		// --- Define a polygon interactively ---
-
-		DisplayMessage_SYS(_("Define polygon"),_("Enter points on polygon, Right button when done, Esc to cancel."));
-
-		i = iGetPolyLine_EMAP(EMap,_("Click on polygon corners, Right button when done..."),VVx,VVy);
+   GetString_SYS("DHMASKPLY", "MASK", sMaskCh);
+   if (iStrlen_STR(sMaskCh) == 0)
+      Abort_SYS(_("A value for the mask channel DHMASKPLY.MASK must be defined"));
+   iAppend = iGetInt_SYS("DHMASKPLY", "APPEND");
+   if (iAppend != 0 && iAppend != 1)
+      Abort_SYS(_("A value for the append/new DHMASKPLY.APPEND must be defined"));
+   iSelect = iGetInt_SYS("DHMASKPLY", "SELECT");
+   if (iSelect != 0 && iSelect != 1)
+      Abort_SYS(_("A value for all holes/selected holes DHMASKPLY.SELECT must be defined"));
 
 
-		// --- Reset the working projection, even if the user cancels ---
+   if (!iInteractive)
+   {
+      GetString_SYS("DHMASKPLY", "VIEW", sView);
+      if (iStrlen_STR(sView) == 0)
+         Abort_SYS(_("A value for the current view DHMASKPLY.VIEW must be defined"));
+   }
+   else
+   {
+      // --- Set the current view ---
 
-		Map = Lock_EMAP(EMap);
-		View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
-		SetIPJ_MVIEW(View, Ipj);
-		SetUserIPJ_MVIEW(View, Ipj2);
-		SetWorkingIPJ_MVIEW(View, Ipj);
-		UnLock_EMAP(EMap);
-
-
-		// --- Check for cancel ---
-
-		if(i==1) Cancel_SYS();    
-   
-   
-		// --- Check for valid polygon ---
-   
-		if(iLength_VV(VVx) < 3) {
-			Abort_SYS(_("At least three points are required for a valid polygon."));
-		}
-   
-      
-		// --- create polygon ---
-
-		Poly = Create_PLY();
-		AddPolygon_PLY(Poly,VVx,VVy);
-	}
+      if (iPlotType == DH_PLOT_PLAN ||
+          iPlotType == DH_PLOT_HOLE_TRACES)
+      {
+         if (iSetCurrentView_EMAP(EMap, "*data"))
+            Abort_SYS(_("Unable to locate the Data view in the plan map."));
+      }
+      else
+      {
+         if (iSetCurrentView_EMAP(EMap, "Section"))
+            Abort_SYS(_("Unable to locate the \"Section\" view in the section map."));
+      }
+      GetCurrentView_EMAP(EMap, sView);
+   }
 
 
-	// --- Is this a plan map? For Full plan and pierce plots, set Tolerance to dummy ---
-	
-	GetInt_REG(Reg, "DH.PLOT_TYPE", iType);
-	GetInt_REG(Reg, "DH.TRACE_TYPE", iTraceType);
-	GetInt_REG(Reg, "DH.PLOT_FULL_PLAN", iFullPlan);
-	
-	if(iType == DH_PLOT_PLAN && 
-		(iTraceType != 2 || iFullPlan==1))	// Trace type is 2 for plan slices
-	{	
-		rTol = rDUMMY;
-	}
-	else
-	{
-		// --- Get the slice tolerance ---
+   // --- create VV's ---
 
-		GetReal_REG(Reg, "DH.TOLERANCE", rTol);
-	}
+   VVx = Create_VV(REAL, 0);
+   VVy = Create_VV(REAL, 0);
+
+
+   // --- Get the view projection ---
+
+   Ipj = Create_IPJ();
+
+   Map = Lock_EMAP(EMap);
+   View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
+   GetIPJ_MVIEW(View, Ipj);
+
+   if (iInteractive)
+   {
+      // --- Clear the working projection ---
+
+      Ipj2 = Create_IPJ();
+      Copy_IPJ(Ipj, Ipj2);
+      ClearWarp_IPJ(Ipj2);
+
+      SetIPJ_MVIEW(View, Ipj2);
+   }
+   UnLock_EMAP(EMap);
+
+
+   if (!iInteractive)
+   {
+      GetString_SYS("DHMASKPLY", "POLYGON", sPly);
+      if (iStrlen_STR(sPly) == 0)
+         Abort_SYS(_("A value for the polygon DHMASKPLY.POLYGON must be defined"));
+
+      Poly = Create_PLY();
+      LoadTable_PLY(Poly, sPly);
+   }
+   else
+   {
+      // --- Restore the map if it is minimized ---
+
+      if (iGetWindowState_EMAP(EMap) == EMAP_WINDOW_MINIMIZE)
+         SetWindowState_EMAP(EMap, EMAP_WINDOW_RESTORE);
+
+
+      // --- Define a polygon interactively ---
+
+      DisplayMessage_SYS(_("Define polygon"), _("Enter points on polygon, Right button when done, Esc to cancel."));
+
+      i = iGetPolyLine_EMAP(EMap, _("Click on polygon corners, Right button when done..."), VVx, VVy);
+
+
+      // --- Reset the working projection, even if the user cancels ---
+
+      Map = Lock_EMAP(EMap);
+      View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
+      SetIPJ_MVIEW(View, Ipj);
+      SetUserIPJ_MVIEW(View, Ipj2);
+      SetWorkingIPJ_MVIEW(View, Ipj);
+      UnLock_EMAP(EMap);
+
+
+      // --- Check for cancel ---
+
+      if (i == 1) Cancel_SYS();
+
+
+      // --- Check for valid polygon ---
+
+      if (iLength_VV(VVx) < 3)
+      {
+         Abort_SYS(_("At least three points are required for a valid polygon."));
+      }
+
+
+      // --- create polygon ---
+
+      Poly = Create_PLY();
+      AddPolygon_PLY(Poly, VVx, VVy);
+   }
+
+
+   // --- Is this a plan map? For Full plan and pierce plots, set Tolerance to dummy ---
+
+   GetInt_REG(Reg, "DH.PLOT_TYPE", iType);
+   GetInt_REG(Reg, "DH.TRACE_TYPE", iTraceType);
+   GetInt_REG(Reg, "DH.PLOT_FULL_PLAN", iFullPlan);
+
+   if (iType == DH_PLOT_PLAN &&
+       (iTraceType != 2 || iFullPlan == 1))  // Trace type is 2 for plan slices
+   {
+      rTol = rDUMMY;
+   }
+   else
+   {
+      // --- Get the slice tolerance ---
+
+      GetReal_REG(Reg, "DH.TOLERANCE", rTol);
+   }
 
 
    // --- get DH handle for current database ---
-   
+
    Drill = Create_DH(sDB);
 
 
@@ -309,18 +312,17 @@ string(STR_VIEW) sView;
 
    // --- Bring the current map back to the front ---
 
-	if (iInteractive)
-	{
-		EMap = Load_EMAP(sMap);
-		MakeCurrent_EMAP(EMap);
-		
+   if (iInteractive)
+   {
+      EMap = Load_EMAP(sMap);
+      MakeCurrent_EMAP(EMap);
 
-		// --- Set stuff for scripts ---
 
-		Strcpy_STR(sPly, "_dhmaskply.ply");
-		SaveTable_PLY(Poly, sPly);
-		SetString_SYS("DHMASKPLY", "POLYGON", sPly);
-		SetString_SYS("DHMASKPLY", "VIEW", sView);
-	}
+      // --- Set stuff for scripts ---
+
+      Strcpy_STR(sPly, "_dhmaskply.ply");
+      SaveTable_PLY(Poly, sPly);
+      SetString_SYS("DHMASKPLY", "POLYGON", sPly);
+      SetString_SYS("DHMASKPLY", "VIEW", sView);
+   }
 }
-

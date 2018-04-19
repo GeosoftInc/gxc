@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Colour Symbol Plot"
 #include <version.gxh>
 TRANSLATIONDOMAIN = "geochemistry"
@@ -26,34 +27,36 @@ RESOURCE = "chclass.gr"
 //===========================================================================
 
 #include <all.gxh>
+             // clang-format on
 
 
-//===========================================================================
-//                             VARIABLES
-//===========================================================================
+             //===========================================================================
+             //                             VARIABLES
+             //===========================================================================
 
-string(STR_DEFAULT_SHORT) sEColour, sTemp;
-string(STR_DB_SYMBOL) sChan,sLine,sMask;
+             string(STR_DEFAULT_SHORT) sEColour,
+   sTemp;
+string(STR_DB_SYMBOL) sChan, sLine, sMask;
 string(STR_GROUP) sGroup;
 string(STR_VIEW_GROUP) sViewGroup;
-string(STR_DEFAULT) sUnits,sFont,sLabel;
-string(STR_FILE) sZone,sFileName;
+string(STR_DEFAULT) sUnits, sFont, sLabel;
+string(STR_FILE) sZone, sFileName;
 
-EDB        EData;
-DB         Data;
-DB_SYMB    XCh,YCh,ZCh,MCh;   // Channel handles
-DB_SYMB    Line;              // Line handle
-EMAP  EMap;
-MAP   Map;
+EDB EData;
+DB Data;
+DB_SYMB XCh, YCh, ZCh, MCh;  // Channel handles
+DB_SYMB Line;                // Line handle
+EMAP EMap;
+MAP Map;
 MVIEW View;
-DGW   Diag;
-IPJ   DataIPJ;
-VV    VVx,VVy,VVz,VVm;
-LST   List;
-int   iSymb,iLines,iTotLines,iWeight,iMask;
-real  rSize,rScaleMM;
+DGW Diag;
+IPJ DataIPJ;
+VV VVx, VVy, VVz, VVm;
+LST List;
+int iSymb, iLines, iTotLines, iWeight, iMask;
+real rSize, rScaleMM;
 
-CSYMB  CSymb;
+CSYMB CSymb;
 
 
 //===========================================================================
@@ -69,13 +72,15 @@ CSYMB  CSymb;
 
    // --- Get Default Mask Channel if required, and if it exists or is "None" ---
 
-   if (iGlobal_SYS("CHIMERA.MASK",sMask) == 0) {
-      if (iGlobal_SYS("CHIMERA.DEFMASK",sTemp) == 0) {
-         if(iScanI_STR(sTemp)==1 &&
-            (iExistChan_DB(Data,sMask) || 
-             !iStrcmp_STR(sMask,_n("None"),STR_CASE_TOLERANT))) {
-
-            SetString_SYS("CHCLASS","MASK",sMask);
+   if (iGlobal_SYS("CHIMERA.MASK", sMask) == 0)
+   {
+      if (iGlobal_SYS("CHIMERA.DEFMASK", sTemp) == 0)
+      {
+         if (iScanI_STR(sTemp) == 1 &&
+             (iExistChan_DB(Data, sMask) ||
+              !iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)))
+         {
+            SetString_SYS("CHCLASS", "MASK", sMask);
          }
       }
    }
@@ -83,65 +88,64 @@ CSYMB  CSymb;
 
    // --- Are we running interactively ? ---
 
-   if (iInteractive_SYS()) {
-
-
+   if (iInteractive_SYS())
+   {
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("CHCLASS");
 
       // --- Set up mask channel list ---
 
-      List = GetList_DGW(Diag,_CHCLASS_0);
-      MaskChanLST_CHIMERA(Data,List);
-      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag, _CHCLASS_0);
+      MaskChanLST_CHIMERA(Data, List);
+      Sort_LST(List, 0, 0);
 
-      
+
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_CHCLASS_0,DGW_TEXT,     "CHCLASS","MASK");
-      SetInfoSYS_DGW(Diag,_CHCLASS_1,DGW_FILEPATH, "CHCLASS","ZONE");
-      SetInfoSYS_DGW(Diag,_CHCLASS_2,DGW_LISTALIAS,"CHCLASS","SYMBOL");
-      SetInfoSYS_DGW(Diag,_CHCLASS_3,DGW_TEXT,     "CHCLASS","SIZE");
-      SetInfoSYS_DGW(Diag,_CHCLASS_4,DGW_TEXT,     "CHCLASS","EDGECOLOR");
-      SetInfoSYS_DGW(Diag,_CHCLASS_5,DGW_LISTALIAS,"CHCLASS","WEIGHT");     
-     
+      SetInfoSYS_DGW(Diag, _CHCLASS_0, DGW_TEXT, "CHCLASS", "MASK");
+      SetInfoSYS_DGW(Diag, _CHCLASS_1, DGW_FILEPATH, "CHCLASS", "ZONE");
+      SetInfoSYS_DGW(Diag, _CHCLASS_2, DGW_LISTALIAS, "CHCLASS", "SYMBOL");
+      SetInfoSYS_DGW(Diag, _CHCLASS_3, DGW_TEXT, "CHCLASS", "SIZE");
+      SetInfoSYS_DGW(Diag, _CHCLASS_4, DGW_TEXT, "CHCLASS", "EDGECOLOR");
+      SetInfoSYS_DGW(Diag, _CHCLASS_5, DGW_LISTALIAS, "CHCLASS", "WEIGHT");
+
       // --- Run the Dialogue ---
 
-      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
 
-      
+
       // --- Put values back in INI ---
 
-      GetInfoSYS_DGW(Diag,_CHCLASS_0,DGW_TEXT,     "CHCLASS","MASK");
-      GetInfoSYS_DGW(Diag,_CHCLASS_1,DGW_FILEPATH, "CHCLASS","ZONE");
-      GetInfoSYS_DGW(Diag,_CHCLASS_2,DGW_LISTALIAS,"CHCLASS","SYMBOL");
-      GetInfoSYS_DGW(Diag,_CHCLASS_3,DGW_TEXT,     "CHCLASS","SIZE");
-      GetInfoSYS_DGW(Diag,_CHCLASS_4,DGW_TEXT,     "CHCLASS","EDGECOLOR");
-      GetInfoSYS_DGW(Diag,_CHCLASS_5,DGW_LISTALIAS,"CHCLASS","WEIGHT");
-      
-    }
+      GetInfoSYS_DGW(Diag, _CHCLASS_0, DGW_TEXT, "CHCLASS", "MASK");
+      GetInfoSYS_DGW(Diag, _CHCLASS_1, DGW_FILEPATH, "CHCLASS", "ZONE");
+      GetInfoSYS_DGW(Diag, _CHCLASS_2, DGW_LISTALIAS, "CHCLASS", "SYMBOL");
+      GetInfoSYS_DGW(Diag, _CHCLASS_3, DGW_TEXT, "CHCLASS", "SIZE");
+      GetInfoSYS_DGW(Diag, _CHCLASS_4, DGW_TEXT, "CHCLASS", "EDGECOLOR");
+      GetInfoSYS_DGW(Diag, _CHCLASS_5, DGW_LISTALIAS, "CHCLASS", "WEIGHT");
+   }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("CHCLASS","CHANNEL",sChan);    
-   GetString_SYS("CHCLASS","MASK",sMask);    
-   GetString_SYS("CHCLASS","ZONE",sZone);
-   iSymb = iGetInt_SYS("CHCLASS","SYMBOL");     
-   rSize = rGetReal_SYS("CHCLASS","SIZE");     
-   GetString_SYS("CHCLASS","EDGECOLOR",sEColour);
-   iWeight = iGetInt_SYS("CHCLASS","WEIGHT");
-   
+   GetString_SYS("CHCLASS", "CHANNEL", sChan);
+   GetString_SYS("CHCLASS", "MASK", sMask);
+   GetString_SYS("CHCLASS", "ZONE", sZone);
+   iSymb = iGetInt_SYS("CHCLASS", "SYMBOL");
+   rSize = rGetReal_SYS("CHCLASS", "SIZE");
+   GetString_SYS("CHCLASS", "EDGECOLOR", sEColour);
+   iWeight = iGetInt_SYS("CHCLASS", "WEIGHT");
+
 
    // --- Apply mask? ---
 
    iMask = 0;
-   if(iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT)) {
-      MCh = FindChan_DB(Data,sMask);
-      if (MCh==NULLSYMB)  
+   if (iStrlen_STR(sMask) && iStrcmp_STR(sMask, _n("None"), STR_CASE_TOLERANT))
+   {
+      MCh = FindChan_DB(Data, sMask);
+      if (MCh == NULLSYMB)
          Abort_SYS(_("Mask channel does not exist."));
-      LockSymb_DB(Data,MCh,DB_LOCK_READONLY,DB_WAIT_NONE);     
+      LockSymb_DB(Data, MCh, DB_LOCK_READONLY, DB_WAIT_NONE);
       iMask = 1;
    }
 
@@ -159,19 +163,19 @@ CSYMB  CSymb;
    // --- channels exist ? ---
 
    XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
-   if (XCh==NULLSYMB)
+   if (XCh == NULLSYMB)
       Abort_SYS(_("The current X channel does not exist. This channel must be in the database for the GX to run."));
-   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-   
+   LockSymb_DB(Data, XCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+
    YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
-   if (YCh==NULLSYMB)
+   if (YCh == NULLSYMB)
       Abort_SYS(_("The current Y channel does not exist. This channel must be in the database for the GX to run."));
-   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-   
-   if (!iExistChan_DB(Data,sChan))
+   LockSymb_DB(Data, YCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+
+   if (!iExistChan_DB(Data, sChan))
       Abort_SYS(_("The specified symbol channel does not exist."));
-   ZCh = FindChan_DB(Data,sChan);
-   LockSymb_DB(Data,ZCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   ZCh = FindChan_DB(Data, sChan);
+   LockSymb_DB(Data, ZCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
 
 
    // --- get current map and lock it ---
@@ -182,18 +186,18 @@ CSYMB  CSymb;
 
    // --- open the data view ---
 
-   View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
-   
+   View = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
+
    // --- Handle Projections ---
-   
+
    DataIPJ = Create_IPJ();
-   GetIPJ_DB(Data,XCh,DataIPJ);
-   SetWorkingIPJ_MVIEW(View,DataIPJ);
-   
-   
+   GetIPJ_DB(Data, XCh, DataIPJ);
+   SetWorkingIPJ_MVIEW(View, DataIPJ);
+
+
    // --- Scaling ---
-   
-   SetThinRes_MVIEW(View,0.02);
+
+   SetThinRes_MVIEW(View, 0.02);
    rScaleMM = rScaleMM_MVIEW(View);
    Assert_SYS(rScaleMM > 0.0);
 
@@ -203,52 +207,52 @@ CSYMB  CSymb;
    //     dg_csymb.cpp depends on this format, remove any underscores in the
    //     database and channel names, but allow for channel names with underscores and units ---
 
-   Strcpy_STR(sGroup,"CSYMB_");
-   GetName_DB(Data,DB_NAME_FILE,sFileName);
-   FileNamePart_STR(sFileName,sFileName,STR_FILE_PART_NAME);
-   GetChanUnit_DB(Data,ZCh,sUnits);
+   Strcpy_STR(sGroup, "CSYMB_");
+   GetName_DB(Data, DB_NAME_FILE, sFileName);
+   FileNamePart_STR(sFileName, sFileName, STR_FILE_PART_NAME);
+   GetChanUnit_DB(Data, ZCh, sUnits);
 
    ReplaceChar2_STR(sFileName, "_", "");
 
-   
+
    //--- Append the units to the channel name ONLY if the units are defined,
    //    and they do not already appear in the channel name. ---
-   
-   if(iStrlen_STR(sUnits))
+
+   if (iStrlen_STR(sUnits))
    {
       // --- Look for "ppm" in "Cr_ppm", for instance ---
-      
-      if(iStrStr_STR(sChan, sUnits, STR_CASE_TOLERANT)==-1)
+
+      if (iStrStr_STR(sChan, sUnits, STR_CASE_TOLERANT) == -1)
       {
          Strcat_STR(sChan, "_");
          Strcat_STR(sChan, sUnits);
       }
    }
-   GenGroupName_STR("CSYMB",sFileName,sChan,sGroup);   
-   
- 
+   GenGroupName_STR("CSYMB", sFileName, sChan, sGroup);
+
+
    // --- get a CSYMB ---
 
    CSymb = Create_CSYMB(sZone);
 
 
    // --- edge Colour ---
-   
-   if (iStrcmp_STR(_n("none"),sEColour,STR_CASE_TOLERANT) != 0)
-      SetStaticCol_CSYMB(CSymb,iColor_MVIEW(sEColour),CSYMB_COLOR_EDGE);
-      
+
+   if (iStrcmp_STR(_n("none"), sEColour, STR_CASE_TOLERANT) != 0)
+      SetStaticCol_CSYMB(CSymb, iColor_MVIEW(sEColour), CSYMB_COLOR_EDGE);
+
 
    // --- Fixed size symbols ---
-   
-   SetScale_CSYMB(CSymb,rSize*rScaleMM);
-   
+
+   SetScale_CSYMB(CSymb, rSize * rScaleMM);
+
 
    // --- get some VV's ---
 
-   VVx = Create_VV(REAL,0);
-   VVy = Create_VV(REAL,0);
-   VVz = Create_VV(REAL,0);
-   VVm = Create_VV(INT,0);
+   VVx = Create_VV(REAL, 0);
+   VVy = Create_VV(REAL, 0);
+   VVz = Create_VV(REAL, 0);
+   VVm = Create_VV(INT, 0);
 
 
    // --- process lines ---
@@ -257,83 +261,81 @@ CSYMB  CSymb;
    iTotLines = iCountSelLines_DB(Data);
    Progress_SYS(1);
    Line = FirstSelLine_DB(Data);
-   while (iIsLineValid_DB(Data,Line))
+   while (iIsLineValid_DB(Data, Line))
    {
-
       // --- get line label ---
 
-      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-      LineLabel_DB(Data,Line,sLine,DB_LINE_LABEL_FORMAT_FULL);
-      UnLockSymb_DB(Data,Line);
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      LineLabel_DB(Data, Line, sLine, DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data, Line);
 
 
       // --- Update the Progress Bar ---
 
-      Strcpy_STR(sLabel,_("Processing line: "));
-      Strcat_STR(sLabel,sLine);
-      ProgName_SYS(sLabel,0);
-      ProgUpdateL_SYS(iLines,iTotLines);
+      Strcpy_STR(sLabel, _("Processing line: "));
+      Strcat_STR(sLabel, sLine);
+      ProgName_SYS(sLabel, 0);
+      ProgUpdateL_SYS(iLines, iTotLines);
 
 
       // --- Get data ---
 
-      GetChanVV_DB(Data,Line,XCh,VVx);
-      GetChanVV_DB(Data,Line,YCh,VVy);
-      GetChanVV_DB(Data,Line,ZCh,VVz);
-      ReFidVV_VV(VVx,VVz);
-      ReFidVV_VV(VVy,VVz);
+      GetChanVV_DB(Data, Line, XCh, VVx);
+      GetChanVV_DB(Data, Line, YCh, VVy);
+      GetChanVV_DB(Data, Line, ZCh, VVz);
+      ReFidVV_VV(VVx, VVz);
+      ReFidVV_VV(VVy, VVz);
 
-    
-		// --- mask? ---
 
-   	if(iMask) {
+      // --- mask? ---
 
-      	GetChanVV_DB(Data,Line,MCh,VVm);
-      	ReFidVV_VV(VVm,VVx);
-			Mask_VVU(VVx,VVm);
-		}
-			
+      if (iMask)
+      {
+         GetChanVV_DB(Data, Line, MCh, VVm);
+         ReFidVV_VV(VVm, VVx);
+         Mask_VVU(VVx, VVm);
+      }
+
 
       // --- Add to CSYMB class ---
 
-      AddData_CSYMB(CSymb,VVx,VVy,VVz);  
+      AddData_CSYMB(CSymb, VVx, VVy, VVz);
 
 
-      // --- Advance to Next Line ---        
+      // --- Advance to Next Line ---
 
-      Line = NextSelLine_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line);
       iLines++;
-
    }
 
 
    // --- set parameters ---
 
-   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT",sFont) == 1)
-      Strcpy_STR(sFont,_n("symbols"));
-   SetFont_CSYMB(CSymb,sFont,TRUE,iWeight,FALSE);
-   SetNumber_CSYMB(CSymb,iSymb);
-   SetAngle_CSYMB(CSymb,0.0);
-   SetFixed_CSYMB(CSymb,TRUE);
+   if (iGlobal_SYS("MONTAJ.DEFAULT_SYMBOL_FONT", sFont) == 1)
+      Strcpy_STR(sFont, _n("symbols"));
+   SetFont_CSYMB(CSymb, sFont, TRUE, iWeight, FALSE);
+   SetNumber_CSYMB(CSymb, iSymb);
+   SetAngle_CSYMB(CSymb, 0.0);
+   SetFixed_CSYMB(CSymb, TRUE);
 
 
    // --- Create polysymbol ---
 
-   ColSymbol_MVIEW(View,sGroup,CSymb);
+   ColSymbol_MVIEW(View, sGroup, CSymb);
 
 
    // --- add maker ---
 
-   Maker_MVIEW(View,1,1,"CHCLASS",MAKER_GX,_("Colour zone symbols..."),"CHCLASS;");
+   Maker_MVIEW(View, 1, 1, "CHCLASS", MAKER_GX, _("Colour zone symbols..."), "CHCLASS;");
 
 
    // --- Unlock the channel symbol ---
 
-   UnLockSymb_DB(Data,XCh);
-   UnLockSymb_DB(Data,YCh);
-   UnLockSymb_DB(Data,ZCh);
-   if(iMask)
-      UnLockSymb_DB(Data,MCh);
+   UnLockSymb_DB(Data, XCh);
+   UnLockSymb_DB(Data, YCh);
+   UnLockSymb_DB(Data, ZCh);
+   if (iMask)
+      UnLockSymb_DB(Data, MCh);
 
 
    // --- done ---
@@ -342,27 +344,26 @@ CSYMB  CSymb;
    Destroy_SYS(VVy);
    Destroy_SYS(VVz);
    Destroy_SYS(VVm);
-   
-   
+
+
    // --- close view and relase map ---
-   
+
    Destroy_MVIEW(View);
    Destroy_IPJ(DataIPJ);
-   UnLock_EMAP(EMap);      
+   UnLock_EMAP(EMap);
    Progress_SYS(0);
-   
-   
+
+
    // --- activate the group ---
-   
-   if (iInteractive_SYS()) { 
-   
-      Strcpy_STR(sViewGroup,"Data\\");
-      Strcat_STR(sViewGroup,sGroup);
-      ActivateGroup_EMAP(EMap,sViewGroup);
-      
+
+   if (iInteractive_SYS())
+   {
+      Strcpy_STR(sViewGroup, "Data\\");
+      Strcat_STR(sViewGroup, sGroup);
+      ActivateGroup_EMAP(EMap, sViewGroup);
    }
 
    // --- Release the Database ---
 
-   UnLock_EDB(EData);   
+   UnLock_EDB(EData);
 }

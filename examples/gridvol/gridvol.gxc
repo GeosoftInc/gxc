@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "GRIDVOL"
 #include <version.gxh>
 
@@ -33,29 +34,30 @@ RESOURCE = "gridvol.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 //===========================================================================
 //                             GLOBAL VARIABLES
 //===========================================================================
 
 DGW        Diag;              // Dialogue handle
-WA         hWA;
+WA hWA;
 
-int        i;                 // utility int
+int i;  // utility int
 
-string(STR_FILE) sGrd;             // Name of input grid
-string(STR_FILE) sResults;         // Output file (if not interactive mode)
-string(STR_DEFAULT) sMult;            // Multiplier string
-string(STR_DEFAULT) sRbase;           // Reference base string
-string(STR_DEFAULT) sStr;             // utility string
+string(STR_FILE) sGrd;       // Name of input grid
+string(STR_FILE) sResults;   // Output file (if not interactive mode)
+string(STR_DEFAULT) sMult;   // Multiplier string
+string(STR_DEFAULT) sRbase;  // Reference base string
+string(STR_DEFAULT) sStr;    // utility string
 
-real       rRbase;            // Reference base value
-real       rMult;             // Multiplier to final volume
-real       rVolA;             // Volume above ref. base
-real       rVolB;             // Volume below ref. base
-real       rDiff;             // Difference between volumes
+real rRbase;  // Reference base value
+real rMult;   // Multiplier to final volume
+real rVolA;   // Volume above ref. base
+real rVolB;   // Volume below ref. base
+real rDiff;   // Difference between volumes
 
-IMG        IMG1;              // Image tied to the input grid
+IMG IMG1;  // Image tied to the input grid
 
 
 //===========================================================================
@@ -63,65 +65,61 @@ IMG        IMG1;              // Image tied to the input grid
 //===========================================================================
 
 {
-
-   
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("GRIDVOLForm1");
-   
+
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_GRIDVOLFORM1_0,DGW_FILEPATH,"GRIDVOL","GRD");     
-      SetInfoSYS_DGW(Diag,_GRIDVOLFORM1_1,DGW_TEXT,"GRIDVOL","REFBASE");    
-      SetInfoSYS_DGW(Diag,_GRIDVOLFORM1_2,DGW_TEXT,"GRIDVOL","MULT");
+      SetInfoSYS_DGW(Diag, _GRIDVOLFORM1_0, DGW_FILEPATH, "GRIDVOL", "GRD");
+      SetInfoSYS_DGW(Diag, _GRIDVOLFORM1_1, DGW_TEXT, "GRIDVOL", "REFBASE");
+      SetInfoSYS_DGW(Diag, _GRIDVOLFORM1_2, DGW_TEXT, "GRIDVOL", "MULT");
 
       // --- Run the Dialogue ---
 
       i = iRunDialogue_DGW(Diag);
-      if (i != 0) Cancel_SYS();    // He hit cancel
+      if (i != 0) Cancel_SYS();  // He hit cancel
 
 
       // --- Get the Strings and replace in INI ---
 
-      GetInfoSYS_DGW(Diag,_GRIDVOLFORM1_0,DGW_FILEPATH,"GRIDVOL","GRD");     
-      GetInfoSYS_DGW(Diag,_GRIDVOLFORM1_1,DGW_TEXT,"GRIDVOL","REFBASE");    
-      GetInfoSYS_DGW(Diag,_GRIDVOLFORM1_2,DGW_TEXT,"GRIDVOL","MULT");
+      GetInfoSYS_DGW(Diag, _GRIDVOLFORM1_0, DGW_FILEPATH, "GRIDVOL", "GRD");
+      GetInfoSYS_DGW(Diag, _GRIDVOLFORM1_1, DGW_TEXT, "GRIDVOL", "REFBASE");
+      GetInfoSYS_DGW(Diag, _GRIDVOLFORM1_2, DGW_TEXT, "GRIDVOL", "MULT");
 
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
 
    // --- Get Parameters ---
 
-   GetString_SYS("GRIDVOL","GRD",sGrd);
-   GetString_SYS("GRIDVOL","REFBASE",sRbase);
-   GetString_SYS("GRIDVOL","MULT",sMult);
+   GetString_SYS("GRIDVOL", "GRD", sGrd);
+   GetString_SYS("GRIDVOL", "REFBASE", sRbase);
+   GetString_SYS("GRIDVOL", "MULT", sMult);
 
    // --- Check for null input file name string ---
 
    if (!iStrlen_STR(sGrd))
       Abort_SYS(_("Input Grid Not Specified!"));
 
-   // --- Check for null ref. base string and set to 
-   //     default value if blank ---     
+   // --- Check for null ref. base string and set to
+   //     default value if blank ---
 
    if (!iStrlen_STR(sRbase))
       rRbase = 0.0;
    else
-      rRbase = rGetReal_SYS("GRIDVOL","REFBASE");
-   
-   // --- Check for null multiplier string and set to 
-   //     default value if blank ---     
+      rRbase = rGetReal_SYS("GRIDVOL", "REFBASE");
+
+   // --- Check for null multiplier string and set to
+   //     default value if blank ---
 
    if (!iStrlen_STR(sMult))
       rMult = 1.0;
    else
-      rMult = rGetReal_SYS("GRIDVOL","MULT");
+      rMult = rGetReal_SYS("GRIDVOL", "MULT");
 
    // --- Check the reference parameter ---
 
@@ -132,22 +130,22 @@ IMG        IMG1;              // Image tied to the input grid
 
    if ((rMult < rMIN) || (rMult > rMAX) || (rMult == rDUMMY))
       Abort_SYS(_("Multiplier is Invalid. Must be from -1e31 to 1e32"));
-  
+
    Progress_SYS(1);
 
-   ProgName_SYS(_("Creating Image..."),1); 
+   ProgName_SYS(_("Creating Image..."), 1);
 
-   // --- Create Image tied to the grid ---  
-   
-   IMG1 = CreateFile_IMG(GS_FLOAT,sGrd,IMG_FILE_READONLY);
-   
-   ProgName_SYS(_("Calculating Grid Volumes..."),1);
+   // --- Create Image tied to the grid ---
+
+   IMG1 = CreateFile_IMG(GS_FLOAT, sGrd, IMG_FILE_READONLY);
+
+   ProgName_SYS(_("Calculating Grid Volumes..."), 1);
 
    // --- Set the INI input parameters ---
 
-   SetString_SYS("GRIDVOL","GRD",sGrd);
-   SetReal_SYS("GRIDVOL","REFBASE",rRbase);
-   SetReal_SYS("GRIDVOL","MULT",rMult);
+   SetString_SYS("GRIDVOL", "GRD", sGrd);
+   SetReal_SYS("GRIDVOL", "REFBASE", rRbase);
+   SetReal_SYS("GRIDVOL", "MULT", rMult);
 
    // --- Get volumes ---
 
@@ -155,11 +153,11 @@ IMG        IMG1;              // Image tied to the input grid
    rVolB = 0.0;
    rDiff = 0.0;
 
-   if (GridVol_IMU(IMG1,rRbase,rMult,rVolA,rVolB,rDiff))
+   if (GridVol_IMU(IMG1, rRbase, rMult, rVolA, rVolB, rDiff))
       Abort_SYS(_("Grid volume calculation failed."));
-   
+
    // --- Destroy the Images ---
-   
+
    Destroy_IMG(IMG1);
 
    // --- done calculation ---
@@ -168,29 +166,28 @@ IMG        IMG1;              // Image tied to the input grid
 
    // --- Set the GX output INI values ---
 
-   SetReal_SYS("GRIDVOL","ABOVE",rVolA);
-   SetReal_SYS("GRIDVOL","BELOW",rVolB);
-   SetReal_SYS("GRIDVOL","DIFF",rDiff);
+   SetReal_SYS("GRIDVOL", "ABOVE", rVolA);
+   SetReal_SYS("GRIDVOL", "BELOW", rVolB);
+   SetReal_SYS("GRIDVOL", "DIFF", rDiff);
 
    // --- If interactive - display results ---
 
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("GRIDVOLForm2");
-   
+
       // --- Set any Output Values ---
-    
-      FormatR_STR(rVolA,sStr,15,10);
-      SetInfo_DGW(Diag,_GRIDVOLFORM2_0,DGW_TEXT,sStr);
 
-      FormatR_STR(rVolB,sStr,15,10);
-      SetInfo_DGW(Diag,_GRIDVOLFORM2_1,DGW_TEXT,sStr);
+      FormatR_STR(rVolA, sStr, 15, 10);
+      SetInfo_DGW(Diag, _GRIDVOLFORM2_0, DGW_TEXT, sStr);
 
-      FormatR_STR(rDiff,sStr,15,10);
-      SetInfo_DGW(Diag,_GRIDVOLFORM2_2,DGW_TEXT,sStr);
+      FormatR_STR(rVolB, sStr, 15, 10);
+      SetInfo_DGW(Diag, _GRIDVOLFORM2_1, DGW_TEXT, sStr);
+
+      FormatR_STR(rDiff, sStr, 15, 10);
+      SetInfo_DGW(Diag, _GRIDVOLFORM2_2, DGW_TEXT, sStr);
 
       // --- Run the Dialogue ---
 
@@ -199,37 +196,35 @@ IMG        IMG1;              // Image tied to the input grid
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
    else
    {
-      GetString_SYS("GRIDVOL","RESULTS",sResults);
+      GetString_SYS("GRIDVOL", "RESULTS", sResults);
       if (!iStrlen_STR(sResults))
          Abort_SYS(_("Results file required in non-interactive mode!"));
 
-      hWA = Create_WA(sResults,WA_NEW);
-      
+      hWA = Create_WA(sResults, WA_NEW);
+
       // --- Set any Output Values ---
-    
-      FormatR_STR(rVolA,sStr,15,10);
-      Puts_WA(hWA,_("Volume above reference base: "));
-      Puts_WA(hWA,sStr);
+
+      FormatR_STR(rVolA, sStr, 15, 10);
+      Puts_WA(hWA, _("Volume above reference base: "));
+      Puts_WA(hWA, sStr);
       NewLine_WA(hWA);
 
-      FormatR_STR(rVolB,sStr,15,10);
-      Puts_WA(hWA,_("Volume below reference base: "));
-      Puts_WA(hWA,sStr);
+      FormatR_STR(rVolB, sStr, 15, 10);
+      Puts_WA(hWA, _("Volume below reference base: "));
+      Puts_WA(hWA, sStr);
       NewLine_WA(hWA);
 
-      FormatR_STR(rDiff,sStr,15,10);
-      Puts_WA(hWA,_("Difference: "));
-      Puts_WA(hWA,sStr);
+      FormatR_STR(rDiff, sStr, 15, 10);
+      Puts_WA(hWA, _("Difference: "));
+      Puts_WA(hWA, sStr);
       NewLine_WA(hWA);
 
       Destroy_WA(hWA);
    }
 
-   
+
    // --- Finished ---
-   
 }

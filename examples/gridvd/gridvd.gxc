@@ -1,4 +1,5 @@
 //=====================g======================================================
+// clang-format off
 NAME          = "GRIDVD"
 #include <version.gxh>
 
@@ -18,22 +19,23 @@ RESOURCE = "gridvd.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-DGW        Diag;              // Dialogue handle
+   DGW Diag;  // Dialogue handle
 
-int        i;                 // utility int
-string(STR_FILE)  sGrd;            // Name of input grid
-string(STR_FILE)  sNew;            // Name of new resultant grid
+int i;                  // utility int
+string(STR_FILE) sGrd;  // Name of input grid
+string(STR_FILE) sNew;  // Name of new resultant grid
 
-IMG         IMGi;             // Image tied to the input grid
-IMG         IMGo;             // Image for the output grid
-IMG         IMGt;             // Image for the trend removed grid
+IMG IMGi;  // Image tied to the input grid
+IMG IMGo;  // Image for the output grid
+IMG IMGt;  // Image for the trend removed grid
 
-VM          VMcoef;           // VM contains trend coefficients (if any)
+VM VMcoef;  // VM contains trend coefficients (if any)
 
 //===========================================================================
 //                            GRID UTIL CODE
@@ -45,11 +47,11 @@ VM          VMcoef;           // VM contains trend coefficients (if any)
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("GRIDVDForm");
-   
+
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_GRIDVDFORM_0,DGW_FILEPATH,"GRIDVD","GRD");     
-      SetInfoSYS_DGW(Diag,_GRIDVDFORM_1,DGW_FILEPATH,"GRIDVD","NEW");    
+      SetInfoSYS_DGW(Diag, _GRIDVDFORM_0, DGW_FILEPATH, "GRIDVD", "GRD");
+      SetInfoSYS_DGW(Diag, _GRIDVDFORM_1, DGW_FILEPATH, "GRIDVD", "NEW");
 
       // --- Run the Dialogue ---
 
@@ -58,9 +60,9 @@ VM          VMcoef;           // VM contains trend coefficients (if any)
 
       // --- Get the Strings and replace in INI ---
 
-      GetInfoSYS_DGW(Diag,_GRIDVDFORM_0,DGW_FILEPATH,"GRIDVD","GRD");     
-      GetInfoSYS_DGW(Diag,_GRIDVDFORM_1,DGW_FILEPATH,"GRIDVD","NEW");    
-           
+      GetInfoSYS_DGW(Diag, _GRIDVDFORM_0, DGW_FILEPATH, "GRIDVD", "GRD");
+      GetInfoSYS_DGW(Diag, _GRIDVDFORM_1, DGW_FILEPATH, "GRIDVD", "NEW");
+
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
@@ -69,8 +71,8 @@ VM          VMcoef;           // VM contains trend coefficients (if any)
 
    // --- Get Parameters ---
 
-   GetString_SYS("GRIDVD","GRD",sGrd);
-   GetString_SYS("GRIDVD","NEW",sNew);
+   GetString_SYS("GRIDVD", "GRD", sGrd);
+   GetString_SYS("GRIDVD", "NEW", sNew);
 
    // --- Check for null input and output file name strings ---
 
@@ -78,43 +80,43 @@ VM          VMcoef;           // VM contains trend coefficients (if any)
       Abort_SYS(_("Input Grid Not Specified!"));
 
    if (!iStrMin2_STR(sNew))
-      Abort_SYS(_("New Resultant Grid Not Specified!"));   
+      Abort_SYS(_("New Resultant Grid Not Specified!"));
 
-   if (!iStrcmp_STR(sGrd,sNew,STR_CASE_TOLERANT))
+   if (!iStrcmp_STR(sGrd, sNew, STR_CASE_TOLERANT))
       Abort_SYS(_("Names of Input Grid and New Resultant Grid Must be Different!"));
 
    Progress_SYS(1);
 
-   ProgName_SYS(_("Creating Images..."),1); 
+   ProgName_SYS(_("Creating Images..."), 1);
 
 
-   // --- Create Images tied to the grids ---  
-   
-   IMGi = CreateFile_IMG(GS_DOUBLE,sGrd,IMG_FILE_READONLY);
-   IMGo = CreateOutFile_IMG(GS_DOUBLE,sNew,IMGi); 
-   IMGt = CreateOutFile_IMG(GS_DOUBLE,"__tr_tmp.grd",IMGi); 
+   // --- Create Images tied to the grids ---
+
+   IMGi = CreateFile_IMG(GS_DOUBLE, sGrd, IMG_FILE_READONLY);
+   IMGo = CreateOutFile_IMG(GS_DOUBLE, sNew, IMGi);
+   IMGt = CreateOutFile_IMG(GS_DOUBLE, "__tr_tmp.grd", IMGi);
 
 
    // --- Grid Trend Remove ---
 
-   ProgName_SYS(_("Grid Trend Remove ..."),1);
+   ProgName_SYS(_("Grid Trend Remove ..."), 1);
 
-   VMcoef = Create_VM(REAL,10);
+   VMcoef = Create_VM(REAL, 10);
 
-   GridTrnd_IMU(IMGi,IMGt,0,IMU_TREND_EDGE,1,VMcoef,3);
+   GridTrnd_IMU(IMGi, IMGt, 0, IMU_TREND_EDGE, 1, VMcoef, 3);
 
    // --- Convoluting the grid ---
 
-   ProgName_SYS(_("Grid Convolution..."),1);
+   ProgName_SYS(_("Grid Convolution..."), 1);
 
-   GridVD_IMU(IMGt,IMGo);   
+   GridVD_IMU(IMGt, IMGo);
 
    // --- Destroy the Images and VV ---
-   
+
    Destroy_IMG(IMGi);
    Destroy_IMG(IMGo);
    Destroy_IMG(IMGt);
-   if(VMcoef)  Destroy_VM(VMcoef);
+   if (VMcoef) Destroy_VM(VMcoef);
    if (iFileExist_SYS("__tr_tmp.grd"))
       iDeleteFile_SYS("__tr_tmp.grd");
    if (iFileExist_SYS("__tr_tmp.grd.gi"))
@@ -122,13 +124,12 @@ VM          VMcoef;           // VM contains trend coefficients (if any)
 
 
    // --- done ---
-   
+
    Progress_SYS(0);
-   
+
 
    // --- Add this grid to the current project ---
 
-   if (iInteractive_SYS())   
-      iAddDocument_PROJ(sNew,"Grid",1);
-      
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sNew, "Grid", 1);
 }

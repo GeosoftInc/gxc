@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Load location data."
 #include <version.gxh>
 
@@ -31,24 +32,25 @@ RESOURCE = "grldxye.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                               VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                               VARIABLES
+   //===========================================================================
 
-EDB         eDB;                  // Database
-DB          hDB;                  // Database
-EDB         eLdDB;                // Load from database
-DB          hLdDB;                // Load from database
-DGW         hDGW;                 // Dialogue handle
-LTB         hLTB;                 // Table Handle
-DB_SYMB     Group,Ch;
-REG         hWorkREG;
+   EDB eDB;  // Database
+DB hDB;      // Database
+EDB eLdDB;   // Load from database
+DB hLdDB;    // Load from database
+DGW hDGW;    // Dialogue handle
+LTB hLTB;    // Table Handle
+DB_SYMB Group, Ch;
+REG hWorkREG;
 
-string(STR_FILE) sDB,sFile;
+string(STR_FILE) sDB, sFile;
 string(STR_DEFAULT_SHORT) sType;
 string(STR_DB_SYMBOL) sXCh, sYCh;
-int i,i0,iType,iForceCreate;
+int i, i0, iType, iForceCreate;
 
 #define TYPE_CSV 0
 #define TYPE_GDB 1
@@ -58,266 +60,272 @@ int i,i0,iType,iForceCreate;
 //===========================================================================
 
 {
-
    // --- Suppress "Create new database" message? Must set every time. ---
-   
+
    iForceCreate = iGetInt_SYS("GRLDXYE", "FORCE_CREATE");
-   if(iForceCreate!=1) iForceCreate = 0;
-   SetInt_SYS("GRLDXYE", "FORCE_CREATE", 0);   
-   
-   
+   if (iForceCreate != 1) iForceCreate = 0;
+   SetInt_SYS("GRLDXYE", "FORCE_CREATE", 0);
+
+
    // --- get workspace REG and parameters ---
-   
+
    hWorkREG = Create_REG(156);
    GetWorkspaceREG_SYS(hWorkREG);
-   Get_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sDB,sizeof(sDB));
-   
-   
+   Get_REG(hWorkREG, "GRAVRED.LOCATION_DATABASE", sDB, sizeof(sDB));
+
+
    // --- determine file type ---
-   
-   GetString_SYS("GRLDXYE","FILE",sFile);
-   if (iStriMask_STR("*.gdb",sFile))
-      Strcpy_STR(sType,_n("Geosoft database (gdb)"));
+
+   GetString_SYS("GRLDXYE", "FILE", sFile);
+   if (iStriMask_STR("*.gdb", sFile))
+      Strcpy_STR(sType, _n("Geosoft database (gdb)"));
    else
-      Strcpy_STR(sType,_n("ASCII CSV file"));
-      
+      Strcpy_STR(sType, _n("ASCII CSV file"));
+
 
    // --- Are we running interactively ? ---
 
-   if (iInteractive_SYS()) {
-   
+   if (iInteractive_SYS())
+   {
       i = 0;
-      while (i != 2) switch (i) {
-         
+      while (i != 2)
+         switch (i)
+         {
          case 0:
-         
+
             hDGW = Create_DGW("GRLDXYE");
-            SetInfo_DGW(hDGW,_GRLDXYE_0,DGW_FILEPATH,sDB);
-            SetInfo_DGW(hDGW,_GRLDXYE_1,DGW_TEXT,sType);
-      
+            SetInfo_DGW(hDGW, _GRLDXYE_0, DGW_FILEPATH, sDB);
+            SetInfo_DGW(hDGW, _GRLDXYE_1, DGW_TEXT, sType);
+
             i0 = 0;
-            while(!i0) {
-      
+            while (!i0)
+            {
                i = iRunDialogue_DGW(hDGW);
                if (i == -1) Cancel_SYS();
-               GetInfo_DGW(hDGW,_GRLDXYE_0,DGW_FILEPATH,sDB);
-               GetInfo_DGW(hDGW,_GRLDXYE_1,DGW_TEXT,sType);
-         
-   
+               GetInfo_DGW(hDGW, _GRLDXYE_0, DGW_FILEPATH, sDB);
+               GetInfo_DGW(hDGW, _GRLDXYE_1, DGW_TEXT, sType);
+
+
                // --- check database exists ---
-   
-               if (!iFileExist_SYS(sDB)) {
-                  if(iForceCreate)
+
+               if (!iFileExist_SYS(sDB))
+               {
+                  if (iForceCreate)
                      i0 = 1;
                   else
-                     i0 = iDisplayQuestion_SYS(sDB,_("Database does not exist.  Create new?"));
-               } else
-                  i0 = 1;   
+                     i0 = iDisplayQuestion_SYS(sDB, _("Database does not exist.  Create new?"));
+               }
+               else
+                  i0 = 1;
             }
-      
+
             Destroy_DGW(hDGW);
-            break;      
-      
+            break;
+
          case 1:
-         
-         
+
+
             // --- determine file type ---
-            
-            if (iCharComp_STR(sType,"G")) {
-            
+
+            if (iCharComp_STR(sType, "G"))
+            {
                iType = TYPE_GDB;
                hDGW = Create_DGW("GRLDXYE_GDB");
-               SetInfo_DGW(hDGW,_GRLDXYE_GDB_0,DGW_FILEPATH,sFile);
+               SetInfo_DGW(hDGW, _GRLDXYE_GDB_0, DGW_FILEPATH, sFile);
                i = iRunDialogue_DGW(hDGW);
                if (i == -1) Cancel_SYS();
                if (i == 2)
-                  GetInfo_DGW(hDGW,_GRLDXYE_GDB_0,DGW_FILEPATH,sFile);
+                  GetInfo_DGW(hDGW, _GRLDXYE_GDB_0, DGW_FILEPATH, sFile);
                Destroy_DGW(hDGW);
-               
-            } else {
-            
+            }
+            else
+            {
                iType = TYPE_CSV;
                hDGW = Create_DGW("GRLDXYE_CSV");
-               SetInfo_DGW(hDGW,_GRLDXYE_CSV_0,DGW_FILEPATH,sFile);
+               SetInfo_DGW(hDGW, _GRLDXYE_CSV_0, DGW_FILEPATH, sFile);
                i = iRunDialogue_DGW(hDGW);
                if (i == -1) Cancel_SYS();
                if (i == 2)
-                  GetInfo_DGW(hDGW,_GRLDXYE_CSV_0,DGW_FILEPATH,sFile);
+                  GetInfo_DGW(hDGW, _GRLDXYE_CSV_0, DGW_FILEPATH, sFile);
                Destroy_DGW(hDGW);
-               
             }
-            
+
             break;
-         
+
          default:
-            Abort_SYS(_("I'm lost"));   
-      }
-      
+            Abort_SYS(_("I'm lost"));
+         }
    }
-   
-   
+
+
    // --- set parameters ---
 
-   SetString_SYS("GRLDXYE","FILE",sFile);
-   SetString_SYS("GRLDXYE","TYPE",sType);
-   if (iCharComp_STR(sType,"G"))
+   SetString_SYS("GRLDXYE", "FILE", sFile);
+   SetString_SYS("GRLDXYE", "TYPE", sType);
+   if (iCharComp_STR(sType, "G"))
       iType = TYPE_GDB;
    else
       iType = TYPE_CSV;
-      
-            
+
+
    // --- Is the location database actually set up correctly? ---
 
-   if(iRunGX_SYS("grtestloc.gx"))
+   if (iRunGX_SYS("grtestloc.gx"))
       Cancel_SYS();
-   
+
 
    // --- load/create the new database ---
 
-   if (!iFileExist_SYS(sDB)) {
-      Set_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sDB);
+   if (!iFileExist_SYS(sDB))
+   {
+      Set_REG(hWorkREG, "GRAVRED.LOCATION_DATABASE", sDB);
       SetWorkspaceREG_SYS(hWorkREG);
-      if (iRunGX_SYS("grxyenew")) 
+      if (iRunGX_SYS("grxyenew"))
          Abort_SYS(_("Unable to create a new location database."));
    }
-   
-   
+
+
    // --- new database ---
 
    eDB = Load_EDB(sDB);
    hDB = Lock_EDB(eDB);
-   Group = FindSymb_DB(hDB,"Location",DB_SYMB_LINE);
+   Group = FindSymb_DB(hDB, "Location", DB_SYMB_LINE);
    if (Group == NULLSYMB)
       Group = FirstSelLine_DB(hDB);
    if (Group == NULLSYMB)
-      Abort_SYS(_("No location group or selected lines in location database."));   
-   
-   
+      Abort_SYS(_("No location group or selected lines in location database."));
+
+
    // --- refid to match station ---
-   
-   if (iExistSymb_DB(hDB,"Station",DB_SYMB_CHAN)) {
-      Ch = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
-      LockSymb_DB(hDB,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);
-      ReFidAllCh_DU(hDB,Group,FindSymb_DB(hDB,"Station",DB_SYMB_CHAN));
-      UnLockSymb_DB(hDB,Ch);
-      Associate_DB(hDB,Group,Ch);
-   } else {
-      Ch = CreateSymb_DB(hDB,"Station",DB_SYMB_CHAN,DB_OWN_SHARED,-24);
-      LOCK_RW(hDB,Ch);
-      SetChanWidth_DB(hDB,Ch,10);
-      UNLOCK(hDB,Ch);
-      Associate_DB(hDB,Group,Ch);
+
+   if (iExistSymb_DB(hDB, "Station", DB_SYMB_CHAN))
+   {
+      Ch = FindSymb_DB(hDB, "Station", DB_SYMB_CHAN);
+      LockSymb_DB(hDB, Ch, DB_LOCK_READONLY, DB_WAIT_NONE);
+      ReFidAllCh_DU(hDB, Group, FindSymb_DB(hDB, "Station", DB_SYMB_CHAN));
+      UnLockSymb_DB(hDB, Ch);
+      Associate_DB(hDB, Group, Ch);
    }
-   
-   
+   else
+   {
+      Ch = CreateSymb_DB(hDB, "Station", DB_SYMB_CHAN, DB_OWN_SHARED, -24);
+      LOCK_RW(hDB, Ch);
+      SetChanWidth_DB(hDB, Ch, 10);
+      UNLOCK(hDB, Ch);
+      Associate_DB(hDB, Group, Ch);
+   }
+
+
    // --- create geographic channels ---
 
-   Ch = FindSymb_DB(hDB,"Longitude",DB_SYMB_CHAN);
-   if (Ch == NULLSYMB) {
-      Ch = CreateSymb_DB(hDB,"Longitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
-      LOCK_RW(hDB,Ch);
-      SetChanWidth_DB(hDB,Ch,13);
-      SetChanDecimal_DB(hDB,Ch,2);
-      SetChanFormat_DB(hDB,Ch,DB_CHAN_FORMAT_GEOGR);
-      SetChanUnit_DB(hDB,Ch,_("dega"));
-      UNLOCK(hDB,Ch);
-      Associate_DB(hDB,Group,Ch);
+   Ch = FindSymb_DB(hDB, "Longitude", DB_SYMB_CHAN);
+   if (Ch == NULLSYMB)
+   {
+      Ch = CreateSymb_DB(hDB, "Longitude", DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);
+      LOCK_RW(hDB, Ch);
+      SetChanWidth_DB(hDB, Ch, 13);
+      SetChanDecimal_DB(hDB, Ch, 2);
+      SetChanFormat_DB(hDB, Ch, DB_CHAN_FORMAT_GEOGR);
+      SetChanUnit_DB(hDB, Ch, _("dega"));
+      UNLOCK(hDB, Ch);
+      Associate_DB(hDB, Group, Ch);
    }
 
-   Ch = FindSymb_DB(hDB,"Latitude",DB_SYMB_CHAN);
-   if (Ch == NULLSYMB) {
-      Ch = CreateSymb_DB(hDB,"Latitude",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
-      LOCK_RW(hDB,Ch);
-      SetChanWidth_DB(hDB,Ch,13);
-      SetChanDecimal_DB(hDB,Ch,2);
-      SetChanFormat_DB(hDB,Ch,DB_CHAN_FORMAT_GEOGR);
-      SetChanUnit_DB(hDB,Ch,_("dega"));
-      UNLOCK(hDB,Ch);
-      Associate_DB(hDB,Group,Ch);
+   Ch = FindSymb_DB(hDB, "Latitude", DB_SYMB_CHAN);
+   if (Ch == NULLSYMB)
+   {
+      Ch = CreateSymb_DB(hDB, "Latitude", DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);
+      LOCK_RW(hDB, Ch);
+      SetChanWidth_DB(hDB, Ch, 13);
+      SetChanDecimal_DB(hDB, Ch, 2);
+      SetChanFormat_DB(hDB, Ch, DB_CHAN_FORMAT_GEOGR);
+      SetChanUnit_DB(hDB, Ch, _("dega"));
+      UNLOCK(hDB, Ch);
+      Associate_DB(hDB, Group, Ch);
    }
 
    Ch = GetXYZChanSymb_DB(hDB, DB_CHAN_X);
-   if (Ch == NULLSYMB) {
+   if (Ch == NULLSYMB)
+   {
       GetXYZChan_DB(hDB, DB_CHAN_X, sXCh);
-      Ch = CreateSymb_DB(hDB,sXCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
-      LOCK_RW(hDB,Ch);
-      SetChanWidth_DB(hDB,Ch,10);
-      SetChanDecimal_DB(hDB,Ch,2);
-      SetChanUnit_DB(hDB,Ch,_("m"));
-      UNLOCK(hDB,Ch);
-      Associate_DB(hDB,Group,Ch);
+      Ch = CreateSymb_DB(hDB, sXCh, DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);
+      LOCK_RW(hDB, Ch);
+      SetChanWidth_DB(hDB, Ch, 10);
+      SetChanDecimal_DB(hDB, Ch, 2);
+      SetChanUnit_DB(hDB, Ch, _("m"));
+      UNLOCK(hDB, Ch);
+      Associate_DB(hDB, Group, Ch);
    }
 
    Ch = GetXYZChanSymb_DB(hDB, DB_CHAN_Y);
-   if (Ch == NULLSYMB) {
+   if (Ch == NULLSYMB)
+   {
       GetXYZChan_DB(hDB, DB_CHAN_Y, sYCh);
-      Ch = CreateSymb_DB(hDB,sYCh,DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
-      LOCK_RW(hDB,Ch);
-      SetChanWidth_DB(hDB,Ch,10);
-      SetChanDecimal_DB(hDB,Ch,2);
-      SetChanUnit_DB(hDB,Ch,_("m"));
-      UNLOCK(hDB,Ch);
-      Associate_DB(hDB,Group,Ch);
+      Ch = CreateSymb_DB(hDB, sYCh, DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);
+      LOCK_RW(hDB, Ch);
+      SetChanWidth_DB(hDB, Ch, 10);
+      SetChanDecimal_DB(hDB, Ch, 2);
+      SetChanUnit_DB(hDB, Ch, _("m"));
+      UNLOCK(hDB, Ch);
+      Associate_DB(hDB, Group, Ch);
    }
 
-   Ch = FindSymb_DB(hDB,"Elevation",DB_SYMB_CHAN);
-   if (Ch == NULLSYMB) {
-      Ch = CreateSymb_DB(hDB,"Elevation",DB_SYMB_CHAN,DB_OWN_SHARED,GS_DOUBLE);
-      LOCK_RW(hDB,Ch);
-      SetChanWidth_DB(hDB,Ch,10);
-      SetChanDecimal_DB(hDB,Ch,2);
-      SetChanUnit_DB(hDB,Ch,_("m"));
-      UNLOCK(hDB,Ch);
-      Associate_DB(hDB,Group,Ch);
+   Ch = FindSymb_DB(hDB, "Elevation", DB_SYMB_CHAN);
+   if (Ch == NULLSYMB)
+   {
+      Ch = CreateSymb_DB(hDB, "Elevation", DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);
+      LOCK_RW(hDB, Ch);
+      SetChanWidth_DB(hDB, Ch, 10);
+      SetChanDecimal_DB(hDB, Ch, 2);
+      SetChanUnit_DB(hDB, Ch, _("m"));
+      UNLOCK(hDB, Ch);
+      Associate_DB(hDB, Group, Ch);
    }
-     
-   if (iType == TYPE_CSV) {
-   
-   
+
+   if (iType == TYPE_CSV)
+   {
       // --- load from CSV ---
 
-      hLTB = CreateCSV_LTB(sFile);                           
-      LoadLTB_DU(hDB,Group,hLTB,DU_LOADLTB_APPEND);
-      AssociateAll_DB(hDB,Group);
+      hLTB = CreateCSV_LTB(sFile);
+      LoadLTB_DU(hDB, Group, hLTB, DU_LOADLTB_APPEND);
+      AssociateAll_DB(hDB, Group);
       Destroy_SYS(hLTB);
-      
-   
-   } else {
-   
-   
+   }
+   else
+   {
       // --- load from separate database ---
 
-      if (iLoaded_EDB(sFile)) {
+      if (iLoaded_EDB(sFile))
+      {
          eLdDB = Load_EDB(sFile);
          hLdDB = Lock_EDB(eLdDB);
-      } else   
-         hLdDB = Open_DB(sFile,"SUPER","");
-      
-      Append_DU(hLdDB,hDB,TRUE);
-      AssociateAll_DB(hDB,Group);
-      
+      }
+      else
+         hLdDB = Open_DB(sFile, "SUPER", "");
+
+      Append_DU(hLdDB, hDB, TRUE);
+      AssociateAll_DB(hDB, Group);
    }
-   
-            
+
+
    // --- update the reg ---
 
-   Set_REG(hWorkREG,"GRAVRED.LOCATION_DATABASE",sDB);
+   Set_REG(hWorkREG, "GRAVRED.LOCATION_DATABASE", sDB);
    SetWorkspaceREG_SYS(hWorkREG);
    Destroy_SYS(hWorkREG);
 
 
    // --- refid to match station if there is station data ---
-   
-   Ch = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
-   LOCK_R(hDB,Ch);
-   if (iGetChannelLength_DB(hDB,Group,Ch) > 0)
-      ReFidAllCh_DU(hDB,Group,FindSymb_DB(hDB,"Station",DB_SYMB_CHAN));
-   UNLOCK(hDB,Ch);
-      
+
+   Ch = FindSymb_DB(hDB, "Station", DB_SYMB_CHAN);
+   LOCK_R(hDB, Ch);
+   if (iGetChannelLength_DB(hDB, Group, Ch) > 0)
+      ReFidAllCh_DU(hDB, Group, FindSymb_DB(hDB, "Station", DB_SYMB_CHAN));
+   UNLOCK(hDB, Ch);
+
 
    // --- delete line 0 ---
 
    UnLock_EDB(eDB);
    DelLine0_EDB(eDB);
-   
 }

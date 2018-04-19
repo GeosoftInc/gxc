@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Redisplay assay channels"
 #include <version.gxh>
 
@@ -25,23 +26,25 @@ RESOURCE = "chredisplayassay.gr"
 //===========================================================================
 
 #include <all.gxh>
+       // clang-format on
 
 
-//===========================================================================
-//                             VARIABLES
-//===========================================================================
+       //===========================================================================
+       //                             VARIABLES
+       //===========================================================================
 
-string(STR_DB_SYMBOL) sChan, sLine;
+       string(STR_DB_SYMBOL) sChan,
+   sLine;
 string(STR_DEFAULT) sChOpt;
 string(32768) sChannels;
 
-EDB      EData;
-DB       Data;
-DGW      Diag;
-LST      AssayLST, ChLST, DispLST;
-DB_SYMB  Chan, Line;
+EDB EData;
+DB Data;
+DGW Diag;
+LST AssayLST, ChLST, DispLST;
+DB_SYMB Chan, Line;
 
-int   i, iItem, iND, iNAssay, iSort, iSelect;
+int i, iItem, iND, iNAssay, iSort, iSelect;
 
 //===========================================================================
 //                           MAP CODE
@@ -56,40 +59,38 @@ int   i, iItem, iND, iNAssay, iSort, iSelect;
 
    // --- Are we running interactively ? ---
 
-   if (iInteractive_SYS()) {
-
-
+   if (iInteractive_SYS())
+   {
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("CHREDISPLAY");
 
-      
+
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_CHREDISPLAY_0,DGW_LISTALIAS, "CHREDISPLAYASSAY","SELECTION");
-      SetInfoSYS_DGW(Diag,_CHREDISPLAY_1,DGW_LISTALIAS, "CHREDISPLAYASSAY","SORT");
-     
+      SetInfoSYS_DGW(Diag, _CHREDISPLAY_0, DGW_LISTALIAS, "CHREDISPLAYASSAY", "SELECTION");
+      SetInfoSYS_DGW(Diag, _CHREDISPLAY_1, DGW_LISTALIAS, "CHREDISPLAYASSAY", "SORT");
+
       // --- Run the Dialogue ---
 
-      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
 
-      
+
       // --- Put values back in INI ---
 
-      GetInfoSYS_DGW(Diag,_CHREDISPLAY_0,DGW_LISTALIAS, "CHREDISPLAYASSAY","SELECTION");
-      GetInfoSYS_DGW(Diag,_CHREDISPLAY_1,DGW_LISTALIAS, "CHREDISPLAYASSAY","SORT");
-      
-    }
+      GetInfoSYS_DGW(Diag, _CHREDISPLAY_0, DGW_LISTALIAS, "CHREDISPLAYASSAY", "SELECTION");
+      GetInfoSYS_DGW(Diag, _CHREDISPLAY_1, DGW_LISTALIAS, "CHREDISPLAYASSAY", "SORT");
+   }
 
 
    // --- Get Parameters ---
 
-   iSelect = iGetInt_SYS("CHREDISPLAYASSAY","SELECTION");
-   GetString_SYS("CHREDISPLAYASSAY","SELECTION",sChOpt);
-   if(!iStrlen_STR(sChOpt)) Strcpy_STR(sChOpt, "ASSAY");  // default to all
+   iSelect = iGetInt_SYS("CHREDISPLAYASSAY", "SELECTION");
+   GetString_SYS("CHREDISPLAYASSAY", "SELECTION", sChOpt);
+   if (!iStrlen_STR(sChOpt)) Strcpy_STR(sChOpt, "ASSAY");  // default to all
 
-   iSort   = iGetInt_SYS("CHREDISPLAYASSAY","SORT");
-   if(iSort != 0) iSort = 1;        // default to sort
+   iSort = iGetInt_SYS("CHREDISPLAYASSAY", "SORT");
+   if (iSort != 0) iSort = 1;  // default to sort
 
 
    // --- Get the list of all currently displayed channels ---
@@ -97,30 +98,29 @@ int   i, iItem, iND, iNAssay, iSort, iSelect;
    DispLST = Create_LST(128);
    if (iInteractive_SYS())
       iND = iDispChanLST_EDB(EData, DispLST);
-   
-   
+
+
    // --- Do the channel selection by calling the CHCHANLST GX ---
 
-   SetString_SYS("CHCHANLST","DATA",sChOpt);
-   SetString_SYS("CHCHANLST","GX","CHREDISPLAYASSAY");
-   
-   if(iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+   SetString_SYS("CHCHANLST", "DATA", sChOpt);
+   SetString_SYS("CHCHANLST", "GX", "CHREDISPLAYASSAY");
 
-   GetString_SYS("CHCHANLST","CHANNELS", sChannels);
-   
-   
+   if (iRunGX_SYS("CHCHANLST.GX")) Cancel_SYS();
+
+   GetString_SYS("CHCHANLST", "CHANNELS", sChannels);
+
+
    // --- create LSTs to hold channel lists ---
-   
-   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   ChLST = Create_LST(2 * STR_DB_SYMBOL);
 
    Data = Lock_EDB(EData);
    SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
    SelectCSVStringItems_LST(ChLST, sChannels, ChLST);
 
 
-
    // --- Create a list of all assay type channels ---
-   
+
    AssayLST = Create_LST(128);
    ClassChanLST_DB(Data, AssayLST, "ASSAY");
 
@@ -130,13 +130,14 @@ int   i, iItem, iND, iNAssay, iSort, iSelect;
    Line = FindSymb_DB(Data, sLine, DB_SYMB_LINE);
 
    LOCK_R(Data, Line);
-   if(iLineCategory_DB(Data, Line) == DB_CATEGORY_LINE_GROUP) {
-      
+   if (iLineCategory_DB(Data, Line) == DB_CATEGORY_LINE_GROUP)
+   {
       iNAssay = iSize_LST(AssayLST);
-      for(i=iNAssay-1; i>-0; i--) {
-
+      for (i = iNAssay - 1; i > -0; i--)
+      {
          Chan = (DB_SYMB)iGetInt_LST(AssayLST, 1, i);
-         if(!iIsAssociated_DB(Data, Line, Chan)) {
+         if (!iIsAssociated_DB(Data, Line, Chan))
+         {
             DelItem_LST(AssayLST, i);
          }
       }
@@ -146,13 +147,14 @@ int   i, iItem, iND, iNAssay, iSort, iSelect;
 
    // --- Remove all assay channels from the displayed channel list ---
 
-   
-   iNAssay = iSize_LST(AssayLST);
-   for(i=0; i<iNAssay; i++) {
 
+   iNAssay = iSize_LST(AssayLST);
+   for (i = 0; i < iNAssay; i++)
+   {
       GetItem_LST(AssayLST, 0, i, sChan);
       iItem = iFindItem_LST(DispLST, 0, sChan);
-      if(iItem!=-1) {
+      if (iItem != -1)
+      {
          DelItem_LST(DispLST, iItem);
       }
    }
@@ -167,8 +169,8 @@ int   i, iItem, iND, iNAssay, iSort, iSelect;
    // --- Reload the non-assay channels ---
 
    iND = iSize_LST(DispLST);
-   for(i=0; i<iND; i++) {
-
+   for (i = 0; i < iND; i++)
+   {
       GetItem_LST(DispLST, 0, i, sChan);
       LoadChan_EDB(EData, sChan);
    }
@@ -176,17 +178,16 @@ int   i, iItem, iND, iNAssay, iSort, iSelect;
 
    // --- Sort the assay channels? ---
 
-   if(iSort)
+   if (iSort)
       Sort_LST(ChLST, 0, 0);
 
 
    // --- Display the assay channels ---
 
    iNAssay = iSize_LST(ChLST);
-   for(i=0; i<iNAssay; i++) {
-
+   for (i = 0; i < iNAssay; i++)
+   {
       GetItem_LST(ChLST, 0, i, sChan);
       LoadChan_EDB(EData, sChan);
    }
-
 }

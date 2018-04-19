@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Minimum curvature gridding from a control file."
 #include <version.gxh>
 
@@ -26,26 +27,27 @@ RESOURCE = "rgcon.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_FILE) sGrdName;     // Name of new grid file
-string(STR_FILE) sConName;     // Name of control file
-string(STR_FILE) sTemp;        // Temporary string
-string(STR_DB_SYMBOL) sXCh,sYCh,sZCh;   // channels
-                                           
-RGRD       Rangrid;       // Handle to Rangrid object
-EDB        EData;
-DB         Data;          // Database handle
-DGW        Diag;          // Dialogue handle
-WA         ConFile;        
-RA         BlankFile;
-LST        List;
- 
-int        i;             // utility int
+   string(STR_FILE) sGrdName;            // Name of new grid file
+string(STR_FILE) sConName;               // Name of control file
+string(STR_FILE) sTemp;                  // Temporary string
+string(STR_DB_SYMBOL) sXCh, sYCh, sZCh;  // channels
+
+RGRD Rangrid;  // Handle to Rangrid object
+EDB EData;
+DB Data;   // Database handle
+DGW Diag;  // Dialogue handle
+WA ConFile;
+RA BlankFile;
+LST List;
+
+int i;  // utility int
 
 
 //===========================================================================
@@ -53,7 +55,6 @@ int        i;             // utility int
 //===========================================================================
 
 {
-
    // --- Get the Database ---
 
    EData = Current_EDB();
@@ -66,109 +67,100 @@ int        i;             // utility int
 
    // --- INTERACTIVE ---
 
-   if (iInteractive_SYS()) {
-   
-
+   if (iInteractive_SYS())
+   {
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("RGCON");
 
-      
+
       // --- Set up lists ---
 
-      List = GetList_DGW(Diag,_RGCON_0);
-      SymbLST_DB(Data,List,DB_SYMB_CHAN);
-      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag, _RGCON_0);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
 
-      
+
       // --- display dialogue until OK ---
-      
+
       i = 1;
-      while (i != 0) {
-      
-         
+      while (i != 0)
+      {
          // --- Set any Defaults from INI ---
 
-         SetInfoSYS_DGW(Diag,_RGCON_0,DGW_TEXT,"RGCON","CHAN");
-         SetInfoSYS_DGW(Diag,_RGCON_1,DGW_FILEPATH,"RGCON","GRDNAME");
-         SetInfoSYS_DGW(Diag,_RGCON_2,DGW_FILEPATH,"RGCON","CONNAME");
+         SetInfoSYS_DGW(Diag, _RGCON_0, DGW_TEXT, "RGCON", "CHAN");
+         SetInfoSYS_DGW(Diag, _RGCON_1, DGW_FILEPATH, "RGCON", "GRDNAME");
+         SetInfoSYS_DGW(Diag, _RGCON_2, DGW_FILEPATH, "RGCON", "CONNAME");
 
 
          // --- Run the Dialogue ---
 
          i = iRunDialogue_DGW(Diag);
          if (i == -1) Cancel_SYS();
-            
-         
+
+
          // --- Put values back in INI ---
 
-         GetInfoSYS_DGW(Diag,_RGCON_0,DGW_TEXT,"RGCON","CHAN");
-         GetInfoSYS_DGW(Diag,_RGCON_1,DGW_FILEPATH,"RGCON","GRDNAME");
-         GetInfoSYS_DGW(Diag,_RGCON_2,DGW_FILEPATH,"RGCON","CONNAME");
+         GetInfoSYS_DGW(Diag, _RGCON_0, DGW_TEXT, "RGCON", "CHAN");
+         GetInfoSYS_DGW(Diag, _RGCON_1, DGW_FILEPATH, "RGCON", "GRDNAME");
+         GetInfoSYS_DGW(Diag, _RGCON_2, DGW_FILEPATH, "RGCON", "CONNAME");
 
 
-         if (i == 1)         // edit control file
+         if (i == 1)  // edit control file
          {
-         
-         
             // --- control file name ---
-            
-            GetString_SYS("RGCON","CONNAME",sConName);
-            if (iStrMin2_STR(sConName) == 0) {
-            
-               GetString_SYS("RGCON","GRDNAME",sGrdName);
-               FileNamePart_STR(sGrdName,sConName,STR_FILE_PART_NAME);
-               Strcat_STR(sConName,".con");
-               
-            }
-            
-            
-            // --- if file does not exist, make a blank copy ---
-            
-            if (iFileExist_SYS(sConName) == 0) {
-            
-            
-               // --- find RANGRID blank ---
-                 
-               if (iFindPathNameEx_SYS("rangrid.con",FIND_GEOSOFT,GEO_DIRECTORY_USER_ETC,sTemp) == 0) {
 
+            GetString_SYS("RGCON", "CONNAME", sConName);
+            if (iStrMin2_STR(sConName) == 0)
+            {
+               GetString_SYS("RGCON", "GRDNAME", sGrdName);
+               FileNamePart_STR(sGrdName, sConName, STR_FILE_PART_NAME);
+               Strcat_STR(sConName, ".con");
+            }
+
+
+            // --- if file does not exist, make a blank copy ---
+
+            if (iFileExist_SYS(sConName) == 0)
+            {
+               // --- find RANGRID blank ---
+
+               if (iFindPathNameEx_SYS("rangrid.con", FIND_GEOSOFT, GEO_DIRECTORY_USER_ETC, sTemp) == 0)
+               {
                   BlankFile = Create_RA(sTemp);
-                  ConFile = Create_WA(sConName,WA_NEW);            
-                  
-                  while (iGets_RA(BlankFile,sTemp) == 0) {
-                     Puts_WA(ConFile,sTemp);
+                  ConFile = Create_WA(sConName, WA_NEW);
+
+                  while (iGets_RA(BlankFile, sTemp) == 0)
+                  {
+                     Puts_WA(ConFile, sTemp);
                      NewLine_WA(ConFile);
                   }
-                  
+
                   Destroy_SYS(BlankFile);
                   Destroy_SYS(ConFile);
-                  
                }
             }
-            
-            
-            // --- edit file ---
-                  
-            SetString_SYS("EDIT","FILE",sConName);
-            SetString_SYS("EDIT","WAIT","WAIT");
-            iRunGX_SYS("edit");
-            GetString_SYS("EDIT","FILE",sConName);
-            SetString_SYS("RGCON","CONNAME",sConName);
 
+
+            // --- edit file ---
+
+            SetString_SYS("EDIT", "FILE", sConName);
+            SetString_SYS("EDIT", "WAIT", "WAIT");
+            iRunGX_SYS("edit");
+            GetString_SYS("EDIT", "FILE", sConName);
+            SetString_SYS("RGCON", "CONNAME", sConName);
          }
-         
-      }         
+      }
 
       Destroy_DGW(Diag);
-      
-   } 
+   }
 
-               
+
    // --- Get Parameters ---
 
-   GetString_SYS("RGCON","CHAN",sZCh); 
-   GetString_SYS("RGCON","GRDNAME",sGrdName);
-   GetString_SYS("RGCON","CONNAME",sConName);
+   GetString_SYS("RGCON", "CHAN", sZCh);
+   GetString_SYS("RGCON", "GRDNAME", sGrdName);
+   GetString_SYS("RGCON", "CONNAME", sConName);
    if (!iFileExist_SYS(sConName))
       Abort_SYS(_("Control file does not exist."));
 
@@ -181,21 +173,21 @@ int        i;             // utility int
 
    // --- See if grid channels exist ---
 
-   if (!iExistSymb_DB(Data,sXCh,DB_SYMB_CHAN))
+   if (!iExistSymb_DB(Data, sXCh, DB_SYMB_CHAN))
       Abort_SYS(_("The current X channel does not exist in database"));
 
-   if (!iExistSymb_DB(Data,sYCh,DB_SYMB_CHAN))
+   if (!iExistSymb_DB(Data, sYCh, DB_SYMB_CHAN))
       Abort_SYS(_("The current Y channel does not exist in database"));
 
-   if (!iExistSymb_DB(Data,sZCh,DB_SYMB_CHAN))
+   if (!iExistSymb_DB(Data, sZCh, DB_SYMB_CHAN))
       Abort_SYS(_("The Z Channel does not exist in database"));
-      
-   
+
+
    // --- Turn on Progress bar ---
 
    Progress_SYS(1);
 
-   
+
    // --- Execute rangrid program ---
 
    iRun2_RGRD(Data, sXCh, sYCh, sZCh, sConName, sGrdName);
@@ -204,19 +196,19 @@ int        i;             // utility int
    // --- Turn off progress bar ---
 
    Progress_SYS(0);
-   
- 
+
+
    // --- Destroy the DATs and Rangrid object ---
-   
+
    Destroy_RGRD(Rangrid);
 
-   
+
    // --- Add this grid to the current project ---
-   
+
    if (iInteractive_SYS())
-      iAddDocument_PROJ(sGrdName,"Grid",1);
-   
-   
+      iAddDocument_PROJ(sGrdName, "Grid", 1);
+
+
    // --- Release the Database ---
 
    UnLock_EDB(EData);

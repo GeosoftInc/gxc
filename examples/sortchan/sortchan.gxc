@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Sort the contents of a channel"
 #include <version.gxh>
 DESCRIPTION   = "
@@ -29,25 +30,26 @@ RESOURCE = "sortchan.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_DB_SYMBOL) sCh;
+   string(STR_DB_SYMBOL) sCh;
 
-string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+string(STR_DEFAULT_SHORT) sTemp;  // temporary number formating string
 string(STR_DEFAULT) sLabel;
 
-EDB         EData;
-DB          Data;
-DB_SYMB     Ch;
-DB_SYMB     Line;
-DGW         Diag;
-LST         List;                  // list handle
-int         iOrder;                // sort order
-int         iLine,iTotLines;       // counters
+EDB EData;
+DB Data;
+DB_SYMB Ch;
+DB_SYMB Line;
+DGW Diag;
+LST List;              // list handle
+int iOrder;            // sort order
+int iLine, iTotLines;  // counters
 
 //===========================================================================
 //                              CODE
@@ -64,49 +66,47 @@ int         iLine,iTotLines;       // counters
 
    if (iInteractive_SYS())
    {
+      // --- Create the Dialogue ---
 
-     // --- Create the Dialogue ---
-
-     Diag = Create_DGW("SORTCHAN");
-
-
-     // --- Set up input and output lists ---
-
-     List = GetList_DGW(Diag,_SORTCHAN_0);
-     SymbLST_DB(Data,List,DB_SYMB_CHAN);
-     Sort_LST(List,0,0);
+      Diag = Create_DGW("SORTCHAN");
 
 
-     // --- Set any Defaults ---
+      // --- Set up input and output lists ---
 
-     SetInfoSYS_DGW(Diag,_SORTCHAN_0,DGW_TEXT,"SORTCHAN","CHANNEL");
-     SetInfoSYS_DGW(Diag,_SORTCHAN_1,DGW_TEXT,"SORTCHAN","ORDER");
-
-
-     // --- Run the Dialogue ---
-
-     if (iRunDialogue_DGW(Diag)) Cancel_SYS();    
+      List = GetList_DGW(Diag, _SORTCHAN_0);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
 
 
-     // --- Get the Strings ---
+      // --- Set any Defaults ---
 
-     GetInfoSYS_DGW(Diag,_SORTCHAN_0,DGW_TEXT,"SORTCHAN","CHANNEL");
-     GetInfoSYS_DGW(Diag,_SORTCHAN_1,DGW_TEXT,"SORTCHAN","ORDER");
+      SetInfoSYS_DGW(Diag, _SORTCHAN_0, DGW_TEXT, "SORTCHAN", "CHANNEL");
+      SetInfoSYS_DGW(Diag, _SORTCHAN_1, DGW_TEXT, "SORTCHAN", "ORDER");
 
 
-     // --- Destroy the Dialogue ---
+      // --- Run the Dialogue ---
 
-     Destroy_DGW(Diag);
+      if (iRunDialogue_DGW(Diag)) Cancel_SYS();
 
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag, _SORTCHAN_0, DGW_TEXT, "SORTCHAN", "CHANNEL");
+      GetInfoSYS_DGW(Diag, _SORTCHAN_1, DGW_TEXT, "SORTCHAN", "ORDER");
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
    }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("SORTCHAN","CHANNEL",sCh);
-   GetString_SYS("SORTCHAN","ORDER",sTemp);
+   GetString_SYS("SORTCHAN", "CHANNEL", sCh);
+   GetString_SYS("SORTCHAN", "ORDER", sTemp);
    ToUpper_STR(sTemp);
-   if (iCharComp_STR(sTemp,"D"))
+   if (iCharComp_STR(sTemp, "D"))
       iOrder = DU_SORT_DESCENDING;
    else
       iOrder = DU_SORT_ASCENDING;
@@ -114,14 +114,14 @@ int         iLine,iTotLines;       // counters
 
    // --- Does the Channel Exist ? ---
 
-   if (!iExistSymb_DB(Data,sCh,DB_SYMB_CHAN))
+   if (!iExistSymb_DB(Data, sCh, DB_SYMB_CHAN))
       Abort_SYS(_("Channel does not exist."));
-   Ch = FindChan_DB(Data,sCh);
-   
+   Ch = FindChan_DB(Data, sCh);
+
 
    // --- Lock the channel symbols ---
 
-   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data, Ch, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
 
 
    // --- Prepare to do the work ---
@@ -133,41 +133,39 @@ int         iLine,iTotLines;       // counters
 
    // --- Go through all selected Lines ---
 
-   ProgName_SYS("",1);
+   ProgName_SYS("", 1);
    Line = FirstSelLine_DB(Data);
-   while (iIsLineValid_DB(Data,Line))
+   while (iIsLineValid_DB(Data, Line))
    {
-
       // --- Update the Progress Bar ---
 
-      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-      GetSymbName_DB(Data,Line,sTemp);
-      UnLockSymb_DB(Data,Line);
-      Strcpy_STR(sLabel,_("Process line: "));
-      Strcat_STR(sLabel,sTemp);
-      ProgName_SYS(sLabel,0);
-      ProgUpdateL_SYS(iLine,iTotLines);        
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      GetSymbName_DB(Data, Line, sTemp);
+      UnLockSymb_DB(Data, Line);
+      Strcpy_STR(sLabel, _("Process line: "));
+      Strcat_STR(sLabel, sTemp);
+      ProgName_SYS(sLabel, 0);
+      ProgUpdateL_SYS(iLine, iTotLines);
 
 
       // --- process ---
 
-      Sort_DU(Data,Line,Ch,iOrder);
+      Sort_DU(Data, Line, Ch, iOrder);
 
 
-      // --- Advance to Next Line ---    
+      // --- Advance to Next Line ---
 
       Line = NextSelLine_DB(Data, Line);
       iLine++;
-
    }
 
    // --- Add maker ---
 
-   EasyMakerSymb_DB(Data,Ch,_("Sort channel"),"SORTCHAN;");
+   EasyMakerSymb_DB(Data, Ch, _("Sort channel"), "SORTCHAN;");
 
    // --- Clean up ---
 
-   UnLockSymb_DB(Data,Ch);
+   UnLockSymb_DB(Data, Ch);
 
 
    // --- Done ---

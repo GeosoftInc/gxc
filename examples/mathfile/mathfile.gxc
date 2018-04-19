@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Math from a file"
 #include <version.gxh>
 DESCRIPTION   = "\
@@ -24,23 +25,24 @@ RESOURCE = "mathfile.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                                 VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                                 VARIABLES
+   //===========================================================================
 
-string(STR_FILE) sFile;                 // File string;
+   string(STR_FILE) sFile;  // File string;
 
-EDB         EData;
-DB          Data;                      // database handle
+EDB EData;
+DB Data;  // database handle
 
-EXP         Exp;
-DB_SYMB     Line;                      // Line Handle
-DGW         Diag;                      // Dialogue handle
+EXP Exp;
+DB_SYMB Line;  // Line Handle
+DGW Diag;      // Dialogue handle
 
-int         i;
-int         iLines;                    // Number of Lines Processed
-int         iTotLines;                 // Total Number of Lines to Process
+int i;
+int iLines;     // Number of Lines Processed
+int iTotLines;  // Total Number of Lines to Process
 string(STR_DEFAULT) sTemp;
 
 
@@ -58,48 +60,46 @@ string(STR_DEFAULT) sTemp;
 
    if (iInteractive_SYS())
    {
+      // --- Create the Dialogue ---
 
-     // --- Create the Dialogue ---
+      Diag = Create_DGW("MATHForm");
 
-     Diag = Create_DGW("MATHForm");
+      // --- Set any Defaults ---
 
-     // --- Set any Defaults ---
+      SetInfoSYS_DGW(Diag, _MATHFORM_0, DGW_FILEPATH, "MATHFILE", "EXP");
 
-     SetInfoSYS_DGW(Diag,_MATHFORM_0,DGW_FILEPATH,"MATHFILE","EXP");
+      // --- Run the Dialogue ---
 
-     // --- Run the Dialogue ---
-
-     i = iRunDialogue_DGW(Diag);
-     if (i != 0) Cancel_SYS();    // He hit cancel
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();  // He hit cancel
 
 
-     // --- Get the Strings ---
+      // --- Get the Strings ---
 
-     GetInfoSYS_DGW(Diag,_MATHFORM_0,DGW_FILEPATH,"MATHFILE","EXP");   
+      GetInfoSYS_DGW(Diag, _MATHFORM_0, DGW_FILEPATH, "MATHFILE", "EXP");
 
-     // --- Destroy the Dialogue ---
+      // --- Destroy the Dialogue ---
 
-     Destroy_DGW(Diag);
-
+      Destroy_DGW(Diag);
    }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("MATHFILE","EXP",sFile);
+   GetString_SYS("MATHFILE", "EXP", sFile);
 
 
    // --- Turn On Progress ---
 
    Progress_SYS(1);
-   Strcpy_STR(sTemp,_("Reading expression: "));
-   Strcat_STR(sTemp,sFile);
-   ProgName_SYS(sTemp,1);
+   Strcpy_STR(sTemp, _("Reading expression: "));
+   Strcat_STR(sTemp, sFile);
+   ProgName_SYS(sTemp, 1);
 
 
    // --- Create the Expression ---
 
-   Exp = CreateFile_EXP(Data,sFile);
+   Exp = CreateFile_EXP(Data, sFile);
 
 
    // --- Prepare to do the work ---
@@ -107,38 +107,37 @@ string(STR_DEFAULT) sTemp;
    iLines = 0;
    iTotLines = iCountSelLines_DB(Data);
 
-   ProgName_SYS(_("Applying Math"),1);
+   ProgName_SYS(_("Applying Math"), 1);
 
 
    // --- Go through all selected Lines ---
 
    Line = FirstSelLine_DB(Data);
-   while (iIsLineValid_DB(Data,Line))
+   while (iIsLineValid_DB(Data, Line))
    {
+      // --- Update the Progress Bar ---
 
-     // --- Update the Progress Bar ---
-
-     ProgUpdateL_SYS(iLines,iTotLines);
-
-
-     // --- Apply the Correction ---
-
-     Math_DU(Data,Line,Exp);
+      ProgUpdateL_SYS(iLines, iTotLines);
 
 
-     // --- Advance to Next Line ---        
+      // --- Apply the Correction ---
 
-     Line = NextSelLine_DB(Data,Line);
-     iLines++;
-  }
+      Math_DU(Data, Line, Exp);
 
 
-  // --- Done ---
+      // --- Advance to Next Line ---
 
-  Destroy_EXP(Exp);
-  Progress_SYS(0);
+      Line = NextSelLine_DB(Data, Line);
+      iLines++;
+   }
+
+
+   // --- Done ---
+
+   Destroy_EXP(Exp);
+   Progress_SYS(0);
 
    // --- Release the Database ---
 
-  UnLock_EDB(EData);
+   UnLock_EDB(EData);
 }

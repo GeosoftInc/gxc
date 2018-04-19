@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Re-sample a database based on a reference channel"
 #include <version.gxh>
 DESCRIPTION   = "\
@@ -29,27 +30,29 @@ RESOURCE = "resampdb.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                               VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                               VARIABLES
+   //===========================================================================
 
-string(STR_DB_SYMBOL) sRefCh, sLine;
+   string(STR_DB_SYMBOL) sRefCh,
+   sLine;
 string(STR_DEFAULT) sLabel;
 
-EDB         EData;
-DB          Data;                  // Database
-DGW         Diag;                  // Dialogue handle
-DB_SYMB     RefCh, Ch;             // Channel Handles
-DB_SYMB     Line;                  // Line Handle
-LST         List, LineLST;         // List handle
-LST         ChLST;
-VV          VVd;
-VA          VAd;
+EDB EData;
+DB Data;            // Database
+DGW Diag;           // Dialogue handle
+DB_SYMB RefCh, Ch;  // Channel Handles
+DB_SYMB Line;       // Line Handle
+LST List, LineLST;  // List handle
+LST ChLST;
+VV VVd;
+VA VAd;
 
-real        rFidStart, rFidIncr, rFidS, rFidI;  
-int         i, iNChan, iProtect, iLine, iNLines, iProg, iNProg, iNFids;  
-int         iType, iNCol, iNF;  
+real rFidStart, rFidIncr, rFidS, rFidI;
+int i, iNChan, iProtect, iLine, iNLines, iProg, iNProg, iNFids;
+int iType, iNCol, iNF;
 
 //===========================================================================
 //                                CODE
@@ -66,7 +69,6 @@ int         iType, iNCol, iNF;
 
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("RESAMPDB");
@@ -74,44 +76,43 @@ int         iType, iNCol, iNF;
 
       // --- Set up lists ---
 
-      List = GetList_DGW(Diag,_RESAMPDB_0);
-      SymbLST_DB(Data,List,DB_SYMB_CHAN);
-      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag, _RESAMPDB_0);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
 
 
       // --- Set any Defaults ---
 
-      SetInfoSYS_DGW(Diag,_RESAMPDB_0,DGW_TEXT,"RESAMPDB","REF");     
+      SetInfoSYS_DGW(Diag, _RESAMPDB_0, DGW_TEXT, "RESAMPDB", "REF");
 
 
       // --- Run the Dialogue ---
 
       i = iRunDialogue_DGW(Diag);
-      if (i != 0) Cancel_SYS();    // she hit cancel
+      if (i != 0) Cancel_SYS();  // she hit cancel
 
 
       // --- Get the Strings ---
 
-      GetInfoSYS_DGW(Diag,_RESAMPDB_0,DGW_TEXT,"RESAMPDB","REF");     
+      GetInfoSYS_DGW(Diag, _RESAMPDB_0, DGW_TEXT, "RESAMPDB", "REF");
 
 
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("RESAMPDB","REF",sRefCh);
-   
+   GetString_SYS("RESAMPDB", "REF", sRefCh);
+
 
    // --- Does the reference channel exist ? ---
 
-   if (!iExistChan_DB(Data,sRefCh))
+   if (!iExistChan_DB(Data, sRefCh))
       Abort_SYS(_("Reference channel does not exist."));
-   RefCh = FindChan_DB(Data,sRefCh);
+   RefCh = FindChan_DB(Data, sRefCh);
 
 
    // --- Lock the reference channel ---
@@ -120,105 +121,104 @@ int         iType, iNCol, iNF;
 
 
    // --- Get a LST of channels ---
-   
-   ChLST = Create_LST(2*STR_DB_SYMBOL);
+
+   ChLST = Create_LST(2 * STR_DB_SYMBOL);
    SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
    iNChan = iSize_LST(ChLST);
-   
+
 
    // --- Get a LST of lines ---
-   
-   LineLST = Create_LST(2*STR_DB_SYMBOL);
+
+   LineLST = Create_LST(2 * STR_DB_SYMBOL);
    SelectedLineLST_DB(Data, LineLST);
    iNLines = iSize_LST(LineLST);
-   iNProg = iNChan*iNLines;
-   
+   iNProg = iNChan * iNLines;
+
 
    // --- Go through all selected Lines ---
 
    Progress_SYS(1);
    iProg = 0;
-   for(iLine=0;iLine<iNLines;iLine++)
+   for (iLine = 0; iLine < iNLines; iLine++)
    {
-
-
       // --- Update the Progress Bar ---
 
       Line = (DB_SYMB)iGetInt_LST(LineLST, 1, iLine);
       GetItem_LST(LineLST, 0, iLine, sLine);
 
-      Strcpy_STR(sLabel,_("Processing line: "));
-      Strcat_STR(sLabel,sLine);
-      ProgName_SYS(sLabel,0);
+      Strcpy_STR(sLabel, _("Processing line: "));
+      Strcat_STR(sLabel, sLine);
+      ProgName_SYS(sLabel, 0);
 
 
       // --- Get the FID start and increment of the reference ---
-         
+
       iNFids = iGetChannelLength_DB(Data, Line, RefCh);
       rFidStart = rGetFidStart_DB(Data, Line, RefCh);
       rFidIncr = rGetFidIncr_DB(Data, Line, RefCh);
 
-      for(i=0;i<iNChan;i++) {
-      
-         ProgUpdateL_SYS(iProg,iNProg);
+      for (i = 0; i < iNChan; i++)
+      {
+         ProgUpdateL_SYS(iProg, iNProg);
          iProg++;
 
          Ch = (DB_SYMB)iGetInt_LST(ChLST, 1, i);
-         if(Ch==RefCh) continue;
-         
-         
+         if (Ch == RefCh) continue;
+
+
          // --- See if any resampling is necessary ---
-         
+
          LOCK_RW(Data, Ch);
          iNF = iGetChannelLength_DB(Data, Line, Ch);
          rFidS = rGetFidStart_DB(Data, Line, Ch);
          rFidI = rGetFidIncr_DB(Data, Line, Ch);
-         
-         if(iNF==0 || (iNF==iNFids && rFidS==rFidStart && rFidI==rFidIncr)) {
+
+         if (iNF == 0 || (iNF == iNFids && rFidS == rFidStart && rFidI == rFidIncr))
+         {
             UNLOCK(Data, Ch);
             continue;
          }
-         
+
 
          // --- Lock the channel and remove protection ---
-         
+
          iProtect = iGetChanProtect_DB(Data, Ch);
          SetChanProtect_DB(Data, Ch, DB_CHAN_UNPROTECTED);
-         
-         
+
+
          // --- Get type and columns in the channel ---
-         
+
          iType = iGetChanType_DB(Data, Ch);
          iNCol = iGetColVA_DB(Data, Ch);
-         
-         if(iNCol==1) {
-         
+
+         if (iNCol == 1)
+         {
             VVd = CreateExt_VV(iType, 0);
-            
+
             GetChanVV_DB(Data, Line, Ch, VVd);
-            
+
             ReFid_VV(VVd, rFidStart, rFidIncr, iNFids);
-            
+
             PutChanVV_DB(Data, Line, Ch, VVd);
-            
+
             Destroy_VV(VVd);
          }
-         else {
-            
-            VAd = CreateExt_VA(iType, 0,  iNCol);
-            
+         else
+         {
+            VAd = CreateExt_VA(iType, 0, iNCol);
+
             GetChanVA_DB(Data, Line, Ch, VAd);
-            
+
             ReFid_VA(VAd, rFidStart, rFidIncr, iNFids);
-            
+
             PutChanVA_DB(Data, Line, Ch, VAd);
 
             Destroy_VA(VAd);
          }
-            
+
 
          // --- Reset protection and unlock ---
-         
+
          SetChanProtect_DB(Data, Ch, iProtect);
          UNLOCK(Data, Ch);
       }
@@ -229,7 +229,7 @@ int         iType, iNCol, iNF;
 
    Progress_SYS(0);
 
-   
+
    // --- Release the Database ---
 
    UNLOCK(Data, RefCh);

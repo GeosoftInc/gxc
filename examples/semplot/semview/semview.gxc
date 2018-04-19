@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Create a data view from the current database."
 #include <version.gxh>
 
@@ -34,6 +35,7 @@ RESOURCE = "SEMVIEW.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 //===========================================================================
 //                             GLOBAL VARIABLES
@@ -56,15 +58,13 @@ int i, iLine, iView, iChan;
 //===========================================================================
 
 {
-
-
    EData = Current_EDB();
    GetName_EDB(EData, sDB);
 
 
    // --- Get currently selected line ---
 
-   GetCurLine_EDB(EData,sCurLine);
+   GetCurLine_EDB(EData, sCurLine);
 
 
    // -- Lock the database ---
@@ -73,7 +73,6 @@ int i, iLine, iView, iChan;
 
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("SEMVIEW");
@@ -81,75 +80,74 @@ int i, iLine, iView, iChan;
 
       // --- Set up the lists ---
 
-      List = GetList_DGW(Diag,_SEMVIEW_1);
-      ClassChanLST_DB(Data,List,"MASK");
+      List = GetList_DGW(Diag, _SEMVIEW_1);
+      ClassChanLST_DB(Data, List, "MASK");
       InsertItem_LST(List, 0, _("None"), _("None"));
 
-      List = GetList_DGW(Diag,_SEMVIEW_2);
+      List = GetList_DGW(Diag, _SEMVIEW_2);
       GetFullMineralLST_SEMPLOT(List);
 
 
       // --- Set any Defaults ---
 
-      SetInfoSYS_DGW(Diag,_SEMVIEW_0,DGW_LISTALIAS,"SEMVIEW","VIEW");    
-      SetInfoSYS_DGW(Diag,_SEMVIEW_1,DGW_TEXT,"SEMVIEW","MASK");     
-      SetInfoSYS_DGW(Diag,_SEMVIEW_2,DGW_LISTALIAS,"SEMVIEW","MINERAL");    
-      SetInfoSYS_DGW(Diag,_SEMVIEW_3,DGW_LISTALIAS,"SEMVIEW","LINE");     
-      SetInfoSYS_DGW(Diag,_SEMVIEW_4,DGW_TEXT,"SEMVIEW","DECIMALS");     
-      SetInfoSYS_DGW(Diag,_SEMVIEW_5,DGW_LISTALIAS,"SEMVIEW","CHAN");     
+      SetInfoSYS_DGW(Diag, _SEMVIEW_0, DGW_LISTALIAS, "SEMVIEW", "VIEW");
+      SetInfoSYS_DGW(Diag, _SEMVIEW_1, DGW_TEXT, "SEMVIEW", "MASK");
+      SetInfoSYS_DGW(Diag, _SEMVIEW_2, DGW_LISTALIAS, "SEMVIEW", "MINERAL");
+      SetInfoSYS_DGW(Diag, _SEMVIEW_3, DGW_LISTALIAS, "SEMVIEW", "LINE");
+      SetInfoSYS_DGW(Diag, _SEMVIEW_4, DGW_TEXT, "SEMVIEW", "DECIMALS");
+      SetInfoSYS_DGW(Diag, _SEMVIEW_5, DGW_LISTALIAS, "SEMVIEW", "CHAN");
 
 
       // --- Run the Dialogue ---
 
       i = iRunDialogue_DGW(Diag);
-      if (i != 0) Cancel_SYS();    // He hit cancel
+      if (i != 0) Cancel_SYS();  // He hit cancel
 
 
       // --- Get the Strings ---
 
-      GetInfoSYS_DGW(Diag,_SEMVIEW_0,DGW_LISTALIAS,"SEMVIEW","VIEW");    
-      GetInfoSYS_DGW(Diag,_SEMVIEW_1,DGW_TEXT,"SEMVIEW","MASK");     
-      GetInfoSYS_DGW(Diag,_SEMVIEW_2,DGW_LISTALIAS,"SEMVIEW","MINERAL");    
-      GetInfoSYS_DGW(Diag,_SEMVIEW_3,DGW_LISTALIAS,"SEMVIEW","LINE");     
-      GetInfoSYS_DGW(Diag,_SEMVIEW_4,DGW_TEXT,"SEMVIEW","DECIMALS");     
-      GetInfoSYS_DGW(Diag,_SEMVIEW_5,DGW_LISTALIAS,"SEMVIEW","CHAN");     
+      GetInfoSYS_DGW(Diag, _SEMVIEW_0, DGW_LISTALIAS, "SEMVIEW", "VIEW");
+      GetInfoSYS_DGW(Diag, _SEMVIEW_1, DGW_TEXT, "SEMVIEW", "MASK");
+      GetInfoSYS_DGW(Diag, _SEMVIEW_2, DGW_LISTALIAS, "SEMVIEW", "MINERAL");
+      GetInfoSYS_DGW(Diag, _SEMVIEW_3, DGW_LISTALIAS, "SEMVIEW", "LINE");
+      GetInfoSYS_DGW(Diag, _SEMVIEW_4, DGW_TEXT, "SEMVIEW", "DECIMALS");
+      GetInfoSYS_DGW(Diag, _SEMVIEW_5, DGW_LISTALIAS, "SEMVIEW", "CHAN");
 
 
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
 
 
    // --- read the dialogue ---
 
-   iView = iGetInt_SYS("SEMVIEW","VIEW");
-   GetString_SYS("SEMVIEW","LINE",sLine);
-   GetString_SYS("SEMVIEW","MASK",sMask);
-   GetString_SYS("SEMVIEW","MINERAL",sMineral); 
-   GetString_SYS("SEMVIEW","DECIMALS",sDec); 
-   iChan = iGetInt_SYS("SEMVIEW","CHAN");
-     
-   
-   if(iStrcmp_STR(sMask, _("None"), STR_CASE_TOLERANT)==0)
+   iView = iGetInt_SYS("SEMVIEW", "VIEW");
+   GetString_SYS("SEMVIEW", "LINE", sLine);
+   GetString_SYS("SEMVIEW", "MASK", sMask);
+   GetString_SYS("SEMVIEW", "MINERAL", sMineral);
+   GetString_SYS("SEMVIEW", "DECIMALS", sDec);
+   iChan = iGetInt_SYS("SEMVIEW", "CHAN");
+
+
+   if (iStrcmp_STR(sMask, _("None"), STR_CASE_TOLERANT) == 0)
       Strcpy_STR(sMask, "");
-      
-	if(iChan!=SEMPLOT_EXPORT_NORMAL &&
-	   iChan!=SEMPLOT_EXPORT_NOEXTRA)
-	   iChan = SEMPLOT_EXPORT_NORMAL;      
+
+   if (iChan != SEMPLOT_EXPORT_NORMAL &&
+       iChan != SEMPLOT_EXPORT_NOEXTRA)
+      iChan = SEMPLOT_EXPORT_NORMAL;
 
 
    // --- Get the mineral channel ---
-   
+
    GetMineralChannelName_SEMPLOT(Data, sMineralCh);
-   
+
 
    // --- Create the new database and lock it ---
 
-   SetString_SYS("CREATE","CURDB", sDB);
-   if(iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)")==-1) Cancel_SYS();
-   GetString_SYS("CREATE","NAME", sDB);   // Get the name of the database actually created.
+   SetString_SYS("CREATE", "CURDB", sDB);
+   if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.NewGDB.NewGDB;Run)") == -1) Cancel_SYS();
+   GetString_SYS("CREATE", "NAME", sDB);  // Get the name of the database actually created.
 
    ENewData = Load_EDB(sDB);
    NewData = Lock_EDB(ENewData);
@@ -157,34 +155,35 @@ int i, iLine, iView, iChan;
 
    // --- Set number of decimal places for channels ---
 
-   if(iView == 0 ||
-      iView == 1 ||
-      iView == 2) {
-
-      GlobalSet_SYS("SEMPLOT.DEC_OXIDES",sDec);      
+   if (iView == 0 ||
+       iView == 1 ||
+       iView == 2)
+   {
+      GlobalSet_SYS("SEMPLOT.DEC_OXIDES", sDec);
    }
-   else if(iView == 3 ||
-           iView == 4) {
-      GlobalSet_SYS("SEMPLOT.DEC_CATIONS",sDec);      
+   else if (iView == 3 ||
+            iView == 4)
+   {
+      GlobalSet_SYS("SEMPLOT.DEC_CATIONS", sDec);
    }
    else
-      GlobalSet_SYS("SEMPLOT.DEC_RATIOS",sDec);     
-       
+      GlobalSet_SYS("SEMPLOT.DEC_RATIOS", sDec);
+
 
    // --- Make list of lines to export ---
 
-   LineLST = Create_LST(2*STR_DB_SYMBOL);
+   LineLST = Create_LST(2 * STR_DB_SYMBOL);
 
-   if (iChar_STR(sLine) == iChar_STR("D")) {
-
+   if (iChar_STR(sLine) == iChar_STR("D"))
+   {
       iLine = (int)FindSymb_DB(Data, sCurLine, DB_SYMB_LINE);
-      FormatI_STR(iLine,sVal,10);
+      FormatI_STR(iLine, sVal, 10);
 
       AddItem_LST(LineLST, sCurLine, sVal);
    }
-   else if (iChar_STR(sLine) == iChar_STR("S")) 
+   else if (iChar_STR(sLine) == iChar_STR("S"))
       SelectedLineLST_DB(Data, LineLST);
-   else if (iChar_STR(sLine) == iChar_STR("A")) 
+   else if (iChar_STR(sLine) == iChar_STR("A"))
       SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
    else
       Abort_SYS(_("Line selection invalid"));
@@ -200,6 +199,6 @@ int i, iLine, iView, iChan;
    UnLock_EDB(ENewData);
 
    MakeCurrent_EDB(ENewData);
-//   LoadAllChans_EDB(ENewData);
+   //   LoadAllChans_EDB(ENewData);
    DelLine0_EDB(ENewData);
 }

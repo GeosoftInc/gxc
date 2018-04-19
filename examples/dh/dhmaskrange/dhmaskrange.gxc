@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Set Mask Channel based on a range of data"
 #include <version.gxh>
 
@@ -29,30 +30,29 @@ RESOURCE = "DHMASKRANGE.gr"
 //===========================================================================
 
 #include <all.gxh>
+                                                                                                                        // clang-format on
 
 
-//===========================================================================
-//                             VARIABLES
-//===========================================================================
+                                                                                                                        //===========================================================================
+                                                                                                                        //                             VARIABLES
+                                                                                                                        //===========================================================================
 
 
-EDB        EData;
-DB         Data;
-DB_SYMB    XCh, MaskCh;   // Channel handles
-DB_SYMB    Line;       // Line handle
-DGW   Diag;
-VV    VVx, VVm;
-LST   List, LineLST;
+                                                                                                                        EDB EData;
+DB Data;
+DB_SYMB XCh, MaskCh;  // Channel handles
+DB_SYMB Line;         // Line handle
+DGW Diag;
+VV VVx, VVm;
+LST List, LineLST;
 
-string(STR_DB_SYMBOL) sChan,sLine,sMaskCh;
+string(STR_DB_SYMBOL) sChan, sLine, sMaskCh;
 string(STR_DEFAULT_LONG) sLabel;
 string(STR_FILE) sName;
 
 int i, iTotLines;
-int   iIncMin, iIncMax, iInside, iSelect;
-real  rMin, rMax;
-
-
+int iIncMin, iIncMax, iInside, iSelect;
+real rMin, rMax;
 
 
 //===========================================================================
@@ -63,161 +63,164 @@ real  rMin, rMax;
    // --- get current database ---
 
    EData = Current_EDB();
-   
-   
-	// --- Prevent usage with Survey databases ---
-	
-	GetName_EDB(EData, sName);	
-	if(iStrStr_STR(sName, "_Survey", STR_CASE_TOLERANT)!= -1 ||
-		iStrStr_STR(sName, "_ENSurvey", STR_CASE_TOLERANT)!= -1)
-	{
-		Abort_SYS(_("This method cannot be applied to survey databases."));
-	}
-   
-	
+
+
+   // --- Prevent usage with Survey databases ---
+
+   GetName_EDB(EData, sName);
+   if (iStrStr_STR(sName, "_Survey", STR_CASE_TOLERANT) != -1 ||
+       iStrStr_STR(sName, "_ENSurvey", STR_CASE_TOLERANT) != -1)
+   {
+      Abort_SYS(_("This method cannot be applied to survey databases."));
+   }
+
+
    // --- Set default mask channel ---
 
-   GetString_SYS("DHMASKRANGE","MASK",sMaskCh);
-   if(!iStrlen_STR(sMaskCh)) {
-      if (iGlobal_SYS("WHOLEPLOT.MASK",sMaskCh) == 0) {
-         SetString_SYS("DHMASKRANGE","MASK",sMaskCh);
+   GetString_SYS("DHMASKRANGE", "MASK", sMaskCh);
+   if (!iStrlen_STR(sMaskCh))
+   {
+      if (iGlobal_SYS("WHOLEPLOT.MASK", sMaskCh) == 0)
+      {
+         SetString_SYS("DHMASKRANGE", "MASK", sMaskCh);
       }
    }
 
 
    // --- Lock the database ---
-   
+
    Data = Lock_EDB(EData);
 
-      
+
    // --- Are we running interactively ? ---
 
-   if (iInteractive_SYS()) {
-
-
+   if (iInteractive_SYS())
+   {
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("DHMASKRANGE");
 
       // --- Set up all channel list ---
 
-      List = GetList_DGW(Diag,_DHMASKRANGE_0);
-      SymbLST_DB(Data,List,DB_SYMB_CHAN);
-      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag, _DHMASKRANGE_0);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
 
 
       // --- Set up mask channel list ---
 
-      List = GetList_DGW(Diag,_DHMASKRANGE_1);
-      MaskChanLST_DB(Data,List);
+      List = GetList_DGW(Diag, _DHMASKRANGE_1);
+      MaskChanLST_DB(Data, List);
       i = iFindItem_LST(List, LST_ITEM_NAME, "None");
-      if(i!=-1) DelItem_LST(List, i);
-      Sort_LST(List,0,0);
+      if (i != -1) DelItem_LST(List, i);
+      Sort_LST(List, 0, 0);
 
-      
+
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_0,DGW_TEXT,     "DHMASKRANGE","CHAN");
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_1,DGW_TEXT,     "DHMASKRANGE","MASK");
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_2,DGW_TEXT,     "DHMASKRANGE","MIN");
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_3,DGW_TEXT,     "DHMASKRANGE","MAX");
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_4,DGW_LISTALIAS,"DHMASKRANGE","INSIDE");
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_5,DGW_LISTALIAS,"DHMASKRANGE","INCMIN");
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_6,DGW_LISTALIAS,"DHMASKRANGE","INCMAX");
-      SetInfoSYS_DGW(Diag,_DHMASKRANGE_7,DGW_LISTALIAS,"DHMASKRANGE","SELECT");
-     
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_0, DGW_TEXT, "DHMASKRANGE", "CHAN");
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_1, DGW_TEXT, "DHMASKRANGE", "MASK");
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_2, DGW_TEXT, "DHMASKRANGE", "MIN");
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_3, DGW_TEXT, "DHMASKRANGE", "MAX");
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_4, DGW_LISTALIAS, "DHMASKRANGE", "INSIDE");
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_5, DGW_LISTALIAS, "DHMASKRANGE", "INCMIN");
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_6, DGW_LISTALIAS, "DHMASKRANGE", "INCMAX");
+      SetInfoSYS_DGW(Diag, _DHMASKRANGE_7, DGW_LISTALIAS, "DHMASKRANGE", "SELECT");
+
 
       // --- Run the Dialogue ---
 
-      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();    
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
 
-      
+
       // --- Put values back in INI ---
 
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_0,DGW_TEXT,     "DHMASKRANGE","CHAN");
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_1,DGW_TEXT,     "DHMASKRANGE","MASK");
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_2,DGW_TEXT,     "DHMASKRANGE","MIN");
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_3,DGW_TEXT,     "DHMASKRANGE","MAX");
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_4,DGW_LISTALIAS,"DHMASKRANGE","INSIDE");
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_5,DGW_LISTALIAS,"DHMASKRANGE","INCMIN");
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_6,DGW_LISTALIAS,"DHMASKRANGE","INCMAX");
-      GetInfoSYS_DGW(Diag,_DHMASKRANGE_7,DGW_LISTALIAS,"DHMASKRANGE","SELECT");
-      
-    }
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_0, DGW_TEXT, "DHMASKRANGE", "CHAN");
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_1, DGW_TEXT, "DHMASKRANGE", "MASK");
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_2, DGW_TEXT, "DHMASKRANGE", "MIN");
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_3, DGW_TEXT, "DHMASKRANGE", "MAX");
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_4, DGW_LISTALIAS, "DHMASKRANGE", "INSIDE");
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_5, DGW_LISTALIAS, "DHMASKRANGE", "INCMIN");
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_6, DGW_LISTALIAS, "DHMASKRANGE", "INCMAX");
+      GetInfoSYS_DGW(Diag, _DHMASKRANGE_7, DGW_LISTALIAS, "DHMASKRANGE", "SELECT");
+   }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("DHMASKRANGE","CHAN",sChan);    
-   GetString_SYS("DHMASKRANGE","MASK",sMaskCh);    
-   rMin = rGetReal_SYS("DHMASKRANGE","MIN");    
-   rMax = rGetReal_SYS("DHMASKRANGE","MAX");    
-   iInside = iGetInt_SYS("DHMASKRANGE","INSIDE");    
-   iIncMin = iGetInt_SYS("DHMASKRANGE","INCMIN");    
-   iIncMax = iGetInt_SYS("DHMASKRANGE","INCMAX");    
-   iSelect = iGetInt_SYS("DHMASKRANGE","SELECT");
+   GetString_SYS("DHMASKRANGE", "CHAN", sChan);
+   GetString_SYS("DHMASKRANGE", "MASK", sMaskCh);
+   rMin = rGetReal_SYS("DHMASKRANGE", "MIN");
+   rMax = rGetReal_SYS("DHMASKRANGE", "MAX");
+   iInside = iGetInt_SYS("DHMASKRANGE", "INSIDE");
+   iIncMin = iGetInt_SYS("DHMASKRANGE", "INCMIN");
+   iIncMax = iGetInt_SYS("DHMASKRANGE", "INCMAX");
+   iSelect = iGetInt_SYS("DHMASKRANGE", "SELECT");
 
 
    // --- Mask channel must be specified ---
 
-   if(!iStrlen_STR(sMaskCh))
+   if (!iStrlen_STR(sMaskCh))
       Abort_SYS(_("A Mask Channel must be specified."));
 
 
    // --- Validate ---
-      
-   if(!iStrlen_STR(sChan))
+
+   if (!iStrlen_STR(sChan))
       Abort_SYS(_("No data channel is defined"));
 
-   if(!iExistChan_DB(Data,sChan))  
+   if (!iExistChan_DB(Data, sChan))
       Abort_SYS(_("Data channel does not exist."));
 
 
    // --- Create or open mask channel ---
-      
-   if (!iExistChan_DB(Data,sMaskCh)) {
-      MaskCh = CreateSymb_DB(Data,sMaskCh,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_LONG);
-      SetRegSymbSetting_DB(Data,MaskCh,"CLASS","MASK");
+
+   if (!iExistChan_DB(Data, sMaskCh))
+   {
+      MaskCh = CreateSymb_DB(Data, sMaskCh, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_LONG);
+      SetRegSymbSetting_DB(Data, MaskCh, "CLASS", "MASK");
    }
    else
-      MaskCh = FindChan_DB(Data,sMaskCh);
-   LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);     
+      MaskCh = FindChan_DB(Data, sMaskCh);
+   LockSymb_DB(Data, MaskCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
 
 
-   if(rMin!=rDUMMY && rMax!=rDUMMY && rMin > rMax)
+   if (rMin != rDUMMY && rMax != rDUMMY && rMin > rMax)
       Abort_SYS(_("Minimum range value must be less than maximum range value."));
 
 
-   if(iInside!=0) iInside = 1; // default
-   if(iIncMin!=0) iIncMin = 1; // default
-   if(iIncMax!=0) iIncMax = 1; // default
+   if (iInside != 0) iInside = 1;  // default
+   if (iIncMin != 0) iIncMin = 1;  // default
+   if (iIncMax != 0) iIncMax = 1;  // default
 
    // --- Handle open-ended ranges ---
 
-   if(rMin==rDUMMY) {
+   if (rMin == rDUMMY)
+   {
       rMin = rMIN;
       iIncMin = 1;
    }
 
-   if(rMax==rDUMMY) {
+   if (rMax == rDUMMY)
+   {
       rMax = rMAX;
       iIncMax = 1;
    }
-   
 
-   XCh = FindChan_DB(Data,sChan);
-   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-   
+
+   XCh = FindChan_DB(Data, sChan);
+   LockSymb_DB(Data, XCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+
    // --- get some VV's ---
 
-   VVx = Create_VV(REAL,0);
-   VVm = Create_VV(INT,0);
+   VVx = Create_VV(REAL, 0);
+   VVm = Create_VV(INT, 0);
 
 
    // --- process lines ---
 
    LineLST = Create_LST(STR_DB_SYMBOL);
-   if(iSelect!=1)
+   if (iSelect != 1)
       SymbLST_DB(Data, LineLST, DB_SYMB_LINE);
    else
       SelectedLineLST_DB(Data, LineLST);
@@ -225,9 +228,8 @@ real  rMin, rMax;
 
    iTotLines = iSize_LST(LineLST);
    Progress_SYS(1);
-   for(i=0; i<iTotLines; i++)
+   for (i = 0; i < iTotLines; i++)
    {
-
       // --- get line label and symbol ---
 
       GetItem_LST(LineLST, 0, i, sLine);
@@ -236,19 +238,19 @@ real  rMin, rMax;
 
       // --- Update the Progress Bar ---
 
-      Strcpy_STR(sLabel,_("Processing line: "));
-      Strcat_STR(sLabel,sLine);
-      ProgName_SYS(sLabel,0);
-      ProgUpdateL_SYS(i,iTotLines);
+      Strcpy_STR(sLabel, _("Processing line: "));
+      Strcat_STR(sLabel, sLine);
+      ProgName_SYS(sLabel, 0);
+      ProgUpdateL_SYS(i, iTotLines);
 
 
       // --- Get data ---
 
-      GetChanVV_DB(Data,Line,XCh,VVx);
-      GetChanVV_DB(Data,Line,MaskCh,VVm);
-      ReFidVV_VV(VVm,VVx);
+      GetChanVV_DB(Data, Line, XCh, VVx);
+      GetChanVV_DB(Data, Line, MaskCh, VVm);
+      ReFidVV_VV(VVm, VVx);
 
-    
+
       // --- Set values outside intended data range to dummies ---
 
       DummyRangeEx_VVU(VVx, rMin, rMax, iInside, iIncMin, iIncMax);
@@ -264,15 +266,14 @@ real  rMin, rMax;
 
       // --- Replace the data ---
 
-      PutChanVV_DB(Data,Line,MaskCh,VVm);
-
+      PutChanVV_DB(Data, Line, MaskCh, VVm);
    }
 
 
    // --- Unlock the channel symbols ---
 
-   UnLockSymb_DB(Data,XCh);
-   UnLockSymb_DB(Data,MaskCh);
+   UnLockSymb_DB(Data, XCh);
+   UnLockSymb_DB(Data, MaskCh);
 
 
    // --- done ---
@@ -280,14 +281,13 @@ real  rMin, rMax;
    Destroy_SYS(VVx);
    Destroy_SYS(VVm);
    Destroy_LST(LineLST);
-   
-   
+
+
    Progress_SYS(0);
-   
-   
+
+
    // --- Release the Database ---
 
-   UnLock_EDB(EData);  
-   LoadChan_EDB(EData, sMaskCh);    
-
+   UnLock_EDB(EData);
+   LoadChan_EDB(EData, sMaskCh);
 }

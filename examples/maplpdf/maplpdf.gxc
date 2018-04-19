@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Draw base map using a user PDF"
 #include <version.gxh>
 
@@ -32,150 +33,145 @@ RESOURCE = "maplpdf.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
+   //===========================================================================
 
-string(STR_FILE)  sMDF,sMap,sPDF;
+   string(STR_FILE) sMDF,
+   sMap, sPDF;
 
-EMAP  EMap;
-MAP   Map;
-DGW   Diag;
-MAPL  Mapplot;
-real  rTime;
-int   iDraw, iClean;
+EMAP EMap;
+MAP Map;
+DGW Diag;
+MAPL Mapplot;
+real rTime;
+int iDraw, iClean;
 
 
 //===========================================================================
 
 {
-
    // --- Clean map by default ---
-   
-   iClean = iGetInt_SYS("MAPLPDF", "CLEAN");
-   SetInt_SYS("MAPLPDF", "CLEAN", iDUMMY);     // must set every time
-   if(iClean!=0) iClean = 1;  // clean by default
 
-   if (iInteractive_SYS()) {
-   
-   
+   iClean = iGetInt_SYS("MAPLPDF", "CLEAN");
+   SetInt_SYS("MAPLPDF", "CLEAN", iDUMMY);  // must set every time
+   if (iClean != 0) iClean = 1;             // clean by default
+
+   if (iInteractive_SYS())
+   {
       // --- set default drawing mode ---
-      
-      if (iHaveCurrent_EMAP()) 
-         SetString_SYS("MAPLPDF","DRAW","0");
-      else if (!iExistInt_SYS("MAPLPDF","DRAW"))
-         SetInt_SYS("MAPLPDF","DRAW", 1);
-        
-         
+
+      if (iHaveCurrent_EMAP())
+         SetString_SYS("MAPLPDF", "DRAW", "0");
+      else if (!iExistInt_SYS("MAPLPDF", "DRAW"))
+         SetInt_SYS("MAPLPDF", "DRAW", 1);
+
+
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("MAPLPDF");
-      SetInfoSYS_DGW(Diag,_MAPLPDF_0,DGW_FILEPATH,"MAPLPDF","PDF");
-      SetInfoSYS_DGW(Diag,_MAPLPDF_1,DGW_LISTALIAS,"MAPLPDF","DRAW");
+      SetInfoSYS_DGW(Diag, _MAPLPDF_0, DGW_FILEPATH, "MAPLPDF", "PDF");
+      SetInfoSYS_DGW(Diag, _MAPLPDF_1, DGW_LISTALIAS, "MAPLPDF", "DRAW");
       if (iRunDialogue_DGW(Diag)) Cancel_SYS();
-      GetInfoSYS_DGW(Diag,_MAPLPDF_0,DGW_FILEPATH,"MAPLPDF","PDF");
-      GetInfoSYS_DGW(Diag,_MAPLPDF_1,DGW_LISTALIAS,"MAPLPDF","DRAW");
+      GetInfoSYS_DGW(Diag, _MAPLPDF_0, DGW_FILEPATH, "MAPLPDF", "PDF");
+      GetInfoSYS_DGW(Diag, _MAPLPDF_1, DGW_LISTALIAS, "MAPLPDF", "DRAW");
       Destroy_DGW(Diag);
-      
-      
+
+
       // --- get PDF name ---
-      
-      GetString_SYS("MAPLPDF","PDF",sPDF);
-      
-      
+
+      GetString_SYS("MAPLPDF", "PDF", sPDF);
+
+
       // --- get old _basemap.con time and run the PDF ---
 
       rTime = rFileTime_SYS("_basemap.con");
-      if (iRunPDF_SYS("",sPDF)) Cancel_SYS();
+      if (iRunPDF_SYS("", sPDF)) Cancel_SYS();
       rTime = rFileTime_SYS("_basemap.con") - rTime;
-      
-      
-      if (iFileExist_SYS("_basemap.con") && (rTime > 0.0)) {
-      
+
+
+      if (iFileExist_SYS("_basemap.con") && (rTime > 0.0))
+      {
          // --- get MDF file name ---
-         
-         iDraw = iGetInt_SYS("MAPLPDF","DRAW");
-         if (iDraw == 2) {
-         
+
+         iDraw = iGetInt_SYS("MAPLPDF", "DRAW");
+         if (iDraw == 2)
+         {
             // --- MDF file ---
-         
+
             Diag = Create_DGW("MAPLMDF");
-            SetInfoSYS_DGW(Diag,_MAPLMDF_0,DGW_FILEPATH,"MAPLPDF","MDF");
-            SetInfoSYS_DGW(Diag,_MAPLMDF_1,DGW_FILEPATH,"MAPLPDF","MAP");
+            SetInfoSYS_DGW(Diag, _MAPLMDF_0, DGW_FILEPATH, "MAPLPDF", "MDF");
+            SetInfoSYS_DGW(Diag, _MAPLMDF_1, DGW_FILEPATH, "MAPLPDF", "MAP");
             if (iRunDialogue_DGW(Diag)) Cancel_SYS();
-            GetInfoSYS_DGW(Diag,_MAPLMDF_0,DGW_FILEPATH,"MAPLPDF","MDF");
-            GetInfoSYS_DGW(Diag,_MAPLMDF_1,DGW_FILEPATH,"MAPLPDF","MAP");
+            GetInfoSYS_DGW(Diag, _MAPLMDF_0, DGW_FILEPATH, "MAPLPDF", "MDF");
+            GetInfoSYS_DGW(Diag, _MAPLMDF_1, DGW_FILEPATH, "MAPLPDF", "MAP");
             Destroy_DGW(Diag);
-            
-         }         
-      }      
-      
-   } else
+         }
+      }
+   }
+   else
       rTime = 1.0;
-   
-   
+
+
    // --- if we created a control file, draw a map ---
 
-   if (iFileExist_SYS("_basemap.con") && (rTime > 0.0)) {
-   
+   if (iFileExist_SYS("_basemap.con") && (rTime > 0.0))
+   {
+      // --- get map drawing mode ---
 
-      // --- get map drawing mode ---   
-      
-      iDraw = iGetInt_SYS("MAPLPDF","DRAW");
-      
-   
+      iDraw = iGetInt_SYS("MAPLPDF", "DRAW");
+
+
       // --- if have a current map ---
-      
-      if (iDraw == 1) {
-      
+
+      if (iDraw == 1)
+      {
          if (iRunGX_SYS("newmap") != 0)
             Cancel_SYS();
-         
-      } else if (iDraw == 2) {
-      
-         GetString_SYS("MAPLPDF","MAP",sMap);
-         GetString_SYS("MAPLPDF","MDF",sMDF);
+      }
+      else if (iDraw == 2)
+      {
+         GetString_SYS("MAPLPDF", "MAP", sMap);
+         GetString_SYS("MAPLPDF", "MDF", sMDF);
          if (iLoaded_EMAP(sMap)) UnLoad_EMAP(sMap);
-         Map = Create_MAP(sMap,MAP_WRITENEW);
-         MDF_MVU(Map,sMDF,"base","data");
+         Map = Create_MAP(sMap, MAP_WRITENEW);
+         MDF_MVU(Map, sMDF, "base", "data");
          Destroy_MAP(Map);
          Load_EMAP(sMap);
-         
       }
-      
+
       // --- create MDF file ---
-      
+
       EMap = Current_EMAP();
       Map = Lock_EMAP(EMap);
 
-      if(iExistView_MAP(Map,"*Data"))
-         MapMDF_MVU(Map,"_basemap.mdf","*Data");
+      if (iExistView_MAP(Map, "*Data"))
+         MapMDF_MVU(Map, "_basemap.mdf", "*Data");
       else
-         MDF_MVU(Map,"_basemap.mdf","base","data");
-      
+         MDF_MVU(Map, "_basemap.mdf", "base", "data");
+
 
       // --- process ---
 
-      Progress_SYS(1);   
-      ProgName_SYS(_("Mapplot"),1);
-      
-      Mapplot = Create_MAPL("_basemap.con","base",0);
-      Process_MAPL(Mapplot,Map);
+      Progress_SYS(1);
+      ProgName_SYS(_("Mapplot"), 1);
+
+      Mapplot = Create_MAPL("_basemap.con", "base", 0);
+      Process_MAPL(Mapplot, Map);
       Destroy_MAPL(Mapplot);
-      
-      
+
+
       // --- Clean up empty groups from all views in map ---
 
-      if(iClean)
+      if (iClean)
          Clean_MAP(Map);
-      
-      
+
+
       // --- done ---
 
       UnLock_EMAP(EMap);
-      
-      Progress_SYS(0);   
-      
-   }      
-   
+
+      Progress_SYS(0);
+   }
 }

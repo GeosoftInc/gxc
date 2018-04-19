@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "GRIDTRNS"
 #include <version.gxh>
 
@@ -32,19 +33,20 @@ RESOURCE = "gridtrns.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-DGW        Diag;              // Dialogue handle
+   DGW Diag;  // Dialogue handle
 
 
-int        i;                 // utility int
-int        iTcon;             // value interpreted from Tcon value
-                              
-string(STR_FILE)  sGrd;            // Name of grid to transpose
-string(4)    sTcon;           // String for Tcon value
+int i;      // utility int
+int iTcon;  // value interpreted from Tcon value
+
+string(STR_FILE) sGrd;  // Name of grid to transpose
+string(4) sTcon;        // String for Tcon value
 
 
 //===========================================================================
@@ -52,43 +54,39 @@ string(4)    sTcon;           // String for Tcon value
 //===========================================================================
 
 {
-
-   
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("GRIDTRNSForm");
-   
+
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_GRIDTRNSFORM_0,DGW_FILEPATH,"GRIDTRNS","GRD");     
-      SetInfoSYS_DGW(Diag,_GRIDTRNSFORM_1,DGW_LISTALIAS,"GRIDTRNS","TCON");       
+      SetInfoSYS_DGW(Diag, _GRIDTRNSFORM_0, DGW_FILEPATH, "GRIDTRNS", "GRD");
+      SetInfoSYS_DGW(Diag, _GRIDTRNSFORM_1, DGW_LISTALIAS, "GRIDTRNS", "TCON");
 
       // --- Run the Dialogue ---
 
       i = iRunDialogue_DGW(Diag);
-      if (i != 0) Cancel_SYS();    // He hit cancel
+      if (i != 0) Cancel_SYS();  // He hit cancel
 
 
       // --- Get the Strings and replace in INI ---
 
-      GetInfoSYS_DGW(Diag,_GRIDTRNSFORM_0,DGW_FILEPATH,"GRIDTRNS","GRD");     
-      GetInfoSYS_DGW(Diag,_GRIDTRNSFORM_1,DGW_LISTALIAS,"GRIDTRNS","TCON");    
-      
+      GetInfoSYS_DGW(Diag, _GRIDTRNSFORM_0, DGW_FILEPATH, "GRIDTRNS", "GRD");
+      GetInfoSYS_DGW(Diag, _GRIDTRNSFORM_1, DGW_LISTALIAS, "GRIDTRNS", "TCON");
+
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
 
    // --- Get Parameters ---
 
-   GetString_SYS("GRIDTRNS","GRD",sGrd);
-   GetString_SYS("GRIDTRNS","TCON",sTcon);
-   
-   
+   GetString_SYS("GRIDTRNS", "GRD", sGrd);
+   GetString_SYS("GRIDTRNS", "TCON", sTcon);
+
+
    // --- Check for null file name string ---
 
    if (!iStrlen_STR(sGrd))
@@ -97,24 +95,26 @@ string(4)    sTcon;           // String for Tcon value
    // --- Check for valid TCON setting ---
 
    if (!iStrlen_STR(sTcon))
-      iTcon = IMU_TRANS_DEFAULT;         // default for empty string
-   else if (!iStrcmp_STR(sTcon,"0",0))  iTcon = IMU_TRANS_DEFAULT;
-   else if (!iStrcmp_STR(sTcon,"1",0))  iTcon = IMU_TRANS_Y;
-   else if (!iStrcmp_STR(sTcon,"-1",0)) iTcon = IMU_TRANS_X;
+      iTcon = IMU_TRANS_DEFAULT;  // default for empty string
+   else if (!iStrcmp_STR(sTcon, "0", 0))
+      iTcon = IMU_TRANS_DEFAULT;
+   else if (!iStrcmp_STR(sTcon, "1", 0))
+      iTcon = IMU_TRANS_Y;
+   else if (!iStrcmp_STR(sTcon, "-1", 0))
+      iTcon = IMU_TRANS_X;
    else
       Abort_SYS(_("Invalid Transpose condition choice! Must be 0,1 or -1"));
 
    Progress_SYS(1);
 
-   ProgName_SYS(_("Transposing Grid..."),1);
+   ProgName_SYS(_("Transposing Grid..."), 1);
 
 
    // --- Transpose the grid ---
 
-   GridTrns_IMU(sGrd,iTcon);
+   GridTrns_IMU(sGrd, iTcon);
 
    // --- done ---
 
    Progress_SYS(0);
-
 }

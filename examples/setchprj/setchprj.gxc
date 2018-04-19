@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Georeference database channels"
 #include <version.gxh>
 DESCRIPTION   = "
@@ -38,24 +39,26 @@ RESOURCE = "setchprj.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                                 VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                                 VARIABLES
+   //===========================================================================
 
-string(STR_DB_SYMBOL) sXCh,sYCh;                 // Channel Names
+   string(STR_DB_SYMBOL) sXCh,
+   sYCh;  // Channel Names
 
-EDB         eDB;                     // database handle
-DB          hDB;
+EDB eDB;  // database handle
+DB hDB;
 //SBF         hSBF;
 //BF          hBF;
 
-DB_SYMB     XCh,YCh;                   // Channel Handles
-DGW         Diag;                      // Dialogue handle
-LST         List;                      // List handle
-IPJ         hIPJ;
+DB_SYMB XCh, YCh;  // Channel Handles
+DGW Diag;          // Dialogue handle
+LST List;          // List handle
+IPJ hIPJ;
 
-int         iSetCurrent;
+int iSetCurrent;
 string(STR_DEFAULT) sTemp;
 string(STR_GXF) s1, s2, s3, s4, s5;
 
@@ -67,48 +70,48 @@ string(STR_GXF) s1, s2, s3, s4, s5;
    eDB = Current_EDB();
    hDB = Lock_EDB(eDB);
    hIPJ = Create_IPJ();
-   
+
 
    // --- Set default new X, Y channels to the existing current X, Y ---
-   
+
    GetString_SYS("SETCHPRJ", "X", sXCh);
-   if(!iStrlen_STR(sXCh) || !iExistChan_DB(hDB, sXCh))
+   if (!iStrlen_STR(sXCh) || !iExistChan_DB(hDB, sXCh))
    {
       GetXYZChan_DB(hDB, DB_CHAN_X, sXCh);
       SetString_SYS("SETCHPRJ", "X", sXCh);
    }
 
    GetString_SYS("SETCHPRJ", "Y", sYCh);
-   if(!iStrlen_STR(sYCh) || !iExistChan_DB(hDB, sYCh))
+   if (!iStrlen_STR(sYCh) || !iExistChan_DB(hDB, sYCh))
    {
       GetXYZChan_DB(hDB, DB_CHAN_Y, sYCh);
       SetString_SYS("SETCHPRJ", "Y", sYCh);
    }
-   
 
-   if (iInteractive_SYS()) {
 
+   if (iInteractive_SYS())
+   {
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("SETCHPRJ");
-   
+
 
       // --- Set up lists ---
 
-      List = GetList_DGW(Diag,_SETCHPRJ_0);
-      SymbLST_DB(hDB,List,DB_SYMB_CHAN);
-      Sort_LST(List,0,0);
-      List = GetList_DGW(Diag,_SETCHPRJ_1);
-      SymbLST_DB(hDB,List,DB_SYMB_CHAN);
-      Sort_LST(List,0,0);
+      List = GetList_DGW(Diag, _SETCHPRJ_0);
+      SymbLST_DB(hDB, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
+      List = GetList_DGW(Diag, _SETCHPRJ_1);
+      SymbLST_DB(hDB, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
 
 
       // --- Set any Defaults ---
 
-      SetInfoSYS_DGW(Diag,_SETCHPRJ_0,DGW_TEXT,"SETCHPRJ","X");
-      SetInfoSYS_DGW(Diag,_SETCHPRJ_1,DGW_TEXT,"SETCHPRJ","Y");
-      SetInfoSYS_DGW(Diag,_SETCHPRJ_2,DGW_LISTALIAS,"SETCHPRJ","SETCURRENTXY");
-   
+      SetInfoSYS_DGW(Diag, _SETCHPRJ_0, DGW_TEXT, "SETCHPRJ", "X");
+      SetInfoSYS_DGW(Diag, _SETCHPRJ_1, DGW_TEXT, "SETCHPRJ", "Y");
+      SetInfoSYS_DGW(Diag, _SETCHPRJ_2, DGW_LISTALIAS, "SETCHPRJ", "SETCURRENTXY");
+
 
       // --- Run the Dialogue ---
 
@@ -117,119 +120,121 @@ string(STR_GXF) s1, s2, s3, s4, s5;
 
       // --- Get the Strings ---
 
-      GetInfoSYS_DGW(Diag,_SETCHPRJ_0,DGW_TEXT,"SETCHPRJ","X");    
-      GetInfoSYS_DGW(Diag,_SETCHPRJ_1,DGW_TEXT,"SETCHPRJ","Y");
-      GetInfoSYS_DGW(Diag,_SETCHPRJ_2,DGW_LISTALIAS,"SETCHPRJ","SETCURRENTXY");
+      GetInfoSYS_DGW(Diag, _SETCHPRJ_0, DGW_TEXT, "SETCHPRJ", "X");
+      GetInfoSYS_DGW(Diag, _SETCHPRJ_1, DGW_TEXT, "SETCHPRJ", "Y");
+      GetInfoSYS_DGW(Diag, _SETCHPRJ_2, DGW_LISTALIAS, "SETCHPRJ", "SETCURRENTXY");
 
 
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-      
-   }      
+   }
 
    // --- Get Parameters ---
 
-   GetString_SYS("SETCHPRJ","X",sXCh);
-   GetString_SYS("SETCHPRJ","Y",sYCh);
-   iSetCurrent = iGetInt_SYS("SETCHPRJ","SETCURRENTXY");
-   if(iSetCurrent!=0) iSetCurrent=1;
+   GetString_SYS("SETCHPRJ", "X", sXCh);
+   GetString_SYS("SETCHPRJ", "Y", sYCh);
+   iSetCurrent = iGetInt_SYS("SETCHPRJ", "SETCURRENTXY");
+   if (iSetCurrent != 0) iSetCurrent = 1;
 
 
    // --- Do Channels Exist ? ---
 
-   if (!iExistChan_DB(hDB,sXCh))  
+   if (!iExistChan_DB(hDB, sXCh))
       Abort_SYS(_("X channel does not exist."));
-   XCh = FindChan_DB(hDB,sXCh);
+   XCh = FindChan_DB(hDB, sXCh);
 
-   if (!iExistChan_DB(hDB,sYCh))  
+   if (!iExistChan_DB(hDB, sYCh))
       Abort_SYS(_("Y channel does not exist."));
-   YCh = FindChan_DB(hDB,sYCh);
+   YCh = FindChan_DB(hDB, sYCh);
 
-   if(iInteractive_SYS())
+   if (iInteractive_SYS())
    {
       // --- get the X channel IPJ ---
 
-      LockSymb_DB(hDB,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
-      GetIPJ_DB(hDB,XCh,hIPJ);
-      UnLockSymb_DB(hDB,XCh);
+      LockSymb_DB(hDB, XCh, DB_LOCK_READONLY, DB_WAIT_NONE);
+      GetIPJ_DB(hDB, XCh, hIPJ);
+      UnLockSymb_DB(hDB, XCh);
 
       // --- Edit/modify the IPJ ---
 
-      Strcpy_STR(sTemp,sXCh);            
-      Strcat_STR(sTemp,",");            
-      Strcat_STR(sTemp,sYCh);            
-      
-      if(iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("X,Y channels"), sTemp)!=0)
+      Strcpy_STR(sTemp, sXCh);
+      Strcat_STR(sTemp, ",");
+      Strcat_STR(sTemp, sYCh);
+
+      if (iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("X,Y channels"), sTemp) != 0)
          Cancel_SYS();
 
-      
+
       // --- Export IPJ parameters as GXF strings for scripting. ---
-      
+
       GetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
-      
+
       SetString_SYS("IPJ", "NAME", s1);
       SetString_SYS("IPJ", "DATUM", s2);
       SetString_SYS("IPJ", "METHOD", s3);
       SetString_SYS("IPJ", "UNITS", s4);
       SetString_SYS("IPJ", "LOCALDATUM", s5);
-      
-      
+
+
       // --- Read them back in - this will ensure they are used for lineage ---
-      
+
       GetString_SYS("IPJ", "NAME", s1);
       GetString_SYS("IPJ", "DATUM", s2);
       GetString_SYS("IPJ", "METHOD", s3);
       GetString_SYS("IPJ", "UNITS", s4);
       GetString_SYS("IPJ", "LOCALDATUM", s5);
-
    }
    else
    {
       // --- Get and validate the IPJ parameters from the INI ---
-      
+
       GetString_SYS("IPJ", "NAME", s1);
       GetString_SYS("IPJ", "DATUM", s2);
       GetString_SYS("IPJ", "METHOD", s3);
       GetString_SYS("IPJ", "UNITS", s4);
       GetString_SYS("IPJ", "LOCALDATUM", s5);
-      
-      if(!iStrlen_STR(s1) &&
-         !iStrlen_STR(s2) &&
-         !iStrlen_STR(s3) &&
-         !iStrlen_STR(s4) &&
-         !iStrlen_STR(s5))
+
+      if (!iStrlen_STR(s1) &&
+          !iStrlen_STR(s2) &&
+          !iStrlen_STR(s3) &&
+          !iStrlen_STR(s4) &&
+          !iStrlen_STR(s5))
       {
          Abort_SYS(_("GXF projection strings IPJ.NAME, IPJ.DATUM, IPJ.METHOD, IPJ.UNITS and IPJ.LOCALDATUM not set for non-interactive use of the SETCHPRJ.GX."));
       }
-      
+
       SetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
    }
 
 
-
    // --- set the new IPJ in the channels ---
 
-   LockSymb_DB(hDB,XCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
-   LockSymb_DB(hDB,YCh,DB_LOCK_READWRITE,DB_WAIT_NONE);
+   LockSymb_DB(hDB, XCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
+   LockSymb_DB(hDB, YCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
 
-   SetIPJ_DB(hDB,XCh,YCh,hIPJ);
-   
-   
+   SetIPJ_DB(hDB, XCh, YCh, hIPJ);
+
+
    // --- Set current XY ---
-   
-   if(iSetCurrent) {
+
+   if (iSetCurrent)
+   {
       SetXYZChan_DB(hDB, DB_CHAN_X, sXCh);
-      SetXYZChan_DB(hDB, DB_CHAN_Y, sYCh);   
+      SetXYZChan_DB(hDB, DB_CHAN_Y, sYCh);
    }
 
-   UnLockSymb_DB(hDB,XCh);
-   UnLockSymb_DB(hDB,YCh);
-   
-   
+   UnLockSymb_DB(hDB, XCh);
+   UnLockSymb_DB(hDB, YCh);
+
+
    // --- Done ---
 
    Destroy_IPJ(hIPJ);
    UnLock_EDB(eDB);
-   
+
+
+   // --- Reset current EDB (setting from another GDB can alter this) ---
+
+   MakeCurrent_EDB(eDB);
 }

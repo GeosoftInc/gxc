@@ -1,5 +1,6 @@
 //===========================================================================
 
+// clang-format off
 NAME          = "Drill Hole - Select Holes in Area"
 #include <version.gxh>
 
@@ -22,6 +23,7 @@ RESOURCE = "dhslarea.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 //===========================================================================
 //                             GLOBAL VARIABLES
@@ -29,14 +31,14 @@ RESOURCE = "dhslarea.gr"
 
 int         i,iLen;
 
-PLY         Poly;                         // polygon object
-EDB         EData;
-DH          Drill;
-VV          VVx,VVy;                    // polyline VV's
-EMAP        EMap;
-DGW         Diag;
-MAP         Map;
-REG         MapReg;
+PLY Poly;  // polygon object
+EDB EData;
+DH Drill;
+VV VVx, VVy;  // polyline VV's
+EMAP EMap;
+DGW Diag;
+MAP Map;
+REG MapReg;
 
 string(STR_FILE) sDB, sMap, sPLY;
 int iType;
@@ -44,106 +46,103 @@ int iType;
 //===========================================================================
 
 {
-    
    // --- create polygon ---
 
    Poly = Create_PLY();
 
-   if(iInteractive_SYS())
-	{
-	   // --- create VV's ---
+   if (iInteractive_SYS())
+   {
+      // --- create VV's ---
 
-		VVx = Create_VV(REAL,0);
-		VVy = Create_VV(REAL,0);
-
-
-		// --- Get the current map, check its REG to see if it's a plan map ---
-
-		EMap = Current_EMAP();
-		GetName_EMAP(EMap, sMap);
-		Map = Lock_EMAP(EMap);
-		MapReg = GetREG_MAP(Map);                   
-		iType = iDUMMY;
-		GetInt_REG(MapReg, "DH_TYPE", iType);              
-		UnLock_EMAP(EMap);
+      VVx = Create_VV(REAL, 0);
+      VVy = Create_VV(REAL, 0);
 
 
-		// --- If the current map is not a plan map, search for a plan map ---
+      // --- Get the current map, check its REG to see if it's a plan map ---
 
-		while(iType!=0) 
-		{
-               
-			if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sMap)) 
-			{
+      EMap = Current_EMAP();
+      GetName_EMAP(EMap, sMap);
+      Map = Lock_EMAP(EMap);
+      MapReg = GetREG_MAP(Map);
+      iType = iDUMMY;
+      GetInt_REG(MapReg, "DH_TYPE", iType);
+      UnLock_EMAP(EMap);
 
-				// --- No plan maps found, prompt for a new map and try again ---
 
-				Diag = Create_DGW("DHSLAREA");
-				SetInfoSYS_DGW(Diag,_DHSLAREA_0,DGW_FILEPATH,"DHSLAREA","MAP");                     
-				if(iRunDialogue_DGW(Diag)==-1) Cancel_SYS();
-      
-				GetInfoSYS_DGW(Diag,_DHSLAREA_0,DGW_FILEPATH,"DHSLAREA","MAP");
-				Destroy_DGW(Diag);
+      // --- If the current map is not a plan map, search for a plan map ---
 
-				GetString_SYS("DHSLAREA","MAP",sMap);
+      while (iType != 0)
+      {
+         if (iGetSpecifiedMapName_EMAP("DH_TYPE", "0", sMap))
+         {
+            // --- No plan maps found, prompt for a new map and try again ---
 
-				// --- See if the new map is a plan map; if not, exit the procedure ---
+            Diag = Create_DGW("DHSLAREA");
+            SetInfoSYS_DGW(Diag, _DHSLAREA_0, DGW_FILEPATH, "DHSLAREA", "MAP");
+            if (iRunDialogue_DGW(Diag) == -1) Cancel_SYS();
 
-				EMap = Load_EMAP(sMap);
+            GetInfoSYS_DGW(Diag, _DHSLAREA_0, DGW_FILEPATH, "DHSLAREA", "MAP");
+            Destroy_DGW(Diag);
 
-				if(iGetSpecifiedMapName_EMAP("DH_TYPE","0", sMap)) 
-				{
-					DisplayMessage_SYS(_("Define Section"),_("The specified map is not a plan map."));
-					continue;
-				}
-			} 
-      
-			EMap = Load_EMAP(sMap);         
-			break;
-		} 
+            GetString_SYS("DHSLAREA", "MAP", sMap);
 
-		iSetCurrentView_EMAP(EMap,"*data");
+            // --- See if the new map is a plan map; if not, exit the procedure ---
 
-   
-		// --- get profile points ---
+            EMap = Load_EMAP(sMap);
 
-		DisplayMessage_SYS(_("Define polygon"),_("Enter points on polygon, Right button when done, Esc to cancel."));
+            if (iGetSpecifiedMapName_EMAP("DH_TYPE", "0", sMap))
+            {
+               DisplayMessage_SYS(_("Define Section"), _("The specified map is not a plan map."));
+               continue;
+            }
+         }
 
-		i = iGetPolyLine_EMAP(EMap,_("Click on polygon corners, Right button when done..."),VVx,VVy);
-   
+         EMap = Load_EMAP(sMap);
+         break;
+      }
 
-		// --- if not cancelled, and there are 3 or more points, process ---
+      iSetCurrentView_EMAP(EMap, "*data");
 
-		iLen = iLength_VV(VVx);
-		if ((i == 0) && (iLen >= 3)) 
-		{
-			AddPolygonEx_PLY(Poly,VVx,VVy,0);
 
-			
-			// --- Save the polygon for scripts ---
+      // --- get profile points ---
 
-			Strcpy_STR(sPLY, "_dhslarea.ply");  
-			SaveTable_PLY(Poly, sPLY);
-			SetString_SYS("DHSLAREA", "PLY", sPLY);
-			GetString_SYS("DHSLAREA", "PLY", sPLY);  // This line forces output to a GS script file.
-		}
-		else
-		   Cancel_SYS();
+      DisplayMessage_SYS(_("Define polygon"), _("Enter points on polygon, Right button when done, Esc to cancel."));
 
-	   Destroy_SYS(VVx);
-		Destroy_SYS(VVy);
-	}
-	else
-	{
-		GetString_SYS("DHSLAREA", "PLY", sPLY);
-		if(iStrlen_STR(sPLY) == 0)
-			Abort_SYS(_("A \"*.ply\" file must be specified using the DHSLAREA.PLY parameter when this GX is used in script mode."));
+      i = iGetPolyLine_EMAP(EMap, _("Click on polygon corners, Right button when done..."), VVx, VVy);
 
-		LoadTable_PLY(Poly, sPLY);
-	}
-      
+
+      // --- if not cancelled, and there are 3 or more points, process ---
+
+      iLen = iLength_VV(VVx);
+      if ((i == 0) && (iLen >= 3))
+      {
+         AddPolygonEx_PLY(Poly, VVx, VVy, 0);
+
+
+         // --- Save the polygon for scripts ---
+
+         Strcpy_STR(sPLY, "_dhslarea.ply");
+         SaveTable_PLY(Poly, sPLY);
+         SetString_SYS("DHSLAREA", "PLY", sPLY);
+         GetString_SYS("DHSLAREA", "PLY", sPLY);  // This line forces output to a GS script file.
+      }
+      else
+         Cancel_SYS();
+
+      Destroy_SYS(VVx);
+      Destroy_SYS(VVy);
+   }
+   else
+   {
+      GetString_SYS("DHSLAREA", "PLY", sPLY);
+      if (iStrlen_STR(sPLY) == 0)
+         Abort_SYS(_("A \"*.ply\" file must be specified using the DHSLAREA.PLY parameter when this GX is used in script mode."));
+
+      LoadTable_PLY(Poly, sPLY);
+   }
+
    EData = Current_EDB();
-   GetName_EDB(EData,sDB);
+   GetName_EDB(EData, sDB);
    Drill = Create_DH(sDB);
 
 
@@ -154,9 +153,8 @@ int iType;
 
    // --- Select the ones in the polygon ---
 
-   SelectPLY_DH(Drill,Poly);
+   SelectPLY_DH(Drill, Poly);
 
    Destroy_DH(Drill);
    Destroy_SYS(Poly);
 }
-

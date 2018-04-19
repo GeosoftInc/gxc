@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Delete a Channel"
 #include <version.gxh>
 DESCRIPTION   = "
@@ -23,29 +24,29 @@ RESOURCE = "delchan.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_DB_SYMBOL) sCh;               // Channel Name
-string(STR_DEFAULT_LONG) sTemp;            // Temporary string
+   string(STR_DB_SYMBOL) sCh;    // Channel Name
+string(STR_DEFAULT_LONG) sTemp;  // Temporary string
 
-EDB        EData;
-DB         Data;
-DB_SYMB    Ch;                // Channel handle
-DGW        Diag;              // Dialogue handle
-LST        List;              // List handle
+EDB EData;
+DB Data;
+DB_SYMB Ch;  // Channel handle
+DGW Diag;    // Dialogue handle
+LST List;    // List handle
 
 
-int        i;                 // utility int
+int i;  // utility int
 
 //===========================================================================
 //                        CHANNEL DELETION CODE
 //===========================================================================
 
 {
-
    // --- Get the Database ---
 
    EData = Current_EDB();
@@ -56,32 +57,31 @@ int        i;                 // utility int
 
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("DELCHANForm");
 
       // --- Set up lists ---
 
-      List = GetList_DGW(Diag,_DELCHANFORM_0);
-      SymbLST_DB(Data,List,DB_SYMB_CHAN);
-      Sort_LST(List,0,0);   
-                                               
+      List = GetList_DGW(Diag, _DELCHANFORM_0);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
+
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_DELCHANFORM_0,DGW_TEXT,"DELCHAN","NAME");         
+      SetInfoSYS_DGW(Diag, _DELCHANFORM_0, DGW_TEXT, "DELCHAN", "NAME");
 
       // --- Run the Dialogue ---
 
       i = iRunDialogue_DGW(Diag);
 
-      if (i != 0) Cancel_SYS();    // He hit cancel
+      if (i != 0) Cancel_SYS();  // He hit cancel
 
 
       // --- Get the String and replace in INI ---
 
-      GetInfoSYS_DGW(Diag,_DELCHANFORM_0,DGW_TEXT,"DELCHAN","NAME");     
-      
+      GetInfoSYS_DGW(Diag, _DELCHANFORM_0, DGW_TEXT, "DELCHAN", "NAME");
+
 
       // --- Destroy the Dialogue ---
 
@@ -90,27 +90,27 @@ int        i;                 // utility int
 
    // --- Verify deletion ---
 
-   GetString_SYS("DELCHAN","NAME",sCh); 
+   GetString_SYS("DELCHAN", "NAME", sCh);
    Printf_STR(sTemp, sizeof(sTemp), _("Delete channel '%s' from database?"), sCh);
-   
+
    if (iInteractive_SYS())
    {
-      i = iDisplayQuestion_SYS(_("Verify Deletion"),sTemp);
-      if (!i)      
-         Cancel_SYS();         
+      i = iDisplayQuestion_SYS(_("Verify Deletion"), sTemp);
+      if (!i)
+         Cancel_SYS();
    }
-    
+
    // --- Does the Channel Exist ? ---
 
-   if (iExistChan_DB(Data,sCh))
-      Ch = FindChan_DB(Data,sCh);       // Get the channel handle 
+   if (iExistChan_DB(Data, sCh))
+      Ch = FindChan_DB(Data, sCh);  // Get the channel handle
    else
       Abort_SYS(_("Channel could not be deleted. The channel does not exist in database."));
 
    // --- Lock channel and delete it ---
 
-   LockSymb_DB(Data,Ch,DB_LOCK_READWRITE,DB_WAIT_NONE);
-   DeleteSymb_DB(Data,Ch);
+   LockSymb_DB(Data, Ch, DB_LOCK_READWRITE, DB_WAIT_NONE);
+   DeleteSymb_DB(Data, Ch);
 
    // --- Release the Database ---
 

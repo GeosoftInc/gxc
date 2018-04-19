@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "DIGITPROFOPT GX"
 #include <version.gxh>
 DESCRIPTION   = "
@@ -39,6 +40,7 @@ RESOURCE = "DIGITPROFOPT.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 
 //===========================================================================
@@ -46,9 +48,9 @@ RESOURCE = "DIGITPROFOPT.gr"
 //===========================================================================
 
 DGW         Diag;
-LST         ChLST, List;
-EDB         EData;
-DB          Data;
+LST ChLST, List;
+EDB EData;
+DB Data;
 
 
 string(STR_DB_SYMBOL) sCh;
@@ -59,40 +61,41 @@ int iDone, iRet, iValue, iItem;
 //===========================================================================
 
 {
-   if (!iInteractive_SYS()) 
+   if (!iInteractive_SYS())
       Abort_SYS(_("This GX must be run interactively"));
-   
+
 
    // --- Get current database ---
-         
+
    EData = Current_EDB();
-   Data = Lock_EDB(EData);   
-   
-   
+   Data = Lock_EDB(EData);
+
+
    // --- Channel LST ---
-   
-   ChLST = Create_LST(2*STR_DB_SYMBOL);
-   SymbLST_DB(Data,ChLST,DB_SYMB_CHAN);
-      
-   
+
+   ChLST = Create_LST(2 * STR_DB_SYMBOL);
+   SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
+
+
    // --- Remove current X and Y channels, as they are output automatically ---
-   
+
    GetXYZChan_DB(Data, DB_CHAN_X, sCh);
    iItem = iFindItem_LST(ChLST, 0, sCh);
-   if(iItem!=-1)
+   if (iItem != -1)
       DelItem_LST(ChLST, iItem);
-   
+
    GetXYZChan_DB(Data, DB_CHAN_Y, sCh);
    iItem = iFindItem_LST(ChLST, 0, sCh);
-   if(iItem!=-1)
+   if (iItem != -1)
       DelItem_LST(ChLST, iItem);
 
 
    iDone = 0;
    iValue = 1;
-   while(!iDone) {
-
-      if(iValue == 1) {   // --- Run Main dialogue ---
+   while (!iDone)
+   {
+      if (iValue == 1)
+      {  // --- Run Main dialogue ---
 
          // --- Create the Dialogue ---
 
@@ -100,77 +103,76 @@ int iDone, iRet, iValue, iItem;
 
 
          // --- Make a channel LST ---
-         
-         
-         List = GetList_DGW(Diag,_DPROFOPT_0);
-         ClassGroupLST_DB(Data,List,"TARGETS");
+
+
+         List = GetList_DGW(Diag, _DPROFOPT_0);
+         ClassGroupLST_DB(Data, List, "TARGETS");
 
          // --- Data channel list ---
 
-         List = GetList_DGW(Diag,_DPROFOPT_1);
+         List = GetList_DGW(Diag, _DPROFOPT_1);
          Copy_LST(List, ChLST);
 
-         List = GetList_DGW(Diag,_DPROFOPT_2);
+         List = GetList_DGW(Diag, _DPROFOPT_2);
          Copy_LST(List, ChLST);
 
-         List = GetList_DGW(Diag,_DPROFOPT_3);
+         List = GetList_DGW(Diag, _DPROFOPT_3);
          Copy_LST(List, ChLST);
 
-         List = GetList_DGW(Diag,_DPROFOPT_4);
+         List = GetList_DGW(Diag, _DPROFOPT_4);
          Copy_LST(List, ChLST);
 
-      
 
          // --- Set any Defaults from INI ---
 
-         SetInfoSYS_DGW(Diag,_DPROFOPT_0,DGW_TEXT,"DIGITPROF","TARGETS");
-         SetInfoSYS_DGW(Diag,_DPROFOPT_1,DGW_TEXT,"DIGITPROF","CHAN");
-         SetInfoSYS_DGW(Diag,_DPROFOPT_2,DGW_TEXT,"DIGITPROF","CHAN2");
-         SetInfoSYS_DGW(Diag,_DPROFOPT_3,DGW_TEXT,"DIGITPROF","CHAN3");
-         SetInfoSYS_DGW(Diag,_DPROFOPT_4,DGW_TEXT,"DIGITPROF","CHAN4");
-         SetInfoSYS_DGW(Diag,_DPROFOPT_5,DGW_LISTALIAS,"DIGITPROF","PLOTSYMB");
+         SetInfoSYS_DGW(Diag, _DPROFOPT_0, DGW_TEXT, "DIGITPROF", "TARGETS");
+         SetInfoSYS_DGW(Diag, _DPROFOPT_1, DGW_TEXT, "DIGITPROF", "CHAN");
+         SetInfoSYS_DGW(Diag, _DPROFOPT_2, DGW_TEXT, "DIGITPROF", "CHAN2");
+         SetInfoSYS_DGW(Diag, _DPROFOPT_3, DGW_TEXT, "DIGITPROF", "CHAN3");
+         SetInfoSYS_DGW(Diag, _DPROFOPT_4, DGW_TEXT, "DIGITPROF", "CHAN4");
+         SetInfoSYS_DGW(Diag, _DPROFOPT_5, DGW_LISTALIAS, "DIGITPROF", "PLOTSYMB");
 
 
          // --- Run the Dialogue ---
 
          iRet = iRunDialogue_DGW(Diag);
-         if (iRet == -1) Cancel_SYS();    // cancel
-      
-         
+         if (iRet == -1) Cancel_SYS();  // cancel
+
+
          // --- Put values back in INI ---
 
-         GetInfoSYS_DGW(Diag,_DPROFOPT_0,DGW_TEXT,"DIGITPROF","TARGETS");
-         GetInfoSYS_DGW(Diag,_DPROFOPT_1,DGW_TEXT,"DIGITPROF","CHAN");
-         GetInfoSYS_DGW(Diag,_DPROFOPT_2,DGW_TEXT,"DIGITPROF","CHAN2");
-         GetInfoSYS_DGW(Diag,_DPROFOPT_3,DGW_TEXT,"DIGITPROF","CHAN3");
-         GetInfoSYS_DGW(Diag,_DPROFOPT_4,DGW_TEXT,"DIGITPROF","CHAN4");
-         GetInfoSYS_DGW(Diag,_DPROFOPT_5,DGW_LISTALIAS,"DIGITPROF","PLOTSYMB");
+         GetInfoSYS_DGW(Diag, _DPROFOPT_0, DGW_TEXT, "DIGITPROF", "TARGETS");
+         GetInfoSYS_DGW(Diag, _DPROFOPT_1, DGW_TEXT, "DIGITPROF", "CHAN");
+         GetInfoSYS_DGW(Diag, _DPROFOPT_2, DGW_TEXT, "DIGITPROF", "CHAN2");
+         GetInfoSYS_DGW(Diag, _DPROFOPT_3, DGW_TEXT, "DIGITPROF", "CHAN3");
+         GetInfoSYS_DGW(Diag, _DPROFOPT_4, DGW_TEXT, "DIGITPROF", "CHAN4");
+         GetInfoSYS_DGW(Diag, _DPROFOPT_5, DGW_LISTALIAS, "DIGITPROF", "PLOTSYMB");
 
 
          // --- Destroy the Dialogue ---
-     
+
          Destroy_DGW(Diag);
 
-         
-         if(iRet == 0)
+
+         if (iRet == 0)
             iDone = 1;
-         else if(iRet == 1)
-            iValue = 2;    // get symbol definition
-            
+         else if (iRet == 1)
+            iValue = 2;  // get symbol definition
       }
-      else if(iValue == 2) {     // symbols dialog
+      else if (iValue == 2)
+      {  // symbols dialog
 
          Diag = Create_DGW("SYMB");
 
-   
+
          // --- Set any Defaults ---
 
-         SetInfoSYS_DGW(Diag,_SYMB_0,DGW_LISTALIAS,  "DIGITPROF","MARKER_SYMBOL");    
-         SetInfoSYS_DGW(Diag,_SYMB_1,DGW_TEXT,       "DIGITPROF","MARKER_SIZE");    
-         SetInfoSYS_DGW(Diag,_SYMB_2,DGW_LISTALIAS,  "DIGITPROF","MARKER_WEIGHT");
-         SetInfoSYS_DGW(Diag,_SYMB_3,DGW_TEXT,       "DIGITPROF","MARKER_LINE_COLOUR");    
-         SetInfoSYS_DGW(Diag,_SYMB_4,DGW_TEXT,       "DIGITPROF","MARKER_FILL_COLOUR");
-      
+         SetInfoSYS_DGW(Diag, _SYMB_0, DGW_LISTALIAS, "DIGITPROF", "MARKER_SYMBOL");
+         SetInfoSYS_DGW(Diag, _SYMB_1, DGW_TEXT, "DIGITPROF", "MARKER_SIZE");
+         SetInfoSYS_DGW(Diag, _SYMB_2, DGW_LISTALIAS, "DIGITPROF", "MARKER_WEIGHT");
+         SetInfoSYS_DGW(Diag, _SYMB_3, DGW_TEXT, "DIGITPROF", "MARKER_LINE_COLOUR");
+         SetInfoSYS_DGW(Diag, _SYMB_4, DGW_TEXT, "DIGITPROF", "MARKER_FILL_COLOUR");
+
 
          // --- Run the Dialogue ---
 
@@ -180,24 +182,17 @@ int iDone, iRet, iValue, iItem;
 
          // --- Get the Strings ---
 
-         GetInfoSYS_DGW(Diag,_SYMB_0,DGW_LISTALIAS,  "DIGITPROF","MARKER_SYMBOL");    
-         GetInfoSYS_DGW(Diag,_SYMB_1,DGW_TEXT,       "DIGITPROF","MARKER_SIZE");    
-         GetInfoSYS_DGW(Diag,_SYMB_2,DGW_LISTALIAS,  "DIGITPROF","MARKER_WEIGHT");
-         GetInfoSYS_DGW(Diag,_SYMB_3,DGW_TEXT,       "DIGITPROF","MARKER_LINE_COLOUR");    
-         GetInfoSYS_DGW(Diag,_SYMB_4,DGW_TEXT,       "DIGITPROF","MARKER_FILL_COLOUR");
+         GetInfoSYS_DGW(Diag, _SYMB_0, DGW_LISTALIAS, "DIGITPROF", "MARKER_SYMBOL");
+         GetInfoSYS_DGW(Diag, _SYMB_1, DGW_TEXT, "DIGITPROF", "MARKER_SIZE");
+         GetInfoSYS_DGW(Diag, _SYMB_2, DGW_LISTALIAS, "DIGITPROF", "MARKER_WEIGHT");
+         GetInfoSYS_DGW(Diag, _SYMB_3, DGW_TEXT, "DIGITPROF", "MARKER_LINE_COLOUR");
+         GetInfoSYS_DGW(Diag, _SYMB_4, DGW_TEXT, "DIGITPROF", "MARKER_FILL_COLOUR");
 
          Destroy_DGW(Diag);
 
          iValue = 1;
-
       }
-   }    
-   
-   UnLock_EDB(EData);   
+   }
+
+   UnLock_EDB(EData);
 }
-
-
-
-
-
-   

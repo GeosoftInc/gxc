@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Edit a list"
 #include <version.gxh>
 
@@ -27,20 +28,21 @@ RESOURCE = "listedit.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
-//                             VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             VARIABLES
+   //===========================================================================
 
-string(STR_FILE)  sList;
+   string(STR_FILE) sList;
 string(STR_DEFAULT) sTitle;
 string(STR_DEFAULT) sPrompt;
-string(STR_DEFAULT) sSetting,sOldSetting;
+string(STR_DEFAULT) sSetting, sOldSetting;
 
-DGW   	Diag;
-LST      List;
-int      i,iItem;
+DGW Diag;
+LST List;
+int i, iItem;
 
 
 //===========================================================================
@@ -48,120 +50,119 @@ int      i,iItem;
 //===========================================================================
 
 {
-
    // --- only works interactively ---
 
-   if (iInteractive_SYS()) {
-   
-   
+   if (iInteractive_SYS())
+   {
       // --- get parameters ---
-      
-      GetString_SYS("LISTEDIT","LIST",sList);
-      GetString_SYS("LISTEDIT","TITLE",sTitle);
-      GetString_SYS("LISTEDIT","PROMPT",sPrompt);
-      GetString_SYS("LISTEDIT","SETTING",sSetting);
-      Strcpy_STR(sOldSetting,sSetting);
-      
-      
+
+      GetString_SYS("LISTEDIT", "LIST", sList);
+      GetString_SYS("LISTEDIT", "TITLE", sTitle);
+      GetString_SYS("LISTEDIT", "PROMPT", sPrompt);
+      GetString_SYS("LISTEDIT", "SETTING", sSetting);
+      Strcpy_STR(sOldSetting, sSetting);
+
+
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("listedit");
-      
-      if (iStrlen_STR(sTitle))
-         SetTitle_DGW(Diag,sTitle);
-          
-      if (iStrlen_STR(sPrompt))
-         SetInfo_DGW(Diag,_LISTEDIT_1,DGW_LABEL,sPrompt);
-         
-      SetInfo_DGW(Diag,_LISTEDIT_0,DGW_TEXT,sList);
-      SetInfo_DGW(Diag,_LISTEDIT_1,DGW_TEXT,sSetting);
 
-      
+      if (iStrlen_STR(sTitle))
+         SetTitle_DGW(Diag, sTitle);
+
+      if (iStrlen_STR(sPrompt))
+         SetInfo_DGW(Diag, _LISTEDIT_1, DGW_LABEL, sPrompt);
+
+      SetInfo_DGW(Diag, _LISTEDIT_0, DGW_TEXT, sList);
+      SetInfo_DGW(Diag, _LISTEDIT_1, DGW_TEXT, sSetting);
+
+
       // --- get the list from the dialog ---
-      
-      List = GetList_DGW(Diag,_LISTEDIT_1);
-      
-      
+
+      List = GetList_DGW(Diag, _LISTEDIT_1);
+
+
       // --- read list file ---
-      
-      LoadFile_LST(List,sList);
-      Sort_LST(List,0,0);
-      
+
+      LoadFile_LST(List, sList);
+      Sort_LST(List, 0, 0);
+
 
       // --- run dialog until everything OK ---
-      
+
       i = 1;
-      while (i != 0) {
-      
+      while (i != 0)
+      {
          // --- Run the Dialogue ---
 
          i = iRunDialogue_DGW(Diag);
-         if (i == -1) {
-            SetString_SYS("LISTEDIT","SETTING",sOldSetting);
-            Cancel_SYS();    
+         if (i == -1)
+         {
+            SetString_SYS("LISTEDIT", "SETTING", sOldSetting);
+            Cancel_SYS();
          }
-         
-         
+
+
          // --- get the setting ---
-         
-         GetInfo_DGW(Diag,_LISTEDIT_1,DGW_TEXT,sSetting);
-         
-         
+
+         GetInfo_DGW(Diag, _LISTEDIT_1, DGW_TEXT, sSetting);
+
+
          // --- option ---
-         
-         if (iStrMin_STR(sSetting)) {
-         
-            GetInfo_DGW(Diag,_LISTEDIT_1,DGW_TEXT,sSetting);
-            SetString_SYS("LISTEDIT","SETTING",sSetting);
-            
-            switch (i) {
-            
-               case 0:  // --- add the new setting to the list ---
-               case 1:
-                           
-                  if (iFindItem_LST(List,0,sSetting) == -1) {   
-                     AddItem_LST(List,sSetting,"");
-                     Sort_LST(List,0,0);
-                  }
-                  break;
-                  
-                  
-               case 2:  // --- delete an entry ---                                 
-                     
-                  iItem = iFindItem_LST(List,0,sSetting);
-                  if (iItem != -1)
-                     DelItem_LST(List,iItem);
-                     
-                     
-                  // --- put next item in the dialog ---
-                  
-                  if (iItem >= iSize_LST(List)) 
-                     iItem = iSize_LST(List) - 1;
-                  if (iItem >= 0) {
-                     GetItem_LST(List,0,iItem,sSetting);
-                  } else
-                     Strcpy_STR(sSetting,"");
-                  SetInfo_DGW(Diag,_LISTEDIT_1,DGW_TEXT,sSetting);
-                  
-                  break;
-                  
-               default:
-                  DisplayMessage_SYS(_("Error"),_("I'm lost"));
-                  
-            }               
-         }            
+
+         if (iStrMin_STR(sSetting))
+         {
+            GetInfo_DGW(Diag, _LISTEDIT_1, DGW_TEXT, sSetting);
+            SetString_SYS("LISTEDIT", "SETTING", sSetting);
+
+            switch (i)
+            {
+            case 0:  // --- add the new setting to the list ---
+            case 1:
+
+               if (iFindItem_LST(List, 0, sSetting) == -1)
+               {
+                  AddItem_LST(List, sSetting, "");
+                  Sort_LST(List, 0, 0);
+               }
+               break;
+
+
+            case 2:  // --- delete an entry ---
+
+               iItem = iFindItem_LST(List, 0, sSetting);
+               if (iItem != -1)
+                  DelItem_LST(List, iItem);
+
+
+               // --- put next item in the dialog ---
+
+               if (iItem >= iSize_LST(List))
+                  iItem = iSize_LST(List) - 1;
+               if (iItem >= 0)
+               {
+                  GetItem_LST(List, 0, iItem, sSetting);
+               }
+               else
+                  Strcpy_STR(sSetting, "");
+               SetInfo_DGW(Diag, _LISTEDIT_1, DGW_TEXT, sSetting);
+
+               break;
+
+            default:
+               DisplayMessage_SYS(_("Error"), _("I'm lost"));
+            }
+         }
       }
-      
-      
+
+
       // --- save the list ---
-      
-      SaveFile_LST(List,sList);
-      
-      
+
+      SaveFile_LST(List, sList);
+
+
       // --- destroy dialog ---
-      
+
       Destroy_DGW(Diag);
-      
    }
-   
 }

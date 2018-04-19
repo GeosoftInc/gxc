@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Import a Maxwell Plate file to a 3D view"
 #include <version.gxh>
 
@@ -36,7 +37,8 @@ RESOURCE = "impmaxplate.gr"
 //                                  INCLUDE
 //===========================================================================
 
-#include <all.gxh>     // system
+#include <all.gxh>
+// clang-format on     // system
 
 #define READ(A) \
    iLine = iLine_RA(Ra);   \
@@ -124,7 +126,7 @@ RA    Ra;
 VV    VVx, VVy, VVn;
 
 int i, iLine, iNP, iRet, iToks, iUsed, iVal, iFill, iLabel;
-
+int iThickPlate;
 real(MAXP) rX, rY, rZ, rDip, rDipDir, rPlunge, rL, rH, rXH, rYH, rZH, rXL, rYL, rZL, rCT;
 real(MAXP) rXN, rYN, rZN;
 real rXMn, rXMx, rYMn, rYMx, rZMn, rZMx;
@@ -243,12 +245,21 @@ string(1024) sMsg;
       if(!iStrcmp_STR(sVal, "NO", STR_CASE_TOLERANT)) iU[i] = 0;
 
 
-      // --- Skip "Thick Plate" or "Flat Top" ---
+      // --- Skip "Flat Top" and Evaluate "Thick Plate" ---
 
-      READ_TOKEN(sBuff)       
+      iThickPlate = 0;
+      READ_TOKEN(sBuff)     
       while(!iStrcmp_STR(sToken, _n("Thick Plate"), STR_CASE_TOLERANT) ||
-				!iStrcmp_STR(sToken, _n("Flat Top"), STR_CASE_TOLERANT))
+            !iStrcmp_STR(sToken, _n("Flat Top"), STR_CASE_TOLERANT))
       {
+         if (!iStrcmp_STR(sToken, _n("Thick Plate"), STR_CASE_TOLERANT))
+         {
+            SCANS(sVal)
+            TrimSpace_STR(sVal, STR_TRIMBOTH);
+            iThickPlate = 1;
+            if(!iStrcmp_STR(sVal, "NO", STR_CASE_TOLERANT)) iThickPlate = 0;
+         }
+
          READ_TOKEN(sBuff)
       }         
 
@@ -325,6 +336,9 @@ string(1024) sMsg;
          rThickness = rVal;
 
          READ(sBuff)          // Skew          : 1.0000
+
+         if (iThickPlate == 1)
+            rCT[i] = rConductivity * rThickness; 
       }
 
 

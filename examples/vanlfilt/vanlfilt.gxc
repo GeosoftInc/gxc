@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Apply a non-linear filter to array cannel along array (row)"
 #include <version.gxh>
 
@@ -40,40 +41,41 @@ RESOURCE = "vanlfilt.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 //===========================================================================
 //                                 VARIABLES
 //===========================================================================
                         
-EDB         EData;                        
-DB          Data;
-DB_SYMB     InCh,OutCh;        // Channel handles
-DB_SYMB     Line;              // Line handle
-DGW         Diag;              // Dialogue handle
-LST         List;              // List handle
-DB_SELECT   Select;              // current selection mode
-VA          YVA;
-VV          InVV,OutVV;
+EDB         EData;
+DB Data;
+DB_SYMB InCh, OutCh;  // Channel handles
+DB_SYMB Line;         // Line handle
+DGW Diag;             // Dialogue handle
+LST List;             // List handle
+DB_SELECT Select;     // current selection mode
+VA YVA;
+VV InVV, OutVV;
 
 
-int         iWidth;            // filter width in points
-int         i;                 // utility int
-int         iLines;            // Number of Lines Processed
-int         iTotLines;         // Total Number of Lines to Process
-int         iVAColumn;
-int         iLenVA;
-int         iStart,iEnd;
-int         iTok;
-real        rFidFrom,rFidTo;
-real        rFidStart,rFidIncr;
-real        rTol;              // filter tolerance
+int iWidth;     // filter width in points
+int i;          // utility int
+int iLines;     // Number of Lines Processed
+int iTotLines;  // Total Number of Lines to Process
+int iVAColumn;
+int iLenVA;
+int iStart, iEnd;
+int iTok;
+real rFidFrom, rFidTo;
+real rFidStart, rFidIncr;
+real rTol;  // filter tolerance
 
-string(DB_SYMB_NAME_SIZE)  sInCh,sOutCh,sLine;      // Channel Names
-string(10)  sTemp;            // temporary number formating string
-string(60)  sLabel;           // Label for progress bar
-string(DB_SYMB_NAME_SIZE)  sFid;
-string(DB_SYMB_NAME_SIZE)  sFidFrom,sFidTo;
-string(GS_MAX_PATH)        sDB;
+string(DB_SYMB_NAME_SIZE) sInCh, sOutCh, sLine;  // Channel Names
+string(10) sTemp;                                // temporary number formating string
+string(60) sLabel;                               // Label for progress bar
+string(DB_SYMB_NAME_SIZE) sFid;
+string(DB_SYMB_NAME_SIZE) sFidFrom, sFidTo;
+string(GS_MAX_PATH) sDB;
 
 
 //===========================================================================
@@ -81,57 +83,53 @@ string(GS_MAX_PATH)        sDB;
 //===========================================================================
 
 {
- 
    if (!iInteractive_SYS()) Abort_SYS(_("This GX must be run interactively."));
 
    // --- Get the current selection information
-   
+
    EData = Current_EDB();
-   GetCurrentSelection_EDB(EData,sDB,sInCh,sLine,sFid);
+   GetCurrentSelection_EDB(EData, sDB, sInCh, sLine, sFid);
 
    Data = Lock_EDB(EData);
-   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   InCh = FindSymb_DB(Data, sInCh, DB_SYMB_CHAN);
    if (NULLSYMB != InCh)
       iVAColumn = iGetColVA_DB(Data, InCh);
-   if (iVAColumn <= 1) 
+   if (iVAColumn <= 1)
       Abort_SYS(_("The selected channel must be an array channel to apply non-linear filter along array."));
-      
 
-      
-   
+
    // --- Create the Dialogue ---
 
    Diag = Create_DGW("VANLFILT");
-   SetString_SYS("VANLFILT","INCH",sInCh);
-   
+   SetString_SYS("VANLFILT", "INCH", sInCh);
+
 
    // --- Set up input and output lists ---
 
-   List = GetList_DGW(Diag,_VANLFILT_1);
-   SymbLST_DB(Data,List,DB_SYMB_CHAN);
-   Sort_LST(List,0,0);
-
+   List = GetList_DGW(Diag, _VANLFILT_1);
+   SymbLST_DB(Data, List, DB_SYMB_CHAN);
+   Sort_LST(List, 0, 0);
 
 
    // --- Set any Defaults ---
 
-   SetInfoSYS_DGW(Diag,_VANLFILT_0,DGW_TEXT,"VANLFILT","INCH");     
-   SetInfoSYS_DGW(Diag,_VANLFILT_1,DGW_TEXT,"VANLFILT","OUTCH");     
-   SetInfoSYS_DGW(Diag,_VANLFILT_2,DGW_TEXT,"VANLFILT","WIDTH");    
-   SetInfoSYS_DGW(Diag,_VANLFILT_3,DGW_TEXT,"VANLFILT","TOL");    
+   SetInfoSYS_DGW(Diag, _VANLFILT_0, DGW_TEXT, "VANLFILT", "INCH");
+   SetInfoSYS_DGW(Diag, _VANLFILT_1, DGW_TEXT, "VANLFILT", "OUTCH");
+   SetInfoSYS_DGW(Diag, _VANLFILT_2, DGW_TEXT, "VANLFILT", "WIDTH");
+   SetInfoSYS_DGW(Diag, _VANLFILT_3, DGW_TEXT, "VANLFILT", "TOL");
 
    // --- Run the Dialogue ---
 
    i = iRunDialogue_DGW(Diag);
-   if (i != 0) Cancel_SYS();    // He hit cancel
+   if (i != 0) Cancel_SYS();  // He hit cancel
 
 
    // --- Get the Strings ---
 
-   GetInfoSYS_DGW(Diag,_VANLFILT_0,DGW_TEXT,"VANLFILT","INCH");     
-   GetInfoSYS_DGW(Diag,_VANLFILT_1,DGW_TEXT,"VANLFILT","OUTCH");     
-   GetInfoSYS_DGW(Diag,_VANLFILT_2,DGW_TEXT,"VANLFILT","WIDTH");    
-   GetInfoSYS_DGW(Diag,_VANLFILT_3,DGW_TEXT,"VANLFILT","TOL");                            
+   GetInfoSYS_DGW(Diag, _VANLFILT_0, DGW_TEXT, "VANLFILT", "INCH");
+   GetInfoSYS_DGW(Diag, _VANLFILT_1, DGW_TEXT, "VANLFILT", "OUTCH");
+   GetInfoSYS_DGW(Diag, _VANLFILT_2, DGW_TEXT, "VANLFILT", "WIDTH");
+   GetInfoSYS_DGW(Diag, _VANLFILT_3, DGW_TEXT, "VANLFILT", "TOL");
 
 
    // --- Destroy the Dialogue ---
@@ -141,60 +139,63 @@ string(GS_MAX_PATH)        sDB;
 
    // --- Get Parameters ---
 
-   GetString_SYS("VANLFILT","INCH",sInCh);
-   GetString_SYS("VANLFILT","OUTCH",sOutCh);
-   iWidth = iGetInt_SYS("VANLFILT","WIDTH");
-   rTol = rGetReal_SYS("VANLFILT","TOL");
-   if (iWidth <= 0)  Abort_SYS(_("Invalid filter width (must be greater than 0)"));
-   if (rTol < 0.0)   Abort_SYS(_("Invalid tolerance (must be greater than 0.0"));
+   GetString_SYS("VANLFILT", "INCH", sInCh);
+   GetString_SYS("VANLFILT", "OUTCH", sOutCh);
+   iWidth = iGetInt_SYS("VANLFILT", "WIDTH");
+   rTol = rGetReal_SYS("VANLFILT", "TOL");
+   if (iWidth <= 0) Abort_SYS(_("Invalid filter width (must be greater than 0)"));
+   if (rTol < 0.0) Abort_SYS(_("Invalid tolerance (must be greater than 0.0"));
 
-   if (iStrcmp_STR(sOutCh,"",STR_CASE_TOLERANT) == 0) Strcpy_STR(sOutCh,sInCh);
+   if (iStrcmp_STR(sOutCh, "", STR_CASE_TOLERANT) == 0) Strcpy_STR(sOutCh, sInCh);
 
 
    // --- Save current selection and set to new selection ---
 
    Select = GetSelect_DB(Data);
-   if (iStrcmp_STR(sLine,"[All]",STR_CASE_TOLERANT) != 0 && iStrcmp_STR(sFid,"[None]",STR_CASE_TOLERANT) != 0) {
-      Select_DB(Data,"",DB_LINE_SELECT_EXCLUDE);
-      Select_DB(Data,sLine,DB_LINE_SELECT_INCLUDE);
-   }   
-                    
-   
+   if (iStrcmp_STR(sLine, "[All]", STR_CASE_TOLERANT) != 0 && iStrcmp_STR(sFid, "[None]", STR_CASE_TOLERANT) != 0)
+   {
+      Select_DB(Data, "", DB_LINE_SELECT_EXCLUDE);
+      Select_DB(Data, sLine, DB_LINE_SELECT_INCLUDE);
+   }
+
+
    // --- Does the Input Channel Exist ? ---
 
-   if (!iExistSymb_DB(Data,sInCh,DB_SYMB_CHAN))
+   if (!iExistSymb_DB(Data, sInCh, DB_SYMB_CHAN))
       Abort_SYS(_("Input channel does not exist."));
-   InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+   InCh = FindSymb_DB(Data, sInCh, DB_SYMB_CHAN);
 
    iVAColumn = iGetColVA_DB(Data, InCh);
-   if (iVAColumn <= 1) 
+   if (iVAColumn <= 1)
       Abort_SYS(_("The selected channel must be an array channel to apply non-linear filter along array."));
-   
+
 
    // --- Does the Ouput Channel Exist ? ---
 
-   if (!iExistSymb_DB(Data,sOutCh,DB_SYMB_CHAN)) {  // if channel does not exist 
-      OutCh = DupSymb_DB(Data,InCh,sOutCh);
-      UnLockSymb_DB(Data,OutCh);
-   } else
-      OutCh = FindSymb_DB(Data,sOutCh,DB_SYMB_CHAN);
-   if (iVAColumn != iGetColVA_DB(Data,OutCh)) 
+   if (!iExistSymb_DB(Data, sOutCh, DB_SYMB_CHAN))
+   {  // if channel does not exist
+      OutCh = DupSymb_DB(Data, InCh, sOutCh);
+      UnLockSymb_DB(Data, OutCh);
+   }
+   else
+      OutCh = FindSymb_DB(Data, sOutCh, DB_SYMB_CHAN);
+   if (iVAColumn != iGetColVA_DB(Data, OutCh))
       Abort_SYS(_("Input and output channels have different array sizes."));
 
 
    // --- Lock the channel symbols ---
 
-   if (InCh != OutCh) 
-      LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-   LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   if (InCh != OutCh)
+      LockSymb_DB(Data, InCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+   LockSymb_DB(Data, OutCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
 
 
    // --- Create VA ---
 
-   YVA = Create_VA(REAL,0,iVAColumn);
-   InVV  = Create_VV(REAL,0);
-   OutVV = Create_VV(REAL,0);
-   
+   YVA = Create_VA(REAL, 0, iVAColumn);
+   InVV = Create_VV(REAL, 0);
+   OutVV = Create_VV(REAL, 0);
+
 
    // --- Prepare to do the work ---
 
@@ -204,116 +205,112 @@ string(GS_MAX_PATH)        sDB;
    // --- Go through all selected Lines ---
 
    Line = FirstSelLine_DB(Data);
-   while (iIsLineValid_DB(Data,Line))
+   while (iIsLineValid_DB(Data, Line))
    {
-
       // --- Update the Progress Bar ---
 
-      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-      GetSymbName_DB(Data,Line,sTemp);
-      UnLockSymb_DB(Data,Line);
-      Strcpy_STR(sLabel,_("Filter line: "));
-      Strcat_STR(sLabel,sTemp);
-   
-      Progress_SYS(1);
-      ProgName_SYS(_("Filter along array"),1);
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      GetSymbName_DB(Data, Line, sTemp);
+      UnLockSymb_DB(Data, Line);
+      Strcpy_STR(sLabel, _("Filter line: "));
+      Strcat_STR(sLabel, sTemp);
 
-      
+      Progress_SYS(1);
+      ProgName_SYS(_("Filter along array"), 1);
+
+
       // --- Get VA data ---
 
-      GetChanVA_DB(Data,Line,InCh,YVA);
+      GetChanVA_DB(Data, Line, InCh, YVA);
       iLenVA = iLen_VA(YVA);
-      
-      rFidStart = rGetFidStart_VA(YVA); 
-      rFidIncr  = rGetFidIncr_VA(YVA);  
+
+      rFidStart = rGetFidStart_VA(YVA);
+      rFidIncr = rGetFidIncr_VA(YVA);
 
       iStart = 0;
-      iEnd = iLenVA-1;
-      
+      iEnd = iLenVA - 1;
 
-      if (iStrcmp_STR(sFid,"[All]",STR_CASE_TOLERANT) != 0 && iStrcmp_STR(sFid,"[None]",STR_CASE_TOLERANT) != 0) {
 
-         iTok = iTokens_STR(sFid," ");
-         if (iTok < 3) break; // this should not have happened
-      
+      if (iStrcmp_STR(sFid, "[All]", STR_CASE_TOLERANT) != 0 && iStrcmp_STR(sFid, "[None]", STR_CASE_TOLERANT) != 0)
+      {
+         iTok = iTokens_STR(sFid, " ");
+         if (iTok < 3) break;  // this should not have happened
+
          GetToken_STR(sFidFrom, sFid, 0);
          GetToken_STR(sFidTo, sFid, 2);
-         
-         rFidFrom = rScanR_STR(sFidFrom); 
-         rFidTo = rScanR_STR(sFidTo);     
-         
-         iStart = (int)((rFidFrom - rFidStart)/rFidIncr);
-         iEnd   = (int)((rFidTo - rFidStart)/rFidIncr);
-         if (iStart < 0) iStart = 0;
-         if (iEnd > iLenVA-1) iEnd = iLenVA-1;
-      }
-      
-      
-      // --- Go through all the selected data points ---
-      
-      for (i = iStart; i <= iEnd; i++) {
-      
-         // --- Progress ---
-      
-         ProgName_SYS(sLabel,0);
-         ProgUpdate_SYS( (int) ((real) i / (real) (iEnd-iStart+1) * 100.0) );
 
-         
+         rFidFrom = rScanR_STR(sFidFrom);
+         rFidTo = rScanR_STR(sFidTo);
+
+         iStart = (int)((rFidFrom - rFidStart) / rFidIncr);
+         iEnd = (int)((rFidTo - rFidStart) / rFidIncr);
+         if (iStart < 0) iStart = 0;
+         if (iEnd > iLenVA - 1) iEnd = iLenVA - 1;
+      }
+
+
+      // --- Go through all the selected data points ---
+
+      for (i = iStart; i <= iEnd; i++)
+      {
+         // --- Progress ---
+
+         ProgName_SYS(sLabel, 0);
+         ProgUpdate_SYS((int)((real)i / (real)(iEnd - iStart + 1) * 100.0));
+
+
          // --- Get each row of data
 
-         GetVV_VA (YVA,i,VA_ROW,InVV);
-      
-      
+         GetVV_VA(YVA, i, VA_ROW, InVV);
+
+
          // --- Apply filter ---
 
-         NLFilt_VVU(InVV,OutVV,iWidth,rTol);
-         SetVV_VA (YVA,i,VA_ROW,OutVV);
+         NLFilt_VVU(InVV, OutVV, iWidth, rTol);
+         SetVV_VA(YVA, i, VA_ROW, OutVV);
       }
-      
+
       // --- Put VA data ---
-      
-      PutChanVA_DB(Data,Line,OutCh,YVA);
-         
 
-      // --- Advance to Next Line ---        
+      PutChanVA_DB(Data, Line, OutCh, YVA);
 
-      Line = NextSelLine_DB(Data, Line );
+
+      // --- Advance to Next Line ---
+
+      Line = NextSelLine_DB(Data, Line);
       iLines++;
-
    }
 
 
    // --- Add maker only if the filter was applied on the entire channel (as opposed to certain selected cells) ---
 
-   if (iStrcmp_STR(sFid,"[All]",STR_CASE_TOLERANT) == 0 || iStrcmp_STR(sFid,"[None]",STR_CASE_TOLERANT) == 0)
-      EasyMakerSymb_DB(Data,OutCh,_("Non-linear filter along array (row)"),"VANLFILT;");
+   if (iStrcmp_STR(sFid, "[All]", STR_CASE_TOLERANT) == 0 || iStrcmp_STR(sFid, "[None]", STR_CASE_TOLERANT) == 0)
+      EasyMakerSymb_DB(Data, OutCh, _("Non-linear filter along array (row)"), "VANLFILT;");
 
 
    // --- Clean ---
-   
+
    Destroy_VA(YVA);
    Destroy_VV(InVV);
    Destroy_VV(OutVV);
-  
-   
-   
+
+
    // --- Unlock the channel symbol ---
 
-   if (InCh != OutCh) UnLockSymb_DB(Data,InCh);
-   UnLockSymb_DB(Data,OutCh);
-   
-   
-   // --- reset starting selections --- 
+   if (InCh != OutCh) UnLockSymb_DB(Data, InCh);
+   UnLockSymb_DB(Data, OutCh);
 
-   SetSelect_DB(Data,Select);
-   if (iInteractive_SYS()) 
+
+   // --- reset starting selections ---
+
+   SetSelect_DB(Data, Select);
+   if (iInteractive_SYS())
       UnLock_EDB(EData);
    else
       Destroy_DB(Data);
 
-   
+
    // --- done ---
 
    Progress_SYS(0);
-
 }

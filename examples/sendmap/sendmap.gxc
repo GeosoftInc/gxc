@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Send an map using email"
 #include <version.gxh>
 DESCRIPTION   = "
@@ -15,17 +16,19 @@ TRANSLATIONFRIENDLYPATH = "GX/Map"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
+   //===========================================================================
 
-string(GS_MAX_PATH)  sDocName,sMap,sNewMap, sMapName;
+   string(GS_MAX_PATH) sDocName,
+   sMap, sNewMap, sMapName;
 string(64) sLicClass;
 
 int iArcGIS;
 
-EMAP  EMap;
-MAP   Map,NewMap;
+EMAP EMap;
+MAP Map, NewMap;
 
 //===========================================================================
 
@@ -34,64 +37,63 @@ MAP   Map,NewMap;
 
    GetLicenseClass_SYS(sLicClass);
    iArcGIS = iStrcmp_STR(sLicClass, "ArcGIS", STR_CASE_TOLERANT) == 0;
-   
+
    // --- get the current map ---
 
    EMap = Current_EMAP();
-   
+
    if (iArcGIS)
       GetCurrentDoc_ARCSYS(sDocName);
    else
-      GetName_EMAP(EMap,sDocName);
-      
+      GetName_EMAP(EMap, sDocName);
+
    RemoveQualifiers_STR(sDocName, sDocName);
 
    // --- Ensure the map name ends in appropriate extension ---
 
    if (iIs3DView_EMAP(EMap) == 0)
-      FileExt_STR(sDocName,".map",sMap,FILE_EXT_FORCE);
+      FileExt_STR(sDocName, ".map", sMap, FILE_EXT_FORCE);
    else
-      FileExt_STR(sDocName,".geosoft_3dv",sMap,FILE_EXT_FORCE);
+      FileExt_STR(sDocName, ".geosoft_3dv", sMap, FILE_EXT_FORCE);
    FileNamePart_STR(sMap, sMapName, STR_FILE_PART_NAME_EXTENSION);
-   	 
+
    Map = Lock_EMAP(EMap);
-   SetRedrawFlag_EMAP(EMap,EMAP_REDRAW_NO);
-   
-   
+   SetRedrawFlag_EMAP(EMap, EMAP_REDRAW_NO);
+
+
    // --- Generate Temp Name ---
-   
+
    if (iIs3DView_EMAP(EMap) == 0)
-      TempFileExt_SYS("map",sNewMap);
+      TempFileExt_SYS("map", sNewMap);
    else
-      TempFileExt_SYS("geosoft_3dv",sNewMap);
+      TempFileExt_SYS("geosoft_3dv", sNewMap);
 
    // --- open the map ---
 
-   NewMap = Create_MAP(sNewMap,MAP_WRITENEW);
-   
+   NewMap = Create_MAP(sNewMap, MAP_WRITENEW);
+
    // --- dup the map ---
-   
-   DupMap_MAP(Map,NewMap,DUPMAP_COPY);   
+
+   DupMap_MAP(Map, NewMap, DUPMAP_COPY);
 
    // --- Pack Map ---
-   
+
    Progress_SYS(1);
    PackFiles_MAP(NewMap);
    Progress_SYS(0);
-   
-   
-   // --- Close Map ---
-   
-   Destroy_MAP(NewMap);
-   
-   
-   // --- Mail Map ---
-   
 
-   
-   SendMail_INTERNET("","","","",sNewMap,sMapName,"","");
-   
-   
+
+   // --- Close Map ---
+
+   Destroy_MAP(NewMap);
+
+
+   // --- Mail Map ---
+
+
+   SendMail_INTERNET("", "", "", "", sNewMap, sMapName, "", "");
+
+
    // --- done ---
 
    UnLock_EMAP(EMap);

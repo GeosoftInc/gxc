@@ -1,5 +1,6 @@
 
 //===========================================================================
+// clang-format off
 NAME          = "Reproject grids"
 #include <version.gxh>
 
@@ -54,6 +55,7 @@ RESOURCE = "gridrepj.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 //===========================================================================
 //                                 VARIABLES
@@ -87,676 +89,692 @@ real rNCell;
 //===========================================================================
 
 {
-   
    hOldIPJ = Create_IPJ();
    hNewIPJ = Create_IPJ();
-   hOldIMG  = (IMG)0;
-   
+   hOldIMG = (IMG)0;
+
    rNewCell = rDUMMY;
    rOldCell = rDUMMY;
 
 
-   if (iInteractive_SYS()) {
-      
+   if (iInteractive_SYS())
+   {
       i = 0;
-      while (i != 99) {
-      
-         switch (i) {
-      
-            case 0:
+      while (i != 99)
+      {
+         switch (i)
+         {
+         case 0:
 
-               // --- Create the Dialogue ---
+            // --- Create the Dialogue ---
 
-               Diag = Create_DGW("GRIDREPJ0");
+            Diag = Create_DGW("GRIDREPJ0");
 
 
-               // --- Run the Dialogue ---
+            // --- Run the Dialogue ---
 
-               SetInfoSYS_DGW(Diag,_GRIDREPJ0_0,DGW_FILEPATH,"GRIDREPJ","OLDGRID");
-               i = iRunDialogue_DGW(Diag);
-               if (i == -1) Cancel_SYS();
-               GetInfoSYS_DGW(Diag,_GRIDREPJ0_0,DGW_FILEPATH,"GRIDREPJ","OLDGRID");    
-               Destroy_DGW(Diag);
-            
-            
-               // --- is this a multi-grid reprojection? ---
+            SetInfoSYS_DGW(Diag, _GRIDREPJ0_0, DGW_FILEPATH, "GRIDREPJ", "OLDGRID");
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
+            GetInfoSYS_DGW(Diag, _GRIDREPJ0_0, DGW_FILEPATH, "GRIDREPJ", "OLDGRID");
+            Destroy_DGW(Diag);
 
-               GetString_SYS("GRIDREPJ","OLDGRID",sGrids);
-               iGrids = iCountTokens_STR(sGrids,"|");
-               if (iGrids > 1) {
-               
-                  iMultiGrid = TRUE;
-                  GetMFile_STR(sGrids,sGrid,0);
-                  FileNamePart_STR(sGrids,sQual,STR_FILE_PART_QUALIFIERS);
-                  if (iStrlen_STR(sQual)) {
-                     Strcpy_STR(sNewGrid,sGrid);
-                  }
-                  
-                  if (hOldIMG) Destroy_IMG(hOldIMG);
-                  hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
-                  GetIPJ_IMG(hOldIMG,hNewIPJ);
-                  
-                  i = 3;
-                  
-               } else {
-               
-                  iMultiGrid = FALSE;
-                  Strcpy_STR(sGrid,sGrids);
-                  
-                  if (hOldIMG) Destroy_IMG(hOldIMG);
-                  hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
-                  GetIPJ_IMG(hOldIMG,hOldIPJ);
-                  
-                  i = 1;
-               }
-                  
-               break;
-            
-            
-            case 1:
-            
-         
-               // --- Edit/modify the IPJ ---
-               
-               hOldIPJ2 = Create_IPJ();
-               Copy_IPJ(hOldIPJ, hOldIPJ2);
-               iR = iCoordSysWizard_GUI(hOldIPJ2, TRUE, COORDSYS_MODE_ALL, _("Grid name"), sGrids);
-               if (iR == 0) 
+
+            // --- is this a multi-grid reprojection? ---
+
+            GetString_SYS("GRIDREPJ", "OLDGRID", sGrids);
+            iGrids = iCountTokens_STR(sGrids, "|");
+            if (iGrids > 1)
+            {
+               iMultiGrid = TRUE;
+               GetMFile_STR(sGrids, sGrid, 0);
+               FileNamePart_STR(sGrids, sQual, STR_FILE_PART_QUALIFIERS);
+               if (iStrlen_STR(sQual))
                {
-                  // --- set parameters ---
-                  
-                  GetXML_IPJ(hOldIPJ2,sXML);
-                  SetString_SYS("GRIDREPJ","OLDIPJ_XML",sXML);
-                  SetString_SYS("GRIDREPJ","OLDIPJ_NAME","");
-                  SetString_SYS("GRIDREPJ","OLDIPJ_DATUM","");
-                  SetString_SYS("GRIDREPJ","OLDIPJ_METHOD","");
-                  SetString_SYS("GRIDREPJ","OLDIPJ_UNITS","");
-                  SetString_SYS("GRIDREPJ","OLDIPJ_LOCALDATUM","");
-                   
-                  
-                  
-                  // --- change the grid IPJ if it has changed ---
-                  
-                  GetName_IPJ(hOldIPJ, IPJ_NAME_METHOD,sOldMethod);
-                  GetName_IPJ(hOldIPJ2,IPJ_NAME_METHOD,sOldMethod2);
-                  
-                  iSame = 0;
-                  if (!iHasProjection_IPJ(hOldIPJ) || !iHasProjection_IPJ(hOldIPJ2) ||
-                        (iCoordinateSystemsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
-                        iWarpsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
-                        iOrientationsAreTheSame_IPJ(hOldIPJ, hOldIPJ2)))
-                        iSame = 1;
-
-                  if(!iSame || 
-                     ( iStrcmp_STR(sOldMethod,_("*unknown"),0) && !iStrcmp_STR(sOldMethod2,_("*unknown"),0 )) ||
-                     (!iStrcmp_STR(sOldMethod,_("*unknown"),0) &&  iStrcmp_STR(sOldMethod2,_("*unknown"),0 )) )  {
-
-
-                     Copy_IPJ(hOldIPJ2, hOldIPJ);
-
-                     if (hOldIMG) Destroy_IMG(hOldIMG);
-                     hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrids,IMG_FILE_READORWRITE);
-                     SetIPJ_IMG(hOldIMG,hOldIPJ);
-                  }
-                  
-                  
-                  if (iMultiGrid)
-                     i = 6;
-                  else   
-                     i = 2;
-               
-               } 
-               else  // user cancelled
-                  Cancel_SYS();   
-               
-               Destroy_IPJ(hOldIPJ2);
-               break;      
-   
-   
-            case 2:
-
-               // --- Create the Dialogue ---
-
-               Diag = Create_DGW("GRIDREPJ3");
-               SetInfoSYS_DGW(Diag,_GRIDREPJ3_0,DGW_FILEPATH,"GRIDREPJ","NEWGRID");
-               i = iRunDialogue_DGW(Diag);
-               if (i == -1) Cancel_SYS();
-               GetInfoSYS_DGW(Diag,_GRIDREPJ3_0,DGW_FILEPATH,"GRIDREPJ","NEWGRID");    
-               Destroy_DGW(Diag);
-            
-
-               // --- Get Parameters ---
-
-               GetString_SYS("GRIDREPJ","NEWGRID",sNewGrid);
-            
-               if (iStrcmp_STR(sNewGrid,sGrids,STR_CASE_TOLERANT) == 0) {
-                   DisplayMessage_SYS(_("Grid error"),_("Grids must be different"));
-                   i = 2;
-                   break;
+                  Strcpy_STR(sNewGrid, sGrid);
                }
-            
-               if (i == 0)      // "<Back" : initial coord system.
-                  i = 1;
-               
-               else if (i == 1) {   // "Next>" : create new grid
-            
-                  // --- Get the image and IPJ ---
 
-                  GetString_SYS("GRIDREPJ","NEWGRID",sNewGrid);
-                  if (iFileExist_SYS(sNewGrid)) {
-               
-                     hNewIMG = CreateFile_IMG(GS_DOUBLE,sNewGrid,IMG_FILE_READONLY);
-                     GetIPJ_IMG(hNewIMG,hNewIPJ);
-                     Destroy_IMG(hNewIMG);
+               if (hOldIMG) Destroy_IMG(hOldIMG);
+               hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READONLY);
+               GetIPJ_IMG(hOldIMG, hNewIPJ);
 
-                  } else {
-                     Copy_IPJ(hOldIPJ,hNewIPJ);
-                     ClearWarp_IPJ(hNewIPJ);
-                  }
-            
-                  i = 3;
-               }
-               
-               break;
-            
-            
-            case 3:
+               i = 3;
+            }
+            else
+            {
+               iMultiGrid = FALSE;
+               Strcpy_STR(sGrid, sGrids);
+
+               if (hOldIMG) Destroy_IMG(hOldIMG);
+               hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READONLY);
+               GetIPJ_IMG(hOldIMG, hOldIPJ);
+
+               i = 1;
+            }
+
+            break;
 
 
-               // --- Edit/modify the IPJ ---
-            
-               if (iMultiGrid) {
-                  Strcpy_STR(sLabel,_("Reproject"));
-                  Strcpy_STR(sSource,_("target coordinate system"));
-               } else {   
-                  Strcpy_STR(sLabel,_("Grid name"));
-                  Strcpy_STR(sSource,sNewGrid);
-               }
-               
-               rXd=rYd=rX0=rY0=rRot=0.0;
-               GetInfo_IMG(hOldIMG,rXd,rYd,rX0,rY0,rRot);
-					iX = iNX_IMG(hOldIMG);
-					iY = iNY_IMG(hOldIMG);
+         case 1:
 
-               iR = iCoordSysWizardGrid_GUI(hNewIPJ, hOldIPJ, TRUE, COORDSYS_MODE_ALL, sLabel, sSource, iX, iY, rX0, rY0, rXd, rYd, rRot);
-               if (iR == 0) 
+
+            // --- Edit/modify the IPJ ---
+
+            hOldIPJ2 = Create_IPJ();
+            Copy_IPJ(hOldIPJ, hOldIPJ2);
+            iR = iCoordSysWizard_GUI(hOldIPJ2, TRUE, COORDSYS_MODE_ALL, _("Grid name"), sGrids);
+            if (iR == 0)
+            {
+               // --- set parameters ---
+
+               GetXML_IPJ(hOldIPJ2, sXML);
+               SetString_SYS("GRIDREPJ", "OLDIPJ_XML", sXML);
+               SetString_SYS("GRIDREPJ", "OLDIPJ_NAME", "");
+               SetString_SYS("GRIDREPJ", "OLDIPJ_DATUM", "");
+               SetString_SYS("GRIDREPJ", "OLDIPJ_METHOD", "");
+               SetString_SYS("GRIDREPJ", "OLDIPJ_UNITS", "");
+               SetString_SYS("GRIDREPJ", "OLDIPJ_LOCALDATUM", "");
+
+
+               // --- change the grid IPJ if it has changed ---
+
+               GetName_IPJ(hOldIPJ, IPJ_NAME_METHOD, sOldMethod);
+               GetName_IPJ(hOldIPJ2, IPJ_NAME_METHOD, sOldMethod2);
+
+               iSame = 0;
+               if (!iHasProjection_IPJ(hOldIPJ) || !iHasProjection_IPJ(hOldIPJ2) ||
+                   (iCoordinateSystemsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
+                    iWarpsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
+                    iOrientationsAreTheSame_IPJ(hOldIPJ, hOldIPJ2)))
+                  iSame = 1;
+
+               if (!iSame ||
+                   (iStrcmp_STR(sOldMethod, _("*unknown"), 0) && !iStrcmp_STR(sOldMethod2, _("*unknown"), 0)) ||
+                   (!iStrcmp_STR(sOldMethod, _("*unknown"), 0) && iStrcmp_STR(sOldMethod2, _("*unknown"), 0)))
                {
-                  rOldCell = rDUMMY;
-                  rNewCell = rDUMMY;
-               
-               
-                  // --- set parameters ---
+                  Copy_IPJ(hOldIPJ2, hOldIPJ);
 
-                  GetXML_IPJ(hNewIPJ,sXML);
-                  SetString_SYS("GRIDREPJ","NEWIPJ_XML",sXML);
-                  SetString_SYS("GRIDREPJ","NEWIPJ_NAME","");
-                  SetString_SYS("GRIDREPJ","NEWIPJ_DATUM","");
-                  SetString_SYS("GRIDREPJ","NEWIPJ_METHOD","");
-                  SetString_SYS("GRIDREPJ","NEWIPJ_UNITS","");
-                  SetString_SYS("GRIDREPJ","NEWIPJ_LOCALDATUM","");
-                  
-                  if (iMultiGrid)
-                     i = 6;
-                  else   
-                     i = 4;
-                  
+                  if (hOldIMG) Destroy_IMG(hOldIMG);
+                  hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrids, IMG_FILE_READORWRITE);
+                  SetIPJ_IMG(hOldIMG, hOldIPJ);
                }
-               else  // user cancelled
-                  Cancel_SYS();
-
-               break;
 
 
-            case 4:
-         
-               // --- create projected grid ---
-            
-                iSame = 0;
-                if (!iHasProjection_IPJ(hNewIPJ) || !iHasProjection_IPJ(hOldIPJ) ||
-                    (iCoordinateSystemsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
-                    iWarpsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
-                    iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ)))
-                    iSame = 1;
-            
-               if (!iSame || (rNewCell != rOldCell)) {
-                  Progress_SYS(1);
-                  CreateProjected2_IMG(hOldIMG,hNewIPJ,rNewCell);
-                  Progress_SYS(0);
-               }
-            
-               rXd=rYd=rX0=rY0=rRot=0.0;
-               GetInfo_IMG(hOldIMG,rXd,rYd,rX0,rY0,rRot);
-			   iX = iNX_IMG(hOldIMG);
-			   iY = iNY_IMG(hOldIMG);
-            
-               iX = iNX_IMG(hOldIMG);
-               iY = iNY_IMG(hOldIMG);
-            
-               if (rOldCell == rDUMMY) rOldCell = rXd;
-            
-               if (rNewCell == rDUMMY) 
-                  rNCell = rOldCell;
+               if (iMultiGrid)
+                  i = 6;
                else
-                  rNCell = rNewCell;
+                  i = 2;
+            }
+            else  // user cancelled
+               Cancel_SYS();
 
-  			   Diag = Create_DGW("GRIDREPJ6");
-               SetInfo_DGW(Diag,_GRIDREPJ6_0,DGW_TEXT,sNewGrid);
-               FormatR_STR(rNCell,sTemp,14,7);
-               SetInfo_DGW(Diag,_GRIDREPJ6_1,DGW_TEXT,sTemp);
-               FormatI_STR(iX,sTemp,7);
-               SetInfo_DGW(Diag,_GRIDREPJ6_2,DGW_TEXT,sTemp);
-               FormatI_STR(iY,sTemp,7);
-               SetInfo_DGW(Diag,_GRIDREPJ6_3,DGW_TEXT,sTemp);
-               FormatR_STR(rX0,sTemp,14,7);
-               SetInfo_DGW(Diag,_GRIDREPJ6_4,DGW_TEXT,sTemp);
-               FormatR_STR(rY0,sTemp,14,7);
-               SetInfo_DGW(Diag,_GRIDREPJ6_5,DGW_TEXT,sTemp);
+            Destroy_IPJ(hOldIPJ2);
+            break;
 
-               i = iRunDialogue_DGW(Diag);
-               if (i < 0) Cancel_SYS();
-               Destroy_DGW(Diag);
-            
-               if (i == 0)
+
+         case 2:
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("GRIDREPJ3");
+            SetInfoSYS_DGW(Diag, _GRIDREPJ3_0, DGW_FILEPATH, "GRIDREPJ", "NEWGRID");
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
+            GetInfoSYS_DGW(Diag, _GRIDREPJ3_0, DGW_FILEPATH, "GRIDREPJ", "NEWGRID");
+            Destroy_DGW(Diag);
+
+
+            // --- Get Parameters ---
+
+            GetString_SYS("GRIDREPJ", "NEWGRID", sNewGrid);
+
+            if (iStrcmp_STR(sNewGrid, sGrids, STR_CASE_TOLERANT) == 0)
+            {
+               DisplayMessage_SYS(_("Grid error"), _("Grids must be different"));
+               i = 2;
+               break;
+            }
+
+            if (i == 0)  // "<Back" : initial coord system.
+               i = 1;
+
+            else if (i == 1)
+            {  // "Next>" : create new grid
+
+               // --- Get the image and IPJ ---
+
+               GetString_SYS("GRIDREPJ", "NEWGRID", sNewGrid);
+               if (iFileExist_SYS(sNewGrid))
                {
-                  // --- Reset Projection ---
-               
-                  Destroy_IMG(hOldIMG);
-                  hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrids,IMG_FILE_READONLY);
-                  GetIPJ_IMG(hOldIMG,hOldIPJ);
-//                  Copy_IPJ(hOldIPJ,hNewIPJ);      // don't revert this.
-            
-                  i = 3;      // Go back to the CS dialog, but retain its latest projection
-               
-               } else if (i == 1) {
-                  SetReal_SYS("GRIDREPJ","NEWCELL",rNCell);
-                  i = 99;
-               } else if (i == 2)
-                  i = 5;
-               else {
-                  DisplayInt_SYS(_("I'm lost"),i);
-                  i = 4;
+                  hNewIMG = CreateFile_IMG(GS_DOUBLE, sNewGrid, IMG_FILE_READONLY);
+                  GetIPJ_IMG(hNewIMG, hNewIPJ);
+                  Destroy_IMG(hNewIMG);
                }
-               
-               break;            
-   
-   
-            case 5:
-         
-               // --- Destroy Old Image ---
-            
+               else
+               {
+                  Copy_IPJ(hOldIPJ, hNewIPJ);
+                  ClearWarp_IPJ(hNewIPJ);
+               }
+
+               i = 3;
+            }
+
+            break;
+
+
+         case 3:
+
+
+            // --- Edit/modify the IPJ ---
+
+            if (iMultiGrid)
+            {
+               Strcpy_STR(sLabel, _("Reproject"));
+               Strcpy_STR(sSource, _("target coordinate system"));
+            }
+            else
+            {
+               Strcpy_STR(sLabel, _("Grid name"));
+               Strcpy_STR(sSource, sNewGrid);
+            }
+
+            rXd = rYd = rX0 = rY0 = rRot = 0.0;
+            GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
+            iX = iNX_IMG(hOldIMG);
+            iY = iNY_IMG(hOldIMG);
+
+            iR = iCoordSysWizardGrid_GUI(hNewIPJ, hOldIPJ, TRUE, COORDSYS_MODE_ALL, sLabel, sSource, iX, iY, rX0, rY0, rXd, rYd, rRot);
+            if (iR == 0)
+            {
+               rOldCell = rDUMMY;
+               rNewCell = rDUMMY;
+
+
+               // --- set parameters ---
+
+               GetXML_IPJ(hNewIPJ, sXML);
+               SetString_SYS("GRIDREPJ", "NEWIPJ_XML", sXML);
+               SetString_SYS("GRIDREPJ", "NEWIPJ_NAME", "");
+               SetString_SYS("GRIDREPJ", "NEWIPJ_DATUM", "");
+               SetString_SYS("GRIDREPJ", "NEWIPJ_METHOD", "");
+               SetString_SYS("GRIDREPJ", "NEWIPJ_UNITS", "");
+               SetString_SYS("GRIDREPJ", "NEWIPJ_LOCALDATUM", "");
+
+               if (iMultiGrid)
+                  i = 6;
+               else
+                  i = 4;
+            }
+            else  // user cancelled
+               Cancel_SYS();
+
+            break;
+
+
+         case 4:
+
+            // --- create projected grid ---
+
+            iSame = 0;
+            if (!iHasProjection_IPJ(hNewIPJ) || !iHasProjection_IPJ(hOldIPJ) ||
+                (iCoordinateSystemsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+                 iWarpsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+                 iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ)))
+               iSame = 1;
+
+            if (!iSame || (rNewCell != rOldCell))
+            {
+               Progress_SYS(1);
+               CreateProjected2_IMG(hOldIMG, hNewIPJ, rNewCell);
+               Progress_SYS(0);
+            }
+
+            rXd = rYd = rX0 = rY0 = rRot = 0.0;
+            GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
+            iX = iNX_IMG(hOldIMG);
+            iY = iNY_IMG(hOldIMG);
+
+            iX = iNX_IMG(hOldIMG);
+            iY = iNY_IMG(hOldIMG);
+
+            if (rOldCell == rDUMMY) rOldCell = rXd;
+
+            if (rNewCell == rDUMMY)
+               rNCell = rOldCell;
+            else
+               rNCell = rNewCell;
+
+            Diag = Create_DGW("GRIDREPJ6");
+            SetInfo_DGW(Diag, _GRIDREPJ6_0, DGW_TEXT, sNewGrid);
+            FormatR_STR(rNCell, sTemp, 14, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ6_1, DGW_TEXT, sTemp);
+            FormatI_STR(iX, sTemp, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ6_2, DGW_TEXT, sTemp);
+            FormatI_STR(iY, sTemp, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ6_3, DGW_TEXT, sTemp);
+            FormatR_STR(rX0, sTemp, 14, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ6_4, DGW_TEXT, sTemp);
+            FormatR_STR(rY0, sTemp, 14, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ6_5, DGW_TEXT, sTemp);
+
+            i = iRunDialogue_DGW(Diag);
+            if (i < 0) Cancel_SYS();
+            Destroy_DGW(Diag);
+
+            if (i == 0)
+            {
+               // --- Reset Projection ---
+
                Destroy_IMG(hOldIMG);
-               hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrids,IMG_FILE_READONLY);
-               GetInfo_IMG(hOldIMG,rXd,rYd,rX0,rY0,rRot);
-               rOCell = rXd;
-         
-               // --- Get new cells sze ---
-            
-               Diag = Create_DGW("GRIDREPJ7");
-            
-               FormatR_STR(rOCell,sTemp,14,7);
-               SetInfo_DGW(Diag,_GRIDREPJ7_0,DGW_TEXT,sTemp);
-            
-               FormatR_STR(rOldCell,sTemp,14,7);
-               SetInfo_DGW(Diag,_GRIDREPJ7_1,DGW_TEXT,sTemp);
-            
-               if (rNewCell == rDUMMY)
-                  Strcpy_STR(sTemp,"");
-               else
-                  FormatR_STR(rNewCell,sTemp,14,7);
-               SetInfo_DGW(Diag,_GRIDREPJ7_2,DGW_TEXT,sTemp);
+               hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrids, IMG_FILE_READONLY);
+               GetIPJ_IMG(hOldIMG, hOldIPJ);
+               //                  Copy_IPJ(hOldIPJ,hNewIPJ);      // don't revert this.
 
-               i = iRunDialogue_DGW(Diag);
-               if (i < 0) Cancel_SYS();
-            
-               GetInfoSYS_DGW(Diag,_GRIDREPJ7_2,DGW_TEXT,"GRIDREPJ","NEWCELL");
-            
-               Destroy_DGW(Diag);
-            
-               if (i==0) {
-               
-                  i = 4;
-                  
-               } else if (i == 1) {
-               
-                   i = 4;
-                   GetString_SYS("GRIDREPJ","NEWCELL",sNewCell);
-                   if (iStrlen_STR(sNewCell))
-                   {
-                      rNCell = rScanR_STR(sNewCell);
-                      if (rNCell <= 0.0)
-                      {
-                        DisplayMessage_SYS(_("Grid error"),_("Cell size must be greater than 0.0"));
-                        i = 5;
-                      }
-                      else
-                        rNewCell = rNCell;
-                   }
-            
-               } else
-                  DisplayInt_SYS(_("I'm lost"),i);
-               
-               break;            
-   
-   
-            case 6:
-            
-                           
-               // --- Create the Dialogue ---
-
-               Diag = Create_DGW("GRIDREPJ8");
-
-
-               // --- Run the Dialogue ---
-
-               SetInfoSYS_DGW(Diag,_GRIDREPJ8_0,DGW_TEXT,"GRIDREPJ","PREFIX");
-               SetInfoSYS_DGW(Diag,_GRIDREPJ8_1,DGW_TEXT,"GRIDREPJ","POSTFIX");
-               i = iRunDialogue_DGW(Diag);
-               if (i == -1) Cancel_SYS();
-               GetInfoSYS_DGW(Diag,_GRIDREPJ8_0,DGW_TEXT,"GRIDREPJ","PREFIX");    
-               GetInfoSYS_DGW(Diag,_GRIDREPJ8_1,DGW_TEXT,"GRIDREPJ","POSTFIX");    
-               Destroy_DGW(Diag);
-         
-         
-               if (i == 0)
-               {
-                  i = 3;      // Go back to the CS dialog
-               }               
-         
-               break;
-            
-            default:
-         
-               DisplayInt_SYS(_("I'm lost"),i);
+               i = 3;  // Go back to the CS dialog, but retain its latest projection
+            }
+            else if (i == 1)
+            {
+               SetReal_SYS("GRIDREPJ", "NEWCELL", rNCell);
                i = 99;
-         }           
-      
+            }
+            else if (i == 2)
+               i = 5;
+            else
+            {
+               DisplayInt_SYS(_("I'm lost"), i);
+               i = 4;
+            }
+
+            break;
+
+
+         case 5:
+
+            // --- Destroy Old Image ---
+
+            Destroy_IMG(hOldIMG);
+            hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrids, IMG_FILE_READONLY);
+            GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
+            rOCell = rXd;
+
+            // --- Get new cells sze ---
+
+            Diag = Create_DGW("GRIDREPJ7");
+
+            FormatR_STR(rOCell, sTemp, 14, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ7_0, DGW_TEXT, sTemp);
+
+            FormatR_STR(rOldCell, sTemp, 14, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ7_1, DGW_TEXT, sTemp);
+
+            if (rNewCell == rDUMMY)
+               Strcpy_STR(sTemp, "");
+            else
+               FormatR_STR(rNewCell, sTemp, 14, 7);
+            SetInfo_DGW(Diag, _GRIDREPJ7_2, DGW_TEXT, sTemp);
+
+            i = iRunDialogue_DGW(Diag);
+            if (i < 0) Cancel_SYS();
+
+            GetInfoSYS_DGW(Diag, _GRIDREPJ7_2, DGW_TEXT, "GRIDREPJ", "NEWCELL");
+
+            Destroy_DGW(Diag);
+
+            if (i == 0)
+            {
+               i = 4;
+            }
+            else if (i == 1)
+            {
+               i = 4;
+               GetString_SYS("GRIDREPJ", "NEWCELL", sNewCell);
+               if (iStrlen_STR(sNewCell))
+               {
+                  rNCell = rScanR_STR(sNewCell);
+                  if (rNCell <= 0.0)
+                  {
+                     DisplayMessage_SYS(_("Grid error"), _("Cell size must be greater than 0.0"));
+                     i = 5;
+                  }
+                  else
+                     rNewCell = rNCell;
+               }
+            }
+            else
+               DisplayInt_SYS(_("I'm lost"), i);
+
+            break;
+
+
+         case 6:
+
+
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("GRIDREPJ8");
+
+
+            // --- Run the Dialogue ---
+
+            SetInfoSYS_DGW(Diag, _GRIDREPJ8_0, DGW_TEXT, "GRIDREPJ", "PREFIX");
+            SetInfoSYS_DGW(Diag, _GRIDREPJ8_1, DGW_TEXT, "GRIDREPJ", "POSTFIX");
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
+            GetInfoSYS_DGW(Diag, _GRIDREPJ8_0, DGW_TEXT, "GRIDREPJ", "PREFIX");
+            GetInfoSYS_DGW(Diag, _GRIDREPJ8_1, DGW_TEXT, "GRIDREPJ", "POSTFIX");
+            Destroy_DGW(Diag);
+
+
+            if (i == 0)
+            {
+               i = 3;  // Go back to the CS dialog
+            }
+
+            break;
+
+         default:
+
+            DisplayInt_SYS(_("I'm lost"), i);
+            i = 99;
+         }
       }
-      
    }
-   
- 
+
+
    // --- destroy the IMG if it exists ---
-   
+
    if (hOldIMG) Destroy_IMG(hOldIMG);
 
-   GetString_SYS("GRIDREPJ","OLDGRID",sGrids);   
-   iGrids = iCountTokens_STR(sGrids,"|");
+   GetString_SYS("GRIDREPJ", "OLDGRID", sGrids);
+   iGrids = iCountTokens_STR(sGrids, "|");
 
-   if (iGrids > 1) {
+   if (iGrids > 1)
+   {
       // --- get qualifier ---
 
-      FileNamePart_STR(sGrids,sQual,STR_FILE_PART_QUALIFIERS);
+      FileNamePart_STR(sGrids, sQual, STR_FILE_PART_QUALIFIERS);
 
-   
+
       // --- Is there an XML setting ? ---
-       
-      GetString_SYS("GRIDREPJ","NEWIPJ_XML",sXML);
-      if (iStrlen_STR(sXML)==0)
+
+      GetString_SYS("GRIDREPJ", "NEWIPJ_XML", sXML);
+      if (iStrlen_STR(sXML) == 0)
       {
          // --- This is left in to support old scripts that were not updated ---
-          
-         GetString_SYS("GRIDREPJ","NEWIPJ_NAME",s1);
-         GetString_SYS("GRIDREPJ","NEWIPJ_DATUM",s2);
-         GetString_SYS("GRIDREPJ","NEWIPJ_METHOD",s3);
-         GetString_SYS("GRIDREPJ","NEWIPJ_UNITS",s4);
-         GetString_SYS("GRIDREPJ","NEWIPJ_LOCALDATUM",s5);
-         SetGXF_IPJ(hNewIPJ,s1,s2,s3,s4,s5);
-          
-      } else
-         SetXML_IPJ(hNewIPJ,sXML);
-   
-   
+
+         GetString_SYS("GRIDREPJ", "NEWIPJ_NAME", s1);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_DATUM", s2);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_METHOD", s3);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_UNITS", s4);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_LOCALDATUM", s5);
+         SetGXF_IPJ(hNewIPJ, s1, s2, s3, s4, s5);
+      }
+      else
+         SetXML_IPJ(hNewIPJ, sXML);
+
+
       // --- get prefix and postfix ---
-   
-      GetString_SYS("GRIDREPJ","PREFIX",sPrefix);
-      GetString_SYS("GRIDREPJ","POSTFIX",sPostfix);
-      if ((iStrMin_STR(sPrefix)==0) && (iStrMin_STR(sPostfix)==0))
-         Strcpy_STR(sPostfix,"_reprojected");
-   
+
+      GetString_SYS("GRIDREPJ", "PREFIX", sPrefix);
+      GetString_SYS("GRIDREPJ", "POSTFIX", sPostfix);
+      if ((iStrMin_STR(sPrefix) == 0) && (iStrMin_STR(sPostfix) == 0))
+         Strcpy_STR(sPostfix, "_reprojected");
+
       iDatumError = 0;
-      for (i=0;i<iGrids;i++) {
-   
-         GetMFile_STR(sGrids,sGrid,i);
-         if (i != (iGrids-1) && iStrlen_STR(sQual)) {
-            Strcpy_STR(sNewGrid,sGrid);
+      for (i = 0; i < iGrids; i++)
+      {
+         GetMFile_STR(sGrids, sGrid, i);
+         if (i != (iGrids - 1) && iStrlen_STR(sQual))
+         {
+            Strcpy_STR(sNewGrid, sGrid);
          }
-         hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
-         GetIPJ_IMG(hOldIMG,hOldIPJ);
-      
-      
+         hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READONLY);
+         GetIPJ_IMG(hOldIMG, hOldIPJ);
+
+
          // --- check for datum transform error ---
-   
-         if (iSupportDatumTransform_IPJ(hOldIPJ,hNewIPJ) == 0)
+
+         if (iSupportDatumTransform_IPJ(hOldIPJ, hNewIPJ) == 0)
             iDatumError = 1;
-         
+
 
          // --- decompose old grid file name ---
-      
-         FileNamePart_STR(sGrid,sVolume,STR_FILE_PART_VOLUME);
-         FileNamePart_STR(sGrid,sDir,STR_FILE_PART_DIRECTORY);
-         FileNamePart_STR(sGrid,sName,STR_FILE_PART_NAME);
-         FileNamePart_STR(sGrid,sExt,STR_FILE_PART_EXTENSION);
+
+         FileNamePart_STR(sGrid, sVolume, STR_FILE_PART_VOLUME);
+         FileNamePart_STR(sGrid, sDir, STR_FILE_PART_DIRECTORY);
+         FileNamePart_STR(sGrid, sName, STR_FILE_PART_NAME);
+         FileNamePart_STR(sGrid, sExt, STR_FILE_PART_EXTENSION);
 
          // --- create new grid ---
 
-         Strcpy_STR(sNewGrid,sPrefix);
-         Strcat_STR(sNewGrid,sName);
-         Strcat_STR(sNewGrid,sPostfix);
-         FileCombineParts_STR(sVolume,sDir,sNewGrid,sExt,sQual,sNewGrid);
-      
-         hNewIMG = CreateOutFile_IMG(GS_DOUBLE,sNewGrid,hOldIMG);
+         Strcpy_STR(sNewGrid, sPrefix);
+         Strcat_STR(sNewGrid, sName);
+         Strcat_STR(sNewGrid, sPostfix);
+         FileCombineParts_STR(sVolume, sDir, sNewGrid, sExt, sQual, sNewGrid);
+
+         iOrientation = iGetOrientation_IPJ(hOldIPJ);
+         if (iOrientation == IPJ_ORIENT_DEFAULT)
+         {
+            // --- inherit the projection ---
+
+            iSame = 0;
+            if (!iHasProjection_IPJ(hNewIPJ) || !iHasProjection_IPJ(hOldIPJ) ||
+               (iCoordinateSystemsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+                  iWarpsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+                  iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ)))
+               iSame = 1;
+
+            if (!iSame)
+               CreateProjected_IMG(hOldIMG, hNewIPJ);
+
+            // --- create new grid and copy old ---
+
+            hNewIMG = CreateOutFile_IMG(GS_DOUBLE, sNewGrid, hOldIMG);
+
+            ProgName_SYS(sNewGrid, 1);
+            Progress_SYS(1);
+            
+            Copy_IMG(hOldIMG, hNewIMG);
+
+            // --- set the new IPJ to pass along name changes only ---
+
+            SetIPJ_IMG(hNewIMG, hNewIPJ);
+         }
+         else
+         {
+            // --- Oriented grids usually require a reset not only on the projection, but the grid registration as well ---
+            hNewIMG = CreateOutFile_IMG(GS_DOUBLE, sNewGrid, hOldIMG);
+
+            GetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);
+
+            ReprojectSectionGrid_IPJ(hOldIPJ, hNewIPJ, rX0, rY0, rXd, rYd, rRot);
+
+            Copy_IMG(hOldIMG, hNewIMG);                      // Copy_IMG(Source, Target): Copies the data, independent of projections.
+            SetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);  // Set Modified grid info
+            SetIPJ_IMG(hNewIMG, hNewIPJ);                    // Set the projection
 
 
-			iOrientation = iGetOrientation_IPJ(hOldIPJ);
-			if (iOrientation == IPJ_ORIENT_DEFAULT)
-			{
-				// --- inherit the projection ---
-   
-				GetInfo_IMG(hNewIMG, rXd,rYd,rX0,rY0,rRot);
+            // --- Resample if necessary ---
 
-				ReprojectSectionGrid_IPJ(hOldIPJ, hNewIPJ, rX0, rY0, rXd, rYd, rRot);
-      
-				ProgName_SYS(sNewGrid,1);
-				Progress_SYS(1);
-      
-				Copy_IMG(hOldIMG,hNewIMG);
-   
-				// --- set the new IPJ to pass along name changes only ---
-   
-				SetIPJ_IMG(hNewIMG,hNewIPJ);
-			}
-			else
-			{
-				// --- Oriented grids usually require a reset not only on the projection, but the grid registration as well ---
+            if (iExistReal_SYS("GRIDREPJ", "NEWCELL"))
+            {
+               rNewCell = rGetReal_SYS("GRIDREPJ", "NEWCELL");
+               if (rNewCell != rXd ||
+                   rNewCell != rYd)
+               {
+                  CreateProjected2_IMG(hNewIMG, hNewIPJ, rNewCell);
+               }
+            }
+         }
 
-				GetInfo_IMG(hNewIMG, rXd,rYd,rX0,rY0,rRot);
-
-				ReprojectSectionGrid_IPJ(hOldIPJ, hNewIPJ, rX0, rY0, rXd, rYd, rRot);
-
-				Copy_IMG(hOldIMG,hNewIMG);							// Copy_IMG(Source, Target): Copies the data, independent of projections. 
-				SetInfo_IMG(hNewIMG, rXd,rYd,rX0,rY0,rRot);	// Set Modified grid info
-				SetIPJ_IMG(hNewIMG,hNewIPJ);						// Set the projection
-
-
-				// --- Resample if necessary ---
-
-				if (iExistReal_SYS("GRIDREPJ","NEWCELL")) 
-				{
-					rNewCell = rGetReal_SYS("GRIDREPJ","NEWCELL"); 
-					if(rNewCell != rXd ||
-						rNewCell != rYd)
-					{
-						CreateProjected2_IMG(hNewIMG,hNewIPJ,rNewCell);
-					}
-				}
-			}
-   
          Destroy_SYS(hOldIMG);
          Destroy_SYS(hNewIMG);
          Progress_SYS(0);
-      
-      
+
+
          // --- Add this grid to the current project ---
 
-         if (iInteractive_SYS())   
-            iAddDocument_PROJ(sNewGrid,"Grid",0);
-         
+         if (iInteractive_SYS())
+            iAddDocument_PROJ(sNewGrid, "Grid", 0);
       }
 
       if (iInteractive_SYS() && (iDatumError != 0))
          DisplayMessage_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between one or more grid coordinate systems may be inaccurate because the local datum transform for one or both grids was not defined."));
-      
-   } else {
-   
+   }
+   else
+   {
       // --- reproject a single grid ---
-      
-      GetString_SYS("GRIDREPJ","OLDGRID",sGrid);   
-      hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
-      GetIPJ_IMG(hOldIMG,hOldIPJ);
+
+      GetString_SYS("GRIDREPJ", "OLDGRID", sGrid);
+      hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READONLY);
+      GetIPJ_IMG(hOldIMG, hOldIPJ);
 
       hOldIPJ2 = Create_IPJ();
-       
+
       // --- Is there an XML setting ? ---
-       
-      GetString_SYS("GRIDREPJ","OLDIPJ_XML",sXML);
-      if (iStrlen_STR(sXML)==0)
+
+      GetString_SYS("GRIDREPJ", "OLDIPJ_XML", sXML);
+      if (iStrlen_STR(sXML) == 0)
       {
          // --- This is left in to support old scripts that were not updated ---
-          
-         GetString_SYS("GRIDREPJ","OLDIPJ_NAME",s1);
-         GetString_SYS("GRIDREPJ","OLDIPJ_DATUM",s2);
-         GetString_SYS("GRIDREPJ","OLDIPJ_METHOD",s3);
-         GetString_SYS("GRIDREPJ","OLDIPJ_UNITS",s4);
-         GetString_SYS("GRIDREPJ","OLDIPJ_LOCALDATUM",s5);
-         SetGXF_IPJ(hOldIPJ2,s1,s2,s3,s4,s5);
-      } else
-         SetXML_IPJ(hOldIPJ2,sXML);
 
-      GetName_IPJ(hOldIPJ, IPJ_NAME_METHOD,sOldMethod);
-      GetName_IPJ(hOldIPJ2,IPJ_NAME_METHOD,sOldMethod2);
-      
+         GetString_SYS("GRIDREPJ", "OLDIPJ_NAME", s1);
+         GetString_SYS("GRIDREPJ", "OLDIPJ_DATUM", s2);
+         GetString_SYS("GRIDREPJ", "OLDIPJ_METHOD", s3);
+         GetString_SYS("GRIDREPJ", "OLDIPJ_UNITS", s4);
+         GetString_SYS("GRIDREPJ", "OLDIPJ_LOCALDATUM", s5);
+         SetGXF_IPJ(hOldIPJ2, s1, s2, s3, s4, s5);
+      }
+      else
+         SetXML_IPJ(hOldIPJ2, sXML);
+
+      GetName_IPJ(hOldIPJ, IPJ_NAME_METHOD, sOldMethod);
+      GetName_IPJ(hOldIPJ2, IPJ_NAME_METHOD, sOldMethod2);
+
       iSame = 0;
       if (!iHasProjection_IPJ(hOldIPJ) || !iHasProjection_IPJ(hOldIPJ2) ||
-			(iCoordinateSystemsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
-			iWarpsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
-			iOrientationsAreTheSame_IPJ(hOldIPJ, hOldIPJ2)))
-			iSame = 1;
+          (iCoordinateSystemsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
+           iWarpsAreTheSame_IPJ(hOldIPJ, hOldIPJ2) &&
+           iOrientationsAreTheSame_IPJ(hOldIPJ, hOldIPJ2)))
+         iSame = 1;
 
-      if(!iSame || 
-         ( iStrcmp_STR(sOldMethod,_("*unknown"),0) && !iStrcmp_STR(sOldMethod2,_("*unknown"),0 )) ||
-         (!iStrcmp_STR(sOldMethod,_("*unknown"),0) &&  iStrcmp_STR(sOldMethod2,_("*unknown"),0 )) )  {
-
+      if (!iSame ||
+          (iStrcmp_STR(sOldMethod, _("*unknown"), 0) && !iStrcmp_STR(sOldMethod2, _("*unknown"), 0)) ||
+          (!iStrcmp_STR(sOldMethod, _("*unknown"), 0) && iStrcmp_STR(sOldMethod2, _("*unknown"), 0)))
+      {
          Copy_IPJ(hOldIPJ2, hOldIPJ);
 
          if (hOldIMG) Destroy_IMG(hOldIMG);
-         hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READORWRITE);
-         SetIPJ_IMG(hOldIMG,hOldIPJ);
+         hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READORWRITE);
+         SetIPJ_IMG(hOldIMG, hOldIPJ);
       }
       Destroy_IMG(hOldIMG);
-   
-      hOldIMG = CreateFile_IMG(GS_DOUBLE,sGrid,IMG_FILE_READONLY);
-      rXd=rYd=rX0=rY0=rRot=0.0;
-      GetInfo_IMG(hOldIMG,rXd,rYd,rX0,rY0,rRot);
+
+      hOldIMG = CreateFile_IMG(GS_DOUBLE, sGrid, IMG_FILE_READONLY);
+      rXd = rYd = rX0 = rY0 = rRot = 0.0;
+      GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
       rOldCell = rXd;
-   
-   
-       // --- Is there an XML setting ? ---
-       
-      GetString_SYS("GRIDREPJ","NEWIPJ_XML",sXML);
-      if (iStrlen_STR(sXML)==0)
+
+
+      // --- Is there an XML setting ? ---
+
+      GetString_SYS("GRIDREPJ", "NEWIPJ_XML", sXML);
+      if (iStrlen_STR(sXML) == 0)
       {
          // --- This is left in to support old scripts that were not updated ---
-          
-         GetString_SYS("GRIDREPJ","NEWIPJ_NAME",s1);
-         GetString_SYS("GRIDREPJ","NEWIPJ_DATUM",s2);
-         GetString_SYS("GRIDREPJ","NEWIPJ_METHOD",s3);
-         GetString_SYS("GRIDREPJ","NEWIPJ_UNITS",s4);
-         GetString_SYS("GRIDREPJ","NEWIPJ_LOCALDATUM",s5);
-         SetGXF_IPJ(hNewIPJ,s1,s2,s3,s4,s5);
-          
-      } else
-         SetXML_IPJ(hNewIPJ,sXML);
-   
-   
-      // --- check for datum transform ---
-   
-      if (iInteractive_SYS() && iSupportDatumTransform_IPJ(hOldIPJ,hNewIPJ) == 0) {
-         if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between grid coordinate systems may be inaccurate because the local datum transform for one or both grids is not defined.  Do want to continue?")) == 0)
-               Exit_SYS();
+
+         GetString_SYS("GRIDREPJ", "NEWIPJ_NAME", s1);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_DATUM", s2);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_METHOD", s3);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_UNITS", s4);
+         GetString_SYS("GRIDREPJ", "NEWIPJ_LOCALDATUM", s5);
+         SetGXF_IPJ(hNewIPJ, s1, s2, s3, s4, s5);
       }
-         
-
-		iOrientation = iGetOrientation_IPJ(hOldIPJ);
-		if (iOrientation == IPJ_ORIENT_DEFAULT)
-		{
-			// --- inherit the projection based on the cell size ---
-      
-			GetString_SYS("GRIDREPJ","NEWGRID",sNewGrid);
-			iSame = 0;
-			if (!iHasProjection_IPJ(hNewIPJ) || !iHasProjection_IPJ(hOldIPJ) ||
-					(iCoordinateSystemsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
-					iWarpsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
-					iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ)))
-					iSame = 1;
-   
-			if (iExistReal_SYS("GRIDREPJ","NEWCELL")) {
-				rNewCell = rGetReal_SYS("GRIDREPJ","NEWCELL"); 
-				if (!iSame || (rNewCell != rOldCell))
-					CreateProjected2_IMG(hOldIMG,hNewIPJ,rNewCell);
-			} else if (!iSame)
-				CreateProjected_IMG(hOldIMG,hNewIPJ);
-		   
-
-			// --- create new grid and copy old ---
-
-			hNewIMG = CreateOutFile_IMG(GS_DOUBLE,sNewGrid,hOldIMG);
-   
-			Progress_SYS(1);
-			Copy_IMG(hOldIMG,hNewIMG);
-			Progress_SYS(0);
-   
-			// --- set the new IPJ to pass along name changes only ---
-   
-			SetIPJ_IMG(hNewIMG,hNewIPJ);
-		}
-		else
-		{
-			// --- Oriented grids usually require a reset not only on the projection, but the grid registration as well ---
-
-			hNewIMG = CreateOutFile_IMG(GS_DOUBLE,sNewGrid,hOldIMG);
-
-			GetInfo_IMG(hNewIMG, rXd,rYd,rX0,rY0,rRot);
-
-			ReprojectSectionGrid_IPJ(hOldIPJ, hNewIPJ, rX0, rY0, rXd, rYd, rRot);
-
-			Copy_IMG(hOldIMG,hNewIMG);								// Copy_IMG(Source, Target): Copies the data, independent of projections. 
-			SetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);	// Set Modified grid info
-			SetIPJ_IMG(hNewIMG,hNewIPJ);							// Set the projection
+      else
+         SetXML_IPJ(hNewIPJ, sXML);
 
 
-			// --- Resample if necessary ---
+      // --- check for datum transform ---
 
-			if (iExistReal_SYS("GRIDREPJ","NEWCELL")) 
-			{
-				rNewCell = rGetReal_SYS("GRIDREPJ","NEWCELL"); 
-				if(rNewCell != rXd ||
-				   rNewCell != rYd)
-				{
-					CreateProjected2_IMG(hNewIMG,hNewIPJ,rNewCell);
-				}
-			}
-		}
-   
+      if (iInteractive_SYS() && iSupportDatumTransform_IPJ(hOldIPJ, hNewIPJ) == 0)
+      {
+         if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between grid coordinate systems may be inaccurate because the local datum transform for one or both grids is not defined.  Do want to continue?")) == 0)
+            Exit_SYS();
+      }
+
+
+      iOrientation = iGetOrientation_IPJ(hOldIPJ);
+      if (iOrientation == IPJ_ORIENT_DEFAULT)
+      {
+         // --- inherit the projection based on the cell size ---
+
+         GetString_SYS("GRIDREPJ", "NEWGRID", sNewGrid);
+         iSame = 0;
+         if (!iHasProjection_IPJ(hNewIPJ) || !iHasProjection_IPJ(hOldIPJ) ||
+             (iCoordinateSystemsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+              iWarpsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+              iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ)))
+            iSame = 1;
+
+         if (iExistReal_SYS("GRIDREPJ", "NEWCELL"))
+         {
+            rNewCell = rGetReal_SYS("GRIDREPJ", "NEWCELL");
+            if (!iSame || (rNewCell != rOldCell))
+               CreateProjected2_IMG(hOldIMG, hNewIPJ, rNewCell);
+         }
+         else if (!iSame)
+            CreateProjected_IMG(hOldIMG, hNewIPJ);
+
+
+         // --- create new grid and copy old ---
+
+         hNewIMG = CreateOutFile_IMG(GS_DOUBLE, sNewGrid, hOldIMG);
+
+         Progress_SYS(1);
+         Copy_IMG(hOldIMG, hNewIMG);
+         Progress_SYS(0);
+
+         // --- set the new IPJ to pass along name changes only ---
+
+         SetIPJ_IMG(hNewIMG, hNewIPJ);
+      }
+      else
+      {
+         // --- Oriented grids usually require a reset not only on the projection, but the grid registration as well ---
+
+         hNewIMG = CreateOutFile_IMG(GS_DOUBLE, sNewGrid, hOldIMG);
+
+         GetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);
+
+         ReprojectSectionGrid_IPJ(hOldIPJ, hNewIPJ, rX0, rY0, rXd, rYd, rRot);
+
+         Copy_IMG(hOldIMG, hNewIMG);                      // Copy_IMG(Source, Target): Copies the data, independent of projections.
+         SetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);  // Set Modified grid info
+         SetIPJ_IMG(hNewIMG, hNewIPJ);                    // Set the projection
+
+
+         // --- Resample if necessary ---
+
+         if (iExistReal_SYS("GRIDREPJ", "NEWCELL"))
+         {
+            rNewCell = rGetReal_SYS("GRIDREPJ", "NEWCELL");
+            if (rNewCell != rXd ||
+                rNewCell != rYd)
+            {
+               CreateProjected2_IMG(hNewIMG, hNewIPJ, rNewCell);
+            }
+         }
+      }
+
       Destroy_SYS(hOldIMG);
       Destroy_SYS(hNewIMG);
       Destroy_SYS(hNewIPJ);
-   
-   
+
+
       // --- Add this grid to the current project ---
 
-      if (iInteractive_SYS())   
-         iAddDocument_PROJ(sNewGrid,"Grid",1);
-         
+      if (iInteractive_SYS())
+         iAddDocument_PROJ(sNewGrid, "Grid", 1);
    }         
    
 }

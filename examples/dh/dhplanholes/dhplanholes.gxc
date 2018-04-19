@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Plot drill holes to an existing plan plot"
 #include <version.gxh>
 
@@ -20,23 +21,23 @@ DESCRIPTION   = "
 //===========================================================================
 
 #include <all.gxh>
+                                   // clang-format on
 
-//===========================================================================
-// dialogs
-//===========================================================================
+                                   //===========================================================================
+                                   // dialogs
+                                   //===========================================================================
 
-//===========================================================================
-//                                 VARIABLES
-//===========================================================================
+                                   //===========================================================================
+                                   //                                 VARIABLES
+                                   //===========================================================================
 
-DH       Drill;
-EDB      EData;
-EMAP     EMap;
-MAP      Map;
+                                   DH Drill;
+EDB EData;
+EMAP EMap;
+MAP Map;
 
-int  iMod,iPage;
+int iMod, iPage;
 string(STR_FILE) sDB, sJob, sJob2;
-
 
 
 //===========================================================================
@@ -44,43 +45,41 @@ string(STR_FILE) sDB, sJob, sJob2;
 //===========================================================================
 
 {
-
    // --- get database ---
-   
+
    EData = Current_EDB();
    GetName_EDB(EData, sDB);
    Drill = Create_DH(sDB);
 
    EMap = Current_EMAP();
    Map = Lock_EMAP(EMap);
-      
 
-	// --- Get preset job name, if supplied ---
 
-	GetString_SYS("DHPLANHOLES", "JOB", sJob);
-	SetString_SYS("DHPLANHOLES", "JOB", "");
-	if(iStrlen_STR(sJob)==0)
-		Strcpy_STR(sJob, "_plan.inp");
+   // --- Get preset job name, if supplied ---
+
+   GetString_SYS("DHPLANHOLES", "JOB", sJob);
+   SetString_SYS("DHPLANHOLES", "JOB", "");
+   if (iStrlen_STR(sJob) == 0)
+      Strcpy_STR(sJob, "_plan.inp");
 
 
    // --- Are we running interactively ? ---
 
    iMod = 0;
    iPage = iDUMMY;
-   if (iInteractive_SYS()) {
-
-
+   if (iInteractive_SYS())
+   {
       // To modify a job, the job must be defined.
 
-      if(iFileExist_SYS(sJob))
+      if (iFileExist_SYS(sJob))
          OpenJob_DH(Drill, sJob, DH_PLOT_PLAN);
       else
          CreateDefaultJob_DH(Drill, sJob, DH_PLOT_PLAN);
 
       // --- Create a temporary copy of the job ---
 
-      TempFileName_SYS(sJob,sJob2);
-            
+      TempFileName_SYS(sJob, sJob2);
+
       if (iCopyFile_SYS(sJob, sJob2))
          Abort_SYS(_("Could not create temporary copy of job"));
 
@@ -91,28 +90,26 @@ string(STR_FILE) sDB, sJob, sJob2;
 
       // --- Save the modified data ---
 
-      if(iMod!=-1) {
-
+      if (iMod != -1)
+      {
          if (iCopyFile_SYS(sJob2, sJob))
             Abort_SYS(_("Could not restore from temporary copy of job"));
-         
-         SetInt_SYS("DHPLANHOLES", "PAGE", iPage);
-            
-      }            
 
-      if(iFileExist_SYS(sJob2))
+         SetInt_SYS("DHPLANHOLES", "PAGE", iPage);
+      }
+
+      if (iFileExist_SYS(sJob2))
          iDeleteFile_SYS(sJob2);
 
-      if(iMod == -1) Cancel_SYS();
+      if (iMod == -1) Cancel_SYS();
    }
 
-   
 
    // --- Plot the hole traces ---
 
    Progress_SYS(1);
 
-   PlotHoleTraces_DH(Drill,Map,sJob);
+   PlotHoleTraces_DH(Drill, Map, sJob);
 
    Progress_SYS(0);
 
@@ -127,5 +124,4 @@ string(STR_FILE) sDB, sJob, sJob2;
    // --- Bring the current map to the front ---
 
    MakeCurrent_EMAP(EMap);
-
 }

@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Color-shaded image"
 #include <version.gxh>
 
@@ -58,357 +59,355 @@ RESOURCE = "gridimgs.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_FILE)  sGrid,sOldGrid,sColor,sMap,sGray,sName,sQual,sFullFile,sVol,sDir,sNameExt,sAggGrid,sAggFullFile,sAggVol,sAggDir,sAggNameExt,sAggQual;
+   string(STR_FILE) sGrid,
+   sOldGrid, sColor, sMap, sGray, sName, sQual, sFullFile, sVol, sDir, sNameExt, sAggGrid, sAggFullFile, sAggVol, sAggDir, sAggNameExt, sAggQual;
 string(STR_GROUP) sAgg, sGroup, sGroupName;
 string(STR_DEFAULT_SHORT) sEffect, sEnd;
-EMAP        EMap;
-MAP         Map;
-MVIEW       View;
-DGW         Diag;
-AGG         Agg;
-ITR         Itr;
-IMG         hIMG;
-IPJ         hIPJ, hUserIPJ;
-VV          hVV;
-LST			List;
-int         iZone,iNew,iRun;
-real        rContour,rBright;
-real        rInc,rDec,rScl,rOldScl;
+EMAP EMap;
+MAP Map;
+MVIEW View;
+DGW Diag;
+AGG Agg;
+ITR Itr;
+IMG hIMG;
+IPJ hIPJ, hUserIPJ;
+VV hVV;
+LST List;
+int iZone, iNew, iRun;
+real rContour, rBright;
+real rInc, rDec, rScl, rOldScl;
 
-int         i, iN, iOrient;
+int i, iN, iOrient;
 
 //===========================================================================
 //                           GRIDIMGS CODE
 //===========================================================================
 
 {
-	// --- Set required defaults ---
-
-	DefaultInt_SYS("GRIDIMGS","ZONE",3);
-
-
-	// --- Are we running interactively ? ---
-
-	if (iInteractive_SYS()) {
-
-
-		// --- get previous settings ---
-		
-		GetString_SYS("GRIDIMGS","GRID",sOldGrid);
-		if (iExistReal_SYS("GRIDIMGS","SCL"))
-			rOldScl = rGetReal_SYS("GRIDIMGS","SCL");
-		else   
-			rOldScl = rDUMMY;
-
-
-		// --- Create the Dialogue ---
-
-		Diag = Create_DGW("GRIDIMGS");
-
-		// --- Set any Defaults from INI ---
-
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_0,DGW_FILEPATH, "GRIDIMGS","GRID");     
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_1,DGW_LISTALIAS,"GRIDIMGS","EFFECT");     
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_2,DGW_LISTALIAS,"GRIDIMGS","ZONE");     
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_3,DGW_FILEPATH, "GRIDIMGS","COLOR");     
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_4,DGW_LISTALIAS,"GRIDIMGS","BRIGHT");
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_5,DGW_TEXT,     "GRIDIMGS","CONTOUR");     
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_6,DGW_TEXT,     "GRIDIMGS","INC");     
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_7,DGW_TEXT,     "GRIDIMGS","DEC");     
-		SetInfoSYS_DGW(Diag,_GRIDIMGS_8,DGW_TEXT,     "GRIDIMGS","SCL");     
-		
-
-		// --- Run the Dialogue ---
-
-		while (1)
-		{
-			iRun = iRunDialogue_DGW(Diag);
-			if (iRun == -1)
-				Cancel_SYS();
-			
-			// --- Ensure we have a map and that we are not drawing on grid documents ---
-			if (iRun != 0 || iRunGX_SYS("sclgrd") != -1)
-				break;
-		}
-		SetInt_SYS("GRIDIMGS","NEW",iRun);
-
-		
-		// --- Put values back in INI ---
-
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_0,DGW_FILEPATH, "GRIDIMGS","GRID");     
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_1,DGW_LISTALIAS,"GRIDIMGS","EFFECT");     
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_2,DGW_LISTALIAS,"GRIDIMGS","ZONE");     
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_3,DGW_FILEPATH, "GRIDIMGS","COLOR");     
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_4,DGW_LISTALIAS,"GRIDIMGS","BRIGHT");
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_5,DGW_TEXT,     "GRIDIMGS","CONTOUR");     
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_6,DGW_TEXT,     "GRIDIMGS","INC");     
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_7,DGW_TEXT,     "GRIDIMGS","DEC");     
-		GetInfoSYS_DGW(Diag,_GRIDIMGS_8,DGW_TEXT,     "GRIDIMGS","SCL");     
-		
-	}
-
-
-	// --- Get Parameters ---
-
-	GetString_SYS("GRIDIMGS","GRID",sGrid);
-	iZone    = iGetInt_SYS("GRIDIMGS","ZONE");
-	GetString_SYS("GRIDIMGS","EFFECT",sEffect);
-	if (iCharComp_STR(sEffect,"H")) {
-		if (iFindPathNameEx_SYS("hsvc.tbl",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_TBL,sColor))
-			Abort_SYS(_("Unable to find \"hsvc.tbl\""));
-		if (iFindPathNameEx_SYS("hsvg.tbl",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_TBL,sGray))
-			Abort_SYS(_("Unable to find \"hsvg.tbl\""));
-	} else {
-		GetString_SYS("GRIDIMGS","COLOR",sColor);
-		if (iFindPathNameEx_SYS("lgray.tbl",FIND_LOCAL_GEOSOFT,GEO_DIRECTORY_TBL,sGray))
-			Abort_SYS(_("Unable to find \"lgray.tbl\""));
-	}
-
-	if (iExistReal_SYS("GRIDIMGS","BRIGHT"))
-		rBright = rGetReal_SYS("GRIDIMGS","BRIGHT");
-	else
-		rBright = 0.0;
-	
-	if (iExistReal_SYS("GRIDIMGS","CONTOUR"))
-		rContour = rGetReal_SYS("GRIDIMGS","CONTOUR");
-	else
-		rContour = rDUMMY;
-	if (iExistReal_SYS("GRIDIMGS","INC"))
-		rInc = rGetReal_SYS("GRIDIMGS","INC");
-	else
-		rInc = rDUMMY;
-	if (iExistReal_SYS("GRIDIMGS","DEC"))
-		rDec = rGetReal_SYS("GRIDIMGS","DEC");
-	else
-		rDec = rDUMMY;
-	if (iExistReal_SYS("GRIDIMGS","SCL"))
-		rScl = rGetReal_SYS("GRIDIMGS","SCL");
-	else
-		rScl = rDUMMY;
-	
+   // --- Set required defaults ---
+
+   DefaultInt_SYS("GRIDIMGS", "ZONE", 3);
+
+
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      // --- get previous settings ---
+
+      GetString_SYS("GRIDIMGS", "GRID", sOldGrid);
+      if (iExistReal_SYS("GRIDIMGS", "SCL"))
+         rOldScl = rGetReal_SYS("GRIDIMGS", "SCL");
+      else
+         rOldScl = rDUMMY;
+
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDIMGS");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_0, DGW_FILEPATH, "GRIDIMGS", "GRID");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_1, DGW_LISTALIAS, "GRIDIMGS", "EFFECT");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_2, DGW_LISTALIAS, "GRIDIMGS", "ZONE");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_3, DGW_FILEPATH, "GRIDIMGS", "COLOR");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_4, DGW_LISTALIAS, "GRIDIMGS", "BRIGHT");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_5, DGW_TEXT, "GRIDIMGS", "CONTOUR");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_6, DGW_TEXT, "GRIDIMGS", "INC");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_7, DGW_TEXT, "GRIDIMGS", "DEC");
+      SetInfoSYS_DGW(Diag, _GRIDIMGS_8, DGW_TEXT, "GRIDIMGS", "SCL");
+
+
+      // --- Run the Dialogue ---
+
+      while (1)
+      {
+         iRun = iRunDialogue_DGW(Diag);
+         if (iRun == -1)
+            Cancel_SYS();
+
+         // --- Ensure we have a map and that we are not drawing on grid documents ---
+         if (iRun != 0 || iRunGX_SYS("sclgrd") != -1)
+            break;
+      }
+      SetInt_SYS("GRIDIMGS", "NEW", iRun);
+
+
+      // --- Put values back in INI ---
+
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_0, DGW_FILEPATH, "GRIDIMGS", "GRID");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_1, DGW_LISTALIAS, "GRIDIMGS", "EFFECT");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_2, DGW_LISTALIAS, "GRIDIMGS", "ZONE");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_3, DGW_FILEPATH, "GRIDIMGS", "COLOR");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_4, DGW_LISTALIAS, "GRIDIMGS", "BRIGHT");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_5, DGW_TEXT, "GRIDIMGS", "CONTOUR");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_6, DGW_TEXT, "GRIDIMGS", "INC");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_7, DGW_TEXT, "GRIDIMGS", "DEC");
+      GetInfoSYS_DGW(Diag, _GRIDIMGS_8, DGW_TEXT, "GRIDIMGS", "SCL");
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDIMGS", "GRID", sGrid);
+   iZone = iGetInt_SYS("GRIDIMGS", "ZONE");
+   GetString_SYS("GRIDIMGS", "EFFECT", sEffect);
+   if (iCharComp_STR(sEffect, "H"))
+   {
+      if (iFindPathNameEx_SYS("hsvc.tbl", FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_TBL, sColor))
+         Abort_SYS(_("Unable to find \"hsvc.tbl\""));
+      if (iFindPathNameEx_SYS("hsvg.tbl", FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_TBL, sGray))
+         Abort_SYS(_("Unable to find \"hsvg.tbl\""));
+   }
+   else
+   {
+      GetString_SYS("GRIDIMGS", "COLOR", sColor);
+      if (iFindPathNameEx_SYS("lgray.tbl", FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_TBL, sGray))
+         Abort_SYS(_("Unable to find \"lgray.tbl\""));
+   }
 
-	// --- Verify Color table file ---
+   if (iExistReal_SYS("GRIDIMGS", "BRIGHT"))
+      rBright = rGetReal_SYS("GRIDIMGS", "BRIGHT");
+   else
+      rBright = 0.0;
 
-	if (iStrlen_STR(sColor) == 0)                             // undefined in dialogue
-		if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR",sColor) == 1)  // undefined in parm block
-			Strcpy_STR(sColor,"colour.tbl");                   // hardwire to 
+   if (iExistReal_SYS("GRIDIMGS", "CONTOUR"))
+      rContour = rGetReal_SYS("GRIDIMGS", "CONTOUR");
+   else
+      rContour = rDUMMY;
+   if (iExistReal_SYS("GRIDIMGS", "INC"))
+      rInc = rGetReal_SYS("GRIDIMGS", "INC");
+   else
+      rInc = rDUMMY;
+   if (iExistReal_SYS("GRIDIMGS", "DEC"))
+      rDec = rGetReal_SYS("GRIDIMGS", "DEC");
+   else
+      rDec = rDUMMY;
+   if (iExistReal_SYS("GRIDIMGS", "SCL"))
+      rScl = rGetReal_SYS("GRIDIMGS", "SCL");
+   else
+      rScl = rDUMMY;
 
 
+   // --- Verify Color table file ---
 
-	// --- create a new map if required ---
+   if (iStrlen_STR(sColor) == 0)                              // undefined in dialogue
+      if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR", sColor) == 1)  // undefined in parm block
+         Strcpy_STR(sColor, "colour.tbl");                    // hardwire to
 
-	iNew = iGetInt_SYS("GRIDIMGS","NEW");
-	if (iNew!=0) {
 
+   // --- create a new map if required ---
 
-		// --- range the grid ---
-		
-		SetString_SYS("IMGRANGE","FILE",sGrid);
-		if (iRunGX_SYS("imgrange.gx"))
-			Abort_SYS(_("Failed to determine grid range."));
+   iNew = iGetInt_SYS("GRIDIMGS", "NEW");
+   if (iNew != 0)
+   {
+      // --- range the grid ---
 
-		
-		// --- For running in a script: When recording, DEFMAP was called, and the user may
-		//     have input a different name than that created from the grid name. Get the name
-		//     created by DEFMAP ---
+      SetString_SYS("IMGRANGE", "FILE", sGrid);
+      if (iRunGX_SYS("imgrange.gx"))
+         Abort_SYS(_("Failed to determine grid range."));
 
-		if(!iInteractive_SYS()) {
-			GetString_SYS("DEFMAP","NEWMAP",sMap);         
-			if(!iStrlen_STR(sMap)) {    // if not found, revert back to normal behaviour
-				FileNamePart_STR(sGrid,sMap,STR_FILE_PART_NAME);   
-				Strcat_STR(sMap, ".map");
-			}
-			SetString_SYS("DEFMAP","NEWMAP","");   // use it just once
-		}
-		else
-		{       
-			FileNamePart_STR(sGrid,sMap,STR_FILE_PART_NAME);
-			Strcat_STR(sMap, ".map");
-		}
 
-		SetString_SYS("DEFMAP","MAP",sMap);
-		if (iRunGX_SYS("defmap.gx")) 
-			Cancel_SYS();
-	}
+      // --- For running in a script: When recording, DEFMAP was called, and the user may
+      //     have input a different name than that created from the grid name. Get the name
+      //     created by DEFMAP ---
 
-	// --- Ensure we have a map and that we are not drawing on grid documents ---
-	if (iNew == 0 && iRunGX_SYS("sclgrd") == -1) 
-		Cancel_SYS();
+      if (!iInteractive_SYS())
+      {
+         GetString_SYS("DEFMAP", "NEWMAP", sMap);
+         if (!iStrlen_STR(sMap))
+         {  // if not found, revert back to normal behaviour
+            FileNamePart_STR(sGrid, sMap, STR_FILE_PART_NAME);
+            Strcat_STR(sMap, ".map");
+         }
+         SetString_SYS("DEFMAP", "NEWMAP", "");  // use it just once
+      }
+      else
+      {
+         FileNamePart_STR(sGrid, sMap, STR_FILE_PART_NAME);
+         Strcat_STR(sMap, ".map");
+      }
 
+      SetString_SYS("DEFMAP", "MAP", sMap);
+      if (iRunGX_SYS("defmap.gx"))
+         Cancel_SYS();
+   }
 
-	// --- get the map ---
+   // --- Ensure we have a map and that we are not drawing on grid documents ---
+   if (iNew == 0 && iRunGX_SYS("sclgrd") == -1)
+      Cancel_SYS();
 
-	EMap = Current_EMAP();
-	Map = Lock_EMAP(EMap);
 
+   // --- get the map ---
 
-	// --- create aggregate ---
+   EMap = Current_EMAP();
+   Map = Lock_EMAP(EMap);
 
-	Agg = Create_AGG();
 
+   // --- create aggregate ---
 
-	// --- add grid to the agg ---
+   Agg = Create_AGG();
 
-	Progress_SYS(1);
-	ProgName_SYS(_("Layer"),1);
-	LayerIMG_AGG(Agg,sGrid,iZone,sColor,rContour);
-	LayerShadeIMG_AGG(Agg,sGrid,sGray,rInc,rDec,rScl);
-	Progress_SYS(0);
 
+   // --- add grid to the agg ---
 
-	// --- reduce gray scale 50% ---
+   Progress_SYS(1);
+   ProgName_SYS(_("Layer"), 1);
+   LayerIMG_AGG(Agg, sGrid, iZone, sColor, rContour);
+   LayerShadeIMG_AGG(Agg, sGrid, sGray, rInc, rDec, rScl);
+   Progress_SYS(0);
 
-	Itr = Create_ITR();
-	GetLayerITR_AGG(Agg,1,Itr);
-	ChangeBrightness_ITR(Itr,0.3);
-	SetLayerITR_AGG(Agg,1,Itr);
-	Destroy_ITR(Itr);
 
+   // --- reduce gray scale 50% ---
 
-	// --- adjust the over-all brightness ---
+   Itr = Create_ITR();
+   GetLayerITR_AGG(Agg, 1, Itr);
+   ChangeBrightness_ITR(Itr, 0.3);
+   SetLayerITR_AGG(Agg, 1, Itr);
+   Destroy_ITR(Itr);
 
-	if ((rBright != rDUMMY) && (rBright != 0.0))
-		ChangeBrightness_AGG(Agg,rBright);
-	
-	
-	// --- Set the defaults ---
 
-	SetReal_SYS("GRIDIMGS","INC",rInc);
-	SetReal_SYS("GRIDIMGS","DEC",rDec);
-	SetReal_SYS("GRIDIMGS","SCL",rScl);
+   // --- adjust the over-all brightness ---
 
+   if ((rBright != rDUMMY) && (rBright != 0.0))
+      ChangeBrightness_AGG(Agg, rBright);
 
-	// --- open data view ---
 
-	View = Create_MVIEW(Map,"*Data",MVIEW_WRITEOLD);
+   // --- Set the defaults ---
 
+   SetReal_SYS("GRIDIMGS", "INC", rInc);
+   SetReal_SYS("GRIDIMGS", "DEC", rDec);
+   SetReal_SYS("GRIDIMGS", "SCL", rScl);
 
-	// --- put the AGG in the view ---
 
-	FileNamePart_STR(sGrid,sName,STR_FILE_PART_NAME);
-	Strcpy_STR(sEnd,_n("s"));
-	GenGroupName_STR("AGG", sName, sEnd, sGroup);
+   // --- open data view ---
 
+   View = Create_MVIEW(Map, "*Data", MVIEW_WRITEOLD);
 
-	// --- Begin with the generated group name for the Aggregate group name ---
 
-	Strcpy_STR(sAgg, sGroup);
+   // --- put the AGG in the view ---
 
+   FileNamePart_STR(sGrid, sName, STR_FILE_PART_NAME);
+   Strcpy_STR(sEnd, _n("s"));
+   GenGroupName_STR("AGG", sName, sEnd, sGroup);
 
-	// --- Ensure that the group name is unique, as long as the grid has not already been plotted ---
 
-	AbsoluteFileName_SYS(sGrid,sFullFile);
-	FileNamePart_STR(sFullFile,sVol,STR_FILE_PART_VOLUME);
-	FileNamePart_STR(sFullFile,sDir,STR_FILE_PART_DIRECTORY);
-	FileNamePart_STR(sFullFile,sNameExt,STR_FILE_PART_NAME_EXTENSION);
-	FileNamePart_STR(sFullFile,sQual,STR_FILE_PART_QUALIFIERS);
-	if(iExistGroup_MVIEW (View, sAgg)) 
-	{
+   // --- Begin with the generated group name for the Aggregate group name ---
 
-		// --- Default behaviour is to create a new group name ---
+   Strcpy_STR(sAgg, sGroup);
 
-		GenNewGroupName_MVIEW(View, sGroup, sAgg);
 
-		// --- See if a grid already exist with same folder, qualifiers extension etc. in the view ---
-		List = Create_LST(STR_GROUP);
-		iN = iListGroups_MVIEW(View, List, MVIEW_GROUP_LIST_ALL);
-		
-		for(i=0;i<iN;i++) 
-		{
-			GetItem_LST(List, 0, i, sGroupName);
+   // --- Ensure that the group name is unique, as long as the grid has not already been plotted ---
 
+   AbsoluteFileName_SYS(sGrid, sFullFile);
+   FileNamePart_STR(sFullFile, sVol, STR_FILE_PART_VOLUME);
+   FileNamePart_STR(sFullFile, sDir, STR_FILE_PART_DIRECTORY);
+   FileNamePart_STR(sFullFile, sNameExt, STR_FILE_PART_NAME_EXTENSION);
+   FileNamePart_STR(sFullFile, sQual, STR_FILE_PART_QUALIFIERS);
+   if (iExistGroup_MVIEW(View, sAgg))
+   {
+      // --- Default behaviour is to create a new group name ---
 
-			// --- Is it a grid? ---
+      GenNewGroupName_MVIEW(View, sGroup, sAgg);
 
-			if(iIsGroup_MVIEW(View, sGroupName, MVIEW_IS_AGG)) 
-			{
+      // --- See if a grid already exist with same folder, qualifiers extension etc. in the view ---
+      List = Create_LST(STR_GROUP);
+      iN = iListGroups_MVIEW(View, List, MVIEW_GROUP_LIST_ALL);
 
-				// --- Get the name of the grid associated with the first layer. ---
+      for (i = 0; i < iN; i++)
+      {
+         GetItem_LST(List, 0, i, sGroupName);
 
-				hVV = Create_VV(-STR_FILE, 0);
 
-				GetAGGFileNames_MVIEW(View, sGroupName, hVV);
+         // --- Is it a grid? ---
 
-				// --- Only from gridimgs ---
-				if(iLength_VV(hVV) == 2) 
-				{
+         if (iIsGroup_MVIEW(View, sGroupName, MVIEW_IS_AGG))
+         {
+            // --- Get the name of the grid associated with the first layer. ---
 
-					GetString_VV(hVV,0,sAggGrid);
+            hVV = Create_VV(-STR_FILE, 0);
 
-					AbsoluteFileName_SYS(sAggGrid,sAggFullFile);
-					FileNamePart_STR(sAggFullFile,sAggVol,STR_FILE_PART_VOLUME);
-					FileNamePart_STR(sAggFullFile,sAggDir,STR_FILE_PART_DIRECTORY);
-					FileNamePart_STR(sAggFullFile,sAggNameExt,STR_FILE_PART_NAME_EXTENSION);
-					FileNamePart_STR(sAggFullFile,sAggQual,STR_FILE_PART_QUALIFIERS);
+            GetAGGFileNames_MVIEW(View, sGroupName, hVV);
 
-					// --- If the grid name and qualifiers are the same, use the original group name so the old group gets overwritten. ---
+            // --- Only from gridimgs ---
+            if (iLength_VV(hVV) == 2)
+            {
+               GetString_VV(hVV, 0, sAggGrid);
 
-					if(iStrcmp_STR(sVol, sAggVol, STR_CASE_TOLERANT)==0 && iStrcmp_STR(sDir, sAggDir, STR_CASE_TOLERANT)==0 && iStrcmp_STR(sNameExt, sAggNameExt, STR_CASE_TOLERANT)==0 && iStrcmp_STR(sQual, sAggQual, STR_CASE_TOLERANT)==0) 
-					Strcpy_STR(sAgg, sGroupName);
-				}
-			}
-		}            
-	}
+               AbsoluteFileName_SYS(sAggGrid, sAggFullFile);
+               FileNamePart_STR(sAggFullFile, sAggVol, STR_FILE_PART_VOLUME);
+               FileNamePart_STR(sAggFullFile, sAggDir, STR_FILE_PART_DIRECTORY);
+               FileNamePart_STR(sAggFullFile, sAggNameExt, STR_FILE_PART_NAME_EXTENSION);
+               FileNamePart_STR(sAggFullFile, sAggQual, STR_FILE_PART_QUALIFIERS);
 
-	// --- put the AGG in the view ---
+               // --- If the grid name and qualifiers are the same, use the original group name so the old group gets overwritten. ---
 
-	Aggregate_MVIEW(View,Agg,sAgg);
+               if (iStrcmp_STR(sVol, sAggVol, STR_CASE_TOLERANT) == 0 && iStrcmp_STR(sDir, sAggDir, STR_CASE_TOLERANT) == 0 && iStrcmp_STR(sNameExt, sAggNameExt, STR_CASE_TOLERANT) == 0 && iStrcmp_STR(sQual, sAggQual, STR_CASE_TOLERANT) == 0)
+                  Strcpy_STR(sAgg, sGroupName);
+            }
+         }
+      }
+   }
 
+   // --- put the AGG in the view ---
 
-	// --- clip the aggregate group ---
+   Aggregate_MVIEW(View, Agg, sAgg);
 
-	MarkAllGroups_MVIEW(View,0);
-	MarkGroup_MVIEW(View,sAgg,1);
-	ClipMarkedGroups_MVIEW(View,CLIP_ON);
-	MarkAllGroups_MVIEW(View,0);
 
+   // --- clip the aggregate group ---
 
-	// --- add the maker ---
+   MarkAllGroups_MVIEW(View, 0);
+   MarkGroup_MVIEW(View, sAgg, 1);
+   ClipMarkedGroups_MVIEW(View, CLIP_ON);
+   MarkAllGroups_MVIEW(View, 0);
 
-	Maker_MVIEW(View,0,1,"gridimgs",MAKER_GX,_("Shaded Color..."),"GRIDIMGS;");
 
+   // --- add the maker ---
 
+   Maker_MVIEW(View, 0, 1, "gridimgs", MAKER_GX, _("Shaded Color..."), "GRIDIMGS;");
 
 
-	// --- For new views, if the grid is oriented in 3D, set the user IPJ
-	//     to be the view IPJ without the orientation, so the status bar gives
-	//     the true location in XYZ ---
+   // --- For new views, if the grid is oriented in 3D, set the user IPJ
+   //     to be the view IPJ without the orientation, so the status bar gives
+   //     the true location in XYZ ---
 
-	hIMG = CreateFile_IMG(GS_TYPE_DEFAULT,sGrid,IMG_FILE_READONLY);
-	hIPJ = Create_IPJ();
-	GetIPJ_IMG(hIMG,hIPJ);
+   hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGrid, IMG_FILE_READONLY);
+   hIPJ = Create_IPJ();
+   GetIPJ_IMG(hIMG, hIPJ);
 
-	if(iNew==1)
-	{
-		iOrient = iGetOrientation_IPJ(hIPJ);
-		if(iOrient!=IPJ_ORIENT_DEFAULT)
-		{
-			hUserIPJ = Create_IPJ();
-			Copy_IPJ(hIPJ, hUserIPJ);	
-			SetPlanView_IPJ(hUserIPJ, 0.0, 0.0, 0.0, 0.0);
-			SetUserIPJ_MVIEW(View, hUserIPJ);
-			SetWorkingIPJ_MVIEW(View, hIPJ);		// Need to reset, because SetUserIPJ_MVIEW changes it
-		}
-	}
+   if (iNew == 1)
+   {
+      iOrient = iGetOrientation_IPJ(hIPJ);
+      if (iOrient != IPJ_ORIENT_DEFAULT)
+      {
+         hUserIPJ = Create_IPJ();
+         Copy_IPJ(hIPJ, hUserIPJ);
+         SetPlanView_IPJ(hUserIPJ, 0.0, 0.0, 0.0, 0.0);
+         SetUserIPJ_MVIEW(View, hUserIPJ);
+         SetWorkingIPJ_MVIEW(View, hIPJ);  // Need to reset, because SetUserIPJ_MVIEW changes it
+      }
+   }
 
-	
-	// --- done ---
 
-	Destroy_SYS(hIPJ);
-	Destroy_AGG(Agg);
-	Destroy_MVIEW(View);
+   // --- done ---
 
+   Destroy_SYS(hIPJ);
+   Destroy_AGG(Agg);
+   Destroy_MVIEW(View);
 
-	// --- Add to the current project ---
 
-	if (iInteractive_SYS())   
-		iAddDocument_PROJ(sGrid,"Grid",0);
+   // --- Add to the current project ---
 
-	UnLock_EMAP(EMap);
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sGrid, "Grid", 0);
+
+   UnLock_EMAP(EMap);
 }

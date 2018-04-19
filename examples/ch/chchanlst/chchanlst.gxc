@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "CHIMERA Channel list utility GX"
 #include <version.gxh>
 TRANSLATIONDOMAIN = "geochemistry"
@@ -26,19 +27,20 @@ DESCRIPTION   = "
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 //===========================================================================
 //                             VARIABLES
 //===========================================================================
 
 EDB        EData;
-DB         Data;
-LST        ChLST,SelChanLST;
-DB_SYMB    Chan;
+DB Data;
+LST ChLST, SelChanLST;
+DB_SYMB Chan;
 
 string(STR_DEFAULT) sData, sGX;
 string(32768) sChannels, sAllowed;
-int        i, iCh, iRet, iRemove;
+int i, iCh, iRet, iRemove;
 
 
 //===========================================================================
@@ -46,11 +48,10 @@ int        i, iCh, iRet, iRemove;
 //===========================================================================
 
 {
-
    // --- create LSTs to hold channel lists ---
-   
-   ChLST = Create_LST(2*STR_DB_SYMBOL);
-   SelChanLST = Create_LST(2*STR_DB_SYMBOL);
+
+   ChLST = Create_LST(2 * STR_DB_SYMBOL);
+   SelChanLST = Create_LST(2 * STR_DB_SYMBOL);
 
 
    EData = Current_EDB();
@@ -58,52 +59,51 @@ int        i, iCh, iRet, iRemove;
 
    // --- Get parameters ---
 
-   GetString_SYS("CHCHANLST","DATA",sData);
-   GetString_SYS("CHCHANLST","GX", sGX);
-   GetString_SYS("CHCHANLST","ALLOWED", sAllowed);
+   GetString_SYS("CHCHANLST", "DATA", sData);
+   GetString_SYS("CHCHANLST", "GX", sGX);
+   GetString_SYS("CHCHANLST", "ALLOWED", sAllowed);
 
 
    // --- Force re-set each time ---
 
-   SetString_SYS("CHCHANLST","DATA","");
-   SetString_SYS("CHCHANLST","GX", "");
-   SetString_SYS("CHCHANLST","CHANNELS", "");
-   SetString_SYS("CHCHANLST","ALLOWED", "");
-   
-   
-   iRemove = 0;   // --- Remove non-numeric items from list? ---
+   SetString_SYS("CHCHANLST", "DATA", "");
+   SetString_SYS("CHCHANLST", "GX", "");
+   SetString_SYS("CHCHANLST", "CHANNELS", "");
+   SetString_SYS("CHCHANLST", "ALLOWED", "");
 
-   if (iStrcmp_STR(sData,"ASSAY",STR_CASE_TOLERANT) == 0) {
 
+   iRemove = 0;  // --- Remove non-numeric items from list? ---
+
+   if (iStrcmp_STR(sData, "ASSAY", STR_CASE_TOLERANT) == 0)
+   {
       Data = Lock_EDB(EData);
       ClassChanLST_DB(Data, ChLST, "ASSAY");
       UnLock_EDB(EData);
-
-   } else if (iStrcmp_STR(sData,"DISPLAYED_ASSAY",STR_CASE_TOLERANT) == 0) {
-
+   }
+   else if (iStrcmp_STR(sData, "DISPLAYED_ASSAY", STR_CASE_TOLERANT) == 0)
+   {
       iDispClassChanLST_EDB(EData, ChLST, "ASSAY");
-
-   } else if (iStrcmp_STR(sData,"DISPLAYED",STR_CASE_TOLERANT) == 0) {
-
+   }
+   else if (iStrcmp_STR(sData, "DISPLAYED", STR_CASE_TOLERANT) == 0)
+   {
       iDispChanLST_EDB(EData, ChLST);
       iRemove = 1;
-
-   } else if (iStrcmp_STR(sData,"ALL",STR_CASE_TOLERANT) == 0) {
-
+   }
+   else if (iStrcmp_STR(sData, "ALL", STR_CASE_TOLERANT) == 0)
+   {
       Data = Lock_EDB(EData);
       SymbLST_DB(Data, ChLST, DB_SYMB_CHAN);
       UnLock_EDB(EData);
       iRemove = 1;
-
-   } else if (iStrcmp_STR(sData,"LIST",STR_CASE_TOLERANT) == 0) {
-
-
+   }
+   else if (iStrcmp_STR(sData, "LIST", STR_CASE_TOLERANT) == 0)
+   {
       // --- The channels selected from the list are saved
       //     to unique GX parameters for each calling GX. ---
 
       // --- Validate "GX" parameter ---
 
-      if(!iStrlen_STR(sGX)) 
+      if (!iStrlen_STR(sGX))
          Abort_SYS(_("GX programming error - must define CHCHANLST.GX parameter."));
 
 
@@ -116,67 +116,68 @@ int        i, iCh, iRet, iRemove;
 
       // --- Remove items not on the "allowed" list ---
 
-      if(iStrlen_STR(sAllowed))
+      if (iStrlen_STR(sAllowed))
          SelectCSVStringItems_LST(ChLST, sAllowed, ChLST);
 
 
       // --- Get previous selection ---
-      
+
       GetString_SYS(sGX, "SELECTED", sChannels);
 
 
       // --- User selection ---
 
-      if(iInteractive_SYS()) {
-
-
+      if (iInteractive_SYS())
+      {
          // --- Set starting selection for GUI ---
 
          ConvertFromCSVString_LST(SelChanLST, sChannels);
 
          iRet = iTwoPanelSelection_GUI(ChLST, SelChanLST, _("Select Channels to Process"));
-         if(iRet!=0) Cancel_SYS();
+         if (iRet != 0) Cancel_SYS();
 
-         
+
          // --- Save selection ---
-      
+
          ConvertToCSVString_LST(SelChanLST, sChannels);
          SetString_SYS(sGX, "SELECTED", sChannels);
       }
-      else 
+      else
          SelectCSVStringItems_LST(ChLST, sChannels, SelChanLST);
 
       Copy_LST(ChLST, SelChanLST);
-      Sort_LST(ChLST,0,0);
+      Sort_LST(ChLST, 0, 0);
+   }
+   else
+      Abort_SYS(_("Invalid channel selection option."));
 
-   } else Abort_SYS(_("Invalid channel selection option."));
-   
-   
-   iCh = iSize_LST(ChLST);   
+
+   iCh = iSize_LST(ChLST);
 
 
    // --- Remove non-numeric channels from the non-ASSAY lists ---
 
-   if (iRemove) {
-
+   if (iRemove)
+   {
       Data = Lock_EDB(EData);
-      for (i=iCh-1; i>=0; i--) {
-         Chan = (DB_SYMB)iGetInt_LST(ChLST,1,i);
-         LockSymb_DB(Data,Chan,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      for (i = iCh - 1; i >= 0; i--)
+      {
+         Chan = (DB_SYMB)iGetInt_LST(ChLST, 1, i);
+         LockSymb_DB(Data, Chan, DB_LOCK_READONLY, DB_WAIT_INFINITY);
 
          if (iGetChanType_DB(Data, Chan) < 0)
-            DelItem_LST(ChLST,i);
+            DelItem_LST(ChLST, i);
          UnLockSymb_DB(Data, Chan);
       }
       UnLock_EDB(EData);
    }
-         
+
 
    // --- Remove items not on the "allowed" list ---
 
-   if(iStrlen_STR(sAllowed)) {
-
-      if (iStrcmp_STR(sData,"LIST",STR_CASE_TOLERANT) != 0)
+   if (iStrlen_STR(sAllowed))
+   {
+      if (iStrcmp_STR(sData, "LIST", STR_CASE_TOLERANT) != 0)
          SelectCSVStringItems_LST(ChLST, sAllowed, ChLST);
    }
 

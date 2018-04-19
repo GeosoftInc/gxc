@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Load gravity file into a new database"
 #include <version.gxh>
 
@@ -28,7 +29,8 @@ RESOURCE = "grload.gr"
 //                                  INCLUDE
 //===========================================================================
 
-#include <all.gxh>     // system
+#include <all.gxh>
+// clang-format on     // system
 
 //===========================================================================
 //                                 VARIABLES
@@ -44,7 +46,7 @@ REG         hWorkREG;       // Workspace REG
 string(STR_FILE)  sData,sRaw,sDatabase;
 string(STR_DEFAULT_LONG) sTemp;
 string(STR_DB_SYMBOL) sXCh, sYCh;
-int                      i;
+int                      i, iLoadToCurrentDB;
 int                      iTideCorrOpt;    // 1 - Calculate, 0 - Use CG3/CG5 ETC
 string(STR_DEFAULT_LONG) sTideCorrOpt;
 
@@ -153,48 +155,67 @@ string(STR_DEFAULT_LONG) sTideCorrOpt;
 		FileExt_STR(sRaw,"raw",sRaw,FILE_EXT_FORCE);
 		iTideCorrOpt = iGetInt_SYS("GRLOAD","TIDECORROPT");
 		ConvertCG5toRAW_MISC(sData,sRaw,iTideCorrOpt);
+   }
+	else if (iStrcmp_STR(sTemp,"CG6",STR_CASE_TOLERANT) == 0) 
+	{
+         // --- Nothing to do here... do not use the RAW file conversion ---
 	} else
 		Abort_SYS(_("Only \"RAW\" and \"CG#\" data files are suppoted."));
 		
 		
-	// --- database name ---
+	// --- database name - CG6 can load to the current database ---
 			
-	FileNamePart_STR(sData,sDatabase,STR_FILE_PART_NAME);
-	FileExt_STR(sDatabase,"gdb",sDatabase,FILE_EXT_FORCE);
-	if (iFileExist_SYS(sDatabase) && iInteractive_SYS())
-	{
-		i = iDisplayQuestionWithCancel_SYS(sDatabase,_("Database exists.  Overwrite?"));
+   iLoadToCurrentDB = 0;
+   if (iStrcmp_STR(sTemp,"CG6",STR_CASE_TOLERANT) == 0)
+   {
+      if(iHaveCurrent_EDB() == 1)
+      {
+         EData = Current_EDB();
+         GetName_EDB(EData, sDatabase);
+         iLoadToCurrentDB = 1;
+      }
+   }
+   
+   if (iLoadToCurrentDB == 0)
+   {
+	   FileNamePart_STR(sData,sDatabase,STR_FILE_PART_NAME);
+	   FileExt_STR(sDatabase,"gdb",sDatabase,FILE_EXT_FORCE);
+
+	   if (iFileExist_SYS(sDatabase) && iInteractive_SYS())
+	   {
+		   i = iDisplayQuestionWithCancel_SYS(sDatabase,_("Database exists.  Overwrite?"));
 	
-		if(i == 2)
-			Cancel_SYS();
-		else if(i == 0)
-		{
-		  DisplayMessage_SYS("GRLOAD",_("Please provide a new database name"));
+		   if(i == 2)
+			   Cancel_SYS();
+		   else if(i == 0)
+		   {
+		     DisplayMessage_SYS("GRLOAD",_("Please provide a new database name"));
 		  
-		  // --- Create the Dialogue ---
+		     // --- Create the Dialogue ---
 
-		  Diag = Create_DGW("GRLOAD1");
+		     Diag = Create_DGW("GRLOAD1");
 
 
-		  // --- Set any Defaults ---
+		     // --- Set any Defaults ---
 
-		  SetInfoSYS_DGW(Diag,_GRLOAD1_0,DGW_FILEPATH,"GRLOAD","NEWDB");
+		     SetInfoSYS_DGW(Diag,_GRLOAD1_0,DGW_FILEPATH,"GRLOAD","NEWDB");
 
-		  // --- Run the Dialogue ---
+		     // --- Run the Dialogue ---
 
-		  if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+		     if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
 
-		  // --- Get the Strings ---
+		     // --- Get the Strings ---
 
-		  GetInfoSYS_DGW(Diag,_GRLOAD1_0,DGW_FILEPATH,"GRLOAD","NEWDB");
+		     GetInfoSYS_DGW(Diag,_GRLOAD1_0,DGW_FILEPATH,"GRLOAD","NEWDB");
 
-		  // --- Destroy the Dialogue ---
+		     // --- Destroy the Dialogue ---
 
-		  Destroy_DGW(Diag);
+		     Destroy_DGW(Diag);
 
-		  GetString_SYS("GRLOAD","NEWDB",sDatabase);
-		}   
-	}
+		     GetString_SYS("GRLOAD","NEWDB",sDatabase);
+		   }   
+	   }
+   }
 
 
 	// --- turn on progress ---
@@ -205,12 +226,33 @@ string(STR_DEFAULT_LONG) sTideCorrOpt;
 
 	// --- create/load the new database ---
 
-	if (iLoaded_EDB(sDatabase)) UnLoad_EDB(sDatabase);
-	iDeleteFile_SYS(sDatabase);
-	Create_DB(sDatabase,10,50,10+50+20,10,100,"SUPER","");
+   if (iLoadToCurrentDB == 0)
+   {
+	   if (iLoaded_EDB(sDatabase)) UnLoad_EDB(sDatabase);
+	   iDeleteFile_SYS(sDatabase);
+	   Create_DB(sDatabase,10,50,10+50+20,10,100,"SUPER","");
+   }
 	EData = Load_EDB(sDatabase);
 	Data = Lock_EDB(EData);
 	
+   // --- CG-6 is separate ---
+   
+   if (iStrcmp_STR(sTemp,"CG6",STR_CASE_TOLERANT) == 0) 
+   {
+      LoadGravityCG6_DU(Data, sData);
+      UnLock_EDB(EData);
+
+      LoadChan_EDB(EData, "Station");
+      LoadChan_EDB(EData, "Date");
+      LoadChan_EDB(EData, "Time");
+      LoadChan_EDB(EData, "CorrGrav");
+      LoadAllChans_EDB(EData);
+	   
+      Progress_SYS(0);
+
+      Exit_SYS();
+   }
+
 	
 	// --- get reg's ---
 

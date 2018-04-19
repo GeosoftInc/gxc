@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Subset solution list"
 #include <version.gxh>
 
@@ -27,26 +28,27 @@ RESOURCE = "E3SUBSET.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                                 VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                                 VARIABLES
+   //===========================================================================
 
-string(STR_DB_SYMBOL) sSolutions,sNewSolutions,sMask;      // Line Names
+   string(STR_DB_SYMBOL) sSolutions,
+   sNewSolutions, sMask;  // Line Names
 
-EDB        EData;
-DB         Data;
-DB_SYMB    Solutions,NewSolutions,MaskCh;
-DGW        Diag;              // Dialogue handle
-LST        List;              // List handle
-int        i;                 // Utility int
+EDB EData;
+DB Data;
+DB_SYMB Solutions, NewSolutions, MaskCh;
+DGW Diag;  // Dialogue handle
+LST List;  // List handle
+int i;     // Utility int
 
 //===========================================================================
 //                                    CODE
 //===========================================================================
 
 {
-
    // --- Get the Database ---
 
    EData = Current_EDB();
@@ -57,7 +59,6 @@ int        i;                 // Utility int
 
    if (iInteractive_SYS())
    {
-
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("E3SUBSET");
@@ -65,27 +66,28 @@ int        i;                 // Utility int
 
       // --- Set up input and output lists ---
 
-      List = GetList_DGW(Diag,_E3SUBSET_0);
-      ClassGroupLST_DB(Data,List,"Targets");
-      
-      List = GetList_DGW(Diag,_E3SUBSET_1);
-      ClassChanLST_DB(Data,List,"MASK");
-      
-      List = GetList_DGW(Diag,_E3SUBSET_2);
-      ClassGroupLST_DB(Data,List,"Targets");
+      List = GetList_DGW(Diag, _E3SUBSET_0);
+      ClassGroupLST_DB(Data, List, "Targets");
+
+      List = GetList_DGW(Diag, _E3SUBSET_1);
+      ClassChanLST_DB(Data, List, "MASK");
+
+      List = GetList_DGW(Diag, _E3SUBSET_2);
+      ClassGroupLST_DB(Data, List, "Targets");
 
 
-      GetString_SYS("E3SUBSET","OLD_SOLUTIONS",sSolutions);
-      if(!iStrlen_STR(sSolutions)) {
-         GetString_SYS("EULER3D","SOLUTIONS", sSolutions);
-         SetString_SYS("E3SUBSET","OLD_SOLUTIONS",sSolutions);
+      GetString_SYS("E3SUBSET", "OLD_SOLUTIONS", sSolutions);
+      if (!iStrlen_STR(sSolutions))
+      {
+         GetString_SYS("EULER3D", "SOLUTIONS", sSolutions);
+         SetString_SYS("E3SUBSET", "OLD_SOLUTIONS", sSolutions);
       }
 
       // --- Set any Defaults ---
 
-      SetInfoSYS_DGW(Diag,_E3SUBSET_0,DGW_TEXT,"E3SUBSET","OLD_SOLUTIONS");     
-      SetInfoSYS_DGW(Diag,_E3SUBSET_1,DGW_TEXT,"EULER3D","MASK");     
-      SetInfoSYS_DGW(Diag,_E3SUBSET_2,DGW_TEXT,"E3SUBSET","NEW_SOLUTIONS");     
+      SetInfoSYS_DGW(Diag, _E3SUBSET_0, DGW_TEXT, "E3SUBSET", "OLD_SOLUTIONS");
+      SetInfoSYS_DGW(Diag, _E3SUBSET_1, DGW_TEXT, "EULER3D", "MASK");
+      SetInfoSYS_DGW(Diag, _E3SUBSET_2, DGW_TEXT, "E3SUBSET", "NEW_SOLUTIONS");
 
 
       // --- Run the Dialogue ---
@@ -96,83 +98,83 @@ int        i;                 // Utility int
 
       // --- Get the Strings ---
 
-      GetInfoSYS_DGW(Diag,_E3SUBSET_0,DGW_TEXT,"E3SUBSET","OLD_SOLUTIONS");     
-      GetInfoSYS_DGW(Diag,_E3SUBSET_1,DGW_TEXT,"EULER3D","MASK");     
-      GetInfoSYS_DGW(Diag,_E3SUBSET_2,DGW_TEXT,"E3SUBSET","NEW_SOLUTIONS");     
+      GetInfoSYS_DGW(Diag, _E3SUBSET_0, DGW_TEXT, "E3SUBSET", "OLD_SOLUTIONS");
+      GetInfoSYS_DGW(Diag, _E3SUBSET_1, DGW_TEXT, "EULER3D", "MASK");
+      GetInfoSYS_DGW(Diag, _E3SUBSET_2, DGW_TEXT, "E3SUBSET", "NEW_SOLUTIONS");
 
 
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("E3SUBSET","OLD_SOLUTIONS",sSolutions);
-   GetString_SYS("EULER3D","MASK",sMask);
-   GetString_SYS("E3SUBSET","NEW_SOLUTIONS",sNewSolutions);
+   GetString_SYS("E3SUBSET", "OLD_SOLUTIONS", sSolutions);
+   GetString_SYS("EULER3D", "MASK", sMask);
+   GetString_SYS("E3SUBSET", "NEW_SOLUTIONS", sNewSolutions);
 
 
    // --- Does the Input Solutions list Exist ? ---
 
-   if (!iExistSymb_DB(Data,sSolutions,DB_SYMB_LINE))
+   if (!iExistSymb_DB(Data, sSolutions, DB_SYMB_LINE))
       Abort_SYS(_("Input solution list does not exist."));
-   Solutions = FindSymb_DB(Data,sSolutions,DB_SYMB_LINE);
-   
+   Solutions = FindSymb_DB(Data, sSolutions, DB_SYMB_LINE);
+
 
    // --- Does the Mask Channel Exist ? ---
 
-   if (!iExistSymb_DB(Data,sMask,DB_SYMB_CHAN))
+   if (!iExistSymb_DB(Data, sMask, DB_SYMB_CHAN))
       Abort_SYS(_("Mask channel does not exist."));
-   MaskCh = FindSymb_DB(Data,sMask,DB_SYMB_CHAN);
+   MaskCh = FindSymb_DB(Data, sMask, DB_SYMB_CHAN);
 
 
    // --- Does the Ouput solution list Exist ? ---
 
-   if (!iExistSymb_DB(Data,sNewSolutions,DB_SYMB_LINE)) {
-      NewSolutions = DupSymb_DB(Data,Solutions,sNewSolutions);
-      UnLockSymb_DB(Data,NewSolutions);
+   if (!iExistSymb_DB(Data, sNewSolutions, DB_SYMB_LINE))
+   {
+      NewSolutions = DupSymb_DB(Data, Solutions, sNewSolutions);
+      UnLockSymb_DB(Data, NewSolutions);
    }
    else
-      NewSolutions = FindSymb_DB(Data,sNewSolutions,DB_SYMB_LINE);
+      NewSolutions = FindSymb_DB(Data, sNewSolutions, DB_SYMB_LINE);
 
 
    // --- Lock the symbols ---
 
    if (Solutions == NewSolutions) Abort_SYS(_("Input and output solution lists cannot be the same"));
-   LockSymb_DB(Data,Solutions,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-   LockSymb_DB(Data,MaskCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
-   LockSymb_DB(Data,NewSolutions,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+   LockSymb_DB(Data, Solutions, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+   LockSymb_DB(Data, MaskCh, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+   LockSymb_DB(Data, NewSolutions, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
 
    Progress_SYS(1);
 
 
    // --- Update the Progress Bar ---
 
-   ProgName_SYS(_("Subset solutions"),1);
+   ProgName_SYS(_("Subset solutions"), 1);
 
-   CopyLineMasked_DU(Data,Solutions,MaskCh,VVU_PRUNE_DUMMY,NewSolutions);
+   CopyLineMasked_DU(Data, Solutions, MaskCh, VVU_PRUNE_DUMMY, NewSolutions);
 
 
    // --- Add maker ---
 
-   EasyMakerSymb_DB(Data,NewSolutions,_("Subset Solutions"),"E3SUBSET;EULER3D;");
+   EasyMakerSymb_DB(Data, NewSolutions, _("Subset Solutions"), "E3SUBSET;EULER3D;");
 
 
    // --- Unlock the symbols ---
 
-   UnLockSymb_DB(Data,Solutions);
-   UnLockSymb_DB(Data,MaskCh);
-   UnLockSymb_DB(Data,NewSolutions);
+   UnLockSymb_DB(Data, Solutions);
+   UnLockSymb_DB(Data, MaskCh);
+   UnLockSymb_DB(Data, NewSolutions);
 
 
    // --- done ---
 
    Progress_SYS(0);
 
-   
+
    // --- Release the Database ---
 
    UnLock_EDB(EData);
@@ -180,9 +182,8 @@ int        i;                 // Utility int
 
    // --- Go to the new Solutions list ---
 
-   SetString_SYS("EULER3D","SOLUTIONS",sNewSolutions);
-   
-   if (iInteractive_SYS() == 1)   
-      GotoLine_EDB(EData, NewSolutions);
+   SetString_SYS("EULER3D", "SOLUTIONS", sNewSolutions);
 
+   if (iInteractive_SYS() == 1)
+      GotoLine_EDB(EData, NewSolutions);
 }

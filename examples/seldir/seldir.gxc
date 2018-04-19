@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Select lines based on line direction."
 #include <version.gxh>
 DESCRIPTION   = "
@@ -30,23 +31,24 @@ RESOURCE = "seldir.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_DEFAULT_SHORT) sTemp;                 // temporary number formating string
+   string(STR_DEFAULT_SHORT) sTemp;  // temporary number formating string
 string(STR_DEFAULT) sLabel;
 string(STR_DB_SYMBOL) sLine;
 
-EDB         EData;
-DB          Data;
-DB_SYMB     XCh, YCh;              // Channel Handles
-DB_SYMB     Line;
-DGW         Diag;
-VV          LineVV;
-int         iLineLabel,i,iLines,iSelect;
-real        rDir,rTestDir,rError;
+EDB EData;
+DB Data;
+DB_SYMB XCh, YCh;  // Channel Handles
+DB_SYMB Line;
+DGW Diag;
+VV LineVV;
+int iLineLabel, i, iLines, iSelect;
+real rDir, rTestDir, rError;
 
 
 //===========================================================================
@@ -54,160 +56,156 @@ real        rDir,rTestDir,rError;
 //===========================================================================
 
 {
-	// --- Selection mode ---
+   // --- Selection mode ---
 
-	iSelect = iGetInt_SYS("SELDIR","SELCTION");
-	if(iSelect != 0)
-		iSelect = 1;
-
-
-	// --- Are we running interactively ? ---
-
-	if (iInteractive_SYS()) {
-
-		// --- Create the Dialogue ---
-
-		Diag = Create_DGW("SELDIR");
-	  
-
-		// --- Set any Defaults ---
-
-		SetInfoSYS_DGW(Diag,_SELDIR_0,DGW_TEXT,"SELDIR","DIRECTION");
-		SetInfoSYS_DGW(Diag,_SELDIR_1,DGW_TEXT,"SELDIR","ERROR");
-		SetInfoSYS_DGW(Diag,_SELDIR_2,DGW_LISTALIAS,"SELDIR","OPTION");
-	  
-
-		// --- Run the Dialogue ---
-
-		iSelect = iRunDialogue_DGW(Diag);
-		if (iSelect == -1)
-			Cancel_SYS();
+   iSelect = iGetInt_SYS("SELDIR", "SELCTION");
+   if (iSelect != 0)
+      iSelect = 1;
 
 
-		// --- Get the Strings ---
+   // --- Are we running interactively ? ---
 
-		GetInfoSYS_DGW(Diag,_SELDIR_0,DGW_TEXT,"SELDIR","DIRECTION");
-		GetInfoSYS_DGW(Diag,_SELDIR_1,DGW_TEXT,"SELDIR","ERROR");
-		GetInfoSYS_DGW(Diag,_SELDIR_2,DGW_LISTALIAS,"SELDIR","OPTION");
-	  
-		SetInt_SYS("SELDIR","SELECTION", iSelect);
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("SELDIR");
 
 
-		// --- Destroy the Dialogue ---
+      // --- Set any Defaults ---
 
-	  Destroy_DGW(Diag);
-	  
-	}
+      SetInfoSYS_DGW(Diag, _SELDIR_0, DGW_TEXT, "SELDIR", "DIRECTION");
+      SetInfoSYS_DGW(Diag, _SELDIR_1, DGW_TEXT, "SELDIR", "ERROR");
+      SetInfoSYS_DGW(Diag, _SELDIR_2, DGW_LISTALIAS, "SELDIR", "OPTION");
+
+
+      // --- Run the Dialogue ---
+
+      iSelect = iRunDialogue_DGW(Diag);
+      if (iSelect == -1)
+         Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag, _SELDIR_0, DGW_TEXT, "SELDIR", "DIRECTION");
+      GetInfoSYS_DGW(Diag, _SELDIR_1, DGW_TEXT, "SELDIR", "ERROR");
+      GetInfoSYS_DGW(Diag, _SELDIR_2, DGW_LISTALIAS, "SELDIR", "OPTION");
+
+      SetInt_SYS("SELDIR", "SELECTION", iSelect);
+
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
 
    // --- Get the Database ---
 
    EData = Current_EDB();
    Data = Lock_EDB(EData);
-   
+
 
    // --- Get Parameters ---
 
-   rTestDir  = rGetReal_SYS("SELDIR","DIRECTION");
-   rError    = rGetReal_SYS("SELDIR","ERROR");
-   
-   rTestDir = rGetReal_SYS("SELDIR","DIRECTION");
-   
-   
+   rTestDir = rGetReal_SYS("SELDIR", "DIRECTION");
+   rError = rGetReal_SYS("SELDIR", "ERROR");
+
+   rTestDir = rGetReal_SYS("SELDIR", "DIRECTION");
+
+
    // --- clear selections if required - allow for either "Clear" or "New" ---
-   
-   GetString_SYS("SELDIR","OPTION",sTemp);
-   if (iCharComp_STR(sTemp,_n("C")) || iCharComp_STR(sTemp,_n("c")) ||
-       iCharComp_STR(sTemp,_n("N")) || iCharComp_STR(sTemp,_n("n")))
-	{
-		if (iSelect == 1)
-			Select_DB(Data, "", DB_LINE_SELECT_EXCLUDE);
-		else
-			Select_DB(Data, "", DB_LINE_SELECT_INCLUDE);	  
-	}
-   
+
+   GetString_SYS("SELDIR", "OPTION", sTemp);
+   if (iCharComp_STR(sTemp, _n("C")) || iCharComp_STR(sTemp, _n("c")) ||
+       iCharComp_STR(sTemp, _n("N")) || iCharComp_STR(sTemp, _n("n")))
+   {
+      if (iSelect == 1)
+         Select_DB(Data, "", DB_LINE_SELECT_EXCLUDE);
+      else
+         Select_DB(Data, "", DB_LINE_SELECT_INCLUDE);
+   }
+
 
    // --- Do the reference channels exist ? ---
 
    XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
-   if (XCh==NULLSYMB)
+   if (XCh == NULLSYMB)
       Abort_SYS(_("The current X channel does not exist."));
 
    YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
-   if (YCh==NULLSYMB)
+   if (YCh == NULLSYMB)
       Abort_SYS(_("The current Y channel does not exist."));
-   
-         
+
+
    // --- Lock the channel symbols ---
 
-   LockSymb_DB(Data,XCh,DB_LOCK_READONLY,DB_WAIT_NONE);
-   LockSymb_DB(Data,YCh,DB_LOCK_READONLY,DB_WAIT_NONE);
-   
+   LockSymb_DB(Data, XCh, DB_LOCK_READONLY, DB_WAIT_NONE);
+   LockSymb_DB(Data, YCh, DB_LOCK_READONLY, DB_WAIT_NONE);
+
 
    // --- line label format ---
-   
-   iLineLabel =   DB_LINE_LABEL_FORMAT_LINE    +
-                  DB_LINE_LABEL_FORMAT_VERSION +
-                  DB_LINE_LABEL_FORMAT_TYPE;
-   
+
+   iLineLabel = DB_LINE_LABEL_FORMAT_LINE +
+                DB_LINE_LABEL_FORMAT_VERSION +
+                DB_LINE_LABEL_FORMAT_TYPE;
+
 
    // --- Go through all lines ---
 
-   LineVV = Create_VV(INT,0);
-   iSymbList_DB(Data,LineVV,DB_SYMB_LINE);
+   LineVV = Create_VV(INT, 0);
+   iSymbList_DB(Data, LineVV, DB_SYMB_LINE);
    iLines = iLength_VV(LineVV);
    Progress_SYS(1);
-   ProgName_SYS(_("Selecting"),1);
-   
-   
-   for (i=0;i<iLines;i++) {
-   
-   
+   ProgName_SYS(_("Selecting"), 1);
+
+
+   for (i = 0; i < iLines; i++)
+   {
       // --- get the line symbol ---
-      
-      Line = (DB_SYMB)iGetInt_VV(LineVV,i);
-      
-      
+
+      Line = (DB_SYMB)iGetInt_VV(LineVV, i);
+
+
       // --- Update the Progress Bar ---
-      
-      LockSymb_DB(Data,Line,DB_LOCK_READWRITE,DB_WAIT_NONE);
-      GetSymbName_DB(Data,Line,sTemp);
-      UnLockSymb_DB(Data,Line);
-      Strcpy_STR(sLabel,_("Testing line: "));
-      Strcat_STR(sLabel,sTemp);
-      ProgName_SYS(sLabel,0);
-      ProgUpdateL_SYS(iLines,iLines);
+
+      LockSymb_DB(Data, Line, DB_LOCK_READWRITE, DB_WAIT_NONE);
+      GetSymbName_DB(Data, Line, sTemp);
+      UnLockSymb_DB(Data, Line);
+      Strcpy_STR(sLabel, _("Testing line: "));
+      Strcat_STR(sLabel, sTemp);
+      ProgName_SYS(sLabel, 0);
+      ProgUpdateL_SYS(iLines, iLines);
 
 
       // --- get line direction and test ---
 
       rDir = rDirection_DU(Data, Line, XCh, YCh);
       rDir -= rTestDir;
-      if (rDir > 180.0) 
+      if (rDir > 180.0)
          rDir -= 360.0;
-      else if (rDir < -180.0)   
+      else if (rDir < -180.0)
          rDir += 360.0;
-      if ((rDir >= -rError) && (rDir <= rError)) 
-		{
-         LineLabel_DB(Data,Line,sLine,iLineLabel);
-			if (iSelect == 1)
-				Select_DB(Data, sLine, DB_LINE_SELECT_INCLUDE);
-			else
-				Select_DB(Data, sLine, DB_LINE_SELECT_EXCLUDE);
+      if ((rDir >= -rError) && (rDir <= rError))
+      {
+         LineLabel_DB(Data, Line, sLine, iLineLabel);
+         if (iSelect == 1)
+            Select_DB(Data, sLine, DB_LINE_SELECT_INCLUDE);
+         else
+            Select_DB(Data, sLine, DB_LINE_SELECT_EXCLUDE);
       }
-      
    }
 
 
    // --- Unlock the channel symbol ---
 
-   UnLockSymb_DB(Data,XCh);
-   UnLockSymb_DB(Data,YCh);
+   UnLockSymb_DB(Data, XCh);
+   UnLockSymb_DB(Data, YCh);
    UnLock_EDB(EData);
-   
+
 
    // --- Done ---
 
    Destroy_VV(LineVV);
    Progress_SYS(0);
-
 }

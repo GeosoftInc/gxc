@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Append one database to another."
 #include <version.gxh>
 
@@ -23,21 +24,22 @@ RESOURCE = "chappend.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-DGW        Diag;              // Dialogue handle
+   DGW Diag;  // Dialogue handle
 
-DB         DBi,DBo;
-EDB        EDBi,EDBo;
-DB_SYMB    Chan;
-LST        hLST;
+DB DBi, DBo;
+EDB EDBi, EDBo;
+DB_SYMB Chan;
+LST hLST;
 
-string(STR_FILE)  sMaster,sWork; 
+string(STR_FILE) sMaster, sWork;
 string(STR_DB_SYMBOL) sXCh, sYCh, sChan;
-int        i, iNew, iN;
+int i, iNew, iN;
 
 
 //===========================================================================
@@ -45,9 +47,8 @@ int        i, iNew, iN;
 //===========================================================================
 
 {
-   if (iInteractive_SYS()) {
-
-
+   if (iInteractive_SYS())
+   {
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("CHAPPEND");
@@ -55,41 +56,40 @@ int        i, iNew, iN;
 
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_CHAPPEND_0,DGW_FILEPATH,"CHAPPEND","WORK");     
-      SetInfoSYS_DGW(Diag,_CHAPPEND_1,DGW_FILEPATH,"CHAPPEND","MASTER");     
+      SetInfoSYS_DGW(Diag, _CHAPPEND_0, DGW_FILEPATH, "CHAPPEND", "WORK");
+      SetInfoSYS_DGW(Diag, _CHAPPEND_1, DGW_FILEPATH, "CHAPPEND", "MASTER");
 
 
       // --- Run the Dialogue ---
 
       if (iRunDialogue_DGW(Diag) != 0)
-         Cancel_SYS();   
+         Cancel_SYS();
 
 
       // --- Get the Strings and replace in INI ---
 
-      GetInfoSYS_DGW(Diag,_CHAPPEND_0,DGW_FILEPATH,"CHAPPEND","WORK");
-      GetInfoSYS_DGW(Diag,_CHAPPEND_1,DGW_FILEPATH,"CHAPPEND","MASTER");
+      GetInfoSYS_DGW(Diag, _CHAPPEND_0, DGW_FILEPATH, "CHAPPEND", "WORK");
+      GetInfoSYS_DGW(Diag, _CHAPPEND_1, DGW_FILEPATH, "CHAPPEND", "MASTER");
 
 
       // --- Destroy the Dialogue ---
 
       Destroy_DGW(Diag);
-
    }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("CHAPPEND","WORK",sWork);
-   GetString_SYS("CHAPPEND","MASTER",sMaster);
+   GetString_SYS("CHAPPEND", "WORK", sWork);
+   GetString_SYS("CHAPPEND", "MASTER", sMaster);
 
 
    // --- Check for null input and output strings ---
 
    if (!iStrlen_STR(sWork))
-      Abort_SYS(_("Source Database Not Specified!"));   
+      Abort_SYS(_("Source Database Not Specified!"));
    if (!iStrlen_STR(sMaster))
-      Abort_SYS(_("Master Database Not Specified!"));   
+      Abort_SYS(_("Master Database Not Specified!"));
 
    // --- Load the Work database ---
 
@@ -98,68 +98,70 @@ int        i, iNew, iN;
 
    // --- Get displayed channel order ---
 
-   hLST = Create_LST(2*STR_DB_SYMBOL);
-   
+   hLST = Create_LST(2 * STR_DB_SYMBOL);
+
    if (iInteractive_SYS())
       iN = iDispChanLST_EDB(EDBi, hLST);
 
-   DBi  = Lock_EDB(EDBi);
+   DBi = Lock_EDB(EDBi);
 
 
    // --- Master database not exist ---
 
-   if (iFileExist_SYS(sMaster) == 0) {
+   if (iFileExist_SYS(sMaster) == 0)
+   {
       iNew = TRUE;
-      CreateDup_DB(DBi,sMaster);
-
-   } else   
+      CreateDup_DB(DBi, sMaster);
+   }
+   else
       iNew = FALSE;
 
 
    // --- Load Master database ---
-   
+
    EDBo = Load_EDB(sMaster);
-   DBo  = Lock_EDB(EDBo);
-   
-   DupChans_DU(DBi,DBo);
+   DBo = Lock_EDB(EDBo);
 
-   Chan = FindChan_DB(DBo,"Sample");
+   DupChans_DU(DBi, DBo);
 
-   Progress_SYS(1);   
+   Chan = FindChan_DB(DBo, "Sample");
+
+   Progress_SYS(1);
 
 
    // --- Normalize the output data, append input data, then normalize output again ---
 
-   Normal_DU(DBo,Chan,TRUE);
-   Append_DU(DBi,DBo,TRUE);
-   Normal_DU(DBo,Chan,TRUE);
+   Normal_DU(DBo, Chan, TRUE);
+   Append_DU(DBi, DBo, TRUE);
+   Normal_DU(DBo, Chan, TRUE);
 
-   if (iNew) {
-
+   if (iNew)
+   {
       // --- Set Current X and Y channels to be the same as in the original database ---
 
       GetXYZChan_DB(DBi, DB_CHAN_X, sXCh);
       GetXYZChan_DB(DBi, DB_CHAN_Y, sYCh);
       SetXYZChan_DB(DBo, DB_CHAN_X, sXCh);
       SetXYZChan_DB(DBo, DB_CHAN_Y, sYCh);
-      
-      DupChanLocks_DU(DBi,DBo);
+
+      DupChanLocks_DU(DBi, DBo);
       UnLock_EDB(EDBo);
       DelLine0_EDB(EDBo);
 
 
       // --- Duplicate the displayed channel order ---
-      if (iInteractive_SYS()) {
-         for(i=0;i<iN;i++) {
+      if (iInteractive_SYS())
+      {
+         for (i = 0; i < iN; i++)
+         {
             GetItem_LST(hLST, 0, i, sChan);
-            LoadChan_EDB(EDBo,sChan);
+            LoadChan_EDB(EDBo, sChan);
          }
       }
    }
    UnLock_EDB(EDBi);
-   
-   Progress_SYS(0);     
+
+   Progress_SYS(0);
 
    Destroy_LST(hLST);
-  
 }

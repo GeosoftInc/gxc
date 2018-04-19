@@ -1,5 +1,6 @@
 //===========================================================================
 
+// clang-format off
 NAME          = "Create a new empty group in a view"
 #include <version.gxh>
 
@@ -24,23 +25,24 @@ RESOURCE = "newgroup.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
-//                             VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             VARIABLES
+   //===========================================================================
 
-string(STR_VIEW) sView;
+   string(STR_VIEW) sView;
 string(STR_GROUP) sGroup;
 string(STR_VIEW_GROUP) sViewGroup;
 string(STR_GROUP) sGroupTest;
 
-EMAP  EMap;
-MAP   Map;
+EMAP EMap;
+MAP Map;
 MVIEW View;
-DGW   Diag;
-LST   ViewList;
-int   i, iDone;
+DGW Diag;
+LST ViewList;
+int i, iDone;
 
 //===========================================================================
 //                             MAP CODE
@@ -48,17 +50,18 @@ int   i, iDone;
 
 {
    // --- Ensure we have a base map and that we are not working with grid documents ---
-   
-   if (iRunGX_SYS("sclmap") != 0) 
+
+   if (iRunGX_SYS("sclmap") != 0)
       Cancel_SYS();
 
    EMap = Current_EMAP();
-   Map  = Lock_EMAP(EMap);
+   Map = Lock_EMAP(EMap);
 
 
    // --- Are we running interactively ? ---
 
-   if (iInteractive_SYS()) {
+   if (iInteractive_SYS())
+   {
       iDone = 0;
 
       // --- Create the Dialogue ---
@@ -68,18 +71,18 @@ int   i, iDone;
 
       // --- Set up lists ---
 
-      ViewList = GetList_DGW(Diag,_NEWGROUP_0);
-      ViewListEx_MAP(Map,ViewList,MAP_LIST_MODE_NOT3D);
-      Sort_LST(ViewList,0,0);
+      ViewList = GetList_DGW(Diag, _NEWGROUP_0);
+      ViewListEx_MAP(Map, ViewList, MAP_LIST_MODE_NOT3D);
+      Sort_LST(ViewList, 0, 0);
 
 
       // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag,_NEWGROUP_0,DGW_TEXT,"NEWGROUP","VIEW");
-      SetInfoSYS_DGW(Diag,_NEWGROUP_1,DGW_TEXT,"NEWGROUP","GROUP");
+      SetInfoSYS_DGW(Diag, _NEWGROUP_0, DGW_TEXT, "NEWGROUP", "VIEW");
+      SetInfoSYS_DGW(Diag, _NEWGROUP_1, DGW_TEXT, "NEWGROUP", "GROUP");
 
-      while (!iDone) {
-
+      while (!iDone)
+      {
          // --- Run the Dialogue ---
 
          i = iRunDialogue_DGW(Diag);
@@ -91,16 +94,18 @@ int   i, iDone;
 
          if (iStrlen_STR(sGroupTest) > STR_GROUP - 1)
             DisplayMessage_SYS(_("NEWGROUP GX"), _("The name of the group is too long. The maximum name length is 1039 characters."));
-         else {
+         else
+         {
             // --- open the view and see if the group already exists. ---
-            View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
-            
+            View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
+
             if (!iExistGroup_MVIEW(View, sGroupTest) || (iExistGroup_MVIEW(View, sGroupTest) &&
-                iDisplayQuestion_SYS(_("NEWGROUP GX"), _("The group already exists, do you want to overwrite it?")))) {
+                                                         iDisplayQuestion_SYS(_("NEWGROUP GX"), _("The group already exists, do you want to overwrite it?"))))
+            {
                // --- Put values back in INI ---
 
-               GetInfoSYS_DGW(Diag,_NEWGROUP_0,DGW_TEXT,"NEWGROUP","VIEW");
-               GetInfoSYS_DGW(Diag,_NEWGROUP_1,DGW_TEXT,"NEWGROUP","GROUP");
+               GetInfoSYS_DGW(Diag, _NEWGROUP_0, DGW_TEXT, "NEWGROUP", "VIEW");
+               GetInfoSYS_DGW(Diag, _NEWGROUP_1, DGW_TEXT, "NEWGROUP", "GROUP");
 
                iDone = 1;
             }
@@ -114,30 +119,30 @@ int   i, iDone;
 
    // --- get parameters ---
 
-   GetString_SYS("NEWGROUP","VIEW",sView);
-   GetString_SYS("NEWGROUP","GROUP",sGroup);
+   GetString_SYS("NEWGROUP", "VIEW", sView);
+   GetString_SYS("NEWGROUP", "GROUP", sGroup);
 
-   
+
    // --- open the view ---
 
-   View = Create_MVIEW(Map,sView,MVIEW_WRITEOLD);
+   View = Create_MVIEW(Map, sView, MVIEW_WRITEOLD);
 
 
    // --- create new empty group ---
 
-   StartGroup_MVIEW(View,sGroup,MVIEW_GROUP_NEW);
- 
+   StartGroup_MVIEW(View, sGroup, MVIEW_GROUP_NEW);
+
    Destroy_MVIEW(View);
    UnLock_EMAP(EMap);
-      
+
 
    // --- activate the group ---
-   
-   if (iInteractive_SYS()) {
-      Strcpy_STR(sViewGroup,sView);
-      Strcat_STR(sViewGroup,"/");
-      Strcat_STR(sViewGroup,sGroup);
-      ActivateGroup_EMAP(EMap,sViewGroup);
-   }
 
+   if (iInteractive_SYS())
+   {
+      Strcpy_STR(sViewGroup, sView);
+      Strcat_STR(sViewGroup, "/");
+      Strcat_STR(sViewGroup, sGroup);
+      ActivateGroup_EMAP(EMap, sViewGroup);
+   }
 }

@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Add/Replace a group mask in view"
 #include <version.gxh>
 
@@ -23,6 +24,7 @@ RESOURCE = "viewextclip.gr"
 //===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
 
 //===========================================================================
@@ -33,21 +35,21 @@ string(STR_FILE) sPoly,sName,sNameComp;
 string(STR_VIEW) sView;
 string(STR_GROUP) sGroup;
 
-DGW         hDGW;
-int         i;
-int         iRun;
-int         iForce;
-int         iClipRegion;
-int         iGroupRegion;
-int         iOrient;
-int         iGroups;
-PLY         hPLY;
-IPJ         hIPJ, hUserIPJ, hPolyIPJ;
-EMAP        EMap;
-MAP   		hMAP;
-MVIEW 		View;
-LST         hLST;
-LST         hGroupLST;
+DGW hDGW;
+int i;
+int iRun;
+int iForce;
+int iClipRegion;
+int iGroupRegion;
+int iOrient;
+int iGroups;
+PLY hPLY;
+IPJ hIPJ, hUserIPJ, hPolyIPJ;
+EMAP EMap;
+MAP hMAP;
+MVIEW View;
+LST hLST;
+LST hGroupLST;
 
 
 //===========================================================================
@@ -55,88 +57,92 @@ LST         hGroupLST;
 //===========================================================================
 
 {
-	// --- get current map ---
+   // --- get current map ---
 
-   EMap  = Current_EMAP();
+   EMap = Current_EMAP();
    hMAP = Lock_EMAP(EMap);
-   View = (MVIEW) 0;
+   View = (MVIEW)0;
 
    // --- Are we running interactively ? ---
 
-   if (iInteractive_SYS()) {
+   if (iInteractive_SYS())
+   {
       iRun = 0;
 
-      while (iRun != 99) {
-
-         if (iRun == 0) {
+      while (iRun != 99)
+      {
+         if (iRun == 0)
+         {
             // --- Create the Dialogue ---
 
             hDGW = Create_DGW("VIEWEXTCLIP1");
 
-            hLST = GetList_DGW(hDGW,_VIEWEXTCLIP1_1);
-            ViewList_MAP(hMAP,hLST);
-            Sort_LST(hLST,0,0);
+            hLST = GetList_DGW(hDGW, _VIEWEXTCLIP1_1);
+            ViewList_MAP(hMAP, hLST);
+            Sort_LST(hLST, 0, 0);
 
             // --- set default view to the current data view ---
-      
-            GetClassName_MAP(hMAP,"Data",sView);
-            SetInfo_DGW(hDGW,_VIEWEXTCLIP1_1,DGW_TEXT,sView);
+
+            GetClassName_MAP(hMAP, "Data", sView);
+            SetInfo_DGW(hDGW, _VIEWEXTCLIP1_1, DGW_TEXT, sView);
 
             // --- Set any Defaults from INI ---
 
-            SetInfoSYS_DGW(hDGW,_VIEWEXTCLIP1_0,DGW_FILEPATH,"VIEWEXTCLIP","FILE");
-            
+            SetInfoSYS_DGW(hDGW, _VIEWEXTCLIP1_0, DGW_FILEPATH, "VIEWEXTCLIP", "FILE");
+
             // --- Run the Dialogue ---
 
             i = iRunDialogue_DGW(hDGW);
-            if (i == -1) Cancel_SYS(); 
+            if (i == -1) Cancel_SYS();
 
-            GetInfoSYS_DGW(hDGW,_VIEWEXTCLIP1_0,DGW_FILEPATH,"VIEWEXTCLIP","FILE");
-            GetInfoSYS_DGW(hDGW,_VIEWEXTCLIP1_1,DGW_TEXT,"VIEWEXTCLIP","VIEW");     
-      
+            GetInfoSYS_DGW(hDGW, _VIEWEXTCLIP1_0, DGW_FILEPATH, "VIEWEXTCLIP", "FILE");
+            GetInfoSYS_DGW(hDGW, _VIEWEXTCLIP1_1, DGW_TEXT, "VIEWEXTCLIP", "VIEW");
+
             Destroy_DGW(hDGW);
 
-            GetString_SYS("VIEWEXTCLIP","VIEW",sView);
-            View = Create_MVIEW(hMAP,sView,MVIEW_READ);
+            GetString_SYS("VIEWEXTCLIP", "VIEW", sView);
+            View = Create_MVIEW(hMAP, sView, MVIEW_READ);
             hIPJ = Create_IPJ();
-            GetIPJ_MVIEW(View,hIPJ);
+            GetIPJ_MVIEW(View, hIPJ);
 
             // --- Is it an oriented view? ---
 
             iOrient = iGetOrientation_IPJ(hIPJ);
-         
-            if(iOrient!=IPJ_ORIENT_DEFAULT &&
-               iOrient!=IPJ_ORIENT_PLAN) {
+
+            if (iOrient != IPJ_ORIENT_DEFAULT &&
+                iOrient != IPJ_ORIENT_PLAN)
+            {
                DisplayMessage_SYS(_("VIEWEXTCLIP"), _("Masking/clipping operations cannot currently be performed on specially oriented (non-plan) views."));
-            } else
+            }
+            else
                iRun = 1;
             Destroy_MVIEW(View);
             Destroy_IPJ(hIPJ);
-         } else if (iRun == 1) {
-
-
+         }
+         else if (iRun == 1)
+         {
             // --- Create the Dialogue ---
 
             hDGW = Create_DGW("VIEWEXTCLIP2");
 
-            hLST = GetList_DGW(hDGW,_VIEWEXTCLIP2_0);
-            View = Create_MVIEW(hMAP,sView,MVIEW_READ);
-            ExtClipPLYList_MVIEW(View,hLST);
+            hLST = GetList_DGW(hDGW, _VIEWEXTCLIP2_0);
+            View = Create_MVIEW(hMAP, sView, MVIEW_READ);
+            ExtClipPLYList_MVIEW(View, hLST);
             Destroy_MVIEW(View);
-            Sort_LST(hLST,0,0);
+            Sort_LST(hLST, 0, 0);
 
             // --- Set any Defaults from INI ---
 
-            SetInfoSYS_DGW(hDGW,_VIEWEXTCLIP2_0,DGW_TEXT,"VIEWEXTCLIP","NAME");
-            SetInfoSYS_DGW(hDGW,_VIEWEXTCLIP2_1,DGW_LISTALIAS,"VIEWEXTCLIP","FORCE");
+            SetInfoSYS_DGW(hDGW, _VIEWEXTCLIP2_0, DGW_TEXT, "VIEWEXTCLIP", "NAME");
+            SetInfoSYS_DGW(hDGW, _VIEWEXTCLIP2_1, DGW_LISTALIAS, "VIEWEXTCLIP", "FORCE");
 
             // --- Run the Dialogue ---
 
             i = iRunDialogue_DGW(hDGW);
-            if (i == -1) Cancel_SYS(); 
+            if (i == -1) Cancel_SYS();
 
-            GetInfoSYS_DGW(hDGW,_VIEWEXTCLIP2_0,DGW_TEXT,"VIEWEXTCLIP","NAME");
-            GetInfoSYS_DGW(hDGW,_VIEWEXTCLIP2_1,DGW_LISTALIAS,"VIEWEXTCLIP","FORCE");
+            GetInfoSYS_DGW(hDGW, _VIEWEXTCLIP2_0, DGW_TEXT, "VIEWEXTCLIP", "NAME");
+            GetInfoSYS_DGW(hDGW, _VIEWEXTCLIP2_1, DGW_LISTALIAS, "VIEWEXTCLIP", "FORCE");
 
             Destroy_DGW(hDGW);
 
@@ -144,8 +150,8 @@ LST         hGroupLST;
                iRun = 0;
             else
                iRun = 99;
-
-         } else 
+         }
+         else
             Abort_SYS(_("Error processing dialog options"));
       }
    }
@@ -153,42 +159,42 @@ LST         hGroupLST;
 
    // --- Get Parameters ---
 
-   GetString_SYS("VIEWEXTCLIP","FILE",sPoly);
-   GetString_SYS("VIEWEXTCLIP","VIEW",sView);
-   GetString_SYS("VIEWEXTCLIP","NAME",sName);
-   iForce = iGetInt_SYS("VIEWEXTCLIP","FORCE");
+   GetString_SYS("VIEWEXTCLIP", "FILE", sPoly);
+   GetString_SYS("VIEWEXTCLIP", "VIEW", sView);
+   GetString_SYS("VIEWEXTCLIP", "NAME", sName);
+   iForce = iGetInt_SYS("VIEWEXTCLIP", "FORCE");
 
    // --- Create the Polygon ---
 
    hPLY = Create_PLY();
    LoadTable_PLY(hPLY, sPoly);
-   
-   
+
+
    // --- Check for valid polygon ---
-   
-   if(rArea_PLY(hPLY)==0.0)
-       Abort_SYS(_("The polygon file does not contain a valid polygon."));
-       
-          
+
+   if (rArea_PLY(hPLY) == 0.0)
+      Abort_SYS(_("The polygon file does not contain a valid polygon."));
+
+
    hPolyIPJ = Create_IPJ();
    GetIPJ_PLY(hPLY, hPolyIPJ);
 
-   View = Create_MVIEW(hMAP,sView,MVIEW_WRITEOLD);
+   View = Create_MVIEW(hMAP, sView, MVIEW_WRITEOLD);
    hIPJ = Create_IPJ();
-   GetIPJ_MVIEW(View,hIPJ);
+   GetIPJ_MVIEW(View, hIPJ);
 
-   
+
    hUserIPJ = Create_IPJ();
-   GetUserIPJ_MVIEW(View,hUserIPJ);
+   GetUserIPJ_MVIEW(View, hUserIPJ);
 
    // --- If there is no projection in the polygon, assume it
    //     is the same as the User Projection, otherwise
    //     transform it to the User Projection ---
-   
-   if(iSourceType_IPJ(hPolyIPJ)==IPJ_TYPE_NONE)
-      SetIPJ_PLY(hPLY,hUserIPJ);
+
+   if (iSourceType_IPJ(hPolyIPJ) == IPJ_TYPE_NONE)
+      SetIPJ_PLY(hPLY, hUserIPJ);
    else
-      ChangeIPJ_PLY(hPLY,hUserIPJ);
+      ChangeIPJ_PLY(hPLY, hUserIPJ);
 
    // --- If this is an oriented section, you must use the native view
    //     projection, otherwise, one dimension ("Z") is lost because only the
@@ -196,34 +202,36 @@ LST         hGroupLST;
    //     PLY would collapse to a line.  In a section view, the native view
    //     "X" coordinate corresponds to either Easting (for azimuth = 90), or
    //     northing (for azimuth = 0), or begins at 0 on the left side. ---
-   
+
    iOrient = iGetOrientation_IPJ(hIPJ);
-   if(iOrient==IPJ_ORIENT_SECTION)
+   if (iOrient == IPJ_ORIENT_SECTION)
       ClearOrientation_IPJ(hIPJ);
-    
+
    // --- Finally, the clip PLY is in the native view projection; convert
    //     to that.
-                              
 
-   ChangeIPJ_PLY(hPLY,hIPJ);
-    
+
+   ChangeIPJ_PLY(hPLY, hIPJ);
+
    Destroy_IPJ(hIPJ);
    Destroy_IPJ(hPolyIPJ);
    Destroy_IPJ(hUserIPJ);
 
    iClipRegion = -1;
-   for (i = 0; i<iNumExtClipPLY_MVIEW(View); i++) {
-      GetNameExtClipPLY_MVIEW(View,i,sNameComp);
-      if (iStrcmp_STR(sNameComp, sName, STR_CASE_TOLERANT) == 0) {
+   for (i = 0; i < iNumExtClipPLY_MVIEW(View); i++)
+   {
+      GetNameExtClipPLY_MVIEW(View, i, sNameComp);
+      if (iStrcmp_STR(sNameComp, sName, STR_CASE_TOLERANT) == 0)
+      {
          iClipRegion = i;
          break;
       }
    }
-   
+
    if (iClipRegion == -1)
       iClipRegion = iNumExtClipPLY_MVIEW(View);
 
-   if (iSetExtClipPLY_MVIEW(View, iClipRegion, sName, hPLY)==-1)
+   if (iSetExtClipPLY_MVIEW(View, iClipRegion, sName, hPLY) == -1)
       Abort_SYS(_("Error creating/setting extended region!"));
 
    // --- done ---
@@ -232,16 +240,18 @@ LST         hGroupLST;
 
    // --- Force Clipping ---
 
-   if (iForce) {
-      hGroupLST = Create_LST(STR_GROUP+8);
+   if (iForce)
+   {
+      hGroupLST = Create_LST(STR_GROUP + 8);
       iGroups = iListGroups_MVIEW(View, hGroupLST, MVIEW_GROUP_LIST_ALL);
-       for (i=0;i<iGroups;i++) {
-         GetItem_LST(hGroupLST,0,i,sGroup);
+      for (i = 0; i < iGroups; i++)
+      {
+         GetItem_LST(hGroupLST, 0, i, sGroup);
 
          GetGroupExtClipPLY_MVIEW(View, sGroup, iGroupRegion);
          SetGroupExtClipPLY_MVIEW(View, sGroup, iClipRegion);
       }
-      Destroy_LST(hGroupLST);      
+      Destroy_LST(hGroupLST);
    }
 
    // --- Release the map ---

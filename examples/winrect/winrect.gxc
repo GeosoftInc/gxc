@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Define a rectangular plot mask"
 #include <version.gxh>
 
@@ -27,25 +28,26 @@ RESOURCE = "winrect.gr"
 //===========================================================================
 
 #include <all.gxh>
+   // clang-format on
 
 
-//===========================================================================
-//                             GLOBAL VARIABLES
-//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-string(STR_FILE) sMask;
+   string(STR_FILE) sMask;
 
-DGW         Diag, Diag2;
-int         i,iMode,iExcl,iOK,iOrient,iWarped;
-real        rXmin,rYmin,rXmax,rYmax;
-real        rX1,rX2,rX3,rX4,rY1,rY2,rY3,rY4;
-PLY         Poly;
-VV          VVx,VVy;
-EMAP        EMap;
-MAP         Map;
-IPJ         hIPJ;
-IPJ         hUserIPJ;
-MVIEW       View;
+DGW Diag, Diag2;
+int i, iMode, iExcl, iOK, iOrient, iWarped;
+real rXmin, rYmin, rXmax, rYmax;
+real rX1, rX2, rX3, rX4, rY1, rY2, rY3, rY4;
+PLY Poly;
+VV VVx, VVy;
+EMAP EMap;
+MAP Map;
+IPJ hIPJ;
+IPJ hUserIPJ;
+MVIEW View;
 
 
 //===========================================================================
@@ -53,263 +55,255 @@ MVIEW       View;
 //===========================================================================
 
 {
-
    // --- create an empty IPJ ---
-   
+
    hIPJ = Create_IPJ();
    hUserIPJ = Create_IPJ();
-   
+
 
    // --- Are we running interactively ? ---
 
-	iWarped = 0;
-   if (iInteractive_SYS()) {
-
-
+   iWarped = 0;
+   if (iInteractive_SYS())
+   {
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("WINRECT");
       Diag2 = Create_DGW("WINRECT2");
 
       iOK = FALSE;
-      while (!iOK) {
-      
-         
-         if(iWarped)
+      while (!iOK)
+      {
+         if (iWarped)
          {
-	         
-				// --- Set any Defaults from INI ---
+            // --- Set any Defaults from INI ---
 
-				SetInfoSYS_DGW(Diag2,_WINRECT_0,DGW_FILEPATH,"WINRECT","MASK");
-				SetInfoSYS_DGW(Diag2,_WINRECT_1,DGW_LISTALIAS,"WINRECT","EXCL");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_2,DGW_TEXT,"WINRECT","X1");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_3,DGW_TEXT,"WINRECT","Y1");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_4,DGW_TEXT,"WINRECT","X2");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_5,DGW_TEXT,"WINRECT","Y2");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_6,DGW_TEXT,"WINRECT","X3");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_7,DGW_TEXT,"WINRECT","Y3");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_8,DGW_TEXT,"WINRECT","X4");     
-				SetInfoSYS_DGW(Diag2,_WINRECT_9,DGW_TEXT,"WINRECT","Y4");     
+            SetInfoSYS_DGW(Diag2, _WINRECT_0, DGW_FILEPATH, "WINRECT", "MASK");
+            SetInfoSYS_DGW(Diag2, _WINRECT_1, DGW_LISTALIAS, "WINRECT", "EXCL");
+            SetInfoSYS_DGW(Diag2, _WINRECT_2, DGW_TEXT, "WINRECT", "X1");
+            SetInfoSYS_DGW(Diag2, _WINRECT_3, DGW_TEXT, "WINRECT", "Y1");
+            SetInfoSYS_DGW(Diag2, _WINRECT_4, DGW_TEXT, "WINRECT", "X2");
+            SetInfoSYS_DGW(Diag2, _WINRECT_5, DGW_TEXT, "WINRECT", "Y2");
+            SetInfoSYS_DGW(Diag2, _WINRECT_6, DGW_TEXT, "WINRECT", "X3");
+            SetInfoSYS_DGW(Diag2, _WINRECT_7, DGW_TEXT, "WINRECT", "Y3");
+            SetInfoSYS_DGW(Diag2, _WINRECT_8, DGW_TEXT, "WINRECT", "X4");
+            SetInfoSYS_DGW(Diag2, _WINRECT_9, DGW_TEXT, "WINRECT", "Y4");
 
 
-				// --- Run the Dialogue ---
+            // --- Run the Dialogue ---
 
-				i = iRunDialogue_DGW(Diag2);
-				if (i == -1) Cancel_SYS(); 
+            i = iRunDialogue_DGW(Diag2);
+            if (i == -1) Cancel_SYS();
 
-				// --- Get Information ---
+            // --- Get Information ---
 
-				GetInfoSYS_DGW(Diag2,_WINRECT_0,DGW_FILEPATH,"WINRECT","MASK");
-				GetInfoSYS_DGW(Diag2,_WINRECT_1,DGW_LISTALIAS,"WINRECT","EXCL");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_2,DGW_TEXT,"WINRECT","X1");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_3,DGW_TEXT,"WINRECT","Y1");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_4,DGW_TEXT,"WINRECT","X2");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_5,DGW_TEXT,"WINRECT","Y2");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_6,DGW_TEXT,"WINRECT","X3");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_7,DGW_TEXT,"WINRECT","Y3");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_8,DGW_TEXT,"WINRECT","X4");     
-				GetInfoSYS_DGW(Diag2,_WINRECT_9,DGW_TEXT,"WINRECT","Y4");     
+            GetInfoSYS_DGW(Diag2, _WINRECT_0, DGW_FILEPATH, "WINRECT", "MASK");
+            GetInfoSYS_DGW(Diag2, _WINRECT_1, DGW_LISTALIAS, "WINRECT", "EXCL");
+            GetInfoSYS_DGW(Diag2, _WINRECT_2, DGW_TEXT, "WINRECT", "X1");
+            GetInfoSYS_DGW(Diag2, _WINRECT_3, DGW_TEXT, "WINRECT", "Y1");
+            GetInfoSYS_DGW(Diag2, _WINRECT_4, DGW_TEXT, "WINRECT", "X2");
+            GetInfoSYS_DGW(Diag2, _WINRECT_5, DGW_TEXT, "WINRECT", "Y2");
+            GetInfoSYS_DGW(Diag2, _WINRECT_6, DGW_TEXT, "WINRECT", "X3");
+            GetInfoSYS_DGW(Diag2, _WINRECT_7, DGW_TEXT, "WINRECT", "Y3");
+            GetInfoSYS_DGW(Diag2, _WINRECT_8, DGW_TEXT, "WINRECT", "X4");
+            GetInfoSYS_DGW(Diag2, _WINRECT_9, DGW_TEXT, "WINRECT", "Y4");
 
-				GetInfo_DGW(Diag2,_WINRECT_0,DGW_FILEPATH,sMask);
+            GetInfo_DGW(Diag2, _WINRECT_0, DGW_FILEPATH, sMask);
          }
          else
          {
-				// --- Set any Defaults from INI ---
+            // --- Set any Defaults from INI ---
 
-				SetInfoSYS_DGW(Diag,_WINRECT_0,DGW_FILEPATH,"WINRECT","MASK");
-				SetInfoSYS_DGW(Diag,_WINRECT_1,DGW_LISTALIAS,"WINRECT","EXCL");     
-				SetInfoSYS_DGW(Diag,_WINRECT_2,DGW_TEXT,"WINRECT","MINX");     
-				SetInfoSYS_DGW(Diag,_WINRECT_3,DGW_TEXT,"WINRECT","MAXX");     
-				SetInfoSYS_DGW(Diag,_WINRECT_4,DGW_TEXT,"WINRECT","MINY");     
-				SetInfoSYS_DGW(Diag,_WINRECT_5,DGW_TEXT,"WINRECT","MAXY");     
+            SetInfoSYS_DGW(Diag, _WINRECT_0, DGW_FILEPATH, "WINRECT", "MASK");
+            SetInfoSYS_DGW(Diag, _WINRECT_1, DGW_LISTALIAS, "WINRECT", "EXCL");
+            SetInfoSYS_DGW(Diag, _WINRECT_2, DGW_TEXT, "WINRECT", "MINX");
+            SetInfoSYS_DGW(Diag, _WINRECT_3, DGW_TEXT, "WINRECT", "MAXX");
+            SetInfoSYS_DGW(Diag, _WINRECT_4, DGW_TEXT, "WINRECT", "MINY");
+            SetInfoSYS_DGW(Diag, _WINRECT_5, DGW_TEXT, "WINRECT", "MAXY");
 
 
-				// --- Run the Dialogue ---
+            // --- Run the Dialogue ---
 
-				i = iRunDialogue_DGW(Diag);
-				if (i == -1) Cancel_SYS(); 
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();
 
-				// --- Get Information ---
+            // --- Get Information ---
 
-				GetInfoSYS_DGW(Diag,_WINRECT_0,DGW_FILEPATH,"WINRECT","MASK");
-				GetInfoSYS_DGW(Diag,_WINRECT_1,DGW_LISTALIAS,"WINRECT","EXCL");     
-				GetInfoSYS_DGW(Diag,_WINRECT_2,DGW_TEXT,"WINRECT","MINX");     
-				GetInfoSYS_DGW(Diag,_WINRECT_3,DGW_TEXT,"WINRECT","MAXX");     
-				GetInfoSYS_DGW(Diag,_WINRECT_4,DGW_TEXT,"WINRECT","MINY");     
-				GetInfoSYS_DGW(Diag,_WINRECT_5,DGW_TEXT,"WINRECT","MAXY");     
+            GetInfoSYS_DGW(Diag, _WINRECT_0, DGW_FILEPATH, "WINRECT", "MASK");
+            GetInfoSYS_DGW(Diag, _WINRECT_1, DGW_LISTALIAS, "WINRECT", "EXCL");
+            GetInfoSYS_DGW(Diag, _WINRECT_2, DGW_TEXT, "WINRECT", "MINX");
+            GetInfoSYS_DGW(Diag, _WINRECT_3, DGW_TEXT, "WINRECT", "MAXX");
+            GetInfoSYS_DGW(Diag, _WINRECT_4, DGW_TEXT, "WINRECT", "MINY");
+            GetInfoSYS_DGW(Diag, _WINRECT_5, DGW_TEXT, "WINRECT", "MAXY");
 
-				GetInfo_DGW(Diag,_WINRECT_0,DGW_FILEPATH,sMask);
+            GetInfo_DGW(Diag, _WINRECT_0, DGW_FILEPATH, sMask);
          }
-         
-         if (i == 2) {
 
-
+         if (i == 2)
+         {
             // --- Is it an oriented view? ---
 
             EMap = Current_EMAP();
             Map = Lock_EMAP(EMap);
-            View = Create_MVIEW(Map,"*Data",MVIEW_READ);
+            View = Create_MVIEW(Map, "*Data", MVIEW_READ);
             hIPJ = Create_IPJ();
             hUserIPJ = Create_IPJ();
-            GetIPJ_MVIEW(View,hIPJ);
+            GetIPJ_MVIEW(View, hIPJ);
             GetUserIPJ_MVIEW(View, hUserIPJ);
             Destroy_MVIEW(View);
             UnLock_EMAP(EMap);
 
             iOrient = iGetOrientation_IPJ(hIPJ);
-            
-            if(iOrient!=IPJ_ORIENT_DEFAULT &&
-               iOrient!=IPJ_ORIENT_PLAN) {
 
+            if (iOrient != IPJ_ORIENT_DEFAULT &&
+                iOrient != IPJ_ORIENT_PLAN)
+            {
                DisplayMessage_SYS(_("Define mask using current Data view"), _("Masking operations cannot currently be performed on specially oriented (non-plan) views."));
             }
-            else {
+            else
+            {
+               // --- Is this view warped? ---
 
-					// --- Is this view warped? ---            
-
-					iWarped = iWarped_IPJ(hIPJ);
+               iWarped = iWarped_IPJ(hIPJ);
 
 
                // --- define interactive ---
-            
+
                DisplayMessage_SYS(_("Define rectangle"), _("Define a map rectangle using the mouse cursor."));
 
-               iSetCurrentView_EMAP(EMap,"*data");
-               
-               if(iWarped)
-					{
-						rX1 = rX2 = rX3 = rX4 = 0.0;
-						rY1 = rY2 = rY3 = rY4 = 0.0;
-	               if (iGetBox2_EMAP(EMap,_("Specify plot mask rectangle..."),rX1,rY1,rX2,rY2,rX3,rY3,rX4,rY4))
-		               Cancel_SYS();
-		               
+               iSetCurrentView_EMAP(EMap, "*data");
 
-						// --- put range in INI ---
+               if (iWarped)
+               {
+                  rX1 = rX2 = rX3 = rX4 = 0.0;
+                  rY1 = rY2 = rY3 = rY4 = 0.0;
+                  if (iGetBox2_EMAP(EMap, _("Specify plot mask rectangle..."), rX1, rY1, rX2, rY2, rX3, rY3, rX4, rY4))
+                     Cancel_SYS();
 
-						SetReal_SYS("WINRECT","X1",rX1);     
-						SetReal_SYS("WINRECT","Y1",rY1);     
-						SetReal_SYS("WINRECT","X2",rX2);     
-						SetReal_SYS("WINRECT","Y2",rY2);     
-						SetReal_SYS("WINRECT","X3",rX3);     
-						SetReal_SYS("WINRECT","Y3",rY3);     
-						SetReal_SYS("WINRECT","X4",rX4);     
-						SetReal_SYS("WINRECT","Y4",rY4);     
-						
-						DisplayMessage_SYS(_("Define a rectangular plot mask"), _("This map view has a warp or rotation; showing locations of all four specified corners."));
-		               
-					}
-					else
-					{					
-	               rXmin=rXmax=rYmin=rYmax=0.0;
-		            if (iGetBox_EMAP(EMap,_("Specify plot mask rectangle..."),rXmin,rYmin,rXmax,rYmax))
-			            Cancel_SYS();
-			            
-						// --- put range in INI ---
 
-						SetReal_SYS("WINRECT","MINX",rXmin);     
-						SetReal_SYS("WINRECT","MINY",rYmin);     
-						SetReal_SYS("WINRECT","MAXX",rXmax);     
-						SetReal_SYS("WINRECT","MAXY",rYmax);     
-					}
-					
+                  // --- put range in INI ---
+
+                  SetReal_SYS("WINRECT", "X1", rX1);
+                  SetReal_SYS("WINRECT", "Y1", rY1);
+                  SetReal_SYS("WINRECT", "X2", rX2);
+                  SetReal_SYS("WINRECT", "Y2", rY2);
+                  SetReal_SYS("WINRECT", "X3", rX3);
+                  SetReal_SYS("WINRECT", "Y3", rY3);
+                  SetReal_SYS("WINRECT", "X4", rX4);
+                  SetReal_SYS("WINRECT", "Y4", rY4);
+
+                  DisplayMessage_SYS(_("Define a rectangular plot mask"), _("This map view has a warp or rotation; showing locations of all four specified corners."));
+               }
+               else
+               {
+                  rXmin = rXmax = rYmin = rYmax = 0.0;
+                  if (iGetBox_EMAP(EMap, _("Specify plot mask rectangle..."), rXmin, rYmin, rXmax, rYmax))
+                     Cancel_SYS();
+
+                  // --- put range in INI ---
+
+                  SetReal_SYS("WINRECT", "MINX", rXmin);
+                  SetReal_SYS("WINRECT", "MINY", rYmin);
+                  SetReal_SYS("WINRECT", "MAXX", rXmax);
+                  SetReal_SYS("WINRECT", "MAXY", rYmax);
+               }
             }
 
             iOK = FALSE;
-
-         } else if ((i == 0) || (!iFileExist_SYS(sMask))) {
-            SetString_SYS("WINRECT","MODE","0");
-            iOK = TRUE;
-         } else {
-            SetString_SYS("WINRECT","MODE","1");
+         }
+         else if ((i == 0) || (!iFileExist_SYS(sMask)))
+         {
+            SetString_SYS("WINRECT", "MODE", "0");
             iOK = TRUE;
          }
-         
-      }         
+         else
+         {
+            SetString_SYS("WINRECT", "MODE", "1");
+            iOK = TRUE;
+         }
+      }
 
       Destroy_DGW(Diag);
       Destroy_DGW(Diag2);
-
    }
 
 
    // --- Get Parameters ---
 
-   GetString_SYS("WINRECT","MASK",sMask);
-   iExcl = iGetInt_SYS("WINRECT","EXCL");
-   iMode = iGetInt_SYS("WINRECT","MODE");
+   GetString_SYS("WINRECT", "MASK", sMask);
+   iExcl = iGetInt_SYS("WINRECT", "EXCL");
+   iMode = iGetInt_SYS("WINRECT", "MODE");
 
 
-	// --- create polygon ---
+   // --- create polygon ---
 
-	Poly = Create_PLY();
+   Poly = Create_PLY();
 
 
-	// --- if append, load current file ---
+   // --- if append, load current file ---
 
-	if (iMode == 1) {
+   if (iMode == 1)
+   {
+      // --- file must exist ---
 
-		// --- file must exist ---
+      if (!iFileExist_SYS(sMask))
+         Abort_SYS(_("Cannot append to a file that does not exist."));
 
-		if (!iFileExist_SYS(sMask))
-			Abort_SYS(_("Cannot append to a file that does not exist."));
+      LoadTable_PLY(Poly, sMask);
+   }
 
-		LoadTable_PLY(Poly,sMask);
-
-	}
-	
 
    // --- create VV's ---
 
-   VVx = Create_VV(REAL,4);
-   VVy = Create_VV(REAL,4);
+   VVx = Create_VV(REAL, 4);
+   VVy = Create_VV(REAL, 4);
 
-	if(iWarped)
-	{
-		SetReal_VV(VVx, 0, rGetReal_SYS("WINRECT","X1"));
-		SetReal_VV(VVy, 0, rGetReal_SYS("WINRECT","Y1"));
+   if (iWarped)
+   {
+      SetReal_VV(VVx, 0, rGetReal_SYS("WINRECT", "X1"));
+      SetReal_VV(VVy, 0, rGetReal_SYS("WINRECT", "Y1"));
 
-		SetReal_VV(VVx, 1, rGetReal_SYS("WINRECT","X2"));
-		SetReal_VV(VVy, 1, rGetReal_SYS("WINRECT","Y2"));
+      SetReal_VV(VVx, 1, rGetReal_SYS("WINRECT", "X2"));
+      SetReal_VV(VVy, 1, rGetReal_SYS("WINRECT", "Y2"));
 
-		SetReal_VV(VVx, 2, rGetReal_SYS("WINRECT","X3"));
-		SetReal_VV(VVy, 2, rGetReal_SYS("WINRECT","Y3"));
+      SetReal_VV(VVx, 2, rGetReal_SYS("WINRECT", "X3"));
+      SetReal_VV(VVy, 2, rGetReal_SYS("WINRECT", "Y3"));
 
-		SetReal_VV(VVx, 3, rGetReal_SYS("WINRECT","X4"));
-		SetReal_VV(VVy, 3, rGetReal_SYS("WINRECT","Y4"));
-	}
-	else
-	{
-		SetReal_VV(VVx,0,rGetReal_SYS("WINRECT","MINX"));
-		SetReal_VV(VVy,0,rGetReal_SYS("WINRECT","MINY"));
-	   
-		SetReal_VV(VVx,1,rGetReal_SYS("WINRECT","MAXX"));
-		SetReal_VV(VVy,1,rGetReal_SYS("WINRECT","MINY"));
-	   
-		SetReal_VV(VVx,2,rGetReal_SYS("WINRECT","MAXX"));
-		SetReal_VV(VVy,2,rGetReal_SYS("WINRECT","MAXY"));
-	   
-		SetReal_VV(VVx,3,rGetReal_SYS("WINRECT","MINX"));
-		SetReal_VV(VVy,3,rGetReal_SYS("WINRECT","MAXY"));
-	}
+      SetReal_VV(VVx, 3, rGetReal_SYS("WINRECT", "X4"));
+      SetReal_VV(VVy, 3, rGetReal_SYS("WINRECT", "Y4"));
+   }
+   else
+   {
+      SetReal_VV(VVx, 0, rGetReal_SYS("WINRECT", "MINX"));
+      SetReal_VV(VVy, 0, rGetReal_SYS("WINRECT", "MINY"));
+
+      SetReal_VV(VVx, 1, rGetReal_SYS("WINRECT", "MAXX"));
+      SetReal_VV(VVy, 1, rGetReal_SYS("WINRECT", "MINY"));
+
+      SetReal_VV(VVx, 2, rGetReal_SYS("WINRECT", "MAXX"));
+      SetReal_VV(VVy, 2, rGetReal_SYS("WINRECT", "MAXY"));
+
+      SetReal_VV(VVx, 3, rGetReal_SYS("WINRECT", "MINX"));
+      SetReal_VV(VVy, 3, rGetReal_SYS("WINRECT", "MAXY"));
+   }
 
 
    // --- change the IPJ if we have one ---
-   
+
    if (iSourceType_IPJ(hIPJ) != IPJ_TYPE_NONE && iOrient == IPJ_ORIENT_SECTION)
       ChangeIPJ_PLY(Poly, hIPJ);
    else if (iSourceType_IPJ(hUserIPJ) != IPJ_TYPE_NONE)
       ChangeIPJ_PLY(Poly, hUserIPJ);
 
-      
+
    // --- add the polygon and save ---
-         
-	AddPolygonEx_PLY(Poly,VVx,VVy,iExcl);
-	SaveTable_PLY(Poly,sMask);
+
+   AddPolygonEx_PLY(Poly, VVx, VVy, iExcl);
+   SaveTable_PLY(Poly, sMask);
 
    Destroy_IPJ(hIPJ);
    Destroy_IPJ(hUserIPJ);
    Destroy_SYS(VVx);
    Destroy_SYS(VVy);
    Destroy_SYS(Poly);
-   
 }

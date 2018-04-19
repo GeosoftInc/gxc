@@ -1,4 +1,5 @@
 //===========================================================================
+// clang-format off
 NAME          = "Calculate statistics of marked data"
 #include <version.gxh>
 	DESCRIPTION   = "
@@ -37,39 +38,41 @@ STAT.CHAN - input database channel
 	//===========================================================================
 
 #include <all.gxh>
+// clang-format on
 
-#define FORMATREAL(A)\
-	if(iFormat==DB_CHAN_FORMAT_GEOGR)\
-	FormatReal_STR(A,Str,FORMAT_GEOGRAPHIC,20,2);\
-			else if(iFormat==DB_CHAN_FORMAT_EXP)\
-			FormatReal_STR(A,Str,FORMAT_EXP,20,iChanDecimals);\
-			else\
-			FormatR2_STR(A,Str,20,iChanDecimals);
+#define FORMATREAL(A)                                        \
+   if (iFormat == DB_CHAN_FORMAT_GEOGR)                      \
+      FormatReal_STR(A, Str, FORMAT_GEOGRAPHIC, 20, 2);      \
+   else if (iFormat == DB_CHAN_FORMAT_EXP)                   \
+      FormatReal_STR(A, Str, FORMAT_EXP, 20, iChanDecimals); \
+   else                                                      \
+      FormatR2_STR(A, Str, 20, iChanDecimals);
 
-	//===========================================================================
-	//                             GLOBAL VARIABLES
-	//===========================================================================
+   //===========================================================================
+   //                             GLOBAL VARIABLES
+   //===========================================================================
 
-	real        rItems, rDummies, rMin, rMax, rMean, rDev, rSum;
-real        rWeightedMean, rLength;
+   real rItems,
+   rDummies, rMin, rMax, rMean, rDev, rSum;
+real rWeightedMean, rLength;
 string(STR_DEFAULT) sItems, sDummies, sMin, sMax, sMean, sDev, sSum;
 string(STR_DEFAULT) sTemp;
 
-EDB         EData;
-DB          Data;
+EDB EData;
+DB Data;
 string(STR_FILE) sDB;
 string(STR_DB_SYMBOL) sChan, sLine;
 string(STR_DEFAULT_SHORT) sFid;
-DB_SYMB     Chan;
-DB_SYMB     Line;
+DB_SYMB Chan;
+DB_SYMB Line;
 
-int         i, i2, iNLines, iFormat, iDrillHole, iInteractive, iChanDecimals;
-int         iVAColumn,iStart,iEnd,iStartOld,iEndOld,iSelection,iOK;
+int i, i2, iNLines, iFormat, iDrillHole, iInteractive, iChanDecimals;
+int iVAColumn, iStart, iEnd, iStartOld, iEndOld, iSelection, iOK;
 
-ST          hST;
-DGW         Diag,Diag2;
+ST hST;
+DGW Diag, Diag2;
 
-WA          hWA;
+WA hWA;
 string(STR_FILE) sFile;
 string(STR_DEFAULT_LONG) Str, sSkippedLines;
 
@@ -78,597 +81,606 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
 //===========================================================================
 
 {
+   // --- Report statistics ---
 
+   iDrillHole = 0;
+   if (iInteractive_SYS())
+   {
+      // ---------------------------------------- INTERACTIVE MODE ---------------------------------------
 
-	// --- Report statistics ---
+      // --- Get the database ---
 
-	iDrillHole = 0;
-	if (iInteractive_SYS())
-	{
-		// ---------------------------------------- INTERACTIVE MODE ---------------------------------------
+      EData = Current_EDB();
 
-		// --- Get the database --- 
 
-		EData = Current_EDB();
+      // --- Get the current line/channel selection
 
+      GetCurrentSelection_EDB(EData, sDB, sChan, sLine, sFid);
 
-		// --- Get the current line/channel selection
 
-		GetCurrentSelection_EDB(EData,sDB,sChan,sLine,sFid);
+      // --- Channel must be selected ---
 
+      if (iStrlen_STR(sChan) == 0)
+         Abort_SYS(_("A channel must be selected/highlighted for mark statistics."));
 
-		// --- Channel must be selected ---
 
-		if(iStrlen_STR(sChan)==0)
-			Abort_SYS(_("A channel must be selected/highlighted for mark statistics."));
+      // --- Is the channel geographic? ---
 
+      Data = Lock_EDB(EData);
+      Chan = FindSymb_DB(Data, sChan, DB_SYMB_CHAN);
+      LockSymb_DB(Data, Chan, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      iFormat = iGetChanFormat_DB(Data, Chan);
+      iChanDecimals = iGetChanDecimal_DB(Data, Chan);
+      iVAColumn = iGetColVA_DB(Data, Chan);
+      UnLockSymb_DB(Data, Chan);
 
-		// --- Is the channel geographic? ---
 
-		Data = Lock_EDB(EData);
-		Chan = FindSymb_DB(Data,sChan,DB_SYMB_CHAN);
-		LockSymb_DB(Data,Chan,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-		iFormat = iGetChanFormat_DB(Data, Chan);
-		iChanDecimals = iGetChanDecimal_DB(Data, Chan);
-		iVAColumn = iGetColVA_DB(Data, Chan);
-		UnLockSymb_DB(Data, Chan);
+      // --- Is this a drill project and does the user have a Target license? ---
 
+      if (iExistChan_DB(Data, "DH_From") &&
+          iExistChan_DB(Data, "DH_To") &&
+          iVAColumn == 1 &&
+          iFormat != DB_CHAN_FORMAT_GEOGR)
+         iDrillHole = 1;
 
-		// --- Is this a drill project and does the user have a Target license? ---
 
-		if (iExistChan_DB(Data, "DH_From") && 
-			iExistChan_DB(Data, "DH_To") &&
-			iVAColumn == 1 &&
-			iFormat != DB_CHAN_FORMAT_GEOGR)
-			iDrillHole = 1;
+      // --- Prepare to do the work ---
 
+      Progress_SYS(1);
 
-		// --- Prepare to do the work ---
+      iSelection = 1;
+      iStart = 0;
+      iEnd = 0;
 
-		Progress_SYS(1);
+      Chan = FindSymb_DB(Data, sChan, DB_SYMB_CHAN);
+      LockSymb_DB(Data, Chan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
 
-		iSelection = 1;
-		iStart = 0;
-		iEnd = 0;
 
-		Chan = FindSymb_DB(Data,sChan,DB_SYMB_CHAN);
-		LockSymb_DB(Data,Chan,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+      // --- Dialog for VA elements selection ---
 
+      if (iVAColumn > 1)
+      {
+         GetVAWindows_DB(Data, Chan, iStartOld, iEndOld);
 
-		// --- Dialog for VA elements selection ---
+         do
+         {
+            iOK = 0;
 
-		if (iVAColumn > 1) {
+            // --- VA Elements Selection ---
 
-			GetVAWindows_DB(Data,Chan,iStartOld,iEndOld);
+            Diag = Create_DGW("StatForm3");
 
-			do {
+            SetInfoSYS_DGW(Diag, _STATFORM3_0, DGW_LISTALIAS, "STAT_VA", "SELECTION");
 
-				iOK = 0;
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1) Cancel_SYS();  // He hit cancel
 
-				// --- VA Elements Selection ---
+            GetInfoSYS_DGW(Diag, _STATFORM3_0, DGW_LISTALIAS, "STAT_VA", "SELECTION");
 
-				Diag = Create_DGW("StatForm3");
+            Destroy_DGW(Diag);
 
-				SetInfoSYS_DGW(Diag,_STATFORM3_0,DGW_LISTALIAS,"STAT_VA","SELECTION");
+            iSelection = iGetInt_SYS("STAT_VA", "SELECTION");
 
-				i = iRunDialogue_DGW(Diag);
-				if (i==-1)  Cancel_SYS();    // He hit cancel
+            if (iSelection == 1)
+            {  // --- All Elements
 
-				GetInfoSYS_DGW(Diag,_STATFORM3_0,DGW_LISTALIAS,"STAT_VA","SELECTION");
+               iStart = 0;
+               iEnd = iVAColumn - 1;
+               iOK = 1;
+            }
+            else if (iSelection == 2)
+            {  // --- Current Window Elements
 
-				Destroy_DGW(Diag);
+               Diag = Create_DGW("StatForm4");
 
-				iSelection = iGetInt_SYS("STAT_VA","SELECTION");
+               FormatI_STR(iStartOld, Str, 20);
+               SetInfo_DGW(Diag, _STATFORM4_0, DGW_TEXT, Str);
+               FormatI_STR(iEndOld, Str, 20);
+               SetInfo_DGW(Diag, _STATFORM4_1, DGW_TEXT, Str);
 
-				if (iSelection==1)  {   // --- All Elements
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();  // He hit cancel
 
-					iStart = 0;
-					iEnd = iVAColumn-1;
-					iOK=1;
+               Destroy_DGW(Diag);
 
-				} else if (iSelection==2) {  // --- Current Window Elements
+               iStart = iStartOld;
+               iEnd = iEndOld;
+               if (i == 0) iOK = 1;
+            }
+            else if (iSelection == 3)
+            {  // --- Define New Window Elements
 
-					Diag = Create_DGW("StatForm4");
+               Diag = Create_DGW("StatForm5");
 
-					FormatI_STR(iStartOld,Str,20);
-					SetInfo_DGW(Diag,_STATFORM4_0,DGW_TEXT,Str);
-					FormatI_STR(iEndOld,Str,20);
-					SetInfo_DGW(Diag,_STATFORM4_1,DGW_TEXT,Str);
+               SetInfoSYS_DGW(Diag, _STATFORM5_0, DGW_TEXT, "STAT_VA", "START_ELEM");
+               SetInfoSYS_DGW(Diag, _STATFORM5_1, DGW_TEXT, "STAT_VA", "END_ELEM");
 
-					i = iRunDialogue_DGW(Diag);
-					if (i==-1)  Cancel_SYS();    // He hit cancel
+               i = iRunDialogue_DGW(Diag);
+               if (i == -1) Cancel_SYS();  // He hit cancel
+               if (i == 0) iOK = 1;
 
-					Destroy_DGW(Diag);
+               GetInfoSYS_DGW(Diag, _STATFORM5_0, DGW_TEXT, "STAT_VA", "START_ELEM");
+               GetInfoSYS_DGW(Diag, _STATFORM5_1, DGW_TEXT, "STAT_VA", "END_ELEM");
 
-					iStart = iStartOld;
-					iEnd   = iEndOld;
-					if (i==0)   iOK=1;
+               Destroy_DGW(Diag);
 
-				} else if (iSelection==3) {  // --- Define New Window Elements
+               GetString_SYS("STAT_VA", "START_ELEM", sTemp);
+               if (!iStrlen_STR(sTemp))
+                  iStart = 0;
+               else
+                  iStart = iGetInt_SYS("STAT_VA", "START_ELEM");
 
-					Diag = Create_DGW("StatForm5");
+               GetString_SYS("STAT_VA", "END_ELEM", sTemp);
+               if (!iStrlen_STR(sTemp))
+                  iEnd = iVAColumn - 1;
+               else
+                  iEnd = iGetInt_SYS("STAT_VA", "END_ELEM");
 
-					SetInfoSYS_DGW(Diag,_STATFORM5_0,DGW_TEXT,"STAT_VA","START_ELEM");
-					SetInfoSYS_DGW(Diag,_STATFORM5_1,DGW_TEXT,"STAT_VA","END_ELEM");
+               if (iStart < 0) iStart = 0;
+               if (iEnd > iVAColumn - 1) iEnd = iVAColumn - 1;
+            }
+         } while (iOK == 0);
 
-					i = iRunDialogue_DGW(Diag);
-					if (i==-1)  Cancel_SYS();    // He hit cancel
-					if (i==0)   iOK=1;
+         SetVAWindows_DB(Data, Chan, iStart, iEnd);
+      }
+      UnLockSymb_DB(Data, Chan);
+      UnLock_EDB(EData);
 
-					GetInfoSYS_DGW(Diag,_STATFORM5_0,DGW_TEXT,"STAT_VA","START_ELEM");
-					GetInfoSYS_DGW(Diag,_STATFORM5_1,DGW_TEXT,"STAT_VA","END_ELEM");
 
-					Destroy_DGW(Diag);
+      if (iDrillHole == 1)
+      {
+         SetString_SYS("DH_STATS", "LVM_CHANNEL", sChan);
+         SetString_SYS("DH_STATS", "LVM_LINE", sLine);
+         SetString_SYS("DH_STATS", "LVM_STARTFID", sFid);
+         SetString_SYS("DH_STATS", "LVM_SKIPPED_LINES", "");
 
-					GetString_SYS("STAT_VA","START_ELEM",sTemp);
-					if (!iStrlen_STR(sTemp))    iStart = 0;
-					else                        iStart = iGetInt_SYS("STAT_VA","START_ELEM");
+         iInteractive = iInteractive_SYS();
+         SetInteractive_SYS(0);
+         iRunGX_SYS("geogxnet.dll(Geosoft.GX.DrillHole.LengthWeightedMean;Calculate)");
+         SetInteractive_SYS(iInteractive);
 
-					GetString_SYS("STAT_VA","END_ELEM",sTemp);
-					if (!iStrlen_STR(sTemp))    iEnd = iVAColumn-1;
-					else                        iEnd = iGetInt_SYS("STAT_VA","END_ELEM");
+         rWeightedMean = rGetReal_SYS("DH_STATS", "LVM_DOUBLE");
+         rLength = rGetReal_SYS("DH_STATS", "LVM_LENGTH");
+         GetString_SYS("DH_STATS", "LVM_SKIPPED_LINES", sSkippedLines);
 
-					if(iStart<0)          iStart = 0;
-					if(iEnd>iVAColumn-1)  iEnd = iVAColumn-1; 
-				}
-			} while(iOK==0);
+         EData = Current_EDB();
+      }
 
-			SetVAWindows_DB(Data,Chan,iStart,iEnd);
-		}
-		UnLockSymb_DB(Data, Chan);
-		UnLock_EDB(EData);
 
+      // --- Do the work ---
 
-		if(iDrillHole == 1)
-		{
-			SetString_SYS("DH_STATS", "LVM_CHANNEL", sChan);
-			SetString_SYS("DH_STATS", "LVM_LINE", sLine);
-			SetString_SYS("DH_STATS", "LVM_STARTFID", sFid);
-			SetString_SYS("DH_STATS", "LVM_SKIPPED_LINES", "");
+      hST = Create_ST();
 
-			iInteractive = iInteractive_SYS();
-			SetInteractive_SYS(0);
-			iRunGX_SYS("geogxnet.dll(Geosoft.GX.DrillHole.LengthWeightedMean;Calculate)");
-			SetInteractive_SYS(iInteractive);
+      Statistics_EDB(EData, hST);
 
-			rWeightedMean = rGetReal_SYS("DH_STATS", "LVM_DOUBLE");
-			rLength = rGetReal_SYS("DH_STATS", "LVM_LENGTH");			
-			GetString_SYS("DH_STATS", "LVM_SKIPPED_LINES", sSkippedLines);
+      rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+      rItems = rGetInfo_ST(hST, ST_ITEMS) + rDummies;
+      rMin = rGetInfo_ST(hST, ST_MIN);
+      rMax = rGetInfo_ST(hST, ST_MAX);
+      rMean = rGetInfo_ST(hST, ST_MEAN);
+      rDev = rGetInfo_ST(hST, ST_STDDEV);
+      rSum = rGetInfo_ST(hST, ST_SUM);
 
-			EData = Current_EDB();
-		}
+      Destroy_ST(hST);
 
+      if (iVAColumn > 1)
+      {
+         Data = Lock_EDB(EData);
+         LockSymb_DB(Data, Chan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+         SetVAWindows_DB(Data, Chan, iStartOld, iEndOld);
+         UnLockSymb_DB(Data, Chan);
+         UnLock_EDB(EData);
+      }
 
-		// --- Do the work ---
 
-		hST = Create_ST();
+      // --- Done ---
 
-		Statistics_EDB(EData,hST);
+      Progress_SYS(0);
 
-		rDummies = rGetInfo_ST(hST, ST_DUMMIES);
-		rItems   = rGetInfo_ST(hST, ST_ITEMS) + rDummies;      
-		rMin     = rGetInfo_ST(hST, ST_MIN); 
-		rMax     = rGetInfo_ST(hST, ST_MAX);   
-		rMean    = rGetInfo_ST(hST, ST_MEAN);  
-		rDev     = rGetInfo_ST(hST, ST_STDDEV);
-		rSum     = rGetInfo_ST(hST, ST_SUM);
 
-		Destroy_ST(hST);
+      // --- Create the Dialogue ---
 
-		if (iVAColumn>1) {
-			Data = Lock_EDB(EData);
-			LockSymb_DB(Data,Chan,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
-			SetVAWindows_DB(Data,Chan,iStartOld,iEndOld);
-			UnLockSymb_DB(Data, Chan);
-			UnLock_EDB(EData);
-		}
+      if (iDrillHole == 1)
+         Diag = Create_DGW("StatFormDH");
+      else
+         Diag = Create_DGW("StatForm");
 
 
+      // --- Set any Defaults ---
 
-		// --- Done ---
+      if (iDrillHole == 1)
+      {
+         SetInfo_DGW(Diag, _STATFORMDH_0, DGW_TEXT, sChan);
+         SetInfo_DGW(Diag, _STATFORMDH_1, DGW_TEXT, sLine);
+         SetInfo_DGW(Diag, _STATFORMDH_2, DGW_TEXT, sFid);
 
-		Progress_SYS(0);
+         FormatR_STR(rItems, Str, 20, 19);
+         SetInfo_DGW(Diag, _STATFORMDH_3, DGW_TEXT, Str);
 
+         FormatR_STR(rDummies, Str, 20, 19);
+         SetInfo_DGW(Diag, _STATFORMDH_4, DGW_TEXT, Str);
 
-		// --- Create the Dialogue ---
+         FormatR2_STR(rMin, Str, 20, iChanDecimals);
+         SetInfo_DGW(Diag, _STATFORMDH_5, DGW_TEXT, Str);
 
-		if(iDrillHole == 1)
-			Diag = Create_DGW("StatFormDH");
-		else
-			Diag = Create_DGW("StatForm");
+         FormatR2_STR(rMax, Str, 20, iChanDecimals);
+         SetInfo_DGW(Diag, _STATFORMDH_6, DGW_TEXT, Str);
 
+         FormatR2_STR(rMean, Str, 20, iChanDecimals);
+         SetInfo_DGW(Diag, _STATFORMDH_7, DGW_TEXT, Str);
 
-		// --- Set any Defaults ---
+         FormatR2_STR(rWeightedMean, Str, 20, iChanDecimals);
+         if (iStrcmp_STR(Str, "*", STR_CASE_TOLERANT) != 0 && iStrlen_STR(sSkippedLines) > 0)
+            Strcat_STR(Str, "*");
+         SetInfo_DGW(Diag, _STATFORMDH_8, DGW_TEXT, Str);
 
-		if(iDrillHole == 1)
-		{
-			SetInfo_DGW(Diag,_STATFORMDH_0,DGW_TEXT,sChan);
-			SetInfo_DGW(Diag,_STATFORMDH_1,DGW_TEXT,sLine);
-			SetInfo_DGW(Diag,_STATFORMDH_2,DGW_TEXT,sFid);
+         FormatR2_STR(rLength, Str, 20, 2);
+         if (iStrcmp_STR(Str, "*", STR_CASE_TOLERANT) != 0 && iStrlen_STR(sSkippedLines) > 0)
+            Strcat_STR(Str, "*");
+         SetInfo_DGW(Diag, _STATFORMDH_9, DGW_TEXT, Str);
 
-			FormatR_STR(rItems,Str,20,19);
-			SetInfo_DGW(Diag,_STATFORMDH_3,DGW_TEXT,Str);
+         FormatR2_STR(rDev, Str, 20, iChanDecimals);
+         SetInfo_DGW(Diag, _STATFORMDH_10, DGW_TEXT, Str);
 
-			FormatR_STR(rDummies,Str,20,19);
-			SetInfo_DGW(Diag,_STATFORMDH_4,DGW_TEXT,Str);
+         FormatR2_STR(rSum, Str, 20, iChanDecimals);
+         SetInfo_DGW(Diag, _STATFORMDH_11, DGW_TEXT, Str);
+      }
+      else
+      {
+         SetInfo_DGW(Diag, _STATFORM_0, DGW_TEXT, sChan);
+         SetInfo_DGW(Diag, _STATFORM_1, DGW_TEXT, sLine);
+         SetInfo_DGW(Diag, _STATFORM_2, DGW_TEXT, sFid);
 
-			FormatR2_STR(rMin,Str,20,iChanDecimals);
-			SetInfo_DGW(Diag,_STATFORMDH_5,DGW_TEXT,Str);
+         FormatR_STR(rItems, Str, 20, 19);
+         SetInfo_DGW(Diag, _STATFORM_3, DGW_TEXT, Str);
 
-			FormatR2_STR(rMax,Str,20,iChanDecimals);
-			SetInfo_DGW(Diag,_STATFORMDH_6,DGW_TEXT,Str);
+         FormatR_STR(rDummies, Str, 20, 19);
+         SetInfo_DGW(Diag, _STATFORM_4, DGW_TEXT, Str);
 
-			FormatR2_STR(rMean,Str,20,iChanDecimals);
-			SetInfo_DGW(Diag,_STATFORMDH_7,DGW_TEXT,Str);
+         FORMATREAL(rMin)
+         SetInfo_DGW(Diag, _STATFORM_5, DGW_TEXT, Str);
 
-			FormatR2_STR(rWeightedMean,Str,20,iChanDecimals);
-			if(iStrcmp_STR(Str, "*", STR_CASE_TOLERANT)!=0 && iStrlen_STR(sSkippedLines)>0)
-				Strcat_STR(Str, "*");
-			SetInfo_DGW(Diag,_STATFORMDH_8,DGW_TEXT,Str);
+         FORMATREAL(rMax)
+         SetInfo_DGW(Diag, _STATFORM_6, DGW_TEXT, Str);
 
-			FormatR2_STR(rLength,Str,20,2);
-			if(iStrcmp_STR(Str, "*", STR_CASE_TOLERANT)!=0 && iStrlen_STR(sSkippedLines)>0)
-				Strcat_STR(Str, "*");
-			SetInfo_DGW(Diag,_STATFORMDH_9,DGW_TEXT,Str);
+         FORMATREAL(rMean)
+         SetInfo_DGW(Diag, _STATFORM_7, DGW_TEXT, Str);
 
-			FormatR2_STR(rDev,Str,20,iChanDecimals);
-			SetInfo_DGW(Diag,_STATFORMDH_10,DGW_TEXT,Str);
+         FORMATREAL(rDev)
+         SetInfo_DGW(Diag, _STATFORM_8, DGW_TEXT, Str);
 
-			FormatR2_STR(rSum,Str,20,iChanDecimals);
-			SetInfo_DGW(Diag,_STATFORMDH_11,DGW_TEXT,Str);
-		}
-		else
-		{
-			SetInfo_DGW(Diag,_STATFORM_0,DGW_TEXT,sChan);
-			SetInfo_DGW(Diag,_STATFORM_1,DGW_TEXT,sLine);
-			SetInfo_DGW(Diag,_STATFORM_2,DGW_TEXT,sFid);
+         FORMATREAL(rSum)
+         SetInfo_DGW(Diag, _STATFORM_9, DGW_TEXT, Str);
+      }
 
-			FormatR_STR(rItems,Str,20,19);
-			SetInfo_DGW(Diag,_STATFORM_3,DGW_TEXT,Str);
+      // --- Run the Dialogue ---
 
-			FormatR_STR(rDummies,Str,20,19);
-			SetInfo_DGW(Diag,_STATFORM_4,DGW_TEXT,Str);
+      do
+      {
+         i = iRunDialogue_DGW(Diag);
 
-			FORMATREAL(rMin)
-				SetInfo_DGW(Diag,_STATFORM_5,DGW_TEXT,Str);
+         if (i == 1)
+         {
+            // --- File save dialog ---
 
-			FORMATREAL(rMax)
-				SetInfo_DGW(Diag,_STATFORM_6,DGW_TEXT,Str);
+            Diag2 = Create_DGW("StatForm2");
 
-			FORMATREAL(rMean)
-				SetInfo_DGW(Diag,_STATFORM_7,DGW_TEXT,Str);
+            SetInfoSYS_DGW(Diag2, _STATFORM2_0, DGW_FILEPATH, "STAT", "FILE");
 
-			FORMATREAL(rDev)
-				SetInfo_DGW(Diag,_STATFORM_8,DGW_TEXT,Str);
+            i2 = iRunDialogue_DGW(Diag2);
 
-			FORMATREAL(rSum)
-				SetInfo_DGW(Diag,_STATFORM_9,DGW_TEXT,Str);
-		}
+            if (i2 == 0)
+            {
+               GetInfoSYS_DGW(Diag2, _STATFORM2_0, DGW_FILEPATH, "STAT", "FILE");
 
-		// --- Run the Dialogue ---
+               GetString_SYS("STAT", "FILE", sFile);
 
-		do
-		{
-			i = iRunDialogue_DGW(Diag);
+               hWA = Create_WA(sFile, 0);
 
-			if (i == 1)
-			{        				         
-				// --- File save dialog ---
+               Puts_WA(hWA, _n("Statistics Information"));
+               NewLine_WA(hWA);
+               NewLine_WA(hWA);
 
-				Diag2 = Create_DGW("StatForm2");
+               Puts_WA(hWA, _n("          Database: "));
+               Puts_WA(hWA, sDB);
+               NewLine_WA(hWA);
 
-				SetInfoSYS_DGW(Diag2,_STATFORM2_0,DGW_FILEPATH, "STAT","FILE");     
+               Puts_WA(hWA, _n("           Channel: "));
+               Puts_WA(hWA, sChan);
+               NewLine_WA(hWA);
 
-				i2 = iRunDialogue_DGW(Diag2);
+               Puts_WA(hWA, _n("              Line: "));
+               Puts_WA(hWA, sLine);
+               NewLine_WA(hWA);
 
-				if (i2 == 0)
-				{
-					GetInfoSYS_DGW(Diag2,_STATFORM2_0,DGW_FILEPATH, "STAT","FILE");     
+               Puts_WA(hWA, _n("    Fiducial range: "));
+               Puts_WA(hWA, sFid);
+               NewLine_WA(hWA);
+               NewLine_WA(hWA);
 
-					GetString_SYS("STAT","FILE",sFile);
+               FormatR_STR(rItems, Str, 20, 19);
+               Puts_WA(hWA, _n("   Number of items: "));
+               Puts_WA(hWA, Str);
+               NewLine_WA(hWA);
 
-					hWA = Create_WA(sFile,0);
+               FormatR_STR(rDummies, Str, 20, 17);
+               Puts_WA(hWA, _n(" Number of dummies: "));
+               Puts_WA(hWA, Str);
+               NewLine_WA(hWA);
 
-					Puts_WA(hWA, _n("Statistics Information"));
-					NewLine_WA(hWA);
-					NewLine_WA(hWA);
+               if (iFormat == DB_CHAN_FORMAT_GEOGR)
+                  FormatReal_STR(rMin, Str, FORMAT_GEOGRAPHIC, 20, 2);
+               else
+                  FormatR_STR(rMin, Str, 20, 17);
+               Puts_WA(hWA, _n("     Minimum value: "));
+               Puts_WA(hWA, Str);
+               NewLine_WA(hWA);
 
-					Puts_WA(hWA,_n("          Database: "));
-					Puts_WA(hWA,sDB);
-					NewLine_WA(hWA);
+               if (iFormat == DB_CHAN_FORMAT_GEOGR)
+                  FormatReal_STR(rMax, Str, FORMAT_GEOGRAPHIC, 20, 2);
+               else
+                  FormatR_STR(rMax, Str, 20, 17);
+               Puts_WA(hWA, _n("     Maximum value: "));
+               Puts_WA(hWA, Str);
+               NewLine_WA(hWA);
 
-					Puts_WA(hWA,_n("           Channel: "));
-					Puts_WA(hWA,sChan);
-					NewLine_WA(hWA);
 
-					Puts_WA(hWA,_n("              Line: "));
-					Puts_WA(hWA,sLine);
-					NewLine_WA(hWA);
+               if (iFormat == DB_CHAN_FORMAT_GEOGR)
+                  FormatReal_STR(rMean, Str, FORMAT_GEOGRAPHIC, 20, 2);
+               else
+                  FormatR_STR(rMean, Str, 20, 17);
+               Puts_WA(hWA, _n("        Mean value: "));
+               Puts_WA(hWA, Str);
+               NewLine_WA(hWA);
 
-					Puts_WA(hWA,_n("    Fiducial range: "));
-					Puts_WA(hWA,sFid);
-					NewLine_WA(hWA); 
-					NewLine_WA(hWA); 
 
-					FormatR_STR(rItems,Str,20,19);
-					Puts_WA(hWA,_n("   Number of items: "));
-					Puts_WA(hWA,Str);
-					NewLine_WA(hWA);
+               if (iDrillHole == 1)
+               {
+                  FormatR_STR(rWeightedMean, Str, 20, 17);
+                  Puts_WA(hWA, _n("  Length Wt'd Mean: "));
+                  Puts_WA(hWA, Str);
+                  NewLine_WA(hWA);
 
-					FormatR_STR(rDummies,Str,20,17);
-					Puts_WA(hWA,_n(" Number of dummies: "));
-					Puts_WA(hWA,Str);
-					NewLine_WA(hWA);
+                  FormatR_STR(rLength, Str, 20, 17);
+                  Puts_WA(hWA, _n("      Total length: "));
+                  Puts_WA(hWA, Str);
+                  NewLine_WA(hWA);
+               }
 
-					if(iFormat==DB_CHAN_FORMAT_GEOGR)
-						FormatReal_STR(rMin,Str,FORMAT_GEOGRAPHIC,20,2);
-					else
-						FormatR_STR(rMin,Str,20,17);
-					Puts_WA(hWA,_n("     Minimum value: "));
-					Puts_WA(hWA,Str);
-					NewLine_WA(hWA);
+               if (iFormat == DB_CHAN_FORMAT_GEOGR)
+                  FormatReal_STR(rDev, Str, FORMAT_GEOGRAPHIC, 20, 2);
+               else
+                  FormatR_STR(rDev, Str, 20, 17);
+               Puts_WA(hWA, _n("Standard deviation: "));
+               Puts_WA(hWA, Str);
+               NewLine_WA(hWA);
 
-					if(iFormat==DB_CHAN_FORMAT_GEOGR)
-						FormatReal_STR(rMax,Str,FORMAT_GEOGRAPHIC,20,2);
-					else
-						FormatR_STR(rMax,Str,20,17);
-					Puts_WA(hWA,_n("     Maximum value: "));
-					Puts_WA(hWA,Str);
-					NewLine_WA(hWA);
 
+               if (iFormat == DB_CHAN_FORMAT_GEOGR)
+                  FormatReal_STR(rSum, Str, FORMAT_GEOGRAPHIC, 20, 2);
+               else
+                  FormatR_STR(rSum, Str, 20, 17);
+               Puts_WA(hWA, _n("    Arithmetic sum: "));
+               Puts_WA(hWA, Str);
+               NewLine_WA(hWA);
 
-					if(iFormat==DB_CHAN_FORMAT_GEOGR)
-						FormatReal_STR(rMean,Str,FORMAT_GEOGRAPHIC,20,2);
-					else
-						FormatR_STR(rMean,Str,20,17);
-					Puts_WA(hWA,_n("        Mean value: "));
-					Puts_WA(hWA,Str);
-					NewLine_WA(hWA);
+               Destroy_WA(hWA);
+            }
 
+            // --- Destroy the Dialogue ---
 
-					if (iDrillHole == 1)
-					{
-						FormatR_STR(rWeightedMean,Str,20,17);
-						Puts_WA(hWA,_n("  Length Wt'd Mean: "));
-						Puts_WA(hWA,Str);
-						NewLine_WA(hWA);
+            Destroy_DGW(Diag2);
+         }
 
-						FormatR_STR(rLength,Str,20,17);
-						Puts_WA(hWA,_n("      Total length: "));
-						Puts_WA(hWA,Str);
-						NewLine_WA(hWA);
-					}
+      } while (i == 1);
 
-					if(iFormat==DB_CHAN_FORMAT_GEOGR)
-						FormatReal_STR(rDev,Str,FORMAT_GEOGRAPHIC,20,2);
-					else
-						FormatR_STR(rDev,Str,20,17);
-					Puts_WA(hWA,_n("Standard deviation: "));
-					Puts_WA(hWA,Str);
-					NewLine_WA(hWA);
+      // --- Destroy the Dialogue ---
 
+      Destroy_DGW(Diag);
 
-					if(iFormat==DB_CHAN_FORMAT_GEOGR)
-						FormatReal_STR(rSum,Str,FORMAT_GEOGRAPHIC,20,2);
-					else
-						FormatR_STR(rSum,Str,20,17);
-					Puts_WA(hWA,_n("    Arithmetic sum: "));
-					Puts_WA(hWA,Str);
-					NewLine_WA(hWA);
 
-					Destroy_WA(hWA);
-				}
+      // --- Save the channel name for scripting ---
 
-				// --- Destroy the Dialogue ---
+      SetString_SYS("STAT", "CHAN", sChan);
+   }
+   else
+   {
+      // ---------------------------------------- SCRIPT MODE ---------------------------------------
 
-				Destroy_DGW(Diag2);             
-			}
+      // --- Get the Current Database ---
 
-		} while (i == 1);
+      EData = Current_EDB();
 
-		// --- Destroy the Dialogue ---
 
-		Destroy_DGW(Diag);
+      // --- Open the database ---
 
+      Data = Lock_EDB(EData);
 
-		// --- Save the channel name for scripting ---
 
-		SetString_SYS("STAT","CHAN",sChan);
+      // --- Get database name ---
 
-	} else {
+      GetName_DB(Data, DB_NAME_FILE, sDB);
 
 
-		// ---------------------------------------- SCRIPT MODE ---------------------------------------
+      // --- Get channel name ---
 
-		// --- Get the Current Database ---
+      GetString_SYS("STAT", "CHAN", sChan);
+      if (iStrlen_STR(sChan) <= 0)
+         Abort_SYS(_("You must specify the channel name"));
 
-		EData = Current_EDB();
 
+      // --- Create channel handle ---
 
-		// --- Open the database --- 
+      if (!iExistChan_DB(Data, sChan))
+         Chan = CreateSymb_DB(Data, sChan, DB_SYMB_CHAN, DB_OWN_SHARED, DB_CATEGORY_CHAN_DOUBLE);
+      Chan = FindChan_DB(Data, sChan);
 
-		Data = Lock_EDB(EData);
 
+      // --- Get VA channel handling
 
-		// --- Get database name ---
+      iSelection = iGetInt_SYS("STAT_VA", "SELECTION");
+      iVAColumn = 1;
+      if (iSelection >= 1 && iSelection <= 3)
+      {
+         LockSymb_DB(Data, Chan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+         iVAColumn = iGetColVA_DB(Data, Chan);
 
-		GetName_DB(Data,DB_NAME_FILE,sDB);
+         if (iSelection == 1)
+         {  // --- All Elements
 
+            iStart = 0;
+            iEnd = iVAColumn - 1;
+         }
+         else
+         {  // --- Define New Window Elements
 
-		// --- Get channel name ---
+            GetString_SYS("STAT_VA", "START_ELEM", sTemp);
+            if (!iStrlen_STR(sTemp))
+               iStart = 0;
+            else
+               iStart = iGetInt_SYS("STAT_VA", "START_ELEM");
 
-		GetString_SYS("STAT","CHAN",sChan);
-		if (iStrlen_STR(sChan)<=0) 
-			Abort_SYS(_("You must specify the channel name"));
+            GetString_SYS("STAT_VA", "END_ELEM", sTemp);
+            if (!iStrlen_STR(sTemp))
+               iEnd = iVAColumn - 1;
+            else
+               iEnd = iGetInt_SYS("STAT_VA", "END_ELEM");
 
+            if (iStart < 0) iStart = 0;
+            if (iEnd > iVAColumn - 1) iEnd = iVAColumn - 1;
+         }
+         SetVAWindows_DB(Data, Chan, iStart, iEnd);
+         UnLockSymb_DB(Data, Chan);
+      }
 
-		// --- Create channel handle ---
 
-		if (!iExistChan_DB(Data,sChan))
-			Chan=CreateSymb_DB(Data,sChan,DB_SYMB_CHAN,DB_OWN_SHARED,DB_CATEGORY_CHAN_DOUBLE);
-		Chan=FindChan_DB(Data,sChan);
+      // --- Create ST object to hold channel stats ---
 
+      hST = Create_ST();
 
-		// --- Get VA channel handling
 
-		iSelection = iGetInt_SYS("STAT_VA","SELECTION");
-		iVAColumn = 1;  
-		if (iSelection >=1 && iSelection <=3)
-		{            
-			LockSymb_DB(Data,Chan,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
-			iVAColumn = iGetColVA_DB(Data, Chan);
+      // --- Turn on the progress bar ---
 
-			if (iSelection==1)  {   // --- All Elements
+      Progress_SYS(1);
 
-				iStart = 0;
-				iEnd = iVAColumn-1;
 
-			} else {  // --- Define New Window Elements
+      // --- Load data channel to ST ---
 
-				GetString_SYS("STAT_VA","START_ELEM",sTemp);
-				if (!iStrlen_STR(sTemp))    iStart = 0;
-				else                        iStart = iGetInt_SYS("STAT_VA","START_ELEM");
+      i = 1;
+      Line = FirstSelLine_DB(Data);
+      iNLines = iCountSelLines_DB(Data);
+      LockSymb_DB(Data, Chan, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      while (iIsLineValid_DB(Data, Line))
+      {
+         ProgName_SYS(_("Calculating channel statistics"), 0);
+         ProgUpdateL_SYS(i, iNLines);
+         Stat_DU(Data, Line, Chan, hST);
+         Line = NextSelLine_DB(Data, Line);
+         i++;
+      }
+      UnLockSymb_DB(Data, Chan);
 
-				GetString_SYS("STAT_VA","END_ELEM",sTemp);
-				if (!iStrlen_STR(sTemp))    iEnd = iVAColumn-1;
-				else                        iEnd = iGetInt_SYS("STAT_VA","END_ELEM");
 
-				if(iStart<0)          iStart = 0;
-				if(iEnd>iVAColumn-1)  iEnd = iVAColumn-1; 
-			}
-			SetVAWindows_DB(Data,Chan,iStart,iEnd);
-			UnLockSymb_DB(Data, Chan);
-		}
+      // --- Get name of file to store stats ---
 
+      GetString_SYS("STAT", "FILE", sFile);
 
-		// --- Create ST object to hold channel stats ---
 
-		hST=Create_ST();
+      // --- Open handle to write stats ---
 
+      if (iStrlen_STR(sFile) <= 0)
+         Strcpy_STR(sFile, _n("stdout"));
+      hWA = Create_WA(sFile, 0);
 
-		// --- Turn on the progress bar ---
 
-		Progress_SYS(1);
+      // --- Get data from ST and display it ---
 
+      Puts_WA(hWA, _n("CHANNEL STATISTICS REPORT"));
+      NewLine_WA(hWA);
+      NewLine_WA(hWA);
 
-		// --- Load data channel to ST ---
+      Strcpy_STR(Str, _n("          Database: "));
+      Strcat_STR(Str, sDB);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
-		i=1;
-		Line=FirstSelLine_DB(Data);
-		iNLines=iCountSelLines_DB(Data);
-		LockSymb_DB(Data,Chan,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-		while (iIsLineValid_DB(Data,Line))
-		{
-			ProgName_SYS(_("Calculating channel statistics"),0);
-			ProgUpdateL_SYS(i,iNLines);
-			Stat_DU(Data,Line,Chan,hST);
-			Line=NextSelLine_DB(Data,Line);
-			i++;
-		}
-		UnLockSymb_DB(Data, Chan);
+      Strcpy_STR(Str, _n("      Channel Name: "));
+      Strcat_STR(Str, sChan);
+      Puts_WA(hWA, Str);
 
+      if (iVAColumn > 1)
+      {
+         Strcpy_STR(Str, _n(" [Columns: "));
+         Puts_WA(hWA, Str);
+         FormatI_STR(iStart, sItems, 6);
+         Puts_WA(hWA, sItems);
+         Puts_WA(hWA, _n(" to "));
+         FormatI_STR(iEnd, sItems, 6);
+         Puts_WA(hWA, sItems);
+         Puts_WA(hWA, "]");
+      }
 
-		// --- Get name of file to store stats ---
+      NewLine_WA(hWA);
+      NewLine_WA(hWA);
 
-		GetString_SYS("STAT","FILE",sFile);
+      rItems = rGetInfo_ST(hST, ST_ITEMS);
+      FormatR_STR(rItems, sItems, 20, 19);
+      Strcpy_STR(Str, _n("   Number of Items: "));
+      Strcat_STR(Str, sItems);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
+      rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+      FormatR_STR(rDummies, sDummies, 20, 19);
+      Strcpy_STR(Str, _n(" Number of Dummies: "));
+      Strcat_STR(Str, sDummies);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
-		// --- Open handle to write stats ---
+      rMin = rGetInfo_ST(hST, ST_MIN);
+      FormatR_STR(rMin, sMin, 16, 16);
+      Strcpy_STR(Str, _n("     Minimum value: "));
+      Strcat_STR(Str, sMin);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
-		if (iStrlen_STR(sFile)<=0)
-			Strcpy_STR(sFile,_n("stdout"));
-		hWA=Create_WA(sFile,0);
+      rMax = rGetInfo_ST(hST, ST_MAX);
+      FormatR_STR(rMax, sMax, 16, 16);
+      Strcpy_STR(Str, _n("     Maximum value: "));
+      Strcat_STR(Str, sMax);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
+      rMean = rGetInfo_ST(hST, ST_MEAN);
+      FormatR_STR(rMean, sMean, 16, 16);
+      Strcpy_STR(Str, _n("        Mean value: "));
+      Strcat_STR(Str, sMean);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
-		// --- Get data from ST and display it ---
+      rDev = rGetInfo_ST(hST, ST_STDDEV);
+      FormatR_STR(rDev, sDev, 16, 16);
+      Strcpy_STR(Str, _n("Standard Deviation: "));
+      Strcat_STR(Str, sDev);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
-		Puts_WA(hWA,_n("CHANNEL STATISTICS REPORT"));
-		NewLine_WA(hWA);
-		NewLine_WA(hWA);
+      rSum = rGetInfo_ST(hST, ST_SUM);
+      FormatR_STR(rSum, sSum, 16, 16);
+      Strcpy_STR(Str, _n("     Sum of values: "));
+      Strcat_STR(Str, sSum);
+      Puts_WA(hWA, Str);
+      NewLine_WA(hWA);
 
-		Strcpy_STR(Str,_n("          Database: "));
-		Strcat_STR(Str,sDB);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
 
-		Strcpy_STR(Str,_n("      Channel Name: "));
-		Strcat_STR(Str,sChan);
-		Puts_WA(hWA,Str);
+      // --- Done ---
 
-		if(iVAColumn > 1)
-		{
-			Strcpy_STR(Str,_n(" [Columns: "));
-			Puts_WA(hWA,Str);
-			FormatI_STR(iStart,sItems,6);
-			Puts_WA(hWA,sItems);
-			Puts_WA(hWA, _n(" to "));
-			FormatI_STR(iEnd,sItems,6);
-			Puts_WA(hWA,sItems);
-			Puts_WA(hWA, "]");			
-		}
+      Destroy_ST(hST);
+      Destroy_WA(hWA);
+      Progress_SYS(0);
 
-		NewLine_WA(hWA);
-		NewLine_WA(hWA);
+      // --- Release the Database ---
 
-		rItems   = rGetInfo_ST(hST, ST_ITEMS);
-		FormatR_STR(rItems,sItems,20,19);
-		Strcpy_STR(Str,_n("   Number of Items: "));
-		Strcat_STR(Str,sItems);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
-
-		rDummies = rGetInfo_ST(hST, ST_DUMMIES);
-		FormatR_STR(rDummies,sDummies,20,19);
-		Strcpy_STR(Str,_n(" Number of Dummies: "));
-		Strcat_STR(Str,sDummies);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
-
-		rMin     = rGetInfo_ST(hST, ST_MIN); 
-		FormatR_STR(rMin,sMin,16,16);
-		Strcpy_STR(Str,_n("     Minimum value: "));
-		Strcat_STR(Str,sMin);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
-
-		rMax     = rGetInfo_ST(hST, ST_MAX);   
-		FormatR_STR(rMax,sMax,16,16);
-		Strcpy_STR(Str,_n("     Maximum value: "));
-		Strcat_STR(Str,sMax);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
-
-		rMean    = rGetInfo_ST(hST, ST_MEAN);  
-		FormatR_STR(rMean,sMean,16,16);
-		Strcpy_STR(Str,_n("        Mean value: "));
-		Strcat_STR(Str,sMean);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
-
-		rDev     = rGetInfo_ST(hST, ST_STDDEV);
-		FormatR_STR(rDev,sDev,16,16);
-		Strcpy_STR(Str,_n("Standard Deviation: "));
-		Strcat_STR(Str,sDev);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
-
-		rSum     = rGetInfo_ST(hST, ST_SUM);
-		FormatR_STR(rSum,sSum,16,16);
-		Strcpy_STR(Str,_n("     Sum of values: "));
-		Strcat_STR(Str,sSum);
-		Puts_WA(hWA,Str);
-		NewLine_WA(hWA);
-
-
-		// --- Done ---
-
-		Destroy_ST(hST);
-		Destroy_WA(hWA);
-		Progress_SYS(0);
-
-		// --- Release the Database ---
-
-		UnLock_EDB(EData);
-
-	}       
+      UnLock_EDB(EData);
+   }
 }
