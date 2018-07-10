@@ -75,7 +75,7 @@ IPJ hIPJ;
 
 int i, iTRA;
 real rTRA;
-real rTOLN, rWS, rF;
+real rTOLN, rLS, rWS, rF, rFDX;
 string(STR_DEFAULT_LONG) sMsg, sUnits, sAliasFlag;
 
 int iRunMode;
@@ -429,6 +429,16 @@ int iRunMode;
    }
 
 
+	// --- If specifying the pre-filter sampling increment, then either WS or WL must be defined ---
+
+   rLS = rGetReal_SYS("BIGRID", "LS");
+   rFDX = rGetReal_SYS("BIGRID", "FDX");
+   if (rFDX != rDUMMY && rWS == rDUMMY && rLS == rDUMMY)
+   {
+      Abort_SYS(_("The pre-filter sampling increment has no effect unless you specify either a low-pass or high-pass filter wavelength."));
+   }
+
+
    // --- trend gridding? ---
 
    if (iStrMin_STR(sTRA))
@@ -501,7 +511,7 @@ int iRunMode;
    Puts_WA(ConFile, sText);
    NewLine_WA(ConFile);
 
-   Puts_WA(ConFile, "/BL,XX,CLIP");
+   Puts_WA(ConFile, "/BL,XX");
    NewLine_WA(ConFile);
 
    Strcpy_STR(sText, sWS);
@@ -509,7 +519,7 @@ int iRunMode;
    Strcat_STR(sText, sWL);
    Strcat_STR(sText, ",");
    Strcat_STR(sText, sFDX);
-   Strcat_STR(sText, _n(",,, /WS,WL,FDX,FT,NC"));
+   Strcat_STR(sText, _n(",,, /WS,WL,FDX,FT"));
    Puts_WA(ConFile, sText);
    NewLine_WA(ConFile);
 
@@ -651,7 +661,6 @@ int iRunMode;
       Puts_WA(ConFile, "/TRA,KX");
       NewLine_WA(ConFile);
 
-      //Puts_WA(ConFile,"/SLM,SMX,GAPLIM,LSEL,BCLIP");  NewLine_WA(ConFile);
       Strcpy_STR(sText, ",");
       Strcat_STR(sText, sSMX);
       Strcat_STR(sText, ",");
@@ -665,9 +674,9 @@ int iRunMode;
       NewLine_WA(ConFile);
       Puts_WA(ConFile, "/IZ,LOGZ,ZMIN");
       NewLine_WA(ConFile);
-      Puts_WA(ConFile, "/BL,XX,CLIP");
+      Puts_WA(ConFile, "/BL,XX");
       NewLine_WA(ConFile);
-      Puts_WA(ConFile, "/WS,WL,FDX,FT,NC");
+      Puts_WA(ConFile, "/WS,WL,FDX,FT");
       NewLine_WA(ConFile);
       Puts_WA(ConFile, "/NFLT,TOLN");
       NewLine_WA(ConFile);

@@ -9,6 +9,7 @@ TRANSLATIONFRIENDLYPATH = "GX/AirGrav/Import"
 DESCRIPTION   = "
 
    AGIMPGRAV.FILE       Name of the data file(s) to import
+	         .TEMPLATE   Import template (*.i3)
             .DATE       Survey date
          
 "
@@ -55,10 +56,15 @@ string(STR_DEFAULT)     sLine,sName,sDate,sTemp,sLine2;
 //===========================================================================
 
 {
-	// --- Set up properly? ---
 
-	if (_iFindPathEx_SYS("ag_impgrav.i3", FIND_GEOSOFT, GEO_DIRECTORY_USER_ETC, sImportTemplate) != 0)
-		Abort_SYS("Unable to locate the import template file \"ag_impgrav.i3\"");
+	// --- Set default import template ---
+
+	GetString_SYS("AGIMPGRAV","TEMPLATE",sImportTemplate);
+	if (iStrlen_STR(sImportTemplate) == 0)
+	{
+		if (_iFindPathEx_SYS("_ZLSgrav2.i3", FIND_GEOSOFT, GEO_DIRECTORY_USER_ETC, sImportTemplate) == 0)
+			SetString_SYS("AGIMPGRAV","TEMPLATE",sImportTemplate);
+	}
 
 
    // --- Are we running interactively ? ---
@@ -73,7 +79,8 @@ string(STR_DEFAULT)     sLine,sName,sDate,sTemp,sLine2;
       // --- Set any Defaults ---
 
       SetInfoSYS_DGW(Diag,_AGIMPGRAV_0,DGW_FILEPATH,"AGIMPGRAV","FILE");
-      SetInfoSYS_DGW(Diag,_AGIMPGRAV_1,DGW_TEXT,"AGIMPGRAV","DATE");
+      SetInfoSYS_DGW(Diag,_AGIMPGRAV_1,DGW_FILEPATH,"AGIMPGRAV","TEMPLATE");
+      SetInfoSYS_DGW(Diag,_AGIMPGRAV_2,DGW_TEXT,"AGIMPGRAV","DATE");
 
 
       // --- Run the Dialogue ---
@@ -84,7 +91,8 @@ string(STR_DEFAULT)     sLine,sName,sDate,sTemp,sLine2;
       // --- Get the Strings ---
 
       GetInfoSYS_DGW(Diag,_AGIMPGRAV_0,DGW_FILEPATH,"AGIMPGRAV","FILE");
-      GetInfoSYS_DGW(Diag,_AGIMPGRAV_1,DGW_TEXT,"AGIMPGRAV","DATE");
+      GetInfoSYS_DGW(Diag,_AGIMPGRAV_1,DGW_FILEPATH,"AGIMPGRAV","TEMPLATE");
+      GetInfoSYS_DGW(Diag,_AGIMPGRAV_2,DGW_TEXT,"AGIMPGRAV","DATE");
 
 
       // --- Destroy the Dialogue ---
@@ -107,6 +115,18 @@ string(STR_DEFAULT)     sLine,sName,sDate,sTemp,sLine2;
       Abort_SYS(sTemp);
    }
 
+	GetString_SYS("AGIMPGRAV","TEMPLATE",sImportTemplate);
+	if (iStrlen_STR(sImportTemplate) == 0)
+		Abort_SYS(_("Import template must be defined"));
+
+   if (!iFileExist_SYS(sImportTemplate)) 
+	{
+		if (_iFindPathEx_SYS(sImportTemplate, FIND_GEOSOFT, GEO_DIRECTORY_USER_ETC, sImportTemplate) == 1)
+		{
+	      Printf_STR(sTemp, sizeof(sTemp), _("%s does not exist!"), sImportTemplate);
+			Abort_SYS(sTemp);
+		}
+   }
       
    GetString_SYS("AGIMPGRAV", "DATE", sDate);
    rDate = rScanDate_STR(sDate, DATE_FORMAT_YYYYMMDD);

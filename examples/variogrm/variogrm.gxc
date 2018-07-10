@@ -56,7 +56,7 @@ string(STR_DEFAULT_SHORT) s0, s1, s2, s3, s4;
 string(STR_DEFAULT_LONG) sTemp;
 string(STR_DEFAULT_SHORT) sNugget, sSlope, sPower;
 string(STR_DEFAULT_SHORT) sSigma, sSill, sRange;
-string(STR_VIEW) sViewName;
+string(STR_VIEW) sViewName, sBorderView, sVariogramView;
 string(64) sLicClass;
 
 
@@ -346,6 +346,7 @@ int iArcGIS;
    Strcpy_STR(sViewName, sFile);
    Strcat_STR(sViewName, "_Border");
    View = Create_MVIEW(Map, sViewName, MVIEW_WRITENEW);
+	Strcpy_STR(sBorderView, sViewName);
 
 
    // --- Set coordinates ---
@@ -452,11 +453,11 @@ int iArcGIS;
 
    // --- Create Variogram_Border view ---
 
-   Strcpy_STR(sViewName, sFile);
-   Strcat_STR(sViewName, "_VG");
+   Strcpy_STR(sVariogramView, sFile);
+   Strcat_STR(sVariogramView, "_VG");
 
 
-   Mvg = Create_MVG(Map, sViewName, rBotMX, rBotMY, rTopMX, rTopMY,
+   Mvg = Create_MVG(Map, sVariogramView, rBotMX, rBotMY, rTopMX, rTopMY,
                     rBotMX, rBotMY, rTopMX, rTopMY);
    View = GetMVIEW_MVG(Mvg);
 
@@ -559,7 +560,7 @@ int iArcGIS;
    rTopMY = rYo + 0.313 * rHeight;
 
 
-   // --- Create Variogram_Border view ---
+   // --- Create Variogram Sample Pairs view ---
 
    Strcpy_STR(sViewName, sFile);
    Strcat_STR(sViewName, "_NP");
@@ -643,7 +644,11 @@ int iArcGIS;
 
    // --- Set this view for map sizing on exit ---
 
-   SetString_SYS("RESZMAP", "CURRENTVIEW", sViewName);
+	SetInteractive_SYS(1);
+	SetClassName_MAP(Map, "Base", sBorderView);
+	SetClassName_MAP(Map, "Data", sVariogramView);
+   SetString_SYS("RESZMAP", "CURRENTVIEW", sBorderView);
+	SetInteractive_SYS(0);
 
 
    if (iArcGIS && iInteractive_SYS())

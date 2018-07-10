@@ -25,6 +25,25 @@
 // NOTICE: Do not edit anything here, it is generated code
 
 
+//===========================================================================================================
+//
+// RBFKERNEL Definitions
+//
+// Math kernel to use in the RBF Computation
+//
+// RBFKERNEL_DISTANCE
+// Distance
+//
+// RBFKERNEL_MULTIQUADRATIC
+// Multiquadratic
+//
+//===========================================================================================================
+
+
+#define RBFKERNEL_DISTANCE 0
+#define RBFKERNEL_MULTIQUADRATIC 1
+
+
 
 
 
@@ -144,6 +163,17 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// ImportFromSegy_MULTIGRID3DUTIL Imports a MultiVoxset from a SEG Y File
+//
+// Available                      9.4
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ImportFromSegy_MULTIGRID3DUTIL(string,   // Name of output VOX
+                                              string);  // Name of input SEG Y file
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // ImportFromGDB_MULTIGRID3DUTIL Imports from a Geosoft Database
 //
 // Available                     9.4
@@ -179,7 +209,6 @@
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void ExportToSEGY_MULTIGRID3DUTIL(string,   // Input Voxel file
-                                            string,   // Voxel Name
                                             string,   // Output Segy file
                                             real);    // Sampling Internal
 
@@ -249,6 +278,21 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// ConvertVectorToDoubleUsingRotation_MULTIGRID3DUTIL Convert a Vector Voxel to 3 double Voxels using an external rotation. Internal rotations are ignored.
+//
+// Available                                          9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void ConvertVectorToDoubleUsingRotation_MULTIGRID3DUTIL(string,   // Input Vector Voxel file
+                                                                  string,   // Output X Voxel file
+                                                                  string,   // Output Y Voxel file
+                                                                  string,   // Output Z Voxel file
+                                                                  real,     // Inclination
+                                                                  real);    // Declination
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // ConvertThematicToDouble_MULTIGRID3DUTIL Convert Thematic MultiVoxset to Double MultiVoxset
 //
 // Available                               9.4
@@ -268,6 +312,7 @@
 
 [_public] void ConvertDoubleToThematic_MULTIGRID3DUTIL(string,   // Input grid3d filename
                                                        VV,       // Translation VV handle
+                                                       TPAT,     // TPAT object
                                                        string);  // Output grid3d filename
 
 
@@ -535,6 +580,59 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// InvertZ_MULTIGRID3DUTIL Invert the Z values in the Grid3d.
+//
+// Available               9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void InvertZ_MULTIGRID3DUTIL(string,   // Name of the input grid3d
+                                         string);  // Name of the output grid3d
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ExtractDEM_MULTIGRID3DUTIL Extract a DEM grid from a voxel.
+//
+// Available                  9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void ExtractDEM_MULTIGRID3DUTIL(string,   // Name of the input grid3d
+                                            string);  // Name of the output grid
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ClipToPolygon_MULTIGRID3DUTIL Invert the Z values in the Grid3d.
+//
+// Available                     9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void ClipToPolygon_MULTIGRID3DUTIL(string,   // Name of the input grid3d
+                                               string,   // Name of the output grid3d
+                                               PLY,      // Polygons to clip to
+                                               int);     // Clip Dummies (1) or leave them (0)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GenerateRBF_MULTIGRID3DUTIL Creates a VOXEL from an database using RBF.
+//
+// Available                   9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GenerateRBF_MULTIGRID3DUTIL(DB,       // Handle to a database
+                                             string,   // Name of the output grid3d
+                                             string,   // Channel to grid`
+                                             real,     // Cell size
+                                             real,     // Error Tolerance
+                                             int,      // Maximum number of iterations (>0)
+                                             int,      // Desample data (1) or use as is (0)
+                                             int,      // RBFKERNEL
+                                             real);    // Kernel Epsilon
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // GridDirectFromGDB_MULTIGRID3DUTIL Create a grid3d using direct gridding.
 //
 // Notes                             The Z and Data channels may be array channels. If they are, the array sizes must match.
@@ -558,6 +656,303 @@
                                                    DB_SYMB,   // Y channel [DB_LOCK_READONLY]
                                                    DB_SYMB,   // Z channel [DB_LOCK_READONLY]
                                                    DB_SYMB);  // Data channel [DB_LOCK_READONLY]
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GridIDWFromGDB_MULTIGRID3DUTIL Create a grid3d using IDW gridding.
+//
+// Notes                          The Z and Data channels may be array channels. If they are, the array sizes must match.
+//                                                  3D cells take on the averaged values within a search radius, weighted inversely by distance.
+//                                
+//                                               Weighting can be controlled using the power and slope properties;
+//                                
+//                                               weighting = 1 / (distance^wtpower + 1/slope) where distance is in
+//                                               units of grid cells (X dimenstion). Default is 0.0,
+//                                
+//                                               If the blanking distance is set, all cells whose center point is not within the blanking distance of
+//                                               at least one data point are set to dummy.
+//
+// Available                      9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GridIDWFromGDB_MULTIGRID3DUTIL(string,    // Output grid3d filename
+                                                real,      // Voxel origin X
+                                                real,      // Voxel origin Y
+                                                real,      // Voxel origin Z
+                                                int,       // Voxel cell count X
+                                                int,       // Voxel cell count Y
+                                                int,       // Voxel cell count Z
+                                                real,      // Voxel cell size X
+                                                real,      // Voxel cell size Y
+                                                real,      // Voxel cell size Z
+                                                DB,        // Database
+                                                DB_SYMB,   // X channel [DB_LOCK_READONLY]
+                                                DB_SYMB,   // Y channel [DB_LOCK_READONLY]
+                                                DB_SYMB,   // Z channel [DB_LOCK_READONLY]
+                                                DB_SYMB,   // Data channel [DB_LOCK_READONLY]
+                                                real,      // Weight Power (default 2)
+                                                real,      // Weight Slope (default 1)
+                                                real,      // Distance weighting limit (default = 4 * CUBE_ROOT(DX*DY*DZ))
+                                                real,      // Dummy values farther from data than this distance. (default = 4 * CUBE_ROOT(DX*DY*DZ))
+                                                int,       // Apply log transform to input data before gridding (0:No (default), 1:Yes)
+                                                real,      // One of VV_LOG_BASE_10 (default) or :const:`VV_LOG_BASE_E
+                                                int);      // One of VV_LOG_NEGATIVE_NO (default) or VV_LOG_NEGATIVE_YES
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetDataExtents_MULTIGRID3DUTIL Get the voxel size that has non-dummy data.
+//
+// Notes                          Find the non-dummy volume of a MULTIGRID3D object. If the voxel is all dummies,
+//                                returns iMAX for the minima, and iMIN for the maxima.
+//
+// Available                      9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetDataExtents_MULTIGRID3DUTIL(string,    // input filename
+                                              var int,   // Index of minimum valid data in X.
+                                              var int,   // Index of minimum valid data in Y.
+                                              var int,   // Index of minimum valid data in Z.
+                                              var int,   // Index of maximum valid data in X.
+                                              var int,   // Index of maximum valid data in Y.
+                                              var int);  // Index of maximum valid data in Z.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetDataGroundExtents_MULTIGRID3DUTIL Get the voxel size in ground units that has non-dummy data.
+//
+// Notes                                Find the non-dummy volume of a MULTIGRID3D object. If the voxel is all dummies,
+//                                      returns iMAX for the minima, and iMIN for the maxima.
+//
+// Available                            9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetDataGroundExtents_MULTIGRID3DUTIL(string,     // input filename
+                                                    var real,   // Ground location of minimum valid data in X.
+                                                    var real,   // Ground location of minimum valid data in Y.
+                                                    var real,   // Ground location of minimum valid data in Z.
+                                                    var real,   // Ground location of maximum valid data in X.
+                                                    var real,   // Ground location of maximum valid data in Y.
+                                                    var real);  // Ground location of maximum valid data in Z.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GridPointsFromGDB_MULTIGRID3DUTIL Grid a grid3d from a database using kriging.
+//
+// Available                         9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GridPointsFromGDB_MULTIGRID3DUTIL(string,    // Output grid3d filename
+                                                 string,    // Output error grid3d filename
+                                                 real,      // Cell size (DUMMY for default)
+                                                 int,       // Variogram Only
+                                                 real,      // Minimum Search Radius (DUMMY for none)
+                                                 real,      // Maximum Search Radius (DUMMY for none)
+                                                 int,       // Minimum Search Points
+                                                 int,       // Maximum Search Points
+                                                 int,       // Model number 1-power, 2-sperical, 3-gaussian, 4-exponential
+                                                 real,      // Power
+                                                 real,      // Slope
+                                                 real,      // Range
+                                                 real,      // Nugget
+                                                 real,      // Sill
+                                                 int,       // GS_TYPES
+                                                 DB,        // Database
+                                                 DB_SYMB,   // X channel [DB_LOCK_READONLY]
+                                                 DB_SYMB,   // Y channel [DB_LOCK_READONLY]
+                                                 DB_SYMB,   // Z channel [DB_LOCK_READONLY]
+                                                 DB_SYMB,   // Data channel [DB_LOCK_READONLY]
+                                                 IPJ);      //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GridPointsZFromGDB_MULTIGRID3DUTIL Grid a grid3d from a database (using variable Z's)
+//
+// Available                          9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GridPointsZFromGDB_MULTIGRID3DUTIL(string,    // Output grid3d filename
+                                                  string,    // Output error grid3d filename
+                                                  real,      // Cell size (DUMMY for default)
+                                                  string,    // Cell size in Z ("" for default)
+                                                  int,       // Variogram Only
+                                                  real,      // Minimum Search Radius (DUMMY for none)
+                                                  real,      // Maximum Search Radius (DUMMY for none)
+                                                  int,       // Minimum Search Points
+                                                  int,       // Maximum Search Points
+                                                  int,       // Model number 1-power, 2-sperical, 3-gaussian, 4-exponential
+                                                  real,      // Power
+                                                  real,      // Slope
+                                                  real,      // Range
+                                                  real,      // Nugget
+                                                  real,      // Sill
+                                                  int,       // GS_TYPES
+                                                  DB,        // Database
+                                                  DB_SYMB,   // X channel [DB_LOCK_READONLY]
+                                                  DB_SYMB,   // Y channel [DB_LOCK_READONLY]
+                                                  DB_SYMB,   // Z channel [DB_LOCK_READONLY]
+                                                  DB_SYMB,   // Data channel [DB_LOCK_READONLY]
+                                                  IPJ);      //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GridPointsZExFromGDB_MULTIGRID3DUTIL Grid a grid3d from a database (using variable Z's)
+//
+// Available                            9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GridPointsZExFromGDB_MULTIGRID3DUTIL(string,     // Output grid3d filename
+                                                    string,     // Output error grid3d filename
+                                                    real,       // Cell size (DUMMY for default)
+                                                    string,     // Cell size in Z ("" for default)
+                                                    int,        // Variogram Only
+                                                    real,       // Minimum Search Radius (DUMMY for none)
+                                                    real,       // Maximum Search Radius (DUMMY for none)
+                                                    int,        // Minimum Search Points
+                                                    int,        // Maximum Search Points
+                                                    int,        // Model number 1-power, 2-sperical, 3-gaussian, 4-exponential
+                                                    real,       // Power
+                                                    var real,   // Slope
+                                                    var real,   // Range
+                                                    real,       // Nugget
+                                                    var real,   // Sill
+                                                    real,       // Strike
+                                                    real,       // Dip
+                                                    real,       // Plunge
+                                                    real,       // Strike Weight
+                                                    real,       // Dip Plane Weight
+                                                    int,        // GS_TYPES
+                                                    DB,         // Database
+                                                    DB_SYMB,    // X channel [DB_LOCK_READONLY]
+                                                    DB_SYMB,    // Y channel [DB_LOCK_READONLY]
+                                                    DB_SYMB,    // Z channel [DB_LOCK_READONLY]
+                                                    DB_SYMB,    // Data channel [DB_LOCK_READONLY]
+                                                    IPJ);       //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LogGridPointsZExFromGDB_MULTIGRID3DUTIL Log grid a grid3d from a database (using variable Z's)
+//
+// Available                               9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LogGridPointsZExFromGDB_MULTIGRID3DUTIL(string,     // Output grid3d filename
+                                                       string,     // Output error grid3d filename
+                                                       real,       // Cell size (DUMMY for default)
+                                                       string,     // Cell size in Z ("" for default)
+                                                       int,        // Variogram Only
+                                                       real,       // Minimum Search Radius (DUMMY for none)
+                                                       real,       // Maximum Search Radius (DUMMY for none)
+                                                       int,        // Minimum Search Points
+                                                       int,        // Maximum Search Points
+                                                       int,        // Model number 1-power, 2-sperical, 3-gaussian, 4-exponential
+                                                       real,       // Power
+                                                       var real,   // Slope
+                                                       var real,   // Range
+                                                       real,       // Nugget
+                                                       var real,   // Sill
+                                                       real,       // Strike
+                                                       real,       // Dip
+                                                       real,       // Plunge
+                                                       real,       // Strike Weight
+                                                       real,       // Dip Plane Weight
+                                                       int,        // VOX_GRID_LOGOPT Log Option
+                                                       real,       // Minimum log
+                                                       int,        // GS_TYPES
+                                                       DB,         // Database
+                                                       DB_SYMB,    // X channel [DB_LOCK_READONLY]
+                                                       DB_SYMB,    // Y channel [DB_LOCK_READONLY]
+                                                       DB_SYMB,    // Z channel [DB_LOCK_READONLY]
+                                                       DB_SYMB,    // Data channel [DB_LOCK_READONLY]
+                                                       IPJ);       //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// KrigFromGDB_MULTIGRID3DUTIL A more compact and extensible form of LogGridPointsZExFromGDB_MULTIGRID3DUTIL.
+//
+// Notes                       Optional Parameters.
+//                             
+//                             If these values are not set in the REG, then default parameters will be used.
+//                             
+//                             ERROR_VOXEL:		Output error grid3d filename ("" for none)
+//                             CELLSIZEZ:      Z Cell size string (space delimited, "" for default)
+//                             RADIUS_MIN:		Minimum Search Radius (REAL) (Default = 4) (Blanking Distance)
+//                             RADIUS_MAX:		Maximum Search Radius (REAL) (Default = 16)
+//                             SEARCH_MIN:		Minimum Search Points (INT) (Default = 16)
+//                             SEARCH_MAX:		Maximum Search Points (INT) (Default = 32)
+//                             VARIOGRAM_ONLY: Set to 1 to calculate the variogram only (INT) (Default = 0)
+//                             MODEL:				Variogram Model number 1-power, 2-sperical, 3-gaussian, 4-exponential  (INT) (Default = 2)
+//                             POWER:          Power (Default = DUMMY)
+//                             SLOPE:          Slope (REAL) (if input is DUMMY, value calculated and set on return)
+//                             RANGE:          Range (REAL) (if input is DUMMY, value calculated and set on return)
+//                             SILL :          Sill (REAL) (if input is DUMMY, value calculated and set on return)
+//                             STRIKE:				Strike (REAL) (Default = 0)
+//                             DIP:					Dip (REAL)	(Default = 90)
+//                             PLUNGE:				Plunge (REAL) (Default = 0)
+//                             STRIKE WEIGHT:	Along-Strike Weight (REAL) (Default = 1)
+//                             DIP_WEIGHT:      Down-Dip Weight (REAL) (Default = 1)
+//                             LOG_OPT:			One of VOX_GRID_LOGOPT (Default = 0)
+//                             MIN_LOG:			Log Minimum (REAL)	(Default = 1)
+//                             MIN_X:				Minimum X (REAL) (default = DUMMY to determine from the data. If input, nearest lt. or eq. multiple of cell size chosen)
+//                             MAX_X:				Maximum X (REAL) (default = DUMMY to determine from the data. If input, nearest gt. or eq. multiple of cell size chosen)
+//                             MIN_Y:				Minimum Y (REAL) (default = DUMMY to determine from the data. If input, nearest lt. or eq. external multiple of cell size chosen)
+//                             MAX_Y:				Maximum Y (REAL) (default = DUMMY to determine from the data. If input, nearest gt. or eq. multiple of cell size chosen)
+//                             MIN_Z:				Minimum Z (REAL) (default = DUMMY to determine from the data. If input, nearest lt. or eq. multiple of cell size chosen)
+//                             MAX_Z:				Maximum Z (REAL) (default = DUMMY to determine from the data. If input, nearest gt. or eq. multiple of cell size chosen)A more compact and extensible form of LogGridPointsZEx_VOX. Only the most
+//                             basic parameters are entered directly. Optional parameters are passed via a REG object.
+//
+// Available                   9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void KrigFromGDB_MULTIGRID3DUTIL(string,    // Output grid3d filename
+                                           real,      // Cell size (DUMMY for default)
+                                           int,       // GS_TYPES
+                                           DB,        // Database
+                                           DB_SYMB,   // X channel [DB_LOCK_READONLY]
+                                           DB_SYMB,   // Y channel [DB_LOCK_READONLY]
+                                           DB_SYMB,   // Z channel [DB_LOCK_READONLY]
+                                           DB_SYMB,   // Data channel [DB_LOCK_READONLY]
+                                           IPJ,       //
+                                           REG);      //
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateSubset_MULTIGRID3DUTIL Create a new MULTIGRID3D that is a subset of an exisiting MULTIGRID3D.
+//
+// Notes                        Creates a MULTIGRID3D object that is a subset .
+//
+// Available                    9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] MULTIGRID3D CreateSubset_MULTIGRID3DUTIL(string,   // File Name of the MULTIGRID3D that will be subset
+                                                   string,   // File Name of the MULTIGRID3D that will be created
+                                                   int,      // Starting location in X.
+                                                   int,      // Starting location in Y.
+                                                   int,      // Starting location in Z.
+                                                   int,      // Number of items to copy in X.
+                                                   int,      // Number of items to copy in Y.
+                                                   int);     // Number of items to copy in Z.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateSubsetFromRealExtents_MULTIGRID3DUTIL Create a new MULTIGRID3D that is a subset of the non-dummy extents.
+//
+// Notes                                       Creates a MULTIGRID3D object that is a subset with all dummy data regions removed.
+//
+// Available                                   9.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] MULTIGRID3D CreateSubsetFromRealExtents_MULTIGRID3DUTIL(string,   // File Name of the MULTIGRID3D that will be subset
+                                                                  string);  // File Name of the MULTIGRID3D that will be created
 
 
 

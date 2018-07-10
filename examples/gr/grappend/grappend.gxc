@@ -46,7 +46,7 @@ string(STR_FILE) sMaster, sSurvey;
 string(STR_DEFAULT_SHORT) sType;
 string(STR_DEFAULT_SHORT) sSrc, sSrcNew;
 int i, ii, iNew, iLen, iNChan;
-int iGscale, iClosure, iType, iCheck;
+int iGscale, iClosure, iType, iCheck, iSurveyLoaded;
 real rStart, rIncr;
 
 //===========================================================================
@@ -162,6 +162,8 @@ real rStart, rIncr;
 
 
    // --- Load the databases ---
+
+	iSurveyLoaded = iLoaded_EDB(sSurvey);
 
    eDBi = Load_EDB(sSurvey);
    hDBi = Lock_EDB(eDBi);
@@ -303,6 +305,7 @@ real rStart, rIncr;
    // --- remove non-stations ---
 
    TypeChan = FindSymb_DB(hDBo, "Type", DB_SYMB_CHAN);
+
    if (TypeChan != NULLSYMB)
    {
       LOCK_RW(hDBo, TypeChan);
@@ -315,7 +318,7 @@ real rStart, rIncr;
       for (i = 0; i < iLen; i++)
       {
          ii = iGetInt_VV(hTypeVV, i);
-         if (ii != iDUMMY && ii != 1)
+         if (ii != iDUMMY && ii == 1)
          {
             // --- not a reading, remove it ---
 
@@ -426,5 +429,8 @@ real rStart, rIncr;
    Destroy_SYS(hStnVV);
    Destroy_SYS(hSrcVV);
 
-   UnLoad_EDB(sSurvey);
+	if (iSurveyLoaded == 0)
+		UnLoad_EDB(sSurvey);
+
+	MakeCurrent_EDB(eDBo);
 }

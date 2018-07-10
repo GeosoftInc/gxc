@@ -1,0 +1,202 @@
+//===========================================================================
+// clang-format off
+NAME          = "RBF Voxel"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Voxel/RBF"
+
+DESCRIPTION   = "\
+
+Creates a voxel from a 3D dataset.
+                              
+"
+//===========================================================================
+
+RESOURCE = "rbfvox.gr"
+#include "rbfvox.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+// clang-format on
+
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+string(STR_FILE) sVoxel;                          // Name of new voxel file
+string(STR_DB_SYMBOL) sXCh, sYCh, sZCh, sDataCh;  // channels
+
+EDB EData;
+DB Data;   // Database handle
+DGW Diag;  // Dialogue handle
+LST List;  // List handle
+
+int i, iDone, iMaxIterations, iDesample, iKernel;
+
+string(STR_DEFAULT_LONG) sMsg;
+real rCS, rMaxError, rEpsilon;
+
+//===========================================================================
+//                           RBFVOX CODE
+//===========================================================================
+
+{
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS())
+   {
+      iDone = 0;
+      i = 0;
+      while (iDone == 0)
+      {
+         if (i == 0)
+         {
+            // --- Create the Dialogue ---
+
+            Diag = Create_DGW("RBFVOX");
+
+            // --- Set up lists ---
+
+            EData = Current_EDB();
+            Data = Lock_EDB(EData);
+            List = GetList_DGW(Diag, _RBFVOX_0);
+            SymbLST_DB(Data, List, DB_SYMB_CHAN);
+            Sort_LST(List, 0, 0);
+            UnLock_EDB(EData);
+
+
+            // --- Set any Defaults from INI ---
+
+            SetInfoSYS_DGW(Diag, _RBFVOX_0, DGW_TEXT, "RBFVOX", "CHAN");
+            SetInfoSYS_DGW(Diag, _RBFVOX_1, DGW_FILEPATH, "RBFVOX", "VOXEL");
+            SetInfoSYS_DGW(Diag, _RBFVOX_2, DGW_TEXT, "RBFVOX", "CS");
+            SetInfoSYS_DGW(Diag, _RBFVOX_3, DGW_TEXT, "RBFVOX", "MAX_ERROR");
+            SetInfoSYS_DGW(Diag, _RBFVOX_4, DGW_TEXT, "RBFVOX", "MAX_ITERATIONS");
+            SetInfoSYS_DGW(Diag, _RBFVOX_5, DGW_LISTALIAS, "RBFVOX", "DESAMPLE");
+            SetInfoSYS_DGW(Diag, _RBFVOX_6, DGW_LISTALIAS, "RBFVOX", "KERNEL");
+            SetInfoSYS_DGW(Diag, _RBFVOX_7, DGW_TEXT, "RBFVOX", "EPSILON");
+
+
+            // --- Run the Dialogue ---
+
+            i = iRunDialogue_DGW(Diag);
+            if (i == -1)
+               Cancel_SYS();  // Cancel
+
+
+            // --- Put values back in INI ---
+
+            GetInfoSYS_DGW(Diag, _RBFVOX_0, DGW_TEXT, "RBFVOX", "CHAN");
+            GetInfoSYS_DGW(Diag, _RBFVOX_1, DGW_FILEPATH, "RBFVOX", "VOXEL");
+            GetInfoSYS_DGW(Diag, _RBFVOX_2, DGW_TEXT, "RBFVOX", "CS");
+            GetInfoSYS_DGW(Diag, _RBFVOX_3, DGW_TEXT, "RBFVOX", "MAX_ERROR");
+            GetInfoSYS_DGW(Diag, _RBFVOX_4, DGW_TEXT, "RBFVOX", "MAX_ITERATIONS");
+            GetInfoSYS_DGW(Diag, _RBFVOX_5, DGW_LISTALIAS, "RBFVOX", "DESAMPLE");
+            GetInfoSYS_DGW(Diag, _RBFVOX_6, DGW_LISTALIAS, "RBFVOX", "KERNEL");
+            GetInfoSYS_DGW(Diag, _RBFVOX_7, DGW_TEXT, "RBFVOX", "EPSILON");
+
+
+            // ---  Do file verification here ---
+
+            if (i == 0)
+            {
+               GetString_SYS("RBFVOX", "VOXEL", sVoxel);
+               if (iFileExist_SYS(sVoxel))
+               {
+                  Printf_STR(sMsg, sizeof(sMsg), _("Overwrite the \"%s\" file?"), sVoxel);
+
+                  if (iDisplayQuestion_SYS(_("File Validation"), sMsg) == 0) i = 1;
+               }
+            }
+
+            Destroy_DGW(Diag);
+
+            if (i == 0) iDone = 1;
+         }
+
+      }  // end while(!iDone)
+
+
+      // --- Lock the database ---
+
+      EData = Current_EDB();
+      Data = Lock_EDB(EData);
+
+
+      // --- Get Non-control file Parameters ---
+
+      GetString_SYS("RBFVOX", "CHAN", sDataCh);
+      GetString_SYS("RBFVOX", "VOXEL", sVoxel);
+
+
+      // --- Validate parameters ---
+
+      if (iStrlen_STR(sDataCh) <= 0)
+         Abort_SYS(_("Data channel name is invalid"));
+
+      if (iStrlen_STR(sVoxel) <= 0)
+         Abort_SYS(_("New voxel file name is invalid"));
+
+
+      // --- Get current X, Y channels ---
+
+      GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+      GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+      GetXYZChan_DB(Data, DB_CHAN_Z, sZCh);
+
+
+      // --- See if grid channels exist ---
+
+      if (!iExistSymb_DB(Data, sXCh, DB_SYMB_CHAN))
+         Abort_SYS(_("The current X channel does not exist in database"));
+
+      if (!iExistSymb_DB(Data, sYCh, DB_SYMB_CHAN))
+         Abort_SYS(_("The current Y channel does not exist in database"));
+
+	  if (!iExistSymb_DB(Data, sZCh, DB_SYMB_CHAN))
+         Abort_SYS(_("The current Z channel does not exist in database"));
+
+      if (!iExistSymb_DB(Data, sDataCh, DB_SYMB_CHAN))
+         Abort_SYS(_("The Data Channel does not exist in database"));
+   }
+
+
+   // --- Get Control File Parameters ---
+
+   rCS = rGetReal_SYS("RBFVOX", "CS");
+   rMaxError = rGetReal_SYS("RBFVOX", "MAX_ERROR");
+   iMaxIterations = iGetInt_SYS("RBFVOX", "MAX_ITERATIONS");
+   iDesample = iGetInt_SYS("RBFVOX", "DESAMPLE");
+   iKernel = iGetInt_SYS("RBFVOX", "KERNEL");
+   rEpsilon = rGetReal_SYS("RBFVOX", "EPSILON"); 
+ 
+ 
+   // --- Turn on Progress bar ---
+
+   Progress_SYS(1);
+
+
+   // --- Execute RBFVOX program ---
+
+   GenerateRBF_MULTIGRID3DUTIL(Data, sVoxel, sDataCh, rCS, rMaxError, iMaxIterations, iDesample, iKernel, rEpsilon);
+
+
+   // --- Turn off progress ---
+
+   Progress_SYS(0);
+
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sVoxel, "Voxel", 1);
+
+
+   // --- Release the Database ---
+
+   UnLock_EDB(EData);
+
+}

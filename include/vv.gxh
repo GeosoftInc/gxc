@@ -105,14 +105,14 @@
 
 //===========================================================================================================
 //
-// VV_LOG_NEGATIVE Definitions
+// VV_LOGMODE Definitions
 //
 // Ways to handle negatives
 //
-// VV_LOG_NEGATIVE_NO
+// VV_LOGMODE_CLIPPED
 // Dummies out value less than the minimum.
 //
-// VV_LOG_NEGATIVE_YES
+// VV_LOGMODE_SCALED
 // if the data is in the range +/- minimum,
 // it is left alone.  Otherwise, the data
 // is divided by the minimum, the log is
@@ -120,11 +120,19 @@
 // sign is reapplied. Use _LogLinear_VV function
 // if decades in results are required.
 //
+// VV_LOGMODE_CLAMPED
+// Any values below the minimum are turned to the minimum.
+//
+// VV_LOGMODE_LINEAR
+// Similar to Scaled but using a smoother function. Identical to LogLinear_VV.
+//
 //===========================================================================================================
 
 
-#define VV_LOG_NEGATIVE_NO 0
-#define VV_LOG_NEGATIVE_YES 1
+#define VV_LOGMODE_CLIPPED 0
+#define VV_LOGMODE_SCALED 1
+#define VV_LOGMODE_CLAMPED 2
+#define VV_LOGMODE_LINEAR 3
 
 
 //===========================================================================================================
@@ -293,7 +301,7 @@
 
 [_public] void _Log_VV(VV,     // VV handle
                        int,    // VV_LOG_BASE
-                       int,    // VV_LOG_NEGATIVE
+                       int,    // VV_LOGMODE
                        real);  // Minimum value for VV_LOG_NEGATIVE
 #define Log_VV _Log_VV
 
@@ -823,22 +831,13 @@
 // InvLog_VV Inverse of the _Log_VV function.
 //
 // Notes     This is the inverse function for _Log_VV, with the same inputs.
-//           
-//           NEGATIVE_NO    - will not return values smaller than the input minimum
-//           NEGATIVE_YES   - if the data is in the range +/- minimum,
-//           it is left alone.  Otherwise, the sign is removed,
-//           the minimum is subtracted, the log of the minimum is added,
-//           and the exponential (base e or base 10) is taken of the
-//           sum. The sign is then reapplied.
-//           Minimum value will be defaulted to 1.0 if it is 0.0 or
-//           less than 0.0
 //
 // Available 7.3
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void InvLog_VV(VV,     // VV handle
                          int,    // VV_LOG_BASE
-                         int,    // VV_LOG_NEGATIVE
+                         int,    // VV_LOGMODE
                          real);  // Minimum value for VV_LOG_NEGATIVE
 
 
@@ -1093,8 +1092,7 @@
                            real,   // Current increment
                            real,   // New fid start
                            real,   // New fid increment
-                           int,    // New length
-                           int);   // Extrapolate Endpoints (0 - No, 1 - Yes)
+                           int);   // New length
 
 
   
