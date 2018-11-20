@@ -47,11 +47,11 @@ SBF hMapSBF;
 BF hMapBF;
 LST FileList;
 
-int i, iD, iJob, iNSec, iStyle, iType, iLoaded, iPlot, iArcGIS;
+int i, iD, iJob, iNSec, iStyle, iType, iLoaded, iPlot, iArcGIS, iVal;
 
 real rAz, rAzDeg, rLen, rRefX, rRefY, rSwing, rTol, rX, rX0, rX1, rY, rY0, rY1;
 real rDXl, rDXw, rDYl, rDYw, rX2, rX3, rX4, rY2, rY3, rY4, rThick, rBit;
-real rScaleMM, rXOff, rYOff, rCos, rSin, rF, rSize, rALen, rAWid;
+real rScaleMM, rXOff, rYOff, rCos, rSin, rF, rSize, rALen, rAWid,rVal;
 real rXOff2, rYOff2, rXa, rXb, rYa, rYb;
 real rX1s, rX2s, rX3s, rX4s, rY1s, rY2s, rY3s, rY4s, rXOffs, rYOffs;
 real rSinSwing, rBotE, rTopE, rH, rOff, rEInt, rNInt;
@@ -62,7 +62,9 @@ string(STR_DEFAULT_SHORT) sExt, sString;
 string(STR_DEFAULT_SHORT) sColour;
 string(STR_DEFAULT_LONG) sDesc;
 string(STR_DEFAULT_LONG) sLicClass;
+string(STR_DEFAULT_LONG) sTemp;
 string(STR_FILE) sDB;
+string(2) szDir;
 
 //===========================================================================
 //                                 CODE
@@ -586,7 +588,7 @@ string(STR_FILE) sDB;
 
    // --- Plot labels ---
 
-   if (!iArcGIS && iNSec > 1)
+   if (iNSec > 1)
    {
       for (i = 1; i <= iNSec; i++)
       {
@@ -598,8 +600,37 @@ string(STR_FILE) sDB;
          rX = rX0 + ((real)i - 1.0) * rEInt + rF * rXOff + rXOff2;
          rY = rY0 + ((real)i - 1.0) * rNInt + rF * rYOff + rYOff2;
 
-         FormatI_STR(i, sString, 3);
-         Text_MVIEW(View, sString, rX, rY);
+		if (rAbs_MATH(rCos) >= rAbs_MATH(rSin))
+		{
+			rVal = rRefX+(((real)i - 1.0)*rEInt);
+			if (rVal >= 0.0)
+				Strcpy_STR(szDir, "E", sizeof(szDir));
+			else
+			{
+				Strcpy_STR(szDir, "W", sizeof(szDir));
+				rVal = -rVal;
+			}
+		}
+		else
+		{
+			rVal = rRefY + (((real)i - 1.0)*rNInt);
+			if (rVal >= 0.0)
+				Strcpy_STR(szDir, "N", sizeof(szDir));
+			else
+			{
+				Strcpy_STR(szDir, "S", sizeof(szDir));
+				rVal = -rVal;
+			}
+		}
+
+		rVal = rVal + 0.5;
+		iVal = (int)rVal;
+		FormatI_STR(iVal, sTemp, sizeof(sTemp));
+		
+		Strcpy_STR(sString, sTemp);
+		Strcat_STR(sString, szDir);	
+		 		 
+        Text_MVIEW(View, sString, rX, rY);
       }
    }
 

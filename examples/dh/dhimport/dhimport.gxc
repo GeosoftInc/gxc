@@ -89,7 +89,7 @@ VV          VVf, VVi;
 
 int i, j, iType, iImpType, iOverwrite, iOverW, iLines, iNumLines, iBlobs, iChannels, iDefChannels, iPageSize, iNewDB;  
 int iRet, iTemplate, iTemplates, iNewCollarDB, iCollarTemplate, iNTemp, iTemp, iRequiredChannels;
-int iForceLogFile, iInteractive, iSaveINI, iNAssay, iNStartHoles, iHoles;
+int iForceLogFile, iArcGISPro, iInteractive, iSaveINI, iNAssay, iNStartHoles, iHoles;
 int iOverrideTemplateDataFileAdo, iOverrideTemplateDataFile, bMaxwell;
 
 string(1024) sConnect, sMsg;
@@ -98,12 +98,16 @@ string(STR_FILE) sVol, sDir, sDir2, sName, sName2, sTemplate, sLog, sExt;
 string(STR_FILE) sLocalPath, sLocalDir, sLocalVol;
 string(STR_MULTI_FILE) sTemplates;
 string(STR_DEFAULT) sGxParam;
+string(64) sLicClass;
 
 //===========================================================================
 //                                   CODE
 //===========================================================================
 
 {
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGISPro = iStrcmp_STR(sLicClass, _n("ArcGISPro"), STR_CASE_TOLERANT) == 0;
 
    // --- Get the import type ---
 
@@ -940,7 +944,7 @@ string(STR_DEFAULT) sGxParam;
       
       // --- If no channels are loaded, or importing a new collar table, load them all ---
       
-      if(!iScript_SYS())
+      if(!iArcGISPro && !iScript_SYS())
       {
          if(iDispChanLST_EDB(EData, ChanLST)==0 ||
             (iType==DH_DATA_COLLAR && (iNewCollarDB || iNStartHoles==0))) {
