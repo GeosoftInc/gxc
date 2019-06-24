@@ -16,7 +16,7 @@ DESCRIPTION   = "
             .BRIGHT        brightness (-1 to +1, 0 is normal)
             .VIEW          name of 3D view to plot to in scripting (defaults to 3D)
 
-            .EXTMAP        MAP Handle if the EMAP has already been locked externally
+            .EXTMAP        MAP Handle or name if the EMAP has already been locked externally
 
             grid orientation options (for cases where the grid has no
             orientation info of its own).
@@ -101,14 +101,14 @@ IMG hIMG;
 IPJ hIPJ;
 IPJ hIPJt;
 
-string(STR_MAX_PATH) sGrid, sName, sTemp, sColor;
+string(STR_MAX_PATH) sGrid, sName, sTemp, sColor, sMap;
 string(STR_MULTI_FILE) sFiles;
 string(STR_VIEW) s3DView, sGroup, sAgg;
 string(1024) sMsg;
 
 int i, iPlane, iMAP;
 int iZone, iOrientation, iNX, iNY, iOrient;
-int iGrid, iGrids, iInteractive, iProgState;
+int iGrid, iGrids, iInteractive, iProgState, iPlotMultiple;
 
 real rContour;
 real rDx, rDy, rXo, rYo, rBright;
@@ -134,6 +134,17 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
       EMap = (EMAP)0;
       SetInt_SYS("GRIDIMG3D", "EXTMAP", iDUMMY);  // Reset to make it go away from subsequent runs
    }
+	else
+	{
+		GetString_SYS("GRIDIMG3D", "EXTMAP", sMap);
+		if (iStrlen_STR(sMap) > 0 && iFileExist_SYS(sMap) == 0)
+			Strcpy_STR(sMap, "");
+	}
+
+	iPlotMultiple = 0;
+	if (iExistInt_SYS("GRIDIMG3D", "PLOT_MULTIPLE") == 1)
+		iPlotMultiple = (iGetInt_SYS("GRIDIMG3D", "PLOT_MULTIPLE") == 1);
+
 
    // --- Are we running interactively ? ---
 
@@ -196,6 +207,8 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
    // --- How many grids? ---
 
    iGrids = iCountTokens_STR(sFiles, "|");
+	if (iPlotMultiple == 1)
+		iGrids = 1;  // Let the plotting GX do all the work
 
 
    // --- Get the first one ---
@@ -203,7 +216,16 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
    GetMFile_STR(sFiles, sGrid, 0);
 
    if (iMAP != iDUMMY)
+	{
       Map = (MAP)iMAP;
+		GetFileName_MAP(Map, sMap);
+	}
+	else if (iStrlen_STR(sMap) > 0)
+	{
+		Map = Create_MAP(sMap, MAP_WRITEOLD);
+		iMAP = 1;
+	}
+	else
    {
       EMap = Current_EMAP();
       Map = Lock_EMAP(EMap);
@@ -238,9 +260,19 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
 
    // --- Import the grids ---
 
+   iProgState = iProgState_SYS();
+	Progress_SYS(1);
+	ProgName_SYS(_("Importing"), 1);
+
    for (iGrid = 0; iGrid < iGrids; iGrid++)
    {
       GetMFile_STR(sFiles, sGrid, iGrid);
+	
+      Printf_STR(sMsg, sizeof(sMsg), _("Importing %s"), sGrid);
+      ProgName_SYS(sMsg, 0);
+		ProgUpdateL_SYS(iGrid, iGrids);
+		if (iCheckStop_SYS() == 1)
+			Cancel_SYS();
 
 
       // --- Get the image/grid orientation and information ---
@@ -263,13 +295,10 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
 
       if (iOrientation == IPJ_ORIENT_DEFAULT)
       {
-         //if(iInteractive_SYS()) {
-
          SetInt_SYS("IMGORIENT3D", "GETGRID", 0);
          SetString_SYS("IMGORIENT3D", "GRID", sGrid);
          if (iRunGX_SYS("imgorient3d.gx") != 0)
             Cancel_SYS();
-         //}
 
 
          // --- Get the new image/grid orientation ---
@@ -301,9 +330,22 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
 
          Destroy_MVIEW(View);
          Destroy_IPJ(hIPJ);
-         UnLock_EMAP(EMap);
+			if (iMAP == iDUMMY)
+				UnLock_EMAP(EMap);
+			else
+			{
+				Destroy_MAP(Map);
+				SetString_SYS("SECTIONPLOT3D", "EXT_MAP", sMap);
+			}
 
-         SetString_SYS("SECTIONPLOT3D", "GRID", sGrid);
+			if (iPlotMultiple)
+			{
+				GetString_SYS("GRIDIMG3D", "GRID", sFiles);
+	         SetString_SYS("SECTIONPLOT3D", "GRID", sFiles);
+			}
+			else
+	         SetString_SYS("SECTIONPLOT3D", "GRID", sGrid);
+
          SetString_SYS("SECTIONPLOT3D", "VIEW", s3DView);
          SetInt_SYS("SECTIONPLOT3D", "METHOD", iZone);
          SetString_SYS("SECTIONPLOT3D", "TABLE", sColor);
@@ -313,7 +355,11 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
          iRunGX_SYS("geogxnet.dll(Geosoft.GX.GridUtils.PlotCrookedSectionGrid3D;Run)");
          SetInteractive_SYS(iInteractive);
 
-         Map = Lock_EMAP(EMap);
+			if(iMAP == iDUMMY)
+				Map = Lock_EMAP(EMap);
+			else
+				Map = Create_MAP(sMap, MAP_WRITEOLD);
+
          View = Create_MVIEW(Map, s3DView, MVIEW_WRITEOLD);
 
          continue;
@@ -393,12 +439,7 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
          if (iGlobal_SYS("MONTAJ.DEFAULT_COLOUR", sColor) == 1)  // undefined in parm block
             Strcpy_STR(sColor, "colour.tbl");                    // hardwire
 
-      iProgState = iProgState_SYS();
-      Progress_SYS(1);
-      Printf_STR(sMsg, sizeof(sMsg), _("Importing %s"), sGrid);
-      ProgName_SYS(sMsg, 1);
       LayerIMG_AGG(hAGG, sGrid, iZone, sColor, rContour);
-      Progress_SYS(iProgState);
 
 
       // --- adjust the brightness ---
@@ -434,7 +475,6 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
       Destroy_IPJ(hIPJ);
    }
 
-
    Destroy_IPJ(hIPJt);
    Destroy_MVIEW(View);
 
@@ -456,4 +496,6 @@ real rRefX, rRefY, rRefZ, rRot, rSwing, rAz;
 
    if (iMAP == iDUMMY)
       UnLock_EMAP(EMap);
+
+   Progress_SYS(iProgState);
 }

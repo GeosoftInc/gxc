@@ -61,6 +61,8 @@ int   iGridLine,iLog,iSameRange,iSameScale,iSourceLine,iChan,iScaleOption;
 real  rMinX,rMaxX,rMinY,rMaxY,rGridLineInt,rLog,rProfSplit;
 int   iLineType,iLineVersion;
 int   iLineCategory, iSkipProfile;
+int   iRescaleX, iVertGridLines;
+real  rVertGridLinesInterval;
 
 //===========================================================================
 //                                CODE
@@ -257,6 +259,25 @@ int   iLineCategory, iSkipProfile;
          SetProfileRangeX_EDB(EData,rMinX,rMaxX,(DB_SYMB)iChanX);
          iSetX = 1;
 
+      } 
+      else if(iStrcmp_STR(sItemName,"EDB_CELL_AUTORESCALE_X",STR_CASE_TOLERANT)==0) {
+
+         iRescaleX = iScanI_STR(sItemValue);
+         
+         GetItem_LST(List,0, i,sItemName);
+         GetItem_LST(List,1,i++,sItemValue);
+         if(iStrcmp_STR(sItemName,"EDB_CELL_VERTICAL_GRID_LINES",STR_CASE_TOLERANT)==0)
+            iVertGridLines = iScanI_STR(sItemValue);
+         else
+            Abort_SYS(_("Error loading EDB_CELL_VERTICAL_GRID_LINES in dbview file"));
+         
+         GetItem_LST(List,0, i,sItemName);
+         GetItem_LST(List,1,i++,sItemValue);
+         if(iStrcmp_STR(sItemName,"EDB_CELL_VERTICAL_GRID_LINES_INTERVAL",STR_CASE_TOLERANT)==0)
+            rVertGridLinesInterval = rScanR_STR(sItemValue);
+         else
+            Abort_SYS(_("Error loading EDB_CELL_VERTICAL_GRID_LINES_INTERVAL in dbview file"));
+
       } else
       if(iStrcmp_STR(sItemName,"EDB_PROF_WINDOW#",STR_CASE_TOLERANT)==0) {
          iWindow = iScanI_STR(sItemValue);
@@ -422,8 +443,7 @@ int   iLineCategory, iSkipProfile;
    
    SetSplit_EDB(EData, rProfSplit);
    SetProfileSplitVV_EDB(EData, SplitVV);
-
-
+   SetProfileXAxisOptions_EDB(EData, iRescaleX, iVertGridLines, rVertGridLinesInterval);
 
    // --- Destroy the list ---
 

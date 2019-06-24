@@ -86,24 +86,29 @@ REG         Reg;
 LST         List, AssayLST, HoleLST, UnHoleLST, ChanLST, TemplateChanLST, DatabaseChanLST;
 IPJ         Ipj;
 VV          VVf, VVi;
+RA          hLogRA;
 
-int i, j, iType, iImpType, iOverwrite, iOverW, iLines, iNumLines, iBlobs, iChannels, iDefChannels, iPageSize, iNewDB;  
+int i, j, iType, iL, iLogLines, iImpType, iOverwrite, iOverW, iLines, iNumLines, iBlobs, iChannels, iDefChannels, iPageSize, iNewDB;  
 int iRet, iTemplate, iTemplates, iNewCollarDB, iCollarTemplate, iNTemp, iTemp, iRequiredChannels;
-int iForceLogFile, iInteractive, iSaveINI, iNAssay, iNStartHoles, iHoles;
+int iForceLogFile, iArcGISPro, iInteractive, iSaveINI, iNAssay, iNStartHoles, iHoles;
 int iOverrideTemplateDataFileAdo, iOverrideTemplateDataFile, bMaxwell;
 
-string(1024) sConnect, sMsg;
+string(64000) sConnect, sMsg;
 string(STR_FILE) sData, sTable, sDB, sCurrentDB, sNewDB, sProject, sFile, sDirINI;
-string(STR_FILE) sVol, sDir, sDir2, sName, sName2, sTemplate, sLog, sExt;
+string(STR_FILE) sVol, sDir, sDir2, sName, sName2, sTemplate, sLog, sLogTemp, sExt;
 string(STR_FILE) sLocalPath, sLocalDir, sLocalVol;
 string(STR_MULTI_FILE) sTemplates;
 string(STR_DEFAULT) sGxParam;
+string(64) sLicClass;
 
 //===========================================================================
 //                                   CODE
 //===========================================================================
 
 {
+   // --- Are we running inside ArcGIS ---
+   GetLicenseClass_SYS(sLicClass);
+   iArcGISPro = iStrcmp_STR(sLicClass, _n("ArcGISPro"), STR_CASE_TOLERANT) == 0;
 
    // --- Get the import type ---
 
@@ -848,9 +853,21 @@ string(STR_DEFAULT) sGxParam;
 
       ProgName_SYS(_("Importing data to temporary table."),1);
       if(iImpType==0)
+	  {
          ImportBIN_DU(Data,sData,sTemplate,"TempData",iDUMMY,rDUMMY);
-		else if(iImpType==3)
-			ImportESRI_DU(Data,"",sTemplate,"TempData");
+		 
+		 // Clean up unnecessary log files if it seems they do not contain any useful information
+		 if (iFileExist_SYS("ImportQa.log") && iFileSize_SYS("ImportQa.log")<=3)
+			iDeleteFile_SYS("ImportQa.log");
+		 if (iFileExist_SYS("import_error.log") && iFileSize_SYS("import_error.log")<=3)
+		 {
+		    if (iFileExist_SYS("import.log"))
+				iDeleteFile_SYS("import.log");
+			iDeleteFile_SYS("import_error.log");
+		 }
+	  }
+	  else if(iImpType==3)
+		 ImportESRI_DU(Data,"",sTemplate,"TempData");
       else
       {
             if(iOverrideTemplateDataFileAdo)
@@ -884,14 +901,52 @@ string(STR_DEFAULT) sGxParam;
 
       // --- Create a log file name from the imported file name ---
 
-      Strcpy_STR(sLog, "dhimp_");
+	  Strcpy_STR(sLog, "dhimp_");
       Strcat_STR(sLog, sTable);
       Strcat_STR(sLog, ".log");
 
       Import2_DH(sProject,Data,Line,HoleCh,sTable,iType,sLog);
       ProgName_SYS(_("Import complete"),1);
 
-
+	  // --- Anything to display ---
+	  if (iFileExist_SYS(sLog))
+	  {
+	     if (iFileSize_SYS(sLog)<=3) // 3 characters could be UTF-8 BOM only
+	        iDeleteFile_SYS(sLog);
+	   else
+	     {
+	         if (iArcGISPro)
+		     {
+		        Strcat_STR(sMsg, _("Import warnings recorded in "));
+		  	  Strcat_STR(sMsg, sLog);
+		  	  Strcat_STR(sMsg, ":\r\n");
+		        hLogRA = Create_RA(sLog);
+		  	  iLogLines = iLen_RA(hLogRA);
+		  	  for (iL = 0; iL < iLogLines; iL++)
+                {
+                   iGets_RA(hLogRA, sLogTemp);
+		  		 Strcat_STR(sMsg, "\t");
+		  		 Strcat_STR(sMsg, sLogTemp);
+		  		 Strcat_STR(sMsg, "\r\n");
+		  	  }
+		  	  AddWarning_ARCPY(sMsg);
+		     }
+		     else
+		     {
+		  	   iInteractive = iInteractive_SYS();
+		  	   if(iForceLogFile && iScript_SYS() != 1) SetInteractive_SYS(1);
+		  	   if(iInteractive_SYS()) {
+		  		 // --- edit ---
+         
+		  		 SetString_SYS("EDIT","FILE",sLog);
+		  		 SetString_SYS("EDIT","CHILD","Yes");
+		  		 iRunGX_SYS("edit");         
+		  	   }
+		  	   if(iForceLogFile) SetInteractive_SYS(iInteractive);
+		     }
+	     }
+      }
+	  
       // --- Delete the HOLEID channel except for collar data ---
 
       if(iType!=DH_DATA_COLLAR) {
@@ -903,7 +958,7 @@ string(STR_DEFAULT) sGxParam;
       // --- Set the template into the database for refresh, but only if 
       //     overwriting ---
       
-      if(iOverwrite || iOverW)
+      if(iOverwrite || iOverW || 0 == iGetTemplateBlob_DH(Data, sTemplate, iImpType))
          SetTemplateBlob_DH(Data, sTemplate, iImpType); 
       
       
@@ -940,7 +995,7 @@ string(STR_DEFAULT) sGxParam;
       
       // --- If no channels are loaded, or importing a new collar table, load them all ---
       
-      if(!iScript_SYS())
+      if(!iArcGISPro && !iScript_SYS())
       {
          if(iDispChanLST_EDB(EData, ChanLST)==0 ||
             (iType==DH_DATA_COLLAR && (iNewCollarDB || iNStartHoles==0))) {
@@ -1057,22 +1112,8 @@ string(STR_DEFAULT) sGxParam;
    EData = Load_EDB(sCurrentDB);
    
    
-   // --- Anything to display ---
-
-   iInteractive = iInteractive_SYS();
-   if(iForceLogFile && iScript_SYS() != 1) SetInteractive_SYS(1);
-   if(iInteractive_SYS()) {
-      if (iFileSize_SYS(sLog)>3) // 3 characters could be UTF-8 BOM only
-      {
-          
-         // --- edit ---
-
-         SetString_SYS("EDIT","FILE",sLog);
-         SetString_SYS("EDIT","CHILD","Yes");
-         iRunGX_SYS("edit");         
-      }      
-   }
-   if(iForceLogFile) SetInteractive_SYS(iInteractive);
-
+   
+   
+	   
    Progress_SYS(0);
 }

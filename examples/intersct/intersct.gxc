@@ -231,6 +231,13 @@ int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
          iReloadOutputDB = 1;
       }
       Strcpy_STR(sOutput, "_TempOutputIntersection.tbl");
+      if (iFileExist_SYS(sOutput) == 1)
+      {
+         if (iDeleteFile_SYS(sOutput) != 0)
+         {
+            Abort_SYS(_("ERROR: Failed to delete _TempOutputIntersection.tbl"));
+         }
+      }
    }
 
 
@@ -404,23 +411,31 @@ int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
 
    if (iOutGDB)
    {
-      IntersectTBLtoGDB_DU(sOutput, sOutputDB);
-      Strcpy_STR(sOutput, sOutputDB);
+      if (iFileExist_SYS(sOutput) == 1)
+      {
+         IntersectTBLtoGDB_DU(sOutput, sOutputDB);
+         Strcpy_STR(sOutput, sOutputDB);
 
-      EIntData = Load_EDB(sOutputDB);
-
-
-      // --- Mark the intersection database with the flight database name ---
-
-      IntData = Lock_EDB(EIntData);
-      SetRegSymbSetting_DB(IntData, NULLSYMB, "Levelling.Database", sCurDB);
-      Commit_DB(IntData);
-      UnLock_EDB(EIntData);
+         EIntData = Load_EDB(sOutputDB);
 
 
-      // --- delete the temp table ---
+         // --- Mark the intersection database with the flight database name ---
 
-      iDeleteFile_SYS(sOutput);
+         IntData = Lock_EDB(EIntData);
+         SetRegSymbSetting_DB(IntData, NULLSYMB, "Levelling.Database", sCurDB);
+         Commit_DB(IntData);
+         UnLock_EDB(EIntData);
+
+
+         // --- delete the temp table ---
+
+         iDeleteFile_SYS(sOutput);
+      }
+      else
+      {
+         DisplayMessage_SYS(_("Create Intersection Database"), _("No tie lines or intersections were found in the selected lines in the database."));
+         Cancel_SYS();
+      }
    }
 
 
