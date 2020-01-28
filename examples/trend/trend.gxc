@@ -19,6 +19,7 @@ DESCRIPTION   = "
          ORDER    Order of the polynomial >=0 and <=9
 "
 // Revision History:
+// v9.7:   BASE-1503 Load output channel when they are created.
 // v7.1:   Made trend order items a list; added check and error message.
 // v5.1.3: Using FindChan_DB and iExistChan_DB
 //===========================================================================
@@ -39,10 +40,10 @@ RESOURCE = "trend.gr"
    //                             GLOBAL VARIABLES
    //===========================================================================
 
-   string(STR_DB_SYMBOL)
-      sInCh,
-   sOutCh,
-   sResCh, sOut;  // Channel Name
+string(STR_DB_SYMBOL)
+sInCh,
+sOutCh,
+sResCh, sOut;  // Channel Name
 int iOrder;       // Trend Order
 int iLines, iTotLines;
 
@@ -150,10 +151,15 @@ int i;     // utility int
    else
       Abort_SYS(_("An output channel was not specified."));
 
-   if (!iExistChan_DB(Data, sOut))
-      DupSymbNoLock_DB(Data, InCh, sOut);
-   OutCh = FindChan_DB(Data, sOut);
+   if (!iExistChan_DB(Data,sOut)) { 
+      OutCh = DupSymbNoLock_DB(Data,InCh,sOut);    // Create it 
 
+      UnLock_EDB(EData);      
+      LoadChan_EDB(EData,sOut);    //write the channel label to new column and display 
+      Data = Lock_EDB(EData);
+   
+   } else   
+      OutCh = FindChan_DB(Data,sOut);
 
    // --- Lock the channel symbols ---
 
@@ -208,9 +214,16 @@ int i;     // utility int
 
       // --- Create residual channel if it does not exist ---
 
-      if (!iExistChan_DB(Data, sResCh))
-         DupSymbNoLock_DB(Data, InCh, sResCh);
-      OutCh = FindChan_DB(Data, sResCh);
+   if (!iExistChan_DB(Data,sResCh)) { 
+      OutCh = DupSymbNoLock_DB(Data,InCh,sResCh);    // Create it 
+
+      UnLock_EDB(EData); 
+        LoadChan_EDB(EData,sResCh);    //write the channel label to new column and display 
+      Data = Lock_EDB(EData);
+   
+   } else   
+      OutCh = FindChan_DB(Data,sResCh);  
+      
       LockSymb_DB(Data, OutCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
 
       // --- Add maker ---

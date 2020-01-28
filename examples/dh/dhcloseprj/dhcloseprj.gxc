@@ -39,17 +39,22 @@ VV          VVf;
 LST         Lst;
 
 string(STR_FILE) sDB, sMap;
-int         i,iSaveClose,iN,iType,iIsESRI,lType;
+string(64) sLicClass;
+
+int         i,iSaveClose,iN,iType,iArcGISPro,iIsESRI,lType;
 
 //===========================================================================
 //                                    CODE
 //===========================================================================
 
 {
-   // --- Is it ArcView? ---
+   // --- Are we running inside ArcGIS ---
 
    iIsESRI = iIsESRI_DH();
 
+   GetLicenseClass_SYS(sLicClass);
+   iArcGISPro = iStrcmp_STR(sLicClass, _n("ArcGISPro"), STR_CASE_TOLERANT) == 0;
+   
    if (iIsESRI)
    {
       if (iHaveCurrent_EDB())
@@ -92,37 +97,39 @@ int         i,iSaveClose,iN,iType,iIsESRI,lType;
             UnLoad_EDB(sDB);
       }
    
+	  if (!iArcGISPro)
+	  {
+		  // --- Unload open maps ---
 
-      // --- Unload open maps ---
+		  Lst = Create_LST(STR_FILE);
 
-      Lst = Create_LST(STR_FILE);
+		  iN = iGetMapsLST_EMAP(Lst, EMAP_PATH_FULL);
+		  for(i=0;i<iN;i++) {
 
-      iN = iGetMapsLST_EMAP(Lst, EMAP_PATH_FULL);
-      for(i=0;i<iN;i++) {
+			 GetItem_LST(Lst, 0, i, sMap);
+			 if(iLoaded_EMAP(sMap)) {
 
-         GetItem_LST(Lst, 0, i, sMap);
-         if(iLoaded_EMAP(sMap)) {
+				// --- See if it is a Wholeplot map ---
 
-            // --- See if it is a Wholeplot map ---
+				EMap = Load_EMAP(sMap);
+				Map = Lock_EMAP(EMap);
 
-            EMap = Load_EMAP(sMap);
-            Map = Lock_EMAP(EMap);
+				Reg = GetREG_MAP(Map);
+				UnLock_EMAP(EMap);
 
-            Reg = GetREG_MAP(Map);
-            UnLock_EMAP(EMap);
+				GetInt_REG(Reg,"DH_TYPE",iType);
+			GetInt_REG(Reg,"DH_STANDALONE",lType);
 
-            GetInt_REG(Reg,"DH_TYPE",iType);
-	    GetInt_REG(Reg,"DH_STANDALONE",lType);
+				if(iType != iDUMMY && lType != 1)
+				   UnLoad_EMAP(sMap);
+			 
+				Destroy_REG(Reg);
+			 }
+		  }
 
-            if(iType != iDUMMY && lType != 1)
-               UnLoad_EMAP(sMap);
-         
-            Destroy_REG(Reg);
-         }
-      }
-
-      Destroy_LST(Lst);
-      Destroy_VV(VVf);
+		  Destroy_LST(Lst);
+		  Destroy_VV(VVf);
+	  }
    }
 }
 

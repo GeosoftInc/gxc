@@ -75,8 +75,6 @@ string(64) sXannot, sYannot;
 //===========================================================================
 
 {
-   if (!iInteractive_SYS()) Abort_SYS(_("This GX must be run interactively."));
-
    rMLeft = 20.0;
    rMRight = 10.0;
    rMBottom = 15.0;
@@ -93,17 +91,30 @@ string(64) sXannot, sYannot;
 
    EData = Current_EDB();
 
-   rFidNum = rDUMMY;
-   rFidNum = rGetReal_SYS("VAPLOT_GX_RUN", "FIDNUM");
+	if (iScript_SYS() == 0)
+	{
+		rFidNum = rDUMMY;
+		rFidNum = rGetReal_SYS("VAPLOT_GX_RUN", "FIDNUM");
 
-   if (rFidNum == rDUMMY)
-      rFidNum = rGetCurFid_EDB(EData);
-   if (rFidNum == rDUMMY)
-      Abort_SYS(_("You must select the cell to plot, not the cell header, to plot the array profile."));
-
-   SetReal_SYS("VAPLOT", "FIDNUM", rFidNum);
-
-   GetCurrentSelection_EDB(EData, sDB, sChan, sLine, sFid);
+		if (rFidNum == rDUMMY)
+			rFidNum = rGetCurFid_EDB(EData);
+		if (rFidNum == rDUMMY)
+			Abort_SYS(_("You must select the cell to plot, not the cell header, to plot the array profile."));
+   
+		GetCurrentSelection_EDB(EData, sDB, sChan, sLine, sFid);
+		SetString_SYS("VAPLOT", "LINE", sLine);
+		SetString_SYS("VAPLOT", "CHAN", sChan);
+		SetReal_SYS("VAPLOT", "FIDNUM", rFidNum);	
+	}
+	else
+	{
+		GetString_SYS("VAPLOT", "LINE", sLine);
+		GetString_SYS("VAPLOT", "CHAN", sChan);
+		rFidNum = rGetReal_SYS("VAPLOT", "FIDNUM");
+		if (iStrlen_STR(sLine)==0 || iStrlen_STR(sChan)==0)
+			Abort_SYS("The \"VAPLOT.LINE\" and \"VAPLOT.CHAN\" parameters must be defined for script mode.");
+		GetString_SYS("VAPLOT", "MAPNAME", sMap);
+	}
    FileNamePart_STR(sDB, sDB, STR_FILE_PART_NAME);
 
    Data = Lock_EDB(EData);
@@ -130,9 +141,6 @@ string(64) sXannot, sYannot;
    iFirst = iGetInt_SYS("VAPLOT_GX_RUN", "MINW");
    iLast = iGetInt_SYS("VAPLOT_GX_RUN", "MAXW");
 
-   //DisplayReal_SYS("rRange",rRange);
-   //DisplayInt_SYS ("iFirst",iFirst);
-
    if (iFirst == iDUMMY || iLast == iDUMMY) GetVAWindows_DB(Data, ZCh, iFirst, iLast);
    if (rBase == rDUMMY || rRange == rDUMMY) GetVAScaling_DB(Data, ZCh, rBase, rRange);
 
@@ -142,26 +150,29 @@ string(64) sXannot, sYannot;
 
    // --- Ready to run dialogues ---
 
-   Diag = Create_DGW("VAPLOT");
+	if (iInteractive_SYS())
+	{
+		Diag = Create_DGW("VAPLOT");
 
-   SetInfoSYS_DGW(Diag, _VAPLOT_0, DGW_TEXT, "VAPLOT", "TITLE");
-   SetInfoSYS_DGW(Diag, _VAPLOT_1, DGW_TEXT, "VAPLOT", "XANNOT");
-   SetInfoSYS_DGW(Diag, _VAPLOT_2, DGW_TEXT, "VAPLOT", "YANNOT");
-   SetInfoSYS_DGW(Diag, _VAPLOT_3, DGW_TEXT, "VAPLOT", "WIDTH");
-   SetInfoSYS_DGW(Diag, _VAPLOT_4, DGW_TEXT, "VAPLOT", "HEIGHT");
-   SetInfoSYS_DGW(Diag, _VAPLOT_5, DGW_TEXT, "VAPLOT", "COLOR");
+		SetInfoSYS_DGW(Diag, _VAPLOT_0, DGW_TEXT, "VAPLOT", "TITLE");
+		SetInfoSYS_DGW(Diag, _VAPLOT_1, DGW_TEXT, "VAPLOT", "XANNOT");
+		SetInfoSYS_DGW(Diag, _VAPLOT_2, DGW_TEXT, "VAPLOT", "YANNOT");
+		SetInfoSYS_DGW(Diag, _VAPLOT_3, DGW_TEXT, "VAPLOT", "WIDTH");
+		SetInfoSYS_DGW(Diag, _VAPLOT_4, DGW_TEXT, "VAPLOT", "HEIGHT");
+		SetInfoSYS_DGW(Diag, _VAPLOT_5, DGW_TEXT, "VAPLOT", "COLOR");
 
-   i = iRunDialogue_DGW(Diag);
-   if (i == -1) Cancel_SYS();  // He hit cancel
+		i = iRunDialogue_DGW(Diag);
+		if (i == -1) Cancel_SYS();  // He hit cancel
 
-   GetInfoSYS_DGW(Diag, _VAPLOT_0, DGW_TEXT, "VAPLOT", "TITLE");
-   GetInfoSYS_DGW(Diag, _VAPLOT_1, DGW_TEXT, "VAPLOT", "XANNOT");
-   GetInfoSYS_DGW(Diag, _VAPLOT_2, DGW_TEXT, "VAPLOT", "YANNOT");
-   GetInfoSYS_DGW(Diag, _VAPLOT_3, DGW_TEXT, "VAPLOT", "WIDTH");
-   GetInfoSYS_DGW(Diag, _VAPLOT_4, DGW_TEXT, "VAPLOT", "HEIGHT");
-   GetInfoSYS_DGW(Diag, _VAPLOT_5, DGW_TEXT, "VAPLOT", "COLOR");
+		GetInfoSYS_DGW(Diag, _VAPLOT_0, DGW_TEXT, "VAPLOT", "TITLE");
+		GetInfoSYS_DGW(Diag, _VAPLOT_1, DGW_TEXT, "VAPLOT", "XANNOT");
+		GetInfoSYS_DGW(Diag, _VAPLOT_2, DGW_TEXT, "VAPLOT", "YANNOT");
+		GetInfoSYS_DGW(Diag, _VAPLOT_3, DGW_TEXT, "VAPLOT", "WIDTH");
+		GetInfoSYS_DGW(Diag, _VAPLOT_4, DGW_TEXT, "VAPLOT", "HEIGHT");
+		GetInfoSYS_DGW(Diag, _VAPLOT_5, DGW_TEXT, "VAPLOT", "COLOR");
 
-   Destroy_DGW(Diag);
+		Destroy_DGW(Diag);
+	}
 
 
    // --- Get parameters ---
@@ -183,13 +194,16 @@ string(64) sXannot, sYannot;
 
    // --- Create a map. Use the current fid value for the profile. ---
 
-   Strcpy_STR(sMap, sDB);
-   Strcat_STR(sMap, "_");
-   Strcat_STR(sMap, sLine);
-   Strcat_STR(sMap, "_");
-   FormatI_STR((int)rFidNum, sTemp, 10);
-   Strcat_STR(sMap, sTemp);
-   Strcat_STR(sMap, ".map");
+	if (iScript_SYS() == 0 || iStrlen_STR(sMap)==0)
+	{
+		Strcpy_STR(sMap, sDB);
+		Strcat_STR(sMap, "_");
+		Strcat_STR(sMap, sLine);
+		Strcat_STR(sMap, "_");
+		FormatI_STR((int)rFidNum, sTemp, 10);
+		Strcat_STR(sMap, sTemp);
+		Strcat_STR(sMap, ".map");
+	}
 
    iOK = FALSE;
    while (iOK == FALSE)

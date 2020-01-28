@@ -60,7 +60,7 @@ LTB hMED;
 LTB hTMP;
 PLY hPLY, hPLYo;
 VV hVVx1, hVVx2, hVVy1, hVVy2;  // for the warp calculation
-int i, iNext, iRet, iRet2;
+int i, iNext, iRet, iRet2, iGiveRotationWarning;
 
 real r;
 real rMinX;  // Minimum X of map area (ground units)
@@ -88,7 +88,7 @@ real rInside;    // Inside edge
 real rDist;
 
 string(STR_DEFAULT_SHORT) sTemp, sUnits;
-string(STR_DEFAULT_LONG) s1, s2, s3, s4, s5;
+string(STR_DEFAULT_LONG) s1, s2, s3, s4, s5, sMsg;
 string(STR_FILE) sGrid, sDB;
 real rX, rY, rX1, rX2, rY1, rY2, rRot;
 int iDescr, iFactor;
@@ -150,6 +150,10 @@ int iTmp, iMed;
 //===========================================================================
 
 {
+	// --- N-S rotated maps can be dangerous ---
+
+	iGiveRotationWarning = 1;
+
    // --- get SBF for projection info ---
 
    hSBF = hGetSYS_SBF();
@@ -275,6 +279,25 @@ int iTmp, iMed;
             GetInfoSYS_DGW(Diag, _NEWMAPLL_RANGE_3, DGW_TEXT, NEWMAP, "MAX_LAT");
             GetInfoSYS_DGW(Diag, _NEWMAPLL_RANGE_4, DGW_LISTALIAS, NEWMAP, "ROTATE");
             Destroy_DGW(Diag);
+
+				
+				// --- Require user's assent to make map center N-S, since export from such maps can mislocate data ---
+
+				iRot = iGetInt_SYS(NEWMAP, "ROTATE");
+				if (iRot == 1 && iGiveRotationWarning == 1)
+				{
+					iGiveRotationWarning = 0;
+
+					Strcpy_STR(sMsg, _("Making the map center N-S requires that a warp be applied to the map data view. "));
+					Strcat_STR(sMsg, _("This means that objects exported from the map may be mislocated.\n\n\r"));
+					Strcat_STR(sMsg, _("Are you sure you wish to make the map center N-S?"));
+					if (iDisplayQuestion_SYS(_("Create a new map"), sMsg) == 0)
+					{
+						SetInt_SYS(NEWMAP, "ROTATE", 0);
+						i = RANGE_DIALOG;
+						break;
+					}
+				}
 
             if (iRet == SCAN_DATABASE)
             {
@@ -454,6 +477,7 @@ int iTmp, iMed;
 
                i = SETUP_ROTATION;
             }
+			
             break;
 
          case COORD_SYS:
@@ -843,7 +867,7 @@ int iTmp, iMed;
       // --- Rotate map? ---
 
       iRot = iGetInt_SYS(NEWMAP, "ROTATE");
-      if (iRot != 0) iRot = 1;  // Rotate by default
+      if (iRot != 1) iRot = 0;  // Do NOT rotate by default
 
 
       // --- Find rotation necessary to make the center of the

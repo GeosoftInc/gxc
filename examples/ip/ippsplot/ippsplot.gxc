@@ -44,10 +44,11 @@ IP          Ip;               // IP object
 DB_SYMB     Line;  
 DB_SELECT   Select;
 LST         LineLST;
+VV          GridsVV;          // Plotted grids to add to project
 
-int         i;                // Utility 
+int         i, iN;
 
-string(STR_FILE) sJob, sJob2, sMap, sMapTag, sDirectory;
+string(STR_FILE) sJob, sJob2, sMap, sMapTag, sDirectory, sGrid;
 string(300) sBuff, sMsg;
 string(STR_DEFAULT_SHORT) sLines;
 string(STR_DB_SYMBOL) sCurLine;
@@ -320,7 +321,22 @@ int iLine, iLines, iMod, iTotLines, iPage, iPlotted, iInteractive;
    // --- release database to EDB ---
    
    UnLock_EDB(EData);
-   
+
+
+	// --- Add any plotted grids to the project ---
+
+	if (iScript_SYS() == 0)
+	{
+		GridsVV = GetGridsVV_IP(Ip);
+		iN = iLength_VV(GridsVV);
+
+		for(i=0; i<iN; i++)
+		{
+			GetString_VV(GridsVV, i, sGrid);
+			iAddDocument_PROJ(sGrid, "Grid", PROJ_DISPLAY_NO);
+		}
+	}
+
    
    // --- give a warning if nothing happened... ---
 

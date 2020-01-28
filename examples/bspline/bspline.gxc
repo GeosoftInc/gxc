@@ -16,7 +16,8 @@ B-Spline curves in a channel by cubic B-spline on the valid values.
            .SMOOTH : Smoothness (0.0 to 1.0 or more)
            .TAU    : Tension (0.0 to 1.0)
 "
-
+// Revision History:
+// v9.7: BASE-1503 Load output channel when they are created.
 //===========================================================================
 
 RESOURCE = "bspline.gr"
@@ -128,9 +129,13 @@ string(STR_DEFAULT) sLabel;
    // --- Does the Output Channel Exist ? ---
 
    if (!iExistSymb_DB(Data, sOutCh, DB_SYMB_CHAN))
-   {
-      OutCh = DupSymb_DB(Data, InCh, sOutCh);  // Create it
-      UnLockSymb_DB(Data, OutCh);
+   {  
+      OutCh = DupSymbNoLock_DB(Data,InCh,sOutCh);    // Create it 
+
+      UnLock_EDB(EData); 
+      LoadChan_EDB(EData,sOutCh);    //write the channel label to new column and display 
+      Data = Lock_EDB(EData);     
+          
    }
    else
       OutCh = FindSymb_DB(Data, sOutCh, DB_SYMB_CHAN);

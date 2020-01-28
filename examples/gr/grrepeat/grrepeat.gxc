@@ -12,6 +12,7 @@ DESCRIPTION   = "
                .OUT      : Output averaged channel
 					.MODE     : Replace with 0: Mean, 1: Median (default), 2: Maximum, 3: Minimum
 					.SORT     : Sort by stations: 0: No (default), 1: Yes
+		 GRAVRED.STATION   : Station channel name
 "
 // Revision History
 // v8.1.0: Added selection of statistic to replace value with (use to be just the average).
@@ -54,7 +55,7 @@ int         i,iRep, iInteractive, j, k, iBlank;
 int         iStn,iRdgs,iReps,iRepStn,iMode,iSort,iNumRepeats,iRepeat,iStart;
 real        rAvg, rData;
 string(STR_DEFAULT_LONG) sTemp;
-string(STR_DB_SYMBOL) sStnLast,sStnNext,sFidChan;
+string(STR_DB_SYMBOL) sStationChan, sStnLast,sStnNext,sFidChan;
 string(STR_DB_SYMBOL) sLineLast,sLineNext, sLine;
 string(STR_DB_SYMBOL) sStn,sPrcStn,sRdgs,sRepRdgs,sPrcRdgs;
 string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
@@ -83,8 +84,18 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
    
    if (!iInteractive_SYS()) { 
 		GetString_SYS("GRREPEAT","GROUP",sLine);
+		if (!iStrlen_STR(sLine))
+			Abort_SYS(_("The \"GRREPEAT.GROUP\" parameter must be defined in script mode."));
 		Group = FindSymb_DB(hDB, sLine, DB_SYMB_LINE);
    }   
+	else
+	{
+      LockSymb_DB(hDB, Group, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      GetSymbName_DB(hDB, Group, sLine);
+      UnLockSymb_DB(hDB, Group);
+
+		SetString_SYS("GRREPEAT", "GROUP", sLine);
+	}
 
 
    // --- get workspace REG ---
@@ -110,14 +121,18 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
      List = GetList_DGW(hDGW,_GRREPEAT_1);
      SymbLST_DB(hDB,List,DB_SYMB_CHAN);
      Sort_LST(List,0,0);
+	  List = GetList_DGW(hDGW,_GRREPEAT_2);
+     SymbLST_DB(hDB,List,DB_SYMB_CHAN);
+     Sort_LST(List,0,0);
 
      // --- Set any Defaults ---
 
-     SetInfoSYS_DGW(hDGW,_GRREPEAT_0,DGW_TEXT,"GRREPEAT","IN");     
-     SetInfoSYS_DGW(hDGW,_GRREPEAT_1,DGW_TEXT,"GRREPEAT","OUT");
-     SetInfoSYS_DGW(hDGW,_GRREPEAT_2,DGW_LISTALIAS,"GRREPEAT","LINE");
-     SetInfoSYS_DGW(hDGW,_GRREPEAT_3,DGW_LISTALIAS,"GRREPEAT","MODE");
-     SetInfoSYS_DGW(hDGW,_GRREPEAT_4,DGW_LISTALIAS,"GRREPEAT","SORT");
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_0,DGW_TEXT,"GRAVRED","STATION");     
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_1,DGW_TEXT,"GRREPEAT","IN");     
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_2,DGW_TEXT,"GRREPEAT","OUT");
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_3,DGW_LISTALIAS,"GRREPEAT","LINE");
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_4,DGW_LISTALIAS,"GRREPEAT","MODE");
+     SetInfoSYS_DGW(hDGW,_GRREPEAT_5,DGW_LISTALIAS,"GRREPEAT","SORT");
 
 
      // --- Run the Dialogue ---
@@ -127,11 +142,12 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
 
      // --- Get the Strings ---
 
-     GetInfoSYS_DGW(hDGW,_GRREPEAT_0,DGW_TEXT,"GRREPEAT","IN");
-     GetInfoSYS_DGW(hDGW,_GRREPEAT_1,DGW_TEXT,"GRREPEAT","OUT");
-     GetInfoSYS_DGW(hDGW,_GRREPEAT_2,DGW_LISTALIAS,"GRREPEAT","LINE");
-     GetInfoSYS_DGW(hDGW,_GRREPEAT_3,DGW_LISTALIAS,"GRREPEAT","MODE");
-     GetInfoSYS_DGW(hDGW,_GRREPEAT_4,DGW_LISTALIAS,"GRREPEAT","SORT");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_0,DGW_TEXT,"GRAVRED","STATION");     
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_1,DGW_TEXT,"GRREPEAT","IN");     
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_2,DGW_TEXT,"GRREPEAT","OUT");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_3,DGW_LISTALIAS,"GRREPEAT","LINE");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_4,DGW_LISTALIAS,"GRREPEAT","MODE");
+     GetInfoSYS_DGW(hDGW,_GRREPEAT_5,DGW_LISTALIAS,"GRREPEAT","SORT");
 
 
      // --- Destroy the Dialogue ---
@@ -143,6 +159,10 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
 
    // --- Get Parameters ---
 
+   GetString_SYS("GRAVRED","STATION",sStationChan);
+	if (iStrlen_STR(sStationChan) == 0)
+		Strcpy_STR(sStationChan, "Station");
+
    GetString_SYS("GRREPEAT","IN",sInCh);
    GetString_SYS("GRREPEAT","OUT",sOutCh);
 	iMode = iGetInt_SYS("GRREPEAT","MODE");
@@ -151,14 +171,16 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
 	if(iSort != 1) iSort = 0;  // default no sorting
 
 
-   // --- Does the station, line and data channels Exist ? ---
+   // --- Do the data, station and line channels Exist ? ---
 
-   if (!iExistSymb_DB(hDB,sInCh,DB_SYMB_CHAN))
-      Abort_SYS(_("Input Gravity channel does not exist."));
-   StnCh  = FindSymb_DB(hDB,"Station",DB_SYMB_CHAN);
-   if (!iExistSymb_DB(hDB,"Station",DB_SYMB_CHAN))
-      Abort_SYS(_("No Station channel"));
    InCh = FindSymb_DB(hDB,sInCh,DB_SYMB_CHAN);
+	if(InCh == NULLSYMB)
+      Abort_SYS(_("Input Gravity channel does not exist."));
+   
+	StnCh  = FindSymb_DB(hDB,sStationChan,DB_SYMB_CHAN);
+   if(StnCh == NULLSYMB)
+		Abort_SYS(_("Input Station channel does not exist."));
+
    if (iGetYesNo_SYS("GRREPEAT","LINE") && iExistSymb_DB(hDB,"Line",DB_SYMB_CHAN)) 
       LineCh = FindSymb_DB(hDB,"Line",DB_SYMB_CHAN);
    else {
@@ -213,7 +235,7 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
 	if(iSort == 0)
 	{
 		Strcpy_STR(sFidChan, _n("__Fid"));
-		SetString_SYS("MAKEFID", "IN", "Station");
+		SetString_SYS("MAKEFID", "IN", sStationChan);
 		SetString_SYS("MAKEFID", "OUT", sFidChan);
 		SetString_SYS("MAKEFID", "TYPE", "DOUBLE");
 		SetString_SYS("MAKEFID", "LOADCHAN", "0");
@@ -232,7 +254,7 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
    
       // --- sort by station ---
       
-      SetString_SYS("SORTALLN","CHANNEL1","Station");
+      SetString_SYS("SORTALLN","CHANNEL1",sStationChan);
 		if(iSort == 0)
 			SetString_SYS("SORTALLN","CHANNEL2",sFidChan);
 		else
@@ -257,7 +279,7 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
       // --- sort by line and station ---
       
       SetString_SYS("SORTALLN","CHANNEL1","Line");
-      SetString_SYS("SORTALLN","CHANNEL2","Station");
+      SetString_SYS("SORTALLN","CHANNEL2",sStationChan);
 
 		if(iSort == 0)
 			SetString_SYS("SORTALLN","CHANNEL3",sFidChan);
@@ -422,6 +444,7 @@ string(STR_DEFAULT_SHORT) sMaxErr,sMeanErr,sRMS,sRepStn;
    UnLockSymb_DB(hDB,DiffCh);
    
    UnLock_EDB(eDB);
+	LoadChan_EDB(eDB, sOutCh);
    
 
 	// --- Restore original order if not sorting ---

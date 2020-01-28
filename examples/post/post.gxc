@@ -9,6 +9,7 @@ TRANSLATIONFRIENDLYPATH = "GX/Surface Mapping/Symbols"
 DESCRIPTION   = "
 
    POST.CHANNEL      - Data channel
+       .MASK         - Mask channel
        .SIZE         - posting size (mm)
        .COLOR        - posting color
        .DECIMALS     - posting decimals
@@ -46,7 +47,7 @@ RESOURCE = "post.gr"
    //===========================================================================
 
    string(STR_DB_SYMBOL) sChan,
-   sStation;
+   sStation, sMaskChan;
 string(STR_DEFAULT) sLabel;
 string(STR_DB_SYMBOL) sLine;
 string(STR_GROUP) sGroup;
@@ -57,7 +58,7 @@ string(GS_MAX_PATH) sDatabaseFile;
 
 EDB EData;
 DB Data;
-DB_SYMB XCh, YCh, ZCh, SCh;
+DB_SYMB XCh, YCh, ZCh, SCh, MaskCh;
 DB_SYMB Line;
 EMAP EMap;
 MAP Map;
@@ -69,10 +70,10 @@ IPJ DataIPJ;
 VV VVx, VVy, VVz, VVs, VVm;
 PLY Ply;
 int iLines, iTotLines, iJust, iDum, iFixed, iUp;
-int iChType, iChSize, iChFormat, iChDecimals;
+int iChType, iChSize, iChFormat, iChDecimals, iMaskChType;
 real rSize, rAngle, rOffsetL, rOffsetP, rScalePJ;
 real rBase, rMinDetect, rMod, rVangle;
-int iAlter, iStation;
+int iAlter, iStation, iMask;
 real rMinX, rMinY, rMaxX, rMaxY;
 
 
@@ -115,6 +116,9 @@ real rMinX, rMinY, rMaxX, rMaxY;
       List = GetList_DGW(Diag, _POST_0);
       SymbLST_DB(Data, List, DB_SYMB_CHAN);
       Sort_LST(List, 0, 0);
+	  List = GetList_DGW(Diag, _POST_1);
+      SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      Sort_LST(List, 0, 0);
       List = GetList_DGW(Diag, _POST_13);
       SymbLST_DB(Data, List, DB_SYMB_CHAN);
       Sort_LST(List, 0, 0);
@@ -123,20 +127,21 @@ real rMinX, rMinY, rMaxX, rMaxY;
       // --- Set any Defaults from INI ---
 
       SetInfoSYS_DGW(Diag, _POST_0, DGW_TEXT, "POST", "CHANNEL");
-      SetInfoSYS_DGW(Diag, _POST_1, DGW_TEXT, "POST", "SIZE");
-      SetInfoSYS_DGW(Diag, _POST_2, DGW_TEXT, "POST", "COLOR");
-      SetInfoSYS_DGW(Diag, _POST_3, DGW_TEXT, "POST", "DECIMALS");
-      SetInfoSYS_DGW(Diag, _POST_4, DGW_TEXT, "POST", "ANGLE");
-      SetInfoSYS_DGW(Diag, _POST_5, DGW_LISTALIAS, "POST", "FIXANGLE");
-      SetInfoSYS_DGW(Diag, _POST_6, DGW_LISTALIAS, "POST", "JUSTIFY");
-      SetInfoSYS_DGW(Diag, _POST_7, DGW_TEXT, "POST", "H_OFF");
-      SetInfoSYS_DGW(Diag, _POST_8, DGW_TEXT, "POST", "V_OFF");
-      SetInfoSYS_DGW(Diag, _POST_9, DGW_LISTALIAS, "POST", "DUMMY");
-      SetInfoSYS_DGW(Diag, _POST_10, DGW_TEXT, "POST", "BASE");
-      SetInfoSYS_DGW(Diag, _POST_11, DGW_TEXT, "POST", "MINDETECT");
-      SetInfoSYS_DGW(Diag, _POST_12, DGW_LISTALIAS, "POST", "ALTER");
-      SetInfoSYS_DGW(Diag, _POST_13, DGW_TEXT, "POST", "REFERENCE");
-      SetInfoSYS_DGW(Diag, _POST_14, DGW_TEXT, "POST", "INCR");
+	  SetInfoSYS_DGW(Diag, _POST_1, DGW_TEXT, "POST", "MASK");
+      SetInfoSYS_DGW(Diag, _POST_2, DGW_TEXT, "POST", "SIZE");
+      SetInfoSYS_DGW(Diag, _POST_3, DGW_TEXT, "POST", "COLOR");
+      SetInfoSYS_DGW(Diag, _POST_4, DGW_TEXT, "POST", "DECIMALS");
+      SetInfoSYS_DGW(Diag, _POST_5, DGW_TEXT, "POST", "ANGLE");
+      SetInfoSYS_DGW(Diag, _POST_6, DGW_LISTALIAS, "POST", "FIXANGLE");
+      SetInfoSYS_DGW(Diag, _POST_7, DGW_LISTALIAS, "POST", "JUSTIFY");
+      SetInfoSYS_DGW(Diag, _POST_8, DGW_TEXT, "POST", "H_OFF");
+      SetInfoSYS_DGW(Diag, _POST_9, DGW_TEXT, "POST", "V_OFF");
+      SetInfoSYS_DGW(Diag, _POST_10, DGW_LISTALIAS, "POST", "DUMMY");
+      SetInfoSYS_DGW(Diag, _POST_11, DGW_TEXT, "POST", "BASE");
+      SetInfoSYS_DGW(Diag, _POST_12, DGW_TEXT, "POST", "MINDETECT");
+      SetInfoSYS_DGW(Diag, _POST_13, DGW_LISTALIAS, "POST", "ALTER");
+      SetInfoSYS_DGW(Diag, _POST_14, DGW_TEXT, "POST", "REFERENCE");
+      SetInfoSYS_DGW(Diag, _POST_15, DGW_TEXT, "POST", "INCR");
 
 
       // --- Run the Dialogue ---
@@ -148,26 +153,28 @@ real rMinX, rMinY, rMaxX, rMaxY;
       // --- Put values back in INI ---
 
       GetInfoSYS_DGW(Diag, _POST_0, DGW_TEXT, "POST", "CHANNEL");
-      GetInfoSYS_DGW(Diag, _POST_1, DGW_TEXT, "POST", "SIZE");
-      GetInfoSYS_DGW(Diag, _POST_2, DGW_TEXT, "POST", "COLOR");
-      GetInfoSYS_DGW(Diag, _POST_3, DGW_TEXT, "POST", "DECIMALS");
-      GetInfoSYS_DGW(Diag, _POST_4, DGW_TEXT, "POST", "ANGLE");
-      GetInfoSYS_DGW(Diag, _POST_5, DGW_LISTALIAS, "POST", "FIXANGLE");
-      GetInfoSYS_DGW(Diag, _POST_6, DGW_LISTALIAS, "POST", "JUSTIFY");
-      GetInfoSYS_DGW(Diag, _POST_7, DGW_TEXT, "POST", "H_OFF");
-      GetInfoSYS_DGW(Diag, _POST_8, DGW_TEXT, "POST", "V_OFF");
-      GetInfoSYS_DGW(Diag, _POST_9, DGW_LISTALIAS, "POST", "DUMMY");
-      GetInfoSYS_DGW(Diag, _POST_10, DGW_TEXT, "POST", "BASE");
-      GetInfoSYS_DGW(Diag, _POST_11, DGW_TEXT, "POST", "MINDETECT");
-      GetInfoSYS_DGW(Diag, _POST_12, DGW_LISTALIAS, "POST", "ALTER");
-      GetInfoSYS_DGW(Diag, _POST_13, DGW_TEXT, "POST", "REFERENCE");
-      GetInfoSYS_DGW(Diag, _POST_14, DGW_TEXT, "POST", "INCR");
+	  GetInfoSYS_DGW(Diag, _POST_1, DGW_TEXT, "POST", "MASK");
+      GetInfoSYS_DGW(Diag, _POST_2, DGW_TEXT, "POST", "SIZE");
+      GetInfoSYS_DGW(Diag, _POST_3, DGW_TEXT, "POST", "COLOR");
+      GetInfoSYS_DGW(Diag, _POST_4, DGW_TEXT, "POST", "DECIMALS");
+      GetInfoSYS_DGW(Diag, _POST_5, DGW_TEXT, "POST", "ANGLE");
+      GetInfoSYS_DGW(Diag, _POST_6, DGW_LISTALIAS, "POST", "FIXANGLE");
+      GetInfoSYS_DGW(Diag, _POST_7, DGW_LISTALIAS, "POST", "JUSTIFY");
+      GetInfoSYS_DGW(Diag, _POST_8, DGW_TEXT, "POST", "H_OFF");
+      GetInfoSYS_DGW(Diag, _POST_9, DGW_TEXT, "POST", "V_OFF");
+      GetInfoSYS_DGW(Diag, _POST_10, DGW_LISTALIAS, "POST", "DUMMY");
+      GetInfoSYS_DGW(Diag, _POST_11, DGW_TEXT, "POST", "BASE");
+      GetInfoSYS_DGW(Diag, _POST_12, DGW_TEXT, "POST", "MINDETECT");
+      GetInfoSYS_DGW(Diag, _POST_13, DGW_LISTALIAS, "POST", "ALTER");
+      GetInfoSYS_DGW(Diag, _POST_14, DGW_TEXT, "POST", "REFERENCE");
+      GetInfoSYS_DGW(Diag, _POST_15, DGW_TEXT, "POST", "INCR");
    }
 
 
    // --- Get Parameters ---
 
    GetString_SYS("POST", "CHANNEL", sChan);
+   GetString_SYS("POST", "MASK", sMaskChan);
    GetString_SYS("POST", "REFERENCE", sStation);
    GetString_SYS("POST", "COLOR", sColor);
    if (iStrlen_STR(sStation) > 0)
@@ -216,6 +223,18 @@ real rMinX, rMinY, rMaxX, rMaxY;
    ZCh = FindChan_DB(Data, sChan);
    if (ZCh == NULLSYMB)
       Abort_SYS(_("Data channel does not exist."));
+  
+   iMask = 0;
+   if (iStrcmp_STR(sMaskChan, _n(""), STR_CASE_TOLERANT) != 0)
+	   iMask = 1;
+  
+   if (iMask)
+   {
+	  MaskCh = FindChan_DB(Data, sMaskChan);
+      if (MaskCh == NULLSYMB)
+         Abort_SYS(_("Mask channel does not exist."));
+	  iMaskChType = iGetChanType_DB(Data, MaskCh);
+   }
 
    if (iStation)
    {
@@ -325,9 +344,10 @@ real rMinX, rMinY, rMaxX, rMaxY;
    VVx = Create_VV(REAL, 0);
    VVy = Create_VV(REAL, 0);
    VVz = CreateExt_VV(iChType, 0);
+   if (iMask)
+	   VVm = CreateExt_VV(iMaskChType, 0);
    if (iStation)
       VVs = Create_VV(REAL, 0);
-   VVm = Create_VV(INT, 0);
 
 
    // --- Lock the channel symbols ---
@@ -335,6 +355,8 @@ real rMinX, rMinY, rMaxX, rMaxY;
    LockSymb_DB(Data, XCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
    LockSymb_DB(Data, YCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
    LockSymb_DB(Data, ZCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+   if (iMask)
+	  LockSymb_DB(Data, MaskCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
    if (iStation)
       LockSymb_DB(Data, SCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
 
@@ -368,12 +390,19 @@ real rMinX, rMinY, rMaxX, rMaxY;
       GetChanVV_DB(Data, Line, XCh, VVx);
       GetChanVV_DB(Data, Line, YCh, VVy);
       GetChanVV_DB(Data, Line, ZCh, VVz);
-      if (iStation)
+	  if (iMask)
+	    GetChanVV_DB(Data, Line, MaskCh, VVm);		  
+	  if (iStation)
          GetChanVV_DB(Data, Line, SCh, VVs);
       ReFidVV_VV(VVx, VVz);
       ReFidVV_VV(VVy, VVz);
       if (iStation)
          ReFidVV_VV(VVs, VVz);
+	  if (iMask)
+	  {
+		 ReFidVV_VV(VVm, VVz);
+         Mask_VVU(VVz, VVm);
+	  }
 
       /*    
       // --- Clip the data to the view's data extents ---
@@ -422,6 +451,8 @@ real rMinX, rMinY, rMaxX, rMaxY;
    UnLockSymb_DB(Data, XCh);
    UnLockSymb_DB(Data, YCh);
    UnLockSymb_DB(Data, ZCh);
+   if (iMask)
+	  UnLockSymb_DB(Data, MaskCh);
    if (iStation)
       UnLockSymb_DB(Data, SCh);
 

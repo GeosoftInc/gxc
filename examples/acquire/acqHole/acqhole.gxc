@@ -57,7 +57,7 @@ DH Drill;
 EDB EData;
 DB Data;
 
-int i, iRc, iDelete, iType;
+int i, iRc, iDelete, iType, iArcGISPro;
 int iLength, iStatus, iCheck;
 
 string(STR_FILE) sWorkVol;
@@ -67,6 +67,7 @@ string(STR_FILE) sGdbDir;
 string(STR_FILE) sGdbVol;
 string(STR_FILE) sProjectGeo, sProj;
 string(2) sDirSeparatorChar;
+string(64) sLicClass;
 
 int iGdbLst, iProjectGeo, iHasDataBases;
 int iImportNegatives;
@@ -82,6 +83,9 @@ CRC CRC1, CRC2;
 #define MESSAGE_1 _("Import acQuire data into the current Geosoft database ?")
 
 {
+   GetLicenseClass_SYS(sLicClass);
+   iArcGISPro = iStrcmp_STR(sLicClass, _n("ArcGISPro"), STR_CASE_TOLERANT) == 0;
+
    // --- Get the current project database directory ---
 
    GetString_SYS("DH", "PROJECT_DIR", sWorkDir);
@@ -417,59 +421,73 @@ CRC CRC1, CRC2;
    if (!iHasDataBases)
       Abort_SYS(_("The acQuire DrillHole Database import failed because no information was found in query."));
 
-   // --- Open the Wholeplot project ---
-
-   SetString_SYS("DHOPENPRJ", "NAME", sProject);
-   SetString_SYS("DH", "PROJECT_DIR", sWorkDir);
-
-   SetInteractive_SYS(0);
-   iRunGX_SYS("geogxnet.dll(Geosoft.GX.DrillHole.DHOpenPrj;Run)");
-   SetInteractive_SYS(1);
-
-
-   Strcpy_STR(sGdbName, sWorkDir);
-   Strcat_STR(sGdbName, sProject);
-   Strcat_STR(sGdbName, "_Collar.gdb");
-
-   Drill = Create_DH(sGdbName);
-
-
-   // --- Select all holes ---
-
-   SelectAllHoles_DH(Drill);
-
-
-   // --- Re-Compute XYZ locations for surveys and assay data ---
-
-   Progress_SYS(1);
-   ComputeXYZ_DH(Drill);
-   UpdateCollarTable_DH(Drill);
-   Progress_SYS(0);
-
-   VVDatabases = Create_VV(-STR_FILE, 0);
-   GetDatabasesVV_DH(Drill, VVDatabases);
-   Destroy_DH(Drill);
-   iLength = iLength_VV(VVDatabases);
-   for (i = 0; i < iLength; i++)
+   if (iArcGISPro)
    {
-      GetString_VV(VVDatabases, i, sGdbName);
-      if (iFileExist_SYS(sGdbName))
-      {
-         EData = Load_EDB(sGdbName);
-         Data = Lock_EDB(EData);
-         if (iDelete || 0 == iGetTemplateBlob_DH(Data, sParFile, iType))
-            SetTemplateBlob_DH(Data, sParFile, 4);
-         UnLock_EDB(EData);
-      }
+      Strcpy_STR(sGdbName, sWorkDir);
+      Strcat_STR(sGdbName, sProject);
+      Strcat_STR(sGdbName, "_Collar.gdb");
+   
+      EData = Load_EDB(sGdbName);
+      Data = Lock_EDB(EData);
+      if (iDelete || 0 == iGetTemplateBlob_DH(Data, sParFile, iType))
+         SetTemplateBlob_DH(Data, sParFile, 4);
+      UnLock_EDB(EData);
    }
-   Destroy_VV(VVDatabases);
-
-
-   // --- Done ---
-
-   Destroy_VV(NameVV);
-   Destroy_VV(GeologyNameVV);
-
+   else
+   {
+      // --- Open the Wholeplot project ---
+      
+      SetString_SYS("DHOPENPRJ", "NAME", sProject);
+      SetString_SYS("DH", "PROJECT_DIR", sWorkDir);
+      
+      SetInteractive_SYS(0);
+      iRunGX_SYS("geogxnet.dll(Geosoft.GX.DrillHole.DHOpenPrj;Run)");
+      SetInteractive_SYS(1);
+      
+      
+      Strcpy_STR(sGdbName, sWorkDir);
+      Strcat_STR(sGdbName, sProject);
+      Strcat_STR(sGdbName, "_Collar.gdb");
+      
+      Drill = Create_DH(sGdbName);
+      
+      
+      // --- Select all holes ---
+      
+      SelectAllHoles_DH(Drill);
+      
+      
+      // --- Re-Compute XYZ locations for surveys and assay data ---
+      
+      Progress_SYS(1);
+      ComputeXYZ_DH(Drill);
+      UpdateCollarTable_DH(Drill);
+      Progress_SYS(0);
+      
+      VVDatabases = Create_VV(-STR_FILE, 0);
+      GetDatabasesVV_DH(Drill, VVDatabases);
+      Destroy_DH(Drill);
+      iLength = iLength_VV(VVDatabases);
+      for (i = 0; i < iLength; i++)
+      {
+         GetString_VV(VVDatabases, i, sGdbName);
+         if (iFileExist_SYS(sGdbName))
+         {
+            EData = Load_EDB(sGdbName);
+            Data = Lock_EDB(EData);
+            if (iDelete || 0 == iGetTemplateBlob_DH(Data, sParFile, iType))
+               SetTemplateBlob_DH(Data, sParFile, 4);
+            UnLock_EDB(EData);
+         }
+      }
+      Destroy_VV(VVDatabases);
+      
+      
+      // --- Done ---
+      
+      Destroy_VV(NameVV);
+      Destroy_VV(GeologyNameVV);
+   }
 
    // --- Remove the temporary selection file ---
 

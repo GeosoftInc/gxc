@@ -21,6 +21,8 @@ DESCRIPTION   = "
              .MASK     -  Channel to mask.
              .DUMMY    -  \"INSIDE\"  dummy data inside polygons.
                        -  \"OUTSIDE\" dummy data outside polygons.
+				 .GDB      -  If defined, use this database, not the current one,
+				              and don't load it if it is not already loaded.
 "
 // Revision History:
 // v6.3.0: Mask channel can be new.
@@ -38,14 +40,15 @@ RESOURCE = "polymask.gr"
 //===========================================================================
 
 #include <all.gxh>
-   // clang-format on
+// clang-format on
 
-   //===========================================================================
-   //                                 VARIABLES
-   //===========================================================================
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
 
-   string(STR_DB_SYMBOL) sXCh,
-   sYCh, sMask;                    // Channel Names
+string(STR_DB_SYMBOL) sXCh,
+sYCh, sMask;                    // Channel Names
+string(STR_FILE) sDB;              // Database Name
 string(STR_FILE) sTable;           // Table Name
 string(STR_DEFAULT_SHORT) sDummy;  // Dummy option
 
@@ -63,7 +66,7 @@ int i;
 int iDummy;     // Inside/Outside option
 int iLines;     // Number of Lines Processed
 int iTotLines;  // Total Number of Lines to Process
-int iN, iNew;
+int iN, iNew, iLoaded;
 
 string(STR_DEFAULT_SHORT) sTemp;  // temporary number formating string
 string(STR_DEFAULT) sLabel;
@@ -75,8 +78,26 @@ string(STR_DEFAULT) sLabel;
 {
    // --- Get database ---
 
-   EData = Current_EDB();
-   Data = Lock_EDB(EData);
+	GetString_SYS("POLYMASK", "GDB", sDB);
+	iLoaded = 0;
+	if (iStrlen_STR(sDB) > 0)
+	{
+		SetString_SYS("POLYMASK", "GDB", "");  // force reset each time
+		iLoaded = iLoaded_EDB(sDB);
+		if (iLoaded)
+		{
+		   EData = LoadNoActivate_EDB(sDB);
+			Data = Lock_EDB(EData);
+		}
+		else
+			Data = Open_DB(sDB, _n("SUPER"), "");
+	}
+	else
+	{
+		iLoaded = 1;
+	   EData = CurrentNoActivate_EDB();
+		Data = Lock_EDB(EData);
+	}
 
    // --- Are we running interactively ? ---
 
@@ -286,12 +307,14 @@ string(STR_DEFAULT) sLabel;
    Destroy_PLY(Polygon);
    Progress_SYS(0);
 
-   // --- Release the Database ---
+   
+	// --- Release the Database ---
 
-   UnLock_EDB(EData);
-
-
-   // --- Ensure mask channel is loaded ---
-
-   LoadChan_EDB(EData, sMask);
+	if (iLoaded == 1)
+	{
+		UnLock_EDB(EData);
+		LoadChan_EDB(EData, sMask);
+	}
+	else
+		Destroy_DB(Data);
 }

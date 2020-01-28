@@ -21,7 +21,9 @@ DESCRIPTION   = "
                      are trimmed from each line.
            .DIALOG   \"NO\" to prevent interactive dialog.                     
            .COMPRESSION  0 - None, 1 - Speed, 2 - Size.       
-           .MAXLINES If defined, explicitly set the maximum number of lines              
+           .MAXLINES If defined, explicitly set the maximum number of lines    
+			  .GDB      If defined, use this database, not the current one, as the master database,
+				              and don't load it if it is not already loaded.			  
 "
 
 TRANSLATIONDOMAIN = "core"
@@ -82,7 +84,7 @@ string(1024) sTemp;
 string(STR_DEFAULT_SHORT) sLines,sChans,sDummy;
 string(STR_DEFAULT_LONG) sProg;
 
-int i,iChan,iBlob,iFirst,iLast,iLen;
+int i,iChan,iBlob,iFirst,iLast,iLen,iMasterLoaded;
 int iChType,iMask,iCol,iDataLen, iMaskLen;
 int iLine,iLines,iTotLines,iNoDGW,iProg,iNProg;
 int iComp,iOK,iGroupLine,iSaveAsMode;
@@ -99,7 +101,26 @@ real rStart,rIncr,rEnd;
 
    // --- Get the database ---
 
-   EMaster = Current_EDB();
+	GetString_SYS("DBSUBSET", "GDB", sMaster);
+	iMasterLoaded = 0;
+	if (iStrlen_STR(sMaster) > 0)
+	{
+		SetString_SYS("DBSUBSET", "GDB", "");  // force reset each time
+		iMasterLoaded = iLoaded_EDB(sMaster);
+		if (iMasterLoaded)
+		{
+		   EMaster = LoadNoActivate_EDB(sMaster);
+			Master = Lock_EDB(EMaster);
+		}
+		else
+			Master = Open_DB(sMaster, _n("SUPER"), "");
+	}
+	else
+	{
+		iMasterLoaded = 1;
+	   EMaster = CurrentNoActivate_EDB();
+		Master = Lock_EDB(EMaster);
+	}
 
 
    // --- Are we running interactively ? ---
@@ -138,9 +159,7 @@ real rStart,rIncr,rEnd;
       // --- Set up channel list ---
 
       List = GetList_DGW(Diag,_DBSUBSET_4);
-      Master = Lock_EDB(EMaster);
       SymbLST_DB(Master,List,DB_SYMB_CHAN);
-      UnLock_EDB(EMaster);
       Sort_LST(List,0,0);
       		
 		
@@ -213,23 +232,20 @@ real rStart,rIncr,rEnd;
    GetString_SYS("DBSUBSET","LINES",sLines);
 
    LineLST = Create_LST(2*STR_DB_SYMBOL);
-   Master = Lock_EDB(EMaster);
    if (iCharComp_STR(sLines,_n("A"))==1) 
 		LineLST_DB(Master, LineLST);
 	else	
 		SelectedLineLST_DB(Master, LineLST);
-	UnLock_EDB(EMaster);
   
-   
    
    // --- get the channel list ---
    
    GetString_SYS("DBSUBSET","CHANNELS",sChans);
    hVV = Create_VV(INT,0);
-   if (iCharComp_STR(sChans,_n("A"))) {
-      Master = Lock_EDB(EMaster);
+   if (iCharComp_STR(sChans,_n("A")) || iMasterLoaded == 0) {
       iChan = iSymbList_DB(Master,hVV,DB_SYMB_CHAN);
    } else {
+		UnLock_EDB(EMaster);
       iChan = iDispChanList_EDB(EMaster,hVV);
       Master = Lock_EDB(EMaster);
    }
@@ -793,13 +809,17 @@ real rStart,rIncr,rEnd;
    
    // --- Unlock the databases ---
 
-   UnLock_EDB(EMaster);
+	if (iMasterLoaded)
+		UnLock_EDB(EMaster);
+	else
+		Destroy_DB(Master);
+
    Destroy_DB(Subset);
    
 
    // --- Copy the line view info (something else to do here?) ---
 
-   if (iInteractive_SYS())
+   if (iInteractive_SYS() && iMasterLoaded)
       ESubset = LoadWithView_EDB(sSubset,EMaster);
    
    Destroy_VV(hVV);
@@ -811,3 +831,4 @@ real rStart,rIncr,rEnd;
    Progress_SYS(0);
 
 }
+ 
