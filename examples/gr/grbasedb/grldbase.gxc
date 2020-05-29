@@ -50,6 +50,7 @@ int i, i0, iNew, iType;
 
 #define TYPE_CSV 0
 #define TYPE_GDB 1
+#define TYPE_SURVEY 2
 
 //===========================================================================
 //                                CODE
@@ -85,7 +86,7 @@ int i, i0, iNew, iType;
 
             hDGW = Create_DGW("GRLDBASE");
             SetInfo_DGW(hDGW, _GRLDBASE_0, DGW_FILEPATH, sDB);
-            SetInfo_DGW(hDGW, _GRLDBASE_1, DGW_TEXT, sType);
+            SetInfoSYS_DGW(hDGW, _GRLDBASE_1, DGW_TEXT, "GRLOAD", "SOURCE");
 
             i0 = 0;
             while (!i0)
@@ -93,7 +94,8 @@ int i, i0, iNew, iType;
                i = iRunDialogue_DGW(hDGW);
                if (i == -1) Cancel_SYS();
                GetInfo_DGW(hDGW, _GRLDBASE_0, DGW_FILEPATH, sDB);
-               GetInfo_DGW(hDGW, _GRLDBASE_1, DGW_TEXT, sType);
+               GetInfoSYS_DGW(hDGW, _GRLDBASE_1, DGW_TEXT, "GRLOAD", "SOURCE");
+					GetString_SYS("GRLOAD", "SOURCE", sType);
 
 
                // --- check database exists ---
@@ -126,7 +128,7 @@ int i, i0, iNew, iType;
                   GetInfo_DGW(hDGW, _GRLDBASE_GDB_0, DGW_FILEPATH, sFile);
                Destroy_DGW(hDGW);
             }
-            else
+            else if (iCharComp_STR(sType, "T"))
             {
                iType = TYPE_CSV;
                hDGW = Create_DGW("GRLDBASE_CSV");
@@ -137,7 +139,11 @@ int i, i0, iNew, iType;
                   GetInfo_DGW(hDGW, _GRLDBASE_CSV_0, DGW_FILEPATH, sFile);
                Destroy_DGW(hDGW);
             }
-
+				else if (iCharComp_STR(sType, "S"))
+				{
+					iType = TYPE_SURVEY;
+					i = 2; // continue to next step
+				}
             break;
 
          default:
@@ -150,10 +156,12 @@ int i, i0, iNew, iType;
       {
          iType = TYPE_GDB;
       }
-      else
+      else if (iCharComp_STR(sType, "S"))
       {
-         iType = TYPE_CSV;
+         iType = TYPE_SURVEY;
       }
+		else
+			iType = TYPE_CSV;
    }
 
    // --- load/create the new database ---
@@ -236,6 +244,45 @@ int i, i0, iNew, iType;
          hLTB = CreateCSV_LTB(sFile);
          LoadLTB_DU(hDB, Group, hLTB, DU_LOADLTB_APPEND);
          Destroy_SYS(hLTB);
+      }
+      else if (iType == TYPE_SURVEY)  // survey file
+      {
+			// --- Delete the preset channels ---
+
+			Ch = FindSymb_DB(hDB, "Gravity", DB_SYMB_CHAN);
+			if (Ch != NULLSYMB)
+			{
+				LOCK_RW(hDB, Ch);
+				DeleteSymb_DB(hDB, Ch);
+			}
+
+			Ch = FindSymb_DB(hDB, "Latitude", DB_SYMB_CHAN);
+			if (Ch != NULLSYMB)
+			{
+				LOCK_RW(hDB, Ch);
+				DeleteSymb_DB(hDB, Ch);
+			}
+
+			Ch = FindSymb_DB(hDB, "Longitude", DB_SYMB_CHAN);
+			if (Ch != NULLSYMB)
+			{
+				LOCK_RW(hDB, Ch);
+				DeleteSymb_DB(hDB, Ch);
+			}
+
+			Ch = FindSymb_DB(hDB, "Elevation", DB_SYMB_CHAN);
+			if (Ch != NULLSYMB)
+			{
+				LOCK_RW(hDB, Ch);
+				DeleteSymb_DB(hDB, Ch);
+			}
+
+			UnLock_EDB(eDB);
+
+			SetString_SYS("GRLOAD", "BASE_STATION_DB", sDB);
+			iRunGX_SYS("geogxnet.dll(Geosoft.GX.Gravity.ImportGravitySurvey;Run)");
+			eDB = Load_EDB(sDB);
+			hDB = Lock_EDB(eDB);
       }
       else
       {

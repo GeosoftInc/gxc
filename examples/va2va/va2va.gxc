@@ -49,7 +49,7 @@ DB_SYMB     Line;             // Line Handle
 DGW         hDGW;             // Dialogue handle
 LST         List;             // List handle
 VA          hVA,hVAs;         // VA handles
-VV          hVVb;             // Base properties
+VV          hVVb, hVVb2;      // Base properties
 
 int         i,iType,iStart,iSize,iCol,iLen,iBaseType;
 int         iLines;           // Number of Lines Processed
@@ -181,9 +181,21 @@ string(STR_DEFAULT) sLabel, sUnits;
 			{
 				rOffset += rGetReal_VV(hVVb, i);
 			}
+   		Copy2_VV(hVVb, 0, hVVb, iStart, iSize);
+	   	SetLen_VV(hVVb, iSize);
 		}
-		Copy2_VV(hVVb, 0, hVVb, iStart, iSize);
-		SetLen_VV(hVVb, iSize);
+      else if (iBaseType == DB_ARRAY_BASETYPE_DISCRETE_TIME_WINDOWS)
+      {
+         hVVb2 = Create_VV(REAL, iSize*2);
+   		Copy2_VV(hVVb2, 0, hVVb, iStart, iSize);   // widths
+   		Copy2_VV(hVVb2, iSize, hVVb, iStart + iCol, iSize);  // starts
+         Copy_VV(hVVb, hVVb2);
+      }
+      else
+      {
+   		Copy2_VV(hVVb, 0, hVVb, iStart, iSize);
+	   	SetLen_VV(hVVb, iSize);      
+      }
 		SetVABaseCoordinateInfo_DB(hDB, OutCh, iBaseType, rOffset, hVVb, sUnits, 1);
 	}
      

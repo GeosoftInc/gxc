@@ -298,7 +298,7 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 
 	// --- Lists for importing a location database with non-standard channel names ---
 
-	hCopyLST = Create_LST(STR_DB_SYMBOL+20);
+	hCopyLST = CreateSymbLST_DB();
 	iCopyToTempLocationGroup = 0;
 
    if (iType == TYPE_CSV)
@@ -467,6 +467,8 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 				LOCK_RW(hDBi, InputGroup);
 				LOCK_R(hDBi, CurrentLine);
 				CopyLine_DU(hDBi, CurrentLine, InputGroup);
+				UNLOCK(hDBi, InputGroup);
+				UNLOCK(hDBi, CurrentLine);
 
 				// --- Ensure we delete any extra lines added ---
 
@@ -485,6 +487,7 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 		if (iCopyToTempLocationGroup == 1)
 		{
 			SetSelect_DB(hDBi, Select);
+			LOCK_RW(hDBi, InputGroup);
 			DeleteSymb_DB(hDBi, InputGroup);
 		}
 
