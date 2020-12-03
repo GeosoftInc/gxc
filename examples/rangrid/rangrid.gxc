@@ -29,6 +29,7 @@ Internal tension (0-1)                 .TENS                (optional)
 Cells to extend beyond data            .EDGCLP              (optional)
 Weighting power                        .IWT                 (optional)
 Weighting slope                        .WTSLP               (optional)
+Mash Channel                           .MASK_CHANNEL        (optional)
 
 Run Modes      RANGRID.RUNMODE   0: Normal behaviour
                                  1: Run advanced options dialog only
@@ -95,6 +96,14 @@ int i, iDone, iLocked, iRunMode;
 string(STR_DEFAULT_LONG) sMsg;
 string(STR_FILE) sDatabase;
 
+int iCounter, iN;
+string(STR_DB_SYMBOL) sMask, sChannelToGrid, sTempChan, sLine;
+string(STR_DEFAULT_LONG) sExp;
+DB_SYMB TempChan;
+EXP Exp;
+LST LineLST;
+DB_SYMB Line;
+
 //===========================================================================
 //                           RANGRID CODE
 //===========================================================================
@@ -149,14 +158,18 @@ string(STR_FILE) sDatabase;
                List = GetList_DGW(Diag, _RANGRID_0);
                SymbLST_DB(Data, List, DB_SYMB_CHAN);
                Sort_LST(List, 0, 0);
+               List = GetList_DGW(Diag, _RANGRID_1);
+               NonStringAndNonArrayChanLST_DB(Data, List);
+               Sort_LST(List, 0, 0);
                UnLock_EDB(EData);
 
 
                // --- Set any Defaults from INI ---
 
                SetInfoSYS_DGW(Diag, _RANGRID_0, DGW_TEXT, "RANGRID", "CHAN");
-               SetInfoSYS_DGW(Diag, _RANGRID_1, DGW_FILEPATH, "RANGRID", "GRID");
-               SetInfoSYS_DGW(Diag, _RANGRID_2, DGW_TEXT, "RANGRID", "CS");
+               SetInfoSYS_DGW(Diag, _RANGRID_1, DGW_TEXT, "RANGRID", "MASK_CHANNEL");
+               SetInfoSYS_DGW(Diag, _RANGRID_2, DGW_FILEPATH, "RANGRID", "GRID");
+               SetInfoSYS_DGW(Diag, _RANGRID_3, DGW_TEXT, "RANGRID", "CS");
 
 
                // --- Run the Dialogue ---
@@ -169,8 +182,9 @@ string(STR_FILE) sDatabase;
                // --- Put values back in INI ---
 
                GetInfoSYS_DGW(Diag, _RANGRID_0, DGW_TEXT, "RANGRID", "CHAN");
-               GetInfoSYS_DGW(Diag, _RANGRID_1, DGW_FILEPATH, "RANGRID", "GRID");
-               GetInfoSYS_DGW(Diag, _RANGRID_2, DGW_TEXT, "RANGRID", "CS");
+               GetInfoSYS_DGW(Diag, _RANGRID_1, DGW_TEXT, "RANGRID", "MASK_CHANNEL");
+               GetInfoSYS_DGW(Diag, _RANGRID_2, DGW_FILEPATH, "RANGRID", "GRID");
+               GetInfoSYS_DGW(Diag, _RANGRID_3, DGW_TEXT, "RANGRID", "CS");
 
 
                // ---  Do file verification here ---
@@ -381,6 +395,11 @@ string(STR_FILE) sDatabase;
 
       if (!iExistSymb_DB(Data, sZCh, DB_SYMB_CHAN))
          Abort_SYS(_("The Z Channel does not exist in database"));
+
+      GetString_SYS("RANGRID", "MASK_CHANNEL", sMask);
+
+      if (iStrlen_STR(sMask) > 0 && !iExistSymb_DB(Data, sMask, DB_SYMB_CHAN))
+         Abort_SYS(_("The Mask Channel does not exist in database"));
    }
 
 
@@ -523,11 +542,62 @@ string(STR_FILE) sDatabase;
 
    Progress_SYS(1);
 
+   if (iStrlen_STR(sMask) > 0)
+   {
+      Strcpy_STR(sTempChan, "_");
+      Strcat_STR(sTempChan, sZCh);
+      iCounter = 0;
+      while (iExistSymb_DB(Data, sTempChan, DB_SYMB_CHAN))
+      {
+         iCounter++;
+         Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sZCh, iCounter);
+      }
+
+      TempChan = CreateSymb_DB(Data, sTempChan, DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);
+      LockSymb_DB(Data, TempChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+      Printf_STR(sExp, sizeof(sExp), _n("%s = (%s == DUMMY) ? DUMMY : %s;"), sTempChan, sMask, sZCh);
+
+      Exp = Create_EXP(Data, sExp, 256);
+      LineLST = CreateSymbLST_DB();
+      SelectedLineLST_DB(Data, LineLST);
+
+      iN = iSize_LST(LineLST);
+      for (iCounter = 0; iCounter < iN; iCounter++)
+      {
+         GetSymbItem_LST(LineLST, iCounter, sLine, Line);
+         Printf_STR(sText, sizeof(sText), _("Masking channel for line: %s"), sLine);
+         ProgName_SYS(sText, 0);
+
+         LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+         ProgUpdateL_SYS(iCounter, iN);
+
+         if (iCheckStop_SYS()) Cancel_SYS();
+
+         Math_DU(Data, Line, Exp);
+         UnLockSymb_DB(Data, Line);
+      }
+
+      UnLockSymb_DB(Data, TempChan);
+      Strcpy_STR(sChannelToGrid, sTempChan);
+   }
+   else
+      Strcpy_STR(sChannelToGrid, sZCh);
+
 
    // --- Execute rangrid program ---
 
-   iRun2_RGRD(Data, sXCh, sYCh, sZCh, sCtl, sGrid);
+   iRun2_RGRD(Data, sXCh, sYCh, sChannelToGrid, sCtl, sGrid);
 
+   if (iStrlen_STR(sTempChan) > 0)
+   {
+      if (iExistSymb_DB(Data, sTempChan, DB_SYMB_CHAN) == 1)
+      {
+         TempChan = FindSymb_DB(Data, sTempChan, DB_SYMB_CHAN);
+         LockSymb_DB(Data, TempChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data, TempChan);
+      }
+   }
 
    // --- Turn off progress ---
 

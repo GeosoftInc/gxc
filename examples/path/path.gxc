@@ -56,7 +56,7 @@ string(8) sFormat;
 string(2) sChar;
 string(STR_DEFAULT_SHORT) sLabelColor, sLineColor, sFont;
 string(STR_DEFAULT_LONG) sMsg;
-string(STR_GROUP) sGrpName;
+string(STR_GROUP) sGrpName, sPresetGrpName;
 string(STR_FILE) sFile, sLabel;
 
 EDB EData;
@@ -72,7 +72,7 @@ LPT Lpt;
 VV VVx, VVy, VVs;
 IPJ DataIPJ;
 LST List;
-int i, iLines, iTotLines;
+int i, iLines, iTotLines, iGrpMode, iGrpClipMode;
 int iFormat, iLoc, iUp, iTick;
 int iLen, iStation, iLabelDir, iLabelCompass;
 int iLabelWeight, iLineType;
@@ -90,6 +90,26 @@ real rVangle, rThickness, rLabelSize, rThinRes;
 
    if (iRunGX_SYS("sclmap") != 0)
       Cancel_SYS();
+
+   
+   // --- Allow for some script-mode settings ---
+   
+   iGrpMode = MVIEW_GROUP_NEW;
+   iGrpClipMode = CLIP_ON;
+   Strcpy_STR(sPresetGrpName, "");
+   if (iInteractive_SYS() == 0)
+   {
+      iGrpMode = iGetInt_SYS("PATH", "GROUP_MODE");
+      if (iGrpMode != MVIEW_GROUP_APPEND)
+         iGrpMode = MVIEW_GROUP_NEW;
+
+      iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
+      if (iGrpClipMode != CLIP_OFF)
+         iGrpClipMode = CLIP_ON;
+
+      GetString_SYS("PATH", "GROUP_NAME", sPresetGrpName);
+   }
+
 
    // --- get current map and database ---
 
@@ -365,7 +385,7 @@ real rVangle, rThickness, rLabelSize, rThinRes;
 
    // --- Turn on the group clipping ---
 
-   GroupClipMode_MVIEW(View, CLIP_ON);
+   GroupClipMode_MVIEW(View, iGrpClipMode);
 
 
    // --- create path group ---
@@ -391,7 +411,10 @@ real rVangle, rThickness, rLabelSize, rThinRes;
          }
       }
    }
-   StartGroup_MVIEW(View, sLabel, MVIEW_GROUP_NEW);
+   else if (iStrlen_STR(sPresetGrpName) != 0)
+      Strcpy_STR(sLabel, sPresetGrpName);
+
+   StartGroup_MVIEW(View, sLabel, iGrpMode);
 
 
    // --- set plotting parameters ---

@@ -82,6 +82,14 @@ int iRunMode;
 #define MODE_NORMAL 0
 #define MODE_OPTIONS 1
 #define MODE_CONTROL_FILE 2
+int iCounter, iN;
+string(STR_DB_SYMBOL) sMask, sChannelToGrid, sTempChan, sLine;
+string(STR_DEFAULT_LONG) sExp;
+DB_SYMB TempChan;
+EXP Exp;            
+LST LineLST;
+DB_SYMB Line;
+
 //===========================================================================
 //                           BIGRID CODE
 //===========================================================================
@@ -118,13 +126,17 @@ int iRunMode;
                List = GetList_DGW(Diag, _BIGRID0_0);
                SymbLST_DB(Data, List, DB_SYMB_CHAN);
                Sort_LST(List, 0, 0);
+               List = GetList_DGW(Diag, _BIGRID0_1);
+               NonStringAndNonArrayChanLST_DB(Data, List);
+               Sort_LST(List, 0, 0);	
 
 
                // --- Set any Defaults from INI ---
 
                SetInfoSYS_DGW(Diag, _BIGRID0_0, DGW_TEXT, "BIGRID", "CHAN");
-               SetInfoSYS_DGW(Diag, _BIGRID0_1, DGW_FILEPATH, "BIGRID", "GRID");
-               SetInfoSYS_DGW(Diag, _BIGRID0_2, DGW_TEXT, "BIGRID", "CS");
+               SetInfoSYS_DGW(Diag, _BIGRID0_1, DGW_TEXT, "BIGRID", "MASK_CHANNEL");
+               SetInfoSYS_DGW(Diag, _BIGRID0_2, DGW_FILEPATH, "BIGRID", "GRID");
+               SetInfoSYS_DGW(Diag, _BIGRID0_3, DGW_TEXT, "BIGRID", "CS");
 
 
                // --- Run the Dialogue ---
@@ -136,8 +148,9 @@ int iRunMode;
                // --- Put values back in INI ---
 
                GetInfoSYS_DGW(Diag, _BIGRID0_0, DGW_TEXT, "BIGRID", "CHAN");
-               GetInfoSYS_DGW(Diag, _BIGRID0_1, DGW_FILEPATH, "BIGRID", "GRID");
-               GetInfoSYS_DGW(Diag, _BIGRID0_2, DGW_TEXT, "BIGRID", "CS");
+               GetInfoSYS_DGW(Diag, _BIGRID0_1, DGW_TEXT, "BIGRID", "MASK_CHANNEL");
+               GetInfoSYS_DGW(Diag, _BIGRID0_2, DGW_FILEPATH, "BIGRID", "GRID");
+               GetInfoSYS_DGW(Diag, _BIGRID0_3, DGW_TEXT, "BIGRID", "CS");
 
 
                // ---  Do file verification here ---
@@ -397,6 +410,11 @@ int iRunMode;
    if (!iExistChan_DB(Data, sChan))
       Abort_SYS(_("Z Channel is not specified or does not exist"));
 
+    GetString_SYS("BIGRID", "MASK_CHANNEL", sMask);
+	 
+    if (iStrlen_STR(sMask) > 0 && !iExistSymb_DB(Data, sMask, DB_SYMB_CHAN))
+         Abort_SYS(_("The Mask Channel does not exist in database"));
+
 
    // --- Set default parameters to be the same as in the GRC ---
 
@@ -582,7 +600,51 @@ int iRunMode;
       Strcat_STR(sChan, ",");
       Strcat_STR(sChan, sGrad);
    }
-   InDat = CreateDB_DAT(Data, sXCh, sYCh, sChan);
+   
+   if (iStrlen_STR(sMask) > 0)
+   {
+      Strcpy_STR(sTempChan, "_");
+      Strcat_STR(sTempChan, sChan);
+      iCounter = 0;
+      while (iExistSymb_DB(Data, sTempChan, DB_SYMB_CHAN))
+      {
+         iCounter++;
+         Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sChan, iCounter);
+      }
+
+      TempChan = CreateSymb_DB(Data, sTempChan, DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);  
+      LockSymb_DB(Data, TempChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+      Printf_STR(sExp, sizeof(sExp), _n("%s = (%s == DUMMY) ? DUMMY : %s;"), sTempChan, sMask, sChan);
+
+      Exp = Create_EXP(Data, sExp, 256);
+      LineLST = CreateSymbLST_DB();
+      SelectedLineLST_DB(Data, LineLST);
+
+      iN = iSize_LST(LineLST);
+      for (iCounter = 0; iCounter < iN; iCounter++)
+      {
+         GetSymbItem_LST(LineLST, iCounter, sLine, Line);
+         Printf_STR(sText, sizeof(sText), _("Masking channel for line: %s"), sLine);
+         ProgName_SYS(sText, 0);
+         
+         LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+         ProgUpdateL_SYS(iCounter, iN);
+
+         if (iCheckStop_SYS()) Cancel_SYS();
+
+         Math_DU(Data, Line, Exp);
+	 UnLockSymb_DB(Data, Line);
+
+      }
+
+      UnLockSymb_DB(Data, TempChan);
+      Strcpy_STR(sChannelToGrid, sTempChan);
+   }
+   else
+      Strcpy_STR(sChannelToGrid, sChan);
+   
+   InDat = CreateDB_DAT(Data, sXCh, sYCh, sChannelToGrid);
    if (iTRA)
       OutDat = CreateXGD_DAT("_bigrid.grd(GRD)", DAT_XGD_NEW);
    else
@@ -632,6 +694,16 @@ int iRunMode;
    Destroy_BIGRID(Bigrid);
    Destroy_DAT(InDat);
    Destroy_DAT(OutDat);
+   
+   if (iStrlen_STR(sTempChan) > 0)
+   {
+      if (iExistSymb_DB(Data, sTempChan, DB_SYMB_CHAN) == 1)
+      {
+         TempChan = FindSymb_DB(Data, sTempChan, DB_SYMB_CHAN);
+         LockSymb_DB(Data, TempChan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+         DeleteSymb_DB(Data, TempChan);
+      }
+   }
 
 
    // --- if trending, re-grid ---

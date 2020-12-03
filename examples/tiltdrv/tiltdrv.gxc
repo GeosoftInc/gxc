@@ -12,10 +12,11 @@ Computes the tilt derivative (TDR) of an input grid
            
 Parameters: 
 
-     GRIDASIG.IN  - Name of input grid file
+     TILTDRV .IN  - Name of input grid file
              .OUT - Name of output tilt derivative grid (TDR) file
              .OUT2 - Name of output horizontal derivative of TDR grid (HD_TDR) file
              .METHOD - z-derivative method
+             .GDB - Name of output tilt-depth database
 "
 // Revision History:
 // v6.1:   New GX.
@@ -36,8 +37,8 @@ RESOURCE = "TILTDRV.gr"
    //===========================================================================
 
    string(STR_FILE) sIn;  // Name of input grid file
-string(STR_FILE) sOut;    // Name of output analytic signal grid file
-string(STR_FILE) sOut2;   // Name of output analytic signal (phase) grid file
+string(STR_FILE) sTiltDerivGrid;    // Name of output tilt derivative grid (TDR) file
+string(STR_FILE) sHorizDerivOfTiltDerivGrid;   // Name of output horizontal derivative of TDR grid (HD_TDR) file
 
 IMG IMGi;   //
 IMG IMGi2;  // Grid image objects
@@ -66,6 +67,8 @@ real rXoe, rYoe;
 real rDx, rDy, rXo, rYo, rRot;  // grid info
 
 string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
+string(STR_FILE) sGDB;     // Name of output database
+string(STR_FILE) sDrive, sDirectory, sName, sExtension;
 
 
 //===========================================================================
@@ -90,6 +93,7 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
          SetInfoSYS_DGW(Diag, _TILTDRVFORM_1, DGW_FILEPATH, "TILTDRV", "OUT");
          SetInfoSYS_DGW(Diag, _TILTDRVFORM_2, DGW_FILEPATH, "TILTDRV", "OUT2");
          SetInfoSYS_DGW(Diag, _TILTDRVFORM_3, DGW_LISTALIAS, "TILTDRV", "METHOD");
+         SetInfoSYS_DGW(Diag, _TILTDRVFORM_4, DGW_FILEPATH, "TILTDRV", "GDB");
 
          // --- Run the Dialogue ---
 
@@ -103,6 +107,7 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
          GetInfoSYS_DGW(Diag, _TILTDRVFORM_1, DGW_FILEPATH, "TILTDRV", "OUT");
          GetInfoSYS_DGW(Diag, _TILTDRVFORM_2, DGW_FILEPATH, "TILTDRV", "OUT2");
          GetInfoSYS_DGW(Diag, _TILTDRVFORM_3, DGW_LISTALIAS, "TILTDRV", "METHOD");
+         GetInfoSYS_DGW(Diag, _TILTDRVFORM_4, DGW_FILEPATH, "TILTDRV", "GDB");
 
          Destroy_DGW(Diag);
       }
@@ -111,21 +116,40 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
    // --- Get Parameters ---
 
    GetString_SYS("TILTDRV", "IN", sIn);
-   GetString_SYS("TILTDRV", "OUT", sOut);
-   GetString_SYS("TILTDRV", "OUT2", sOut2);
+   GetString_SYS("TILTDRV", "OUT", sTiltDerivGrid);
+   GetString_SYS("TILTDRV", "OUT2", sHorizDerivOfTiltDerivGrid);
    iMethod = iGetInt_SYS("TILTDRV", "METHOD");
+   GetString_SYS("TILTDRV", "GDB", sGDB);
 
 
    // --- Validate essential parameters ---
 
    if (iStrlen_STR(sIn) <= 0)
       Abort_SYS(_("Input grid file name is invalid"));
-   if (iStrlen_STR(sOut) <= 0)
+   if (iStrlen_STR(sTiltDerivGrid) <= 0)
       Abort_SYS(_("Output grid file name is invalid"));
 
    iThtdrGrid = 0;
-   if (iStrlen_STR(sOut2) > 0)
+   if (iStrlen_STR(sHorizDerivOfTiltDerivGrid) > 0)
       iThtdrGrid = 1;
+
+   
+   // --- The horizontal derivative grid is normally optional, but required for the tilt depth database. ---
+
+   if (iStrlen_STR(sGDB) > 0)
+   {
+      iThtdrGrid = 1;
+      if (iStrlen_STR(sHorizDerivOfTiltDerivGrid) == 0)
+      {
+         FileNamePart_STR(sTiltDerivGrid, sDrive, STR_FILE_PART_VOLUME);
+         FileNamePart_STR(sTiltDerivGrid, sDirectory, STR_FILE_PART_DIRECTORY);
+         FileNamePart_STR(sTiltDerivGrid, sName, STR_FILE_PART_NAME);
+         FileNamePart_STR(sTiltDerivGrid, sExtension, STR_FILE_PART_EXTENSION);
+
+         Strcat_STR(sName, _("_HD_TDR"));
+         FileCombineParts_STR(sDrive, sDirectory, sName, sExtension, "GRD", sHorizDerivOfTiltDerivGrid);         
+      }         
+   }
 
 
    // --- Turn on Progress bar ---
@@ -366,7 +390,7 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
    IMGi = CreateFile_IMG(GS_DOUBLE, "_dx.grd", IMG_FILE_READONLY);
    IMGi2 = CreateFile_IMG(GS_DOUBLE, "_dy.grd", IMG_FILE_READONLY);
    IMGi3 = CreateFile_IMG(GS_DOUBLE, "_dz.grd", IMG_FILE_READONLY);
-   IMGo = CreateOutFile_IMG(GS_DOUBLE, sOut, IMGi);
+   IMGo = CreateOutFile_IMG(GS_DOUBLE, sTiltDerivGrid, IMGi);
 
 
    AddGrid_IEXP(IEXP_tdr, IMGi, "dx");
@@ -390,6 +414,7 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
    iDeleteFile_SYS("_dy.grd.gi");
    iDeleteFile_SYS("_dz.grd");
    iDeleteFile_SYS("_dz.grd.gi");
+   iDeleteFile_SYS("_drvz.con");
 
 
    // --- Compute ThTdr grid ---
@@ -436,7 +461,7 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
       // --- Calculate ThTdr grid---
 
       IEXP_tdr2 = Create_IEXP();
-      IMGo2 = CreateOutFile_IMG(GS_DOUBLE, sOut2, IMGo);
+      IMGo2 = CreateOutFile_IMG(GS_DOUBLE, sHorizDerivOfTiltDerivGrid, IMGo);
       AddGrid_IEXP(IEXP_tdr2, IMGo2x, "dx");
       AddGrid_IEXP(IEXP_tdr2, IMGo2y, "dy");
       AddGrid_IEXP(IEXP_tdr2, IMGo2, "tdr2");
@@ -458,6 +483,25 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
 
    Destroy_IMG(IMGo);
 
+   
+   // --- Tilt depth database calculation ---
+
+   if (iStrlen_STR(sGDB))
+   {
+      if (iFileExist_SYS(sGDB))
+      {
+         UnLoad_EDB(sGDB);
+         iDeleteFile_SYS(sGDB);
+      }
+
+      ProgName_SYS(_("Creating tilt depth database..."), 1);
+
+      MagneticTiltDepth_GU(sTiltDerivGrid, sHorizDerivOfTiltDerivGrid, sGDB);
+
+      if (iInteractive_SYS())
+         iAddDocument_PROJ(sGDB, "Database", PROJ_DISPLAY_YES);
+   }
+
 
    // --- done ---
 
@@ -467,8 +511,8 @@ string(STR_FILE) sRefFil;  // Name of reference file (_ref.bin)
 
    if (iInteractive_SYS())
    {
-      iAddDocument_PROJ(sOut, "Grid", 1);
+      iAddDocument_PROJ(sTiltDerivGrid, "Grid", 1);
       if (iThtdrGrid)
-         iAddDocument_PROJ(sOut2, "Grid", 1);
+         iAddDocument_PROJ(sHorizDerivOfTiltDerivGrid, "Grid", 1);
    }
 }

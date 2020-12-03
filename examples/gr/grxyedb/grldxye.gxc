@@ -44,18 +44,21 @@ EDB eDBi;   // Load from database
 DB hDBi;    // Load from database
 DGW hDGW;    // Dialogue handle
 LTB hLTB;    // Table Handle
-DB_SYMB Group, Ch, Chan, InputGroup, CurrentLine;
+DB_SYMB Group, Ch, Chan, InputGroup, CurrentLine, StnCh;
 REG hWorkREG;
-LST hChanLST, hCopyLST, List;
+LST hChanLST, hCopyLST, List,  hOrigStnLST;
+VV  OrigStnVV, NewStnVV, RemoveVV;
 WA hWA;
 DB_SELECT Select;
 
 string(STR_FILE) sDB, sFile, sReportFile;
 string(STR_DEFAULT_SHORT) sType;
 string(STR_DB_SYMBOL) sXCh, sYCh, sLine;
-string(STR_DB_SYMBOL) sStation, sLatitude, sLongitude, sFrom, sTo;
+string(STR_DB_SYMBOL) sStation, sLatitude, sLongitude, sFrom, sTo, sNewStn;
 string(STR_DEFAULT_LONG) sMsg;
 int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTempLocationGroup;
+int iOverwrite, iNStnOrig, iNStnNew, iRemoved, iStn, j;
+real rFidStart, rFidIncr;
 
 #define TYPE_CSV 0
 #define TYPE_GDB 1
@@ -91,9 +94,14 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 
    GetString_SYS("GRLDXYE", "FILE", sFile);
    if (iStriMask_STR("*.gdb", sFile))
-      Strcpy_STR(sType, _n("Geosoft database (gdb)"));
+      Strcpy_STR(sType, _("Geosoft database (gdb)"));
    else
-      Strcpy_STR(sType, _n("ASCII CSV file"));
+      Strcpy_STR(sType, _("Text data file"));
+
+   // --- Init output report file ---
+
+   hWA = (WA)0;
+   Strcpy_STR(sReportFile, _("MergeLocations.log"));
 
 
    // --- Are we running interactively ? ---
@@ -145,10 +153,14 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
                iType = TYPE_GDB;
                hDGW = Create_DGW("GRLDXYE_GDB");
                SetInfo_DGW(hDGW, _GRLDXYE_GDB_0, DGW_FILEPATH, sFile);
+               SetInfoSYS_DGW(hDGW, _GRLDXYE_GDB_1, DGW_LISTALIAS, "GRLDXYE", "OVERWRITE");
                i = iRunDialogue_DGW(hDGW);
                if (i == -1) Cancel_SYS();
                if (i == 2)
+               {
                   GetInfo_DGW(hDGW, _GRLDXYE_GDB_0, DGW_FILEPATH, sFile);
+                  GetInfoSYS_DGW(hDGW, _GRLDXYE_GDB_1, DGW_LISTALIAS, "GRLDXYE", "OVERWRITE");
+               }
                Destroy_DGW(hDGW);
             }
             else
@@ -156,10 +168,14 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
                iType = TYPE_CSV;
                hDGW = Create_DGW("GRLDXYE_CSV");
                SetInfo_DGW(hDGW, _GRLDXYE_CSV_0, DGW_FILEPATH, sFile);
+               SetInfoSYS_DGW(hDGW, _GRLDXYE_CSV_1, DGW_LISTALIAS, "GRLDXYE", "OVERWRITE");
                i = iRunDialogue_DGW(hDGW);
                if (i == -1) Cancel_SYS();
                if (i == 2)
+               {
                   GetInfo_DGW(hDGW, _GRLDXYE_CSV_0, DGW_FILEPATH, sFile);
+                  GetInfoSYS_DGW(hDGW, _GRLDXYE_CSV_1, DGW_LISTALIAS, "GRLDXYE", "OVERWRITE");
+               }
                Destroy_DGW(hDGW);
             }
 
@@ -171,7 +187,11 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
    }
 
 
-   // --- set parameters ---
+   // --- get/set parameters ---
+
+   iOverwrite = iGetInt_SYS("GRLDXYE", "OVERWRITE");
+   if (iOverwrite != 1)    // default to "No"
+      iOverwrite = 0;
 
    SetString_SYS("GRLDXYE", "FILE", sFile);
    SetString_SYS("GRLDXYE", "TYPE", sType);
@@ -213,19 +233,19 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 
    if (iExistSymb_DB(hDBo, "Station", DB_SYMB_CHAN))
    {
-      Ch = FindSymb_DB(hDBo, "Station", DB_SYMB_CHAN);
-      LockSymb_DB(hDBo, Ch, DB_LOCK_READONLY, DB_WAIT_NONE);
-      ReFidAllCh_DU(hDBo, Group, FindSymb_DB(hDBo, "Station", DB_SYMB_CHAN));
-      UnLockSymb_DB(hDBo, Ch);
-      Associate_DB(hDBo, Group, Ch);
+      StnCh = FindSymb_DB(hDBo, "Station", DB_SYMB_CHAN);
+      LockSymb_DB(hDBo, StnCh, DB_LOCK_READONLY, DB_WAIT_NONE);
+      ReFidAllCh_DU(hDBo, Group, StnCh);
+      UnLockSymb_DB(hDBo, StnCh);
+      Associate_DB(hDBo, Group, StnCh);
    }
    else
    {
-      Ch = CreateSymb_DB(hDBo, "Station", DB_SYMB_CHAN, DB_OWN_SHARED, -24);
-      LOCK_RW(hDBo, Ch);
-      SetChanWidth_DB(hDBo, Ch, 10);
-      UNLOCK(hDBo, Ch);
-      Associate_DB(hDBo, Group, Ch);
+      StnCh = CreateSymb_DB(hDBo, "Station", DB_SYMB_CHAN, DB_OWN_SHARED, -24);
+      LOCK_RW(hDBo, StnCh);
+      SetChanWidth_DB(hDBo, StnCh, 10);
+      UNLOCK(hDBo, StnCh);
+      Associate_DB(hDBo, Group, StnCh);
    }
 
 
@@ -301,6 +321,26 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 	hCopyLST = CreateSymbLST_DB();
 	iCopyToTempLocationGroup = 0;
 
+
+   // --- Get the initial list of stations ---
+      
+   hOrigStnLST = CreateSymbLST_DB();
+   OrigStnVV = Create_VV(-STR_DB_SYMBOL, 0);
+   NewStnVV = Create_VV(-STR_DB_SYMBOL, 0);
+
+   LOCK_RW(hDBo, StnCh);
+   GetChanDataLST_DU(hDBo, StnCh, NULLSYMB, hOrigStnLST);
+   GetChanVV_DB(hDBo, Group, StnCh, OrigStnVV);
+   rFidStart = rGetFidStart_VV(OrigStnVV);
+   rFidIncr = rGetFidIncr_VV(OrigStnVV);
+   if (rFidStart == rDUMMY)
+      rFidStart = 0.0;
+   if (rFidIncr == rDUMMY)
+      rFidIncr = 1.0;
+
+   UNLOCK(hDBo, StnCh);
+
+
    if (iType == TYPE_CSV)
    {
       // --- load from CSV ---
@@ -331,15 +371,15 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 			{
 				GetString_SYS("GRLDXYE", "LINE", sLine);
 				if (iStrlen_STR(sLine) == 0)
-					Abort_SYS("The GRLDXYE.LINE parameter must be defined in script mode");
+					Abort_SYS(_("The GRLDXYE.LINE parameter must be defined in script mode"));
 				CurrentLine = FindSymb_DB(hDBi, sLine, DB_SYMB_LINE);
 				if (CurrentLine == NULLSYMB)
-					Abort_SYS("The defined current line was not found");
+					Abort_SYS(_("The defined current line was not found"));
 			}
 
 			// --- Ask the user for the Station, Longitude and Latitude channels if they are not currently present ---
 	
-			iAlternateChannels = !iExistChan_DB(hDBi, "Station") || !iExistChan_DB(hDBi, "Longitude") || !iExistChan_DB(hDBi, "Latitude");
+			iAlternateChannels = !iExistChan_DB(hDBi, _n("Station")) || !iExistChan_DB(hDBi, _n("Longitude")) || !iExistChan_DB(hDBi, _n("Latitude"));
 
 			if (iAlternateChannels)
 			{
@@ -385,45 +425,46 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 			}
 			else
 			{
-				Strcpy_STR(sStation, "Station");
-				Strcpy_STR(sLongitude, "Longitude");
-				Strcpy_STR(sLatitude, "Latitude");
+				Strcpy_STR(sStation, _n("Station"));
+				Strcpy_STR(sLongitude, _n("Longitude"));
+				Strcpy_STR(sLatitude, _n("Latitude"));
 			}
 
 			if (!iStrlen_STR(sStation))
-				Strcpy_STR(sStation, "Station");
+				Strcpy_STR(sStation, _n("Station"));
 			if (!iStrlen_STR(sLongitude))
-				Strcpy_STR(sLongitude, "Longitude");
+				Strcpy_STR(sLongitude, _n("Longitude"));
 			if (!iStrlen_STR(sLatitude))
-				Strcpy_STR(sLatitude, "Latitude");
+				Strcpy_STR(sLatitude, _n("Latitude"));
 
 			// --- Need to do some fancy renaming and copying if importing non-standard channel names to hard-wired channels in the master database ---
 
-			iAlternateChannels = iStrcmp_STR(sStation, "Station", STR_CASE_TOLERANT) || iStrcmp_STR(sLongitude, "Longitude", STR_CASE_TOLERANT) || iStrcmp_STR(sLatitude, "Latitude", STR_CASE_TOLERANT);
+			iAlternateChannels = iStrcmp_STR(sStation, _n("Station"), STR_CASE_TOLERANT) || 
+                                 iStrcmp_STR(sLongitude, _n("Longitude"), STR_CASE_TOLERANT) || 
+                                 iStrcmp_STR(sLatitude, _n("Latitude"), STR_CASE_TOLERANT);
 
 			if (iAlternateChannels)
-			{
-				Strcpy_STR(sReportFile, _("MergeLocations.log"));
+			{				
 				hWA = Create_WA(sReportFile, WA_NEW);
-				if (iStrcmp_STR(sStation, "Station", STR_CASE_TOLERANT))
+				if (iStrcmp_STR(sStation, _n("Station"), STR_CASE_TOLERANT))
 				{
-					AddItem_LST(hCopyLST, sStation, "Station");
+					AddItem_LST(hCopyLST, sStation, _n("Station"));
 					Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended to channel \"Station\"."), sStation);
 					Puts_WA(hWA, sMsg);
 					NewLine_WA(hWA);
 				}
 
-				if (iStrcmp_STR(sLongitude, "Longitude", STR_CASE_TOLERANT))
+				if (iStrcmp_STR(sLongitude, _n("Longitude"), STR_CASE_TOLERANT))
 				{
-					AddItem_LST(hCopyLST, sLongitude, "Longitude");
+					AddItem_LST(hCopyLST, sLongitude, _n("Longitude"));
 					Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended to channel \"Longitude\"."), sLongitude);
 					Puts_WA(hWA, sMsg);
 					NewLine_WA(hWA);	
 				}
 
-				if (iStrcmp_STR(sLatitude, "Latitude", STR_CASE_TOLERANT))
+				if (iStrcmp_STR(sLatitude, _n("Latitude"), STR_CASE_TOLERANT))
 				{
-					AddItem_LST(hCopyLST, sLatitude, "Latitude");
+					AddItem_LST(hCopyLST, sLatitude, _n("Latitude"));
 					Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended to channel \"Latitude\"."), sLatitude);
 					Puts_WA(hWA, sMsg);
 					NewLine_WA(hWA);	
@@ -491,7 +532,7 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 			DeleteSymb_DB(hDBi, InputGroup);
 		}
 
-
+      
 		// --- Remove any temp copied channels from the input survey database ---
 
 		n = iSize_LST(hCopyLST);
@@ -501,6 +542,96 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 			REMOVE_FROMSURVEY(sTo)
 		}
    }
+
+   
+   // --- Remove rows with duplicated station values ---
+
+   iNStnOrig = iLength_VV(OrigStnVV);
+   if (iNStnOrig > 0)
+   {
+      LOCK_RW(hDBo, StnCh);
+      GetChanVV_DB(hDBo, Group, StnCh, NewStnVV);
+      UNLOCK(hDBo, StnCh);
+
+      iNStnNew = iLength_VV(NewStnVV);
+      iRemoved = 0;
+      RemoveVV = Create_VV(INT, iNStnNew);
+      FillInt_VV(RemoveVV, 0);
+      if (iNStnNew > iNStnOrig)
+      {
+         for(i = iNStnOrig; i < iNStnNew; i++)
+         {
+            GetString_VV(NewStnVV, i, sNewStn);
+            iStn = iFindItem_LST(hOrigStnLST, LST_ITEM_NAME, sNewStn);
+            if (iStn != -1)
+            {
+               // --- Mark rows for removal ---
+
+               if (iOverwrite)   // mark original items that have been reimported
+               {
+                  for(j=0; j<iNStnOrig; j++)
+                  {
+                     GetString_VV(OrigStnVV, j, sStation);
+                     if(iStrcmp_STR(sNewStn, sStation, STR_CASE_TOLERANT) == 0)
+                     {
+                        SetInt_VV(RemoveVV, j, 1);
+                        iRemoved++;
+                     }
+                  }
+               }
+               else  // Mark new items that already existed
+               {
+                  for(j=iNStnOrig; j<iNStnNew; j++)
+                  {
+                     GetString_VV(NewStnVV, j, sStation);
+                     if(iStrcmp_STR(sNewStn, sStation, STR_CASE_TOLERANT) == 0)
+                     {
+                        SetInt_VV(RemoveVV, j, 1);
+                        iRemoved++;
+                     }
+                  }
+               }
+            }
+         }
+
+
+         // --- Remove marked items ---
+
+         if (iRemoved)
+         {
+            // --- Add to the report file ---
+
+            if (hWA == (WA)0)
+               hWA = Create_WA(sReportFile, WA_NEW);
+            else
+               NewLine_WA(hWA);
+
+            if (iOverwrite)
+               Puts_WA(hWA, _("Location information for the following station(s) already existed and has been overwritten:")); 
+            else
+               Puts_WA(hWA, _("Location information for the following station(s) already exists. Imported values have been discarded:")); 
+
+            NewLine_WA(hWA);
+            for(i = 0; i < iNStnNew; i++)
+            {
+               if (iGetInt_VV(RemoveVV, i) == 1)
+               {
+                  GetString_VV(NewStnVV, i, sStation);
+                  NewLine_WA(hWA);
+                  Puts_WA(hWA, sStation);
+               }
+            }
+                  
+            for(i = iNStnNew-1; i>= 0; i--)
+            {
+               if (iGetInt_VV(RemoveVV, i) == 1)
+                  ModFidRange_DU(hDBo, Group, rFidStart, rFidIncr, i, 1, DU_MODFID_DELETE);               
+            }
+         }
+      }
+   }
+
+
 
 
    // --- update the reg ---
@@ -527,7 +658,7 @@ int i, i0, iType, iForceCreate, iAlternateChannels, iInteractive, n, iCopyToTemp
 	
 	// --- Report to display? ---
 
-	if (iSize_LST(hCopyLST) > 0) 
+	if (hWA) 
 	{
 		Destroy_WA(hWA);
 		if (iInteractive_SYS())

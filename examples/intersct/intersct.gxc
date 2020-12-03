@@ -19,6 +19,7 @@ DESCRIPTION   = "
                          \"All\" to find all line intersections.
            .OldTable  -  Existing intersection table/database
            .Table     -  Ouput intersection table/database
+           .StatsFile -  Output CSV file for statistics
 "
 // Revision History
 // v7.1.0: Add support for intersection databases.
@@ -42,8 +43,10 @@ RESOURCE = "intersct.gr"
 
 string(STR_DB_SYMBOL) sInX, sInY, sInZ, sTmpX, sTmpY, sLine;
 string(STR_FILE) sInput, sOutput;  // File Names
-string(STR_FILE) sInputDB, sOutputDB, sCurDB, sExt, sDB;
+string(STR_FILE) sInputDB, sOutputDB, sCurDB, sExt, sDB, sStatsFile;
 string(STR_DEFAULT) sProg;
+string(STR_DEFAULT) sTableLineBuffer;
+string(STR_DEFAULT_SHORT) sToken;
 
 string(4) sOpt;  // Intersection option
 
@@ -54,7 +57,15 @@ DGW Diag;
 LST List;  // List
 LST LineLST;
 real rTol, rFidIncrX, rFidIncrZ;
-int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
+real rXDifference, rXDifferenceMin, rXDifferenceMax, rXDifferenceSum, rXDifferenceSumOfSquares, rXDifferenceShift, rXDifferenceStdDev, rXDifferenceShifted;
+real rYDifference, rYDifferenceMin, rYDifferenceMax, rYDifferenceSum, rYDifferenceSumOfSquares, rYDifferenceShift, rYDifferenceStdDev, rYDifferenceShifted;
+real rDistance, rDistanceMin, rDistanceMax, rDistanceSum, rDistanceSumOfSquares, rDistanceShift, rDistanceStdDev, rDistanceShifted;
+real rDataDifference, rDataDifferenceMin, rDataDifferenceMax, rDataDifferenceSum, rDataDifferenceSumOfSquares, rDataDifferenceShift, rDataDifferenceStdDev, rDataDifferenceShifted;
+real rN, rNSquared, rMeanOfSquares, rSquareOfMean;
+int iIntersectionCount;
+int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB, iStatsFile;
+RA TableReader;
+WA TableWriter;
 
 //===========================================================================
 //                             INTERSECTION CODE
@@ -123,6 +134,7 @@ int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
       SetInfoSYS_DGW(Diag, _INTERSCTFORM_4, DGW_LISTALIAS, "InterSct", "Lines");
       SetInfoSYS_DGW(Diag, _INTERSCTFORM_5, DGW_FILEPATH, "InterSct", "OldTable");
       SetInfoSYS_DGW(Diag, _INTERSCTFORM_6, DGW_FILEPATH, "InterSct", "Table");
+      SetInfoSYS_DGW(Diag, _INTERSCTFORM_7, DGW_FILEPATH, "InterSct", "StatsFile");
 
       // --- Run the Dialogue ---
 
@@ -139,6 +151,7 @@ int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
       GetInfoSYS_DGW(Diag, _INTERSCTFORM_4, DGW_LISTALIAS, "InterSct", "Lines");
       GetInfoSYS_DGW(Diag, _INTERSCTFORM_5, DGW_FILEPATH, "InterSct", "OldTable");
       GetInfoSYS_DGW(Diag, _INTERSCTFORM_6, DGW_FILEPATH, "InterSct", "Table");
+      GetInfoSYS_DGW(Diag, _INTERSCTFORM_7, DGW_FILEPATH, "InterSct", "StatsFile");
 
       // --- Destroy the Dialogue ---
 
@@ -163,6 +176,11 @@ int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
    GetString_SYS("Intersct", "Lines", sOpt);
    GetString_SYS("Intersct", "OldTable", sInput);
    GetString_SYS("Intersct", "Table", sOutput);
+
+   iStatsFile = 0;
+   GetString_SYS("Intersct", "StatsFile", sStatsFile);
+   if (iStrlen_STR(sStatsFile) != 0)
+      iStatsFile = 1;
 
 
    // --- Get the absolute file names so the names can be compared. ---
@@ -403,6 +421,145 @@ int i, iN, iTmp, iInGDB, iOutGDB, iReloadInputDB, iReloadOutputDB;
       if (iReloadInputDB)
          Load_EDB(sInputDB);
       iDeleteFile_SYS(sInput);  // delete the temp table
+   }
+
+
+
+   if (iStatsFile==1)
+   {
+      // Scan the output table to find the minimum, maximum, and standard deviation for
+      // the x-difference, y-difference, distance and data values of the intersections.
+
+      // We calculate the standard deviation by calculating the variance as the difference
+      // between the mean of squares and square of mean ( Var(X) = Avg(X^2) - (Avg(X))^2 )
+      // and the taking the square root of the variance to get the standard deviation.
+      // This method allows the standard deviation to be calculated in one pass over the
+      // values.
+
+      // We minimize possible floating-point rounding errors by subtracting a constant
+      // value from each element. (Adding or subtracting a constant from all the values
+      // doesn't change the variance.)
+
+      iIntersectionCount = 0;
+      rXDifferenceMin = 1000000000.0;
+      rXDifferenceMax = 0.0;
+      rXDifferenceSum = 0.0;
+      rXDifferenceSumOfSquares = 0.0;
+      rYDifferenceMin = 1000000000.0;
+      rYDifferenceMax = 0.0;
+      rYDifferenceSum = 0.0;
+      rYDifferenceSumOfSquares = 0.0;
+      rDistanceMin = 1000000000.0;
+      rDistanceMax = 0.0;
+      rDistanceSum = 0.0;
+      rDistanceSumOfSquares = 0.0;
+      rDataDifferenceMin = 1000000000.0;
+      rDataDifferenceMax = 0.0;
+      rDataDifferenceSum = 0.0;
+      rDataDifferenceSumOfSquares = 0.0;
+      TableReader = Create_RA(sOutput);
+
+      rXDifferenceShift = rDUMMY;
+      rYDifferenceShift = rDUMMY;
+      rDistanceShift = rDUMMY;
+      rDataDifferenceShift = rDUMMY;
+
+      iSeek_RA(TableReader, 1);
+      while(IiGets_RA(TableReader, sTableLineBuffer, STR_DEFAULT) == 0)
+      {
+         if(iStrlen_STR(sTableLineBuffer) == 0 || iStrncmp_STR(sTableLineBuffer,"/", 1, STR_CASE_TOLERANT) == 0)
+            continue;
+
+         iTokens_STR(sTableLineBuffer, " \t,");
+
+         GetToken_STR(sToken, sTableLineBuffer, 2);
+         rXDifference = rScanR_STR(sToken);
+         if(rXDifference > rXDifferenceMax)
+            rXDifferenceMax = rXDifference;
+         if(rXDifference < rXDifferenceMin)
+            rXDifferenceMin = rXDifference;
+         if(rXDifferenceShift == rDUMMY)
+            rXDifferenceShift = rXDifference;
+         rXDifferenceShifted = rXDifference - rXDifferenceShift;
+         rXDifferenceSum = rXDifferenceShifted + rXDifferenceSum;
+         rXDifferenceSumOfSquares = rXDifferenceShifted*rXDifferenceShifted + rXDifferenceSumOfSquares;
+
+         GetToken_STR(sToken, sTableLineBuffer, 3);
+         rYDifference = rScanR_STR(sToken);
+         if(rYDifference > rYDifferenceMax)
+            rYDifferenceMax = rYDifference;
+         if(rYDifference < rYDifferenceMin)
+            rYDifferenceMin = rYDifference;
+         if(rYDifferenceShift == rDUMMY)
+            rYDifferenceShift = rYDifference;
+         rYDifferenceShifted = rYDifference - rYDifferenceShift;
+         rYDifferenceSum = rYDifferenceShifted + rYDifferenceSum;
+         rYDifferenceSumOfSquares = rYDifferenceShifted*rYDifferenceShifted + rYDifferenceSumOfSquares;
+
+         GetToken_STR(sToken, sTableLineBuffer, 4);
+         rDistance = rScanR_STR(sToken);
+         if(rDistance > rDistanceMax)
+            rDistanceMax = rDistance;
+         if(rDistance < rDistanceMin)
+            rDistanceMin = rDistance;
+         if(rDistanceShift == rDUMMY)
+            rDistanceShift = rDistance;
+         rDistanceShifted = rDistance - rDistanceShift;
+         rDistanceSum = rDistanceShifted + rDistanceSum;
+         rDistanceSumOfSquares = rDistanceShifted*rDistanceShifted + rDistanceSumOfSquares;
+
+         GetToken_STR(sToken, sTableLineBuffer, 5);
+         rDataDifference = rScanR_STR(sToken);
+         if(rDataDifference > rDataDifferenceMax)
+            rDataDifferenceMax = rDataDifference;
+         if(rDataDifference < rDataDifferenceMin)
+            rDataDifferenceMin = rDataDifference;
+         if(rDataDifferenceShift == rDUMMY)
+            rDataDifferenceShift = rDataDifference;
+         rDataDifferenceShifted = rDataDifference - rDataDifferenceShift;
+         rDataDifferenceSum = rDataDifferenceShifted + rDataDifferenceSum;
+         rDataDifferenceSumOfSquares = rDataDifferenceShifted*rDataDifferenceShifted + rDataDifferenceSumOfSquares;
+
+         iIntersectionCount = iIntersectionCount + 1;
+      }
+
+      rN = (real)iIntersectionCount;
+      rNSquared = (real)(iIntersectionCount*iIntersectionCount);
+
+      rMeanOfSquares = rXDifferenceSumOfSquares / rN;
+      rSquareOfMean = rXDifferenceSum / rNSquared;
+      rXDifferenceStdDev = rSqrt_MATH(rMeanOfSquares-rSquareOfMean);
+
+      rMeanOfSquares = rYDifferenceSumOfSquares / rN;
+      rSquareOfMean = rYDifferenceSum / rNSquared;
+      rYDifferenceStdDev = rSqrt_MATH(rMeanOfSquares-rSquareOfMean);
+
+      rMeanOfSquares = rDistanceSumOfSquares / rN;
+      rSquareOfMean = rDistanceSum / rNSquared;
+      rDistanceStdDev = rSqrt_MATH(rMeanOfSquares-rSquareOfMean);
+
+      rMeanOfSquares = rDataDifferenceSumOfSquares / rN;
+      rSquareOfMean = rDataDifferenceSum / rNSquared;
+      rDataDifferenceStdDev = rSqrt_MATH(rMeanOfSquares-rSquareOfMean);
+
+      TableWriter = Create_WA(sStatsFile, WA_NEW);
+      Puts_WA(TableWriter, "                  Min          Max         StdDev\r\n");
+      Printf_STR(sTableLineBuffer, sizeof(sTableLineBuffer),
+                 "X_Position % 13.3f% 13.3f% 13.3f\r\n",
+                 rXDifferenceMin, rXDifferenceMax, rXDifferenceStdDev);
+      Puts_WA(TableWriter, sTableLineBuffer);
+      Printf_STR(sTableLineBuffer, sizeof(sTableLineBuffer),
+                 "Y_Position % 13.3f% 13.3f% 13.3f\r\n",
+                 rYDifferenceMin, rYDifferenceMax, rYDifferenceStdDev);
+      Puts_WA(TableWriter, sTableLineBuffer);
+      Printf_STR(sTableLineBuffer, sizeof(sTableLineBuffer),
+                 "Distance   % 13.3f% 13.3f% 13.3f\r\n",
+                 rDistanceMin, rDistanceMax, rDistanceStdDev);
+      Puts_WA(TableWriter, sTableLineBuffer);
+      Printf_STR(sTableLineBuffer, sizeof(sTableLineBuffer),
+                 "Data       % 13.3f% 13.3f% 13.3f\r\n",
+                 rDataDifferenceMin, rDataDifferenceMax, rDataDifferenceStdDev);
+      Puts_WA(TableWriter, sTableLineBuffer);
    }
 
 

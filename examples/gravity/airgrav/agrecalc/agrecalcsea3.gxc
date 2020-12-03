@@ -1,0 +1,373 @@
+//===========================================================================
+// clang-format off
+NAME          = "Recalculate Gravity from Raw Data for Sea III"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "gravity"
+TRANSLATIONFRIENDLYPATH = "GX/AirGrav"
+
+DESCRIPTION   = "
+
+   AGRECALCSEA3.SPRTENS    Name of the spring tension channel
+               .BEAM       Name of the beam velocity channel
+			   .TIME	   Name of the time channel
+	           .CRSCPLVCC  Name of the VCC cross coupling channel	   
+		       .CRSCPLVE   Name of the VE cross coupling channel		   
+		       .CRSCPLAL   Name of the AL cross coupling channel	
+		       .CRSCPLAX   Name of the AX cross coupling channel	
+		       .CRSCPLVX2  Name of the AX2cross coupling channel			   
+	           .OUTCH      Output (recalculated gravity) channel
+"
+// Revision History:
+// v9.9 New GX
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "agrecalcsea3.gr"
+#include "agrecalcsea3.grh"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>
+// clang-format on     // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;            // Edited database handle
+DB          Data;             // Database handle
+DGW         Diag;             // Dialogue handle
+DB_SYMB     Line,STCh,BMCh,CCVCCh,CCVEh,CCALh,CCAXh,CCAX2h,BDCh,OutCh,TimeCh,ST2Ch;
+LST         List;           
+EXP         Exp;
+VV          hVV;
+VV          hVVTime,hVVBDerivative;
+
+string(STR_DEFAULT) sSTCh,sBMCh,sCCVCCh,sCCVEh,sCCALh,sCCAXh,sCCAX2h,sBDCh,sOutCh,sTimeCh,sST2Ch;
+
+string(512)         sFormula;
+int i,n;
+
+//===========================================================================
+//                                   CODE
+//===========================================================================
+
+{
+   // --- Get database ---
+   
+   EData = Current_EDB();
+   Data = Lock_EDB(EData);
+   
+   
+   // --- Are we running interactively ? ---
+
+   if (iInteractive_SYS()) {
+
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("AGRECALCSEA3");
+
+
+      // --- Set up lists ---
+
+      List = GetList_DGW(Diag,_AGRECALCSEA3_0);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);      
+      
+      List = GetList_DGW(Diag,_AGRECALCSEA3_1);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+	  
+      List = GetList_DGW(Diag,_AGRECALCSEA3_2);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);	  
+	  
+      List = GetList_DGW(Diag,_AGRECALCSEA3_3);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGRECALCSEA3_4);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGRECALCSEA3_5);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGRECALCSEA3_6);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+	  
+	  List = GetList_DGW(Diag,_AGRECALCSEA3_7);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);  
+
+      List = GetList_DGW(Diag,_AGRECALCSEA3_8);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+
+      // --- Set any Defaults ---
+
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_0,DGW_TEXT,"AGRECALCSEA3","SPRTENS");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_1,DGW_TEXT,"AGRECALCSEA3","BEAM");
+	  SetInfoSYS_DGW(Diag,_AGRECALCSEA3_2,DGW_TEXT,"AGRECALCSEA3","TIME");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_3,DGW_TEXT,"AGRECALCSEA3","CRSCPLVCC");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_4,DGW_TEXT,"AGRECALCSEA3","CRSCPLVE");	  
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_5,DGW_TEXT,"AGRECALCSEA3","CRSCPLAl");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_6,DGW_TEXT,"AGRECALCSEA3","CRSCPLAX");
+	  SetInfoSYS_DGW(Diag,_AGRECALCSEA3_7,DGW_TEXT,"AGRECALCSEA3","CRSCPLVX2");
+	  SetInfoSYS_DGW(Diag,_AGRECALCSEA3_8,DGW_TEXT,"AGRECALCSEA3","OUTCH");
+
+
+      // --- Run the Dialogue ---
+
+      if (iRunDialogue_DGW(Diag) != 0) Cancel_SYS();
+
+
+      // --- Get the Strings ---
+
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_0,DGW_TEXT,"AGRECALCSEA3","SPRTENS");
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_1,DGW_TEXT,"AGRECALCSEA3","BEAM");
+	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_2,DGW_TEXT,"AGRECALCSEA3","TIME");  
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_3,DGW_TEXT,"AGRECALCSEA3","CRSCPLVCC");
+	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_4,DGW_TEXT,"AGRECALCSEA3","CRSCPLVE");
+	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_5,DGW_TEXT,"AGRECALCSEA3","CRSCPLAL");
+	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_6,DGW_TEXT,"AGRECALCSEA3","CRSCPLAX");
+	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_7,DGW_TEXT,"AGRECALCSEA3","CRSCPLVX2");  
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_8,DGW_TEXT,"AGRECALCSEA3","OUTCH");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+
+    // --- Get parameters ---
+
+    GetString_SYS("AGRECALCSEA3","SPRTENS",sSTCh);
+    GetString_SYS("AGRECALCSEA3","BEAM",sBMCh);   
+	GetString_SYS("AGRECALCSEA3","TIME",sTimeCh);  	
+    GetString_SYS("AGRECALCSEA3","CRSCPLVCC",sCCVCCh);
+    GetString_SYS("AGRECALCSEA3","CRSCPLVE",sCCVEh);
+    GetString_SYS("AGRECALCSEA3","CRSCPLAL",sCCALh);
+    GetString_SYS("AGRECALCSEA3","CRSCPLAX",sCCAXh);
+    GetString_SYS("AGRECALCSEA3","CRSCPLVX2",sCCAX2h);  
+    GetString_SYS("AGRECALCSEA3","OUTCH",sOutCh);            
+            
+
+    // --- Get handles to the input data channels ---
+
+    if (iExistChan_DB(Data,sSTCh) == 0)
+       Abort_SYS(_("The \"spring tension\" channel is missing from the gravity database."));
+    if (iExistChan_DB(Data,sBMCh) == 0)
+       Abort_SYS(_("The \"raw beam\" channel is missing from the gravity database."));
+    if (iExistChan_DB(Data,sCCVCCh) == 0)
+       Abort_SYS(_("The \"cross coupling VCC\" channel is missing from the gravity database."));
+    if (iExistChan_DB(Data,sCCVEh) == 0)
+       Abort_SYS(_("The \"cross coupling VE\" channel is missing from the gravity database."));
+    if (iExistChan_DB(Data,sCCALh) == 0)
+       Abort_SYS(_("The \"cross coupling AL\" channel is missing from the gravity database."));
+    if (iExistChan_DB(Data,sCCAXh) == 0)
+       Abort_SYS(_("The \"cross coupling AX\" channel is missing from the gravity database."));
+    if (iExistChan_DB(Data,sCCAX2h) == 0)
+       Abort_SYS(_("The \"cross coupling AX2\" channel is missing from the gravity database."));
+	  
+    STCh = FindChan_DB(Data,sSTCh);
+    BMCh = FindChan_DB(Data,sBMCh);
+	
+	if (iExistString_SYS("AGRECALCSEA3",sTimeCh) == 1)
+	{
+	    if (iExistChan_DB(Data,sTimeCh) == 0)
+		{
+			Abort_SYS(_("The \"Time\" channel is missing from the gravity database."));
+		}
+		else
+		{
+			TimeCh = FindChan_DB(Data,sTimeCh);	
+			LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_NONE);		
+		}		
+	}	
+	
+    CCVCCh = FindChan_DB(Data,sCCVCCh);
+    CCVEh = FindChan_DB(Data,sCCVEh);
+    CCALh = FindChan_DB(Data,sCCALh);
+    CCAXh = FindChan_DB(Data,sCCAXh);
+    CCAX2h = FindChan_DB(Data,sCCAX2h);  
+    LockSymb_DB(Data,STCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    LockSymb_DB(Data,BMCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    LockSymb_DB(Data,CCVCCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    LockSymb_DB(Data,CCVEh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    LockSymb_DB(Data,CCALh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    LockSymb_DB(Data,CCAXh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    LockSymb_DB(Data,CCAX2h,DB_LOCK_READONLY,DB_WAIT_NONE); 
+   
+    // --- Get handle to the output channel --- 
+
+    if (iExistChan_DB(Data,sOutCh) == 0)
+        OutCh = DupSymb_DB(Data,STCh,sOutCh);
+     else {
+        OutCh = FindChan_DB(Data,sOutCh);
+        LockSymb_DB(Data,OutCh,DB_LOCK_READWRITE,DB_WAIT_NONE); 
+        SetChanProtect_DB(Data,OutCh,DB_CHAN_UNPROTECTED);        
+   }
+	 	  
+	  // --- Create First derivative of Beam channel ---
+
+    Strcpy_STR(sBDCh,"Beam_Deriv");
+    if (iExistChan_DB(Data,sBDCh) == 0)
+       BDCh = DupSymb_DB(Data,BMCh,sBDCh);
+    else {
+       BDCh = FindChan_DB(Data,sBDCh);
+       LockSymb_DB(Data,BDCh,DB_LOCK_READWRITE,DB_WAIT_NONE); 
+       SetChanProtect_DB(Data,BDCh,DB_CHAN_UNPROTECTED);        
+    }
+ 
+   // --- Create recalculated spring tension channel --- 
+
+   Strcpy_STR(sST2Ch,_n("SprTensRec"));
+   if (iExistChan_DB(Data,sST2Ch) == 0)
+      ST2Ch = DupSymb_DB(Data,STCh,sST2Ch);
+   else {
+      ST2Ch = FindChan_DB(Data,sST2Ch);
+      LockSymb_DB(Data,ST2Ch,DB_LOCK_READWRITE,DB_WAIT_NONE); 
+      SetChanProtect_DB(Data,ST2Ch,DB_CHAN_UNPROTECTED);        
+   }
+ 
+	  // --- Create expression ---
+  
+    // --- The original coefficents VECoefficient,ALCoefficient,AXCoefficient,AX2Coefficient,VCCCoefficient,STCoefficient are from the .ini file supplied by MicroG-Lacoste System
+    // --- ("@VECoef=-5.682110000000000; @ALCoef=-2.556790000000000; @AXCoef=0.865320000000000; @AX2Coef=5.522490000000000; @VCCCoef=1.678030000000000; @STCoef=1.000000;")
+ 
+   Strcpy_STR(sFormula,_n("@VECoef=2.116009; @ALCoef=-0.759598; @AXCoef=-0.703733; @AX2Coef=0.010473; @VCCCoef=0.518657; @STCoef=1.000000;"));  
+ 
+   Strcat_STR(sFormula,_n("@rP0=78933.350000000006000; @rP1=994.630999999999970; @rP2=-59.361199999999997; @rQ1=1.851700000000000; @rQ2=-0.066900000000000;"));  
+  
+   Strcat_STR(sFormula,_n("@SumCh=@VCCCoef*($sCCVCCh)+@VECoef*($sCCVEh)+@ALCoef*($sCCALh)+@AXCoef*($sCCAXh)+@AX2Coef*($sCCAX2h);"));
+ 
+   Strcat_STR(sFormula,_n("$sOutCh=@STCoef*($sSTCh+$sBDCh*(@rP0+@rP1*$sBMCh+@rP2*$sBMCh*$sBMCh)+@rQ1*$sBMCh+@rQ2*($sBMCh*$sBMCh))+(@SumCh);"));
+
+   Exp = Create_EXP(Data,sFormula,512);
+
+
+   hVV = Create_VV(REAL,0);
+   hVVTime = Create_VV(REAL,0);
+   
+   hVVBDerivative = Create_VV(REAL,0);  
+   DummyRepeat_VVU(hVVBDerivative, VVU_DUMMYREPEAT_LAST  );
+
+   // --- process the data ---
+
+   Progress_SYS(1);
+   ProgName_SYS(_("Recalculate gravity from raw data..."),0);
+
+   Line = FirstSelLine_DB(Data);
+   while (iIsLineValid_DB(Data,Line))
+   {
+      LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+      
+      if(iGetChannelLength_DB(Data, Line, STCh) > 0) {
+
+         GetChanVV_DB(Data,Line,BMCh,hVV);	
+         Copy_VV(hVVBDerivative,hVV);  
+		 ReFidVV_VV(hVVBDerivative, hVV);  		 
+         Diff_VV(hVVBDerivative,1);   	 
+		 
+		 if (iExistString_SYS("AGRECALCSEA3",sTimeCh) == 1)
+		 {
+		     GetChanVV_DB(Data,Line,TimeCh,hVVTime);
+			 Trans_VV(hVVTime,0.0,3600.0);		 
+			 Diff_VV(hVVTime,1);
+
+			DummyRange_VVU(hVV,0.0,1.0,FALSE,FALSE);			 				
+			Divide_VV(hVVBDerivative,hVVTime,hVVBDerivative );    //use time channel if provided to calculate beam derivative
+					
+		    for (i = 0, n = iLength_VV(hVV); i < n; i++)  
+            {		
+				SetReal_VV(hVV,i+1,rGetReal_VV(hVVBDerivative,i));
+            }	
+
+			Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);
+		    PutChanVV_DB(Data,Line,BDCh,hVV);                  //beam derivative		   
+		 }
+		 else
+		 {	 		 	 
+			DummyRange_VVU(hVV,0.0,1.0,FALSE,FALSE);
+			
+		    for (i = 0, n = iLength_VV(hVV); i < n; i++)  
+            {
+				SetReal_VV(hVV,i+1,rGetReal_VV(hVVBDerivative,i));
+            }				 
+				 				
+			Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);	 
+		    PutChanVV_DB(Data,Line,BDCh,hVV);                  //beam derivative
+		 }
+
+         GetChanVV_DB(Data,Line,STCh,hVV);
+         DummyRepeat_VVU(hVV,VVU_DUMMYREPEAT_FIRST);
+         Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);
+         PutChanVV_DB(Data,Line,ST2Ch,hVV);
+
+
+         // --- Evaluate expression ---
+
+         Math_DU(Data,Line,Exp);
+     }
+
+      // --- Advance to Next Line ---        
+
+      UnLockSymb_DB(Data,Line);
+      Line = NextSelLine_DB(Data, Line );
+   }
+   Destroy_EXP(Exp);
+
+
+  // --- Set output channel width, decimals and protection ---
+
+   SetChanWidth_DB(Data,OutCh,12);  
+   SetChanDecimal_DB(Data,OutCh,5);
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+   
+
+   // --- Add maker ---
+
+   EasyMakerSymb_DB(Data,OutCh,_("Recalculate gravity"),"AGRECALCSEA3;");
+
+
+   // --- Set protection and units of output channel ---
+
+   SetChanUnit_DB(Data,OutCh,_("mGal"));   
+   SetChanLabel_DB(Data,OutCh,_("Recalculated Gravity"));
+   SetChanProtect_DB(Data,OutCh,DB_CHAN_PROTECTED);
+
+
+   // --- Unlock channels ---
+   if (iExistString_SYS("AGRECALCSEA3",sTimeCh) == 1)
+   {
+	 UnLockSymb_DB(Data,TimeCh);
+   }
+
+   UnLockSymb_DB(Data,ST2Ch);
+   UnLockSymb_DB(Data,STCh);
+   UnLockSymb_DB(Data,BMCh);
+   UnLockSymb_DB(Data,CCVCCh);
+   UnLockSymb_DB(Data,CCVEh);
+   UnLockSymb_DB(Data,CCALh); 
+   UnLockSymb_DB(Data,CCAXh);   
+   UnLockSymb_DB(Data,CCAX2h); 
+   UnLockSymb_DB(Data,BDCh);   
+   UnLockSymb_DB(Data,OutCh);
+   UnLock_EDB(EData);
+
+
+   // --- Load output channel ---
+   LoadChan_EDB(EData,sST2Ch); 
+   LoadChan_EDB(EData,sBDCh);   
+   LoadChan_EDB(EData,sOutCh);
+
+   Progress_SYS(0);    
+}

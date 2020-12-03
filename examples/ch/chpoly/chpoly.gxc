@@ -61,7 +61,7 @@ int iAppend;
 real rFidStart, rFidIncr;
 
 string(STR_DEFAULT_SHORT) sTemp;  // temporary number formating string
-string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT) sLabel, sAreaFlag;
 string(STR_DB_SYMBOL) sMask;
 
 int i;
@@ -130,6 +130,7 @@ int i;
       GetInfoSYS_DGW(Diag, _CHPOLY_2, DGW_TEXT, "CHPOLY", "AREA");
       GetInfoSYS_DGW(Diag, _CHPOLY_3, DGW_LISTALIAS, "CHPOLY", "APPEND");
 
+      GetInfo_DGW(Diag, _CHPOLY_2, DGW_LISTALIAS, sAreaFlag);
 
       // --- Destroy the Dialogue ---
 
@@ -197,13 +198,15 @@ int i;
    SetRegSymbSetting_DB(Data, MCh, "CLASS", "MASK");
 
 
-   // --- Mask dummy setting ---
+   // --- Mask dummy setting. Note that "Work inside" translates to "Mask outside" ---
+   //     Translation note: because the options get translated, and the translated
+   //     version gets recorded in a script, handle both cases for the non-default option.
 
    ToUpper_STR(sArea);
-   if (iCharComp_STR(sArea, "I"))
+   if (!iStrcmp_STR(sArea, _("inside"), STR_CASE_TOLERANT) || !iStrcmp_STR(sArea, _n("inside"), STR_CASE_TOLERANT) || !iStrcmp_STR("1", sAreaFlag, STR_CASE_TOLERANT))
       iDummy = DU_MASK_OUTSIDE;
    else
-      iDummy = DU_MASK_INSIDE;
+      iDummy = DU_MASK_INSIDE;   // default - work outside = mask inside
 
 
    // --- Create the Poly ---

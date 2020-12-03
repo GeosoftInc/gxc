@@ -64,7 +64,7 @@ string(STR_FILE) sMfile;  // Name of output mask grid
 string(STR_FILE) sTfile;  // Name of temp mask grid
 string(STR_FILE) sPoly;   // Name of polygon file
 
-string(STR_DEFAULT) sMopt;                // Mask option ("OUT" or "IN")
+string(STR_DEFAULT) sMopt, sMoptFlag;     // Mask option ("OUT" or "IN")
 string(STR_DEFAULT) sResize, sAliasFlag;  // Resize option ("YES" or "NO")
 
 PLY Ply;  // Polygons created from file
@@ -103,6 +103,7 @@ PLY Ply;  // Polygons created from file
       GetInfoSYS_DGW(Diag, _GRIDMASKFORM_3, DGW_TEXT, "GRIDMASK", "MASKOPT");
       GetInfoSYS_DGW(Diag, _GRIDMASKFORM_4, DGW_TEXT, "GRIDMASK", "RESIZE");
 
+      GetInfo_DGW(Diag, _GRIDMASKFORM_3, DGW_LISTALIAS, sMoptFlag);
       GetInfo_DGW(Diag, _GRIDMASKFORM_4, DGW_LISTALIAS, sAliasFlag);
 
       // --- Destroy the Dialogue ---
@@ -123,12 +124,10 @@ PLY Ply;  // Polygons created from file
    GetString_SYS("GRIDMASK", "MASKOPT", sMopt);
    GetString_SYS("GRIDMASK", "RESIZE", sResize);
 
-   if (!iStrcmp_STR("OUTSIDE", sMopt, STR_CASE_TOLERANT))
-      iMopt = IMU_MASK_OUTSIDE;
-   else if (!iStrcmp_STR("INSIDE", sMopt, STR_CASE_TOLERANT))
+   if (!iStrcmp_STR(_("INSIDE"), sMopt, STR_CASE_TOLERANT) || !iStrcmp_STR(_n("INSIDE"), sMopt, STR_CASE_TOLERANT) || !iStrcmp_STR("1", sMoptFlag, STR_CASE_TOLERANT))
       iMopt = IMU_MASK_INSIDE;
-   else
-      Abort_SYS(_("Invalid Mask Option selected! Must be 'INSIDE' or 'OUTSIDE'."));
+   else 
+      iMopt = IMU_MASK_OUTSIDE;
 
 
    // --- Check for null input, output and polygon file name strings ---

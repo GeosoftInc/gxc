@@ -43,13 +43,14 @@ IPJ hIPJ;
 LST hLST, hChanLST, hCopyLST, hRenameLST, List;
 WA hWA;
 
-string(STR_FILE) sMaster, sSurvey, sReportFile;
+string(STR_FILE) sMaster, sSurvey, sReportFile, sCurrentSurveyFile, sSurveyFile;
 string(STR_DEFAULT_SHORT) sType;
 string(STR_DEFAULT_SHORT) sSrc, sSrcNew;
 string(STR_DEFAULT_LONG) sMsg;
 string(STR_DB_SYMBOL) sStation, sLatitude, sLongitude, sFrom, sTo, sChan;
 int i, ii, iNew, iLen, iNChan, iAlternateChannels, iInteractive, n;
-int iGscale, iClosure, iType, iCheck, iSurveyLoaded;
+int iGscale, iClosure, iType, iCheck, iSurveyLoaded, iFile, iFiles;
+int iDisplayReportFile;
 real rStart, rIncr;
 
 //===========================================================================
@@ -80,13 +81,19 @@ real rStart, rIncr;
 
    GetString_SYS("GRAPPEND", "MASTER", sMaster);
    if (iStrlen_STR(sMaster) == 0)
+   {
       Get_REG(hWorkREG, "GRAVRED.MASTER_DATABASE", sMaster, sizeof(sMaster));
-   SetString_SYS("GRAPPEND", "MASTER", "");
+      if (iStrlen_STR(sMaster))
+         SetString_SYS("GRAPPEND", "MASTER", sMaster);
+   }
 
    GetString_SYS("GRAPPEND", "SURVEY", sSurvey);
    if (iStrlen_STR(sSurvey) == 0)
+   {
       Get_REG(hWorkREG, "GRAVRED.SURVEY_DATABASE", sSurvey, sizeof(sSurvey));
-   SetString_SYS("GRAPPEND", "SURVEY", "");
+      if (iStrlen_STR(sSurvey))
+         SetString_SYS("GRAPPEND", "SURVEY", sSurvey);
+   }
 
 
    // --- get current database REG and name ---
@@ -117,8 +124,8 @@ real rStart, rIncr;
 
       // --- Create the Dialogue ---
 
-      SetInfo_DGW(hDGW, _GRAPPEND_0, DGW_FILEPATH, sSurvey);
-      SetInfo_DGW(hDGW, _GRAPPEND_1, DGW_FILEPATH, sMaster);
+      SetInfoSYS_DGW(hDGW, _GRAPPEND_0, DGW_FILEPATH, "GRAPPEND", "SURVEY");
+      SetInfoSYS_DGW(hDGW, _GRAPPEND_1, DGW_FILEPATH, "GRAPPEND", "MASTER");
 
       i = 0;
       iNew = FALSE;
@@ -129,10 +136,12 @@ real rStart, rIncr;
          if (iRunDialogue_DGW(hDGW) != 0) Cancel_SYS();
 
 
-         // --- Get the Strings and replace in INI ---
+         // --- Get the Strings ---
 
-         GetInfo_DGW(hDGW, _GRAPPEND_0, DGW_FILEPATH, sSurvey);
-         GetInfo_DGW(hDGW, _GRAPPEND_1, DGW_FILEPATH, sMaster);
+         GetInfoSYS_DGW(hDGW, _GRAPPEND_0, DGW_FILEPATH, "GRAPPEND", "SURVEY");
+         GetInfoSYS_DGW(hDGW, _GRAPPEND_1, DGW_FILEPATH, "GRAPPEND", "MASTER");
+
+         GetString_SYS("GRAPPEND", "MASTER", sMaster);
 
          if (!iFileExist_SYS(sMaster))
          {
@@ -148,6 +157,9 @@ real rStart, rIncr;
 
    // --- Check for null input and output strings ---
 
+   GetString_SYS("GRAPPEND", "MASTER", sMaster);
+   GetString_SYS("GRAPPEND", "SURVEY", sSurvey);
+
    if (!iStrlen_STR(sMaster))
       Abort_SYS(_("Master database Not Specified!"));
    if (!iStrlen_STR(sSurvey))
@@ -158,7 +170,19 @@ real rStart, rIncr;
 
    Set_REG(hWorkREG, "GRAVRED.MASTER_DATABASE", sMaster);
    Set_REG(hWorkREG, "GRAVRED.SURVEY_DATABASE", sSurvey);
- 
+
+
+   // --- new master database? ---
+
+   if (iNew || (iInteractive_SYS() == 0 && !iFileExist_SYS(sMaster)))
+   {
+      // --- create new database ---
+
+      iDeleteFile_SYS(sMaster);
+      Create_DB(sMaster, 100, 100, 250, 10, 100, "SUPER", "");
+   }
+
+   eDBo = Load_EDB(sMaster);
 
 
    // --- get VV's ---
@@ -168,517 +192,538 @@ real rStart, rIncr;
    hSrcVV = Create_VV(-32, 0);
 
 
+   iDisplayReportFile = 0;
+
    // --- Load the databases ---
 
-	iSurveyLoaded = iLoaded_EDB(sSurvey);
-
-   eDBi = Load_EDB(sSurvey);
-   hDBi = Lock_EDB(eDBi);
-
-
-   // --- new master database? ---
-
-   if (iNew)
+   iFiles = iCountTokens_STR(sSurvey,"|");
+   for(iFile=0; iFile<iFiles; iFile++)
    {
-      // --- create new database ---
+      hDBo = Lock_EDB(eDBo);
+   
+      GetMFile_STR(sSurvey,sCurrentSurveyFile,iFile);
+      iSurveyLoaded = iLoaded_EDB(sCurrentSurveyFile);
 
-      iDeleteFile_SYS(sMaster);
-      Create_DB(sMaster, 100, 100, 250, 10, 100, "SUPER", "");
-   }
-
-   eDBo = Load_EDB(sMaster);
-   hDBo = Lock_EDB(eDBo);
-
-	
-	// --- Ask the user for the Station, Longitude and Latitude channels if they are not currently present ---
-	
-	iAlternateChannels = !iExistChan_DB(hDBi, "Station") || !iExistChan_DB(hDBi, "Longitude") || !iExistChan_DB(hDBi, "Latitude");
-
-	if (iAlternateChannels)
-	{
-		if (iInteractive_SYS())
-		{
-			// --- Create the Channels Dialogue ---
-
-			hDGW = Create_DGW("GRAPPEND2");
-
-			// --- Set up lists ---
-
-			hChanLST = Create_LST(80);
-			ChanLST_DB(hDBi, hChanLST);
-
-			List = GetList_DGW(hDGW,_GRAPPEND2_0);
-			Copy_LST(List,hChanLST);
-			List = GetList_DGW(hDGW,_GRAPPEND2_1);
-			Copy_LST(List,hChanLST);
-			List = GetList_DGW(hDGW,_GRAPPEND2_2);
-			Copy_LST(List,hChanLST);
-
-			// --- Set any Defaults ---
-
-			SetInfoSYS_DGW(hDGW,_GRAPPEND2_0,DGW_TEXT,"GRAPPEND","STATION");
-			SetInfoSYS_DGW(hDGW,_GRAPPEND2_1,DGW_TEXT,"GRAPPEND","LONGITUDE");
-			SetInfoSYS_DGW(hDGW,_GRAPPEND2_2,DGW_TEXT,"GRAPPEND","LATITUDE");
+      eDBi = Load_EDB(sCurrentSurveyFile);
+      hDBi = Lock_EDB(eDBi);
 
 
-			// --- Run the Dialogue ---
+      // --- Ask the user for the Station, Longitude and Latitude channels if they are not currently present ---
 
-			if (iRunDialogue_DGW(hDGW) != 0) Cancel_SYS();
+      iAlternateChannels = !iExistChan_DB(hDBi, _n("Station"))
+                           || !iExistChan_DB(hDBi, _n("Longitude"))
+                           || !iExistChan_DB(hDBi, _n("Latitude"));
 
-			GetInfoSYS_DGW(hDGW,_GRAPPEND2_0,DGW_TEXT,"GRAPPEND","STATION");
-			GetInfoSYS_DGW(hDGW,_GRAPPEND2_1,DGW_TEXT,"GRAPPEND","LONGITUDE");
-			GetInfoSYS_DGW(hDGW,_GRAPPEND2_2,DGW_TEXT,"GRAPPEND","LATITUDE");
-		}
+      if (iAlternateChannels)
+      {
+         if (!iStrlen_STR(sStation) || !iExistChan_DB(hDBi, sStation) ||
+             !iStrlen_STR(sLongitude) || !iExistChan_DB(hDBi, sLongitude) ||
+             !iStrlen_STR(sLatitude) || !iExistChan_DB(hDBi, sLatitude) )
+         {
+            if (iInteractive_SYS())
+            {
+               // --- Create the Channels Dialogue ---
 
-		// --- Get values and apply the hard-wired defaults ---
+               hDGW = Create_DGW("GRAPPEND2");
 
-		GetString_SYS("GRAPPEND","STATION", sStation);
-		GetString_SYS("GRAPPEND","LONGITUDE", sLongitude);
-		GetString_SYS("GRAPPEND","LATITUDE", sLatitude);
-	}
-	else
-	{
-		Strcpy_STR(sStation, "Station");
-		Strcpy_STR(sLongitude, "Longitude");
-		Strcpy_STR(sLatitude, "Latitude");
-	}
+               // --- Set up lists ---
 
-	if (!iStrlen_STR(sStation))
-		Strcpy_STR(sStation, "Station");
-	if (!iStrlen_STR(sLongitude))
-		Strcpy_STR(sLongitude, "Longitude");
-	if (!iStrlen_STR(sLatitude))
-		Strcpy_STR(sLatitude, "Latitude");
+               hChanLST = Create_LST(80);
+               ChanLST_DB(hDBi, hChanLST);
 
+               List = GetList_DGW(hDGW,_GRAPPEND2_0);
+               Copy_LST(List,hChanLST);
+               List = GetList_DGW(hDGW,_GRAPPEND2_1);
+               Copy_LST(List,hChanLST);
+               List = GetList_DGW(hDGW,_GRAPPEND2_2);
+               Copy_LST(List,hChanLST);
 
-	// --- Need to do some fancy renaming and copying if importing non-standard channel names to hard-wired channels in the master database ---
+               // --- Set any Defaults ---
 
-	iAlternateChannels = iStrcmp_STR(sStation, "Station", STR_CASE_TOLERANT) || iStrcmp_STR(sLongitude, "Longitude", STR_CASE_TOLERANT) || iStrcmp_STR(sLatitude, "Latitude", STR_CASE_TOLERANT);
-
-	hCopyLST = CreateSymbLST_DB();
-	hRenameLST = CreateSymbLST_DB();
-
-	if (iAlternateChannels)
-	{
-		Strcpy_STR(sReportFile, _("Append.log"));
-		hWA = Create_WA(sReportFile, WA_NEW);
-		if (iStrcmp_STR(sStation, "Station", STR_CASE_TOLERANT))
-		{
-			AddItem_LST(hCopyLST, sStation, "Station");
-			Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended to channels \"%s\" and \"Station\"."), sStation, sStation);
-			Puts_WA(hWA, sMsg);
-			NewLine_WA(hWA);
-			
-			if (iExistChan_DB(hDBi, "Station"))
-			{
-				Strcpy_STR(sFrom, "Station");
-				Strcpy_STR(sTo, "_");
-				Strcat_STR(sTo, sFrom);
-				while(iExistChan_DB(hDBi, sTo))
-				{
-					Strcpy_STR(sChan, sTo);
-					Strcpy_STR(sTo, "_");
-					Strcat_STR(sTo, sChan);
-				}
-				AddItem_LST(hRenameLST, sFrom, sTo);
-				Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended as channel \"%s\"."), sFrom, sTo);
-				Puts_WA(hWA, sMsg);
-				NewLine_WA(hWA);
-			}				
-		}
-
-		if (iStrcmp_STR(sLongitude, "Longitude", STR_CASE_TOLERANT))
-		{
-			AddItem_LST(hCopyLST, sLongitude, "Longitude");
-			Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended to channels \"%s\" and \"Longitude\"."), sLongitude, sLongitude);
-			Puts_WA(hWA, sMsg);
-			NewLine_WA(hWA);
-			
-			if (iExistChan_DB(hDBi, "Longitude"))
-			{
-				Strcpy_STR(sFrom, "Longitude");
-				Strcpy_STR(sTo, "_");
-				Strcat_STR(sTo, sFrom);
-				while(iExistChan_DB(hDBi, sTo))
-				{
-					Strcpy_STR(sChan, sTo);
-					Strcpy_STR(sTo, "_");
-					Strcat_STR(sTo, sChan);
-				}
-				AddItem_LST(hRenameLST, sFrom, sTo);
-				Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended as channel \"%s\"."), sFrom, sTo);
-				Puts_WA(hWA, sMsg);
-				NewLine_WA(hWA);
-			}				
-		}
-
-		if (iStrcmp_STR(sLatitude, "Latitude", STR_CASE_TOLERANT))
-		{
-			AddItem_LST(hCopyLST, sLatitude, "Latitude");
-			Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended to channels \"%s\" and \"Latitude\"."), sLatitude, sLatitude);
-			Puts_WA(hWA, sMsg);
-			NewLine_WA(hWA);
-			
-			if (iExistChan_DB(hDBi, "Latitude"))
-			{
-				Strcpy_STR(sFrom, "Latitude");
-				Strcpy_STR(sTo, "_");
-				Strcat_STR(sTo, sFrom);
-				while(iExistChan_DB(hDBi, sTo))
-				{
-					Strcpy_STR(sChan, sTo);
-					Strcpy_STR(sTo, "_");
-					Strcat_STR(sTo, sChan);
-				}
-				AddItem_LST(hRenameLST, sFrom, sTo);
-				Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended as channel \"%s\"."), sFrom, sTo);
-				Puts_WA(hWA, sMsg);
-				NewLine_WA(hWA);
-			}				
-		}
-	}
-
-	SetWorkspaceREG_SYS(hWorkREG);
+               SetInfoSYS_DGW(hDGW,_GRAPPEND2_0,DGW_TEXT,"GRAPPEND","STATION");
+               SetInfoSYS_DGW(hDGW,_GRAPPEND2_1,DGW_TEXT,"GRAPPEND","LONGITUDE");
+               SetInfoSYS_DGW(hDGW,_GRAPPEND2_2,DGW_TEXT,"GRAPPEND","LATITUDE");
 
 
-	// --- Rename existing hard-wired channel names that are NOT to be imported as-is ---
+               // --- Run the Dialogue ---
+               if (iRunDialogue_DGW(hDGW) != 0) Cancel_SYS();
 
-	n = iSize_LST(hRenameLST);
-	if (n > 0)
-	{
-		for(i=0; i<n; i++)
-		{
-			GetItem_LST(hRenameLST, LST_ITEM_NAME, i, sFrom);
-			GetItem_LST(hRenameLST, LST_ITEM_VALUE, i, sTo);
+               GetInfoSYS_DGW(hDGW,_GRAPPEND2_0,DGW_TEXT,"GRAPPEND","STATION");
+               GetInfoSYS_DGW(hDGW,_GRAPPEND2_1,DGW_TEXT,"GRAPPEND","LONGITUDE");
+               GetInfoSYS_DGW(hDGW,_GRAPPEND2_2,DGW_TEXT,"GRAPPEND","LATITUDE");
+            }
 
-			Chan = FindChan_DB(hDBi, sFrom);
-			LOCK_RW(hDBi, Chan);
-			SetChanName_DB(hDBi, Chan, sTo);
-			UNLOCK(hDBi, Chan);
-		}
-	}
-	
-	// --- Copy alternate Station, Longitude and Latitude channels to hard-wired versions before appending ---
+            // --- Get values and apply the hard-wired defaults ---
 
-	n = iSize_LST(hCopyLST);
-	if (n > 0)
-	{
-		UnLock_EDB(eDBi);
-		MakeCurrent_EDB(eDBi);
+            GetString_SYS("GRAPPEND","STATION", sStation);
+            GetString_SYS("GRAPPEND","LONGITUDE", sLongitude);
+            GetString_SYS("GRAPPEND","LATITUDE", sLatitude);
+         }
+      }
+      else
+      {
+         Strcpy_STR(sStation, _n("Station"));
+         Strcpy_STR(sLongitude, _n("Longitude"));
+         Strcpy_STR(sLatitude, _n("Latitude"));
+      }
 
-		iInteractive = iInteractive_SYS();
-		SetInteractive_SYS(0);
-		for(i = 0; i<n; i++)
-		{
-			GetItem_LST(hCopyLST, LST_ITEM_NAME, i, sFrom);
-			GetItem_LST(hCopyLST, LST_ITEM_VALUE, i, sTo);
-			SetString_SYS("COPY", "FROM", sFrom);
-			SetString_SYS("COPY", "TO", sTo);
-			SetString_SYS("COPY", "DECIMATE", "1");
-			SetString_SYS("COPY", "FIDSTART", "");
-			SetString_SYS("COPY", "FIDINCR", "");
-
-			iRunGX_SYS("copy.gx");
-		}
-		SetInteractive_SYS(iInteractive);
-
-		hDBi = Lock_EDB(eDBi);
-	}
+      if (!iStrlen_STR(sStation))
+         Strcpy_STR(sStation, _n("Station"));
+      if (!iStrlen_STR(sLongitude))
+         Strcpy_STR(sLongitude, _n("Longitude"));
+      if (!iStrlen_STR(sLatitude))
+         Strcpy_STR(sLatitude, _n("Latitude"));
 
 
-   // --- check existing channels ---
+      // --- Need to do some fancy renaming and copying if importing non-standard channel names to hard-wired channels in the master database ---
 
-   iGscale = !iExistSymb_DB(hDBo, "_Gscale", DB_SYMB_CHAN);
-   iClosure = !iExistSymb_DB(hDBo, "Closure", DB_SYMB_CHAN);
-   iType = !iExistSymb_DB(hDBo, "Type", DB_SYMB_CHAN);
+      iAlternateChannels = iStrcmp_STR(sStation, _n("Station"), STR_CASE_TOLERANT) ||
+                           iStrcmp_STR(sLongitude, _n("Longitude"), STR_CASE_TOLERANT) ||
+                           iStrcmp_STR(sLatitude, _n("Latitude"), STR_CASE_TOLERANT);
+
+      hCopyLST = CreateSymbLST_DB();
+      hRenameLST = CreateSymbLST_DB();
+
+      if (iAlternateChannels)
+      {
+         Strcpy_STR(sReportFile, _n("Append.log"));
+         hWA = Create_WA(sReportFile, WA_NEW);
+         if (iStrcmp_STR(sStation, _n("Station"), STR_CASE_TOLERANT))
+         {
+            AddItem_LST(hCopyLST, sStation, _n("Station"));
+            Printf_STR(sMsg, sizeof(sMsg),
+                       _("Channel \"%s\" has been appended to channels \"%s\" and \"Station\"."),
+                       sStation, sStation);
+            Puts_WA(hWA, sMsg);
+            NewLine_WA(hWA);
+
+            if (iExistChan_DB(hDBi, _n("Station")))
+            {
+               Strcpy_STR(sFrom, _n("Station"));
+               Strcpy_STR(sTo, "_");
+               Strcat_STR(sTo, sFrom);
+               while(iExistChan_DB(hDBi, sTo))
+               {
+                  Strcpy_STR(sChan, sTo);
+                  Strcpy_STR(sTo, "_");
+                  Strcat_STR(sTo, sChan);
+               }
+               AddItem_LST(hRenameLST, sFrom, sTo);
+               Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended as channel \"%s\"."),
+                          sFrom, sTo);
+               Puts_WA(hWA, sMsg);
+               NewLine_WA(hWA);
+            }
+         }
+
+         if (iStrcmp_STR(sLongitude, _n("Longitude"), STR_CASE_TOLERANT))
+         {
+            AddItem_LST(hCopyLST, sLongitude, _n("Longitude"));
+            Printf_STR(sMsg, sizeof(sMsg),
+                       _("Channel \"%s\" has been appended to channels \"%s\" and \"Longitude\"."),
+                       sLongitude, sLongitude);
+            Puts_WA(hWA, sMsg);
+            NewLine_WA(hWA);
+
+            if (iExistChan_DB(hDBi, _n("Longitude")))
+            {
+               Strcpy_STR(sFrom, _n("Longitude"));
+               Strcpy_STR(sTo, "_");
+               Strcat_STR(sTo, sFrom);
+               while(iExistChan_DB(hDBi, sTo))
+               {
+                  Strcpy_STR(sChan, sTo);
+                  Strcpy_STR(sTo, "_");
+                  Strcat_STR(sTo, sChan);
+               }
+               AddItem_LST(hRenameLST, sFrom, sTo);
+               Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended as channel \"%s\"."),
+                          sFrom, sTo);
+               Puts_WA(hWA, sMsg);
+               NewLine_WA(hWA);
+            }
+         }
+
+         if (iStrcmp_STR(sLatitude, _n("Latitude"), STR_CASE_TOLERANT))
+         {
+            AddItem_LST(hCopyLST, sLatitude, _n("Latitude"));
+            Printf_STR(sMsg, sizeof(sMsg),
+                       _("Channel \"%s\" has been appended to channels \"%s\" and \"Latitude\"."),
+                       sLatitude, sLatitude);
+            Puts_WA(hWA, sMsg);
+            NewLine_WA(hWA);
+
+            if (iExistChan_DB(hDBi, _n("Latitude")))
+            {
+               Strcpy_STR(sFrom, _n("Latitude"));
+               Strcpy_STR(sTo, "_");
+               Strcat_STR(sTo, sFrom);
+               while(iExistChan_DB(hDBi, sTo))
+               {
+                  Strcpy_STR(sChan, sTo);
+                  Strcpy_STR(sTo, "_");
+                  Strcat_STR(sTo, sChan);
+               }
+               AddItem_LST(hRenameLST, sFrom, sTo);
+               Printf_STR(sMsg, sizeof(sMsg), _("Channel \"%s\" has been appended as channel \"%s\"."),
+                          sFrom, sTo);
+               Puts_WA(hWA, sMsg);
+               NewLine_WA(hWA);
+            }
+         }
+      }
+
+      SetWorkspaceREG_SYS(hWorkREG);
 
 
-   // --- duplicate target channels ---
+      // --- Rename existing hard-wired channel names that are NOT to be imported as-is ---
 
-   DupChans_DU(hDBi, hDBo);
+      n = iSize_LST(hRenameLST);
+      if (n > 0)
+      {
+         for(i=0; i<n; i++)
+         {
+            GetItem_LST(hRenameLST, LST_ITEM_NAME, i, sFrom);
+            GetItem_LST(hRenameLST, LST_ITEM_VALUE, i, sTo);
+
+            Chan = FindChan_DB(hDBi, sFrom);
+            LOCK_RW(hDBi, Chan);
+            SetChanName_DB(hDBi, Chan, sTo);
+            UNLOCK(hDBi, Chan);
+         }
+      }
+
+      // --- Copy alternate Station, Longitude and Latitude channels to hard-wired versions before appending ---
+
+      n = iSize_LST(hCopyLST);
+      if (n > 0)
+      {
+         UnLock_EDB(eDBi);
+         MakeCurrent_EDB(eDBi);
+
+         iInteractive = iInteractive_SYS();
+         SetInteractive_SYS(0);
+         for(i = 0; i<n; i++)
+         {
+            GetItem_LST(hCopyLST, LST_ITEM_NAME, i, sFrom);
+            GetItem_LST(hCopyLST, LST_ITEM_VALUE, i, sTo);
+            SetString_SYS("COPY", "FROM", sFrom);
+            SetString_SYS("COPY", "TO", sTo);
+            SetString_SYS("COPY", "DECIMATE", "1");
+            SetString_SYS("COPY", "FIDSTART", "");
+            SetString_SYS("COPY", "FIDINCR", "");
+
+            iRunGX_SYS("copy.gx");
+         }
+         SetInteractive_SYS(iInteractive);
+
+         hDBi = Lock_EDB(eDBi);
+      }
 
 
-   // --- remove unwanted channels ---
+      // --- check existing channels ---
 
-   REMOVE(iGscale, "_Gscale")
-   REMOVE(iClosure, _n("Closure"))
-
-
-   // --- get the gravity group, normalize all channels ---
-
-   Group = CreateSymb_DB(hDBo, "GravData", DB_SYMB_LINE, DB_OWN_SHARED, DB_CATEGORY_LINE_GROUP);
-   AssociateAll_DB(hDBo, Group);
-   StnChan = FindSymb_DB(hDBo, "Station", DB_SYMB_CHAN);
+      iGscale = !iExistSymb_DB(hDBo, _n("_Gscale"), DB_SYMB_CHAN);
+      iClosure = !iExistSymb_DB(hDBo, _n("Closure"), DB_SYMB_CHAN);
+      iType = !iExistSymb_DB(hDBo, _n("Type"), DB_SYMB_CHAN);
 
 
-   // --- unprotect all channels ---
+      // --- duplicate target channels ---
 
-   UnLock_EDB(eDBo);
-   MakeCurrent_EDB(eDBo);
-   iRunGX_SYS("chanpoff");
-   hDBo = Lock_EDB(eDBo);
+      DupChans_DU(hDBi, hDBo);
 
 
-   // --- refid to station channel ---
+      // --- remove unwanted channels ---
 
-   LOCK_RW(hDBo, StnChan);
-   ReFidAllCh_DU(hDBo, Group, StnChan);
-   iLen = iGetChannelLength_DB(hDBo, Group, StnChan);
-   UNLOCK(hDBo, StnChan);
+      REMOVE(iGscale, _n("_Gscale"))
+      REMOVE(iClosure, _n("Closure"))
 
 
-   // --- find/create a source file channel ---
+      // --- get the gravity group, normalize all channels ---
 
-   FileNamePart_STR(sSurvey, sSrcNew, STR_FILE_PART_NAME);
-   SrcChan = FindSymb_DB(hDBo, "Source", DB_SYMB_CHAN);
-   if (SrcChan == NULLSYMB)
-   {
-      // --- create a source channel ---
+      Group = CreateSymb_DB(hDBo, _n("GravData"), DB_SYMB_LINE, DB_OWN_SHARED, DB_CATEGORY_LINE_GROUP);
+      AssociateAll_DB(hDBo, Group);
+      StnChan = FindSymb_DB(hDBo, _n("Station"), DB_SYMB_CHAN);
 
-      SrcChan = CreateSymb_DB(hDBo, "Source", DB_SYMB_CHAN, DB_OWN_SHARED, -32);
-      Associate_DB(hDBo, Group, SrcChan);
 
-      SetLen_VV(hSrcVV, iLen);
-      FillString_VV(hSrcVV, _n("unknown"));
-   }
-   else
-   {
-      // --- source channel exists, look for survey ---
+      // --- unprotect all channels ---
 
-      LOCK_R(hDBo, SrcChan);
-      GetChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
+      UnLock_EDB(eDBo);
+      MakeCurrent_EDB(eDBo);
+      iRunGX_SYS("chanpoff");
+      hDBo = Lock_EDB(eDBo);
+
+
+      // --- refid to station channel ---
+
+      LOCK_RW(hDBo, StnChan);
+      ReFidAllCh_DU(hDBo, Group, StnChan);
+      iLen = iGetChannelLength_DB(hDBo, Group, StnChan);
+      UNLOCK(hDBo, StnChan);
+
+
+      // --- find/create a source file channel ---
+
+      FileNamePart_STR(sSurvey, sSrcNew, STR_FILE_PART_NAME);
+      SrcChan = FindSymb_DB(hDBo, "Source", DB_SYMB_CHAN);
+      if (SrcChan == NULLSYMB)
+      {
+         // --- create a source channel ---
+
+         SrcChan = CreateSymb_DB(hDBo, "Source", DB_SYMB_CHAN, DB_OWN_SHARED, -32);
+         Associate_DB(hDBo, Group, SrcChan);
+
+         SetLen_VV(hSrcVV, iLen);
+         FillString_VV(hSrcVV, _n("unknown"));
+      }
+      else
+      {
+         // --- source channel exists, look for survey ---
+
+         LOCK_R(hDBo, SrcChan);
+         GetChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
+         UNLOCK(hDBo, SrcChan);
+
+         rStart = rGetFidStart_VV(hSrcVV);
+         rIncr = rGetFidIncr_VV(hSrcVV);
+         iCheck = TRUE && iInteractive_SYS();
+         for (i = 0; i < iLen; i++)
+         {
+            GetString_VV(hSrcVV, i, sSrc);
+            TrimSpace_STR(sSrc, STR_TRIMBOTH);
+            if (iStrcmp_STR(sSrc, sSrcNew, STR_CASE_TOLERANT) == 0)
+            {
+               // --- survey already loaded ---
+
+               if (iCheck)
+               {
+                  if (!iDisplayQuestion_SYS(
+                         sSurvey, _("Survey already merged. Do you want to replace previous survey?")))
+                  {
+                     Exit_SYS();
+                  }
+                  iCheck = FALSE;
+               }
+
+
+               // --- remove this data ---
+
+               ModFidRange_DU(hDBo, Group, rStart, rIncr, i, 1, DU_MODFID_DELETE);
+               if (i + 1 < iLen) Copy2_VV(hSrcVV, i, hSrcVV, i + 1, (iLen - i - 1));
+               i--;
+               iLen--;
+            }
+            else if (iStrlen_STR(sSrc) == 0)
+                 SetString_VV(hSrcVV, i, _n("unknown"));
+         }
+      }
+
+      // --- put source back ---
+
+      LOCK_RW(hDBo, SrcChan);
+      PutChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
       UNLOCK(hDBo, SrcChan);
 
-      rStart = rGetFidStart_VV(hSrcVV);
-      rIncr = rGetFidIncr_VV(hSrcVV);
-      iCheck = TRUE && iInteractive_SYS();
-      for (i = 0; i < iLen; i++)
-      {
-         GetString_VV(hSrcVV, i, sSrc);
-         TrimSpace_STR(sSrc, STR_TRIMBOTH);
-         if (iStrcmp_STR(sSrc, sSrcNew, STR_CASE_TOLERANT) == 0)
-         {
-            // --- survey already loaded ---
 
-            if (iCheck)
+      // --- Normalize the output data, append input data, then normalize output again ---
+
+      Append_DU(hDBi, hDBo, TRUE);
+      LOCK_RW(hDBo, StnChan);
+      ReFidAllCh_DU(hDBo, Group, StnChan);
+      UNLOCK(hDBo, StnChan);
+
+
+      // --- set new source data ---
+
+      LOCK_RW(hDBo, SrcChan);
+      GetChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
+
+      FileNamePart_STR(sCurrentSurveyFile, sSurveyFile, STR_FILE_PART_NAME);
+      for (i = iLen; i < iLength_VV(hSrcVV); i++)
+         SetString_VV(hSrcVV, i, sSurveyFile);
+      
+      PutChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
+      UNLOCK(hDBo, SrcChan);
+
+
+      // --- remove non-stations ---
+
+      TypeChan = FindSymb_DB(hDBo, "Type", DB_SYMB_CHAN);
+
+      if (TypeChan != NULLSYMB)
+      {
+         LOCK_RW(hDBo, TypeChan);
+         GetChanVV_DB(hDBo, Group, TypeChan, hTypeVV);
+         UNLOCK(hDBo, TypeChan);
+
+         rStart = rGetFidStart_VV(hTypeVV);
+         rIncr = rGetFidIncr_VV(hTypeVV);
+         iLen = iLength_VV(hTypeVV);
+         for (i = 0; i < iLen; i++)
+         {
+            ii = iGetInt_VV(hTypeVV, i);
+            if (ii != iDUMMY && ii != 1)
             {
-               if (!iDisplayQuestion_SYS(sSurvey, _("Survey already merged. Do you want to replace previous survey?")))
-                  Exit_SYS();
-               iCheck = FALSE;
+               // --- not a reading, remove it ---
+
+               ModFidRange_DU(hDBo, Group, rStart, rIncr, i, 1, DU_MODFID_DELETE);
+               if (i + 1 < iLen) Copy2_VV(hTypeVV, i, hTypeVV, i + 1, (iLen - i - 1));
+               i--;
+               iLen--;
             }
-
-
-            // --- remove this data ---
-
-            ModFidRange_DU(hDBo, Group, rStart, rIncr, i, 1, DU_MODFID_DELETE);
-            if (i + 1 < iLen) Copy2_VV(hSrcVV, i, hSrcVV, i + 1, (iLen - i - 1));
-            i--;
-            iLen--;
          }
-         else if (iStrlen_STR(sSrc) == 0)
-            SetString_VV(hSrcVV, i, _n("unknown"));
+
+         // --- don't need type any more ---
+
+         REMOVE(iType, _n("Type"))
       }
-   }
-
-   // --- put source back ---
-
-   LOCK_RW(hDBo, SrcChan);
-   PutChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
-   UNLOCK(hDBo, SrcChan);
 
 
-   // --- Normalize the output data, append input data, then normalize output again ---
+      // --- sort line/stations ---
 
-   Append_DU(hDBi, hDBo, TRUE);
-   LOCK_RW(hDBo, StnChan);
-   ReFidAllCh_DU(hDBo, Group, StnChan);
-   UNLOCK(hDBo, StnChan);
-
-
-   // --- set new source data ---
-
-   LOCK_RW(hDBo, SrcChan);
-   GetChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
-   for (i = iLen; i < iLength_VV(hSrcVV); i++)
-      SetString_VV(hSrcVV, i, sSrcNew);
-   PutChanVV_DB(hDBo, Group, SrcChan, hSrcVV);
-   UNLOCK(hDBo, SrcChan);
-
-
-   // --- remove non-stations ---
-
-   TypeChan = FindSymb_DB(hDBo, "Type", DB_SYMB_CHAN);
-
-   if (TypeChan != NULLSYMB)
-   {
-      LOCK_RW(hDBo, TypeChan);
-      GetChanVV_DB(hDBo, Group, TypeChan, hTypeVV);
-      UNLOCK(hDBo, TypeChan);
-
-      rStart = rGetFidStart_VV(hTypeVV);
-      rIncr = rGetFidIncr_VV(hTypeVV);
-      iLen = iLength_VV(hTypeVV);
-      for (i = 0; i < iLen; i++)
+      if (iExistSymb_DB(hDBo, "Line", DB_SYMB_CHAN))
       {
-         ii = iGetInt_VV(hTypeVV, i);
-         if (ii != iDUMMY && ii != 1)
-         {
-            // --- not a reading, remove it ---
+         // --- sort by line/station ---
 
-            ModFidRange_DU(hDBo, Group, rStart, rIncr, i, 1, DU_MODFID_DELETE);
-            if (i + 1 < iLen) Copy2_VV(hTypeVV, i, hTypeVV, i + 1, (iLen - i - 1));
-            i--;
-            iLen--;
-         }
+         SetString_SYS("SORTALL2", "CHANNEL1", "Line");
+         SetString_SYS("SORTALL2", "ORDER1", "ASCENDING");
+         SetString_SYS("SORTALL2", "CHANNEL2", "Station");
+         SetString_SYS("SORTALL2", "ORDER2", "ASCENDING");
+         SetString_SYS("SORTALL2", "READONLY", "YES");
+
+         UnLock_EDB(eDBo);
+		   MakeCurrent_EDB(eDBo);
+         if (iRunGX_SYS("sortal2") != 0)
+            Abort_SYS(_("Sort failed."));
+         hDBo = Lock_EDB(eDBo);
+      }
+      else
+      {
+         // --- sort by  station ---
+
+         SetString_SYS("SORTALL", "CHANNEL", "Station");
+         SetString_SYS("SORTALL", "ORDER", "ASCENDING");
+         SetString_SYS("SORTALL", "READONLY", "YES");
+
+         UnLock_EDB(eDBo);
+		   MakeCurrent_EDB(eDBo);
+         if (iRunGX_SYS("sortal") != 0)
+            Abort_SYS(_("Sort failed."));
+         hDBo = Lock_EDB(eDBo);
       }
 
-      // --- don't need type any more ---
 
-      REMOVE(iType, _n("Type"))
-   }
+      // --- copy projections if not set ---
 
-	
-   // --- sort line/stations ---
+      hIPJ = Create_IPJ();
+      Ch = GetXYZChanSymb_DB(hDBi, DB_CHAN_X);
+      if (Ch != NULLSYMB)
+      {
+         ChX = GetXYZChanSymb_DB(hDBo, DB_CHAN_X);
+         if (ChX != NULLSYMB)
+         {
+            GetIPJ_DB(hDBo, ChX, hIPJ);
+            if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE)
+            {
+               ChY = GetXYZChanSymb_DB(hDBo, DB_CHAN_Y);
+               if (ChY != NULLSYMB)
+               {
+                  GetIPJ_DB(hDBi, Ch, hIPJ);
+                  SetIPJ_DB(hDBo, ChX, ChY, hIPJ);
+               }
+            }
+         }
+      }
+      Ch = FindSymb_DB(hDBi, "Longitude", DB_SYMB_CHAN);
+      if (Ch != NULLSYMB)
+      {
+         ChX = FindSymb_DB(hDBo, "Longitude", DB_SYMB_CHAN);
+         if (ChX != NULLSYMB)
+         {
+            GetIPJ_DB(hDBo, ChX, hIPJ);
+            if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE)
+            {
+               ChY = FindSymb_DB(hDBo, "Latitude", DB_SYMB_CHAN);
+               if (ChY != NULLSYMB)
+               {
+                  GetIPJ_DB(hDBi, Ch, hIPJ);
+                  SetIPJ_DB(hDBo, ChX, ChY, hIPJ);
+               }
+            }
+         }
+      }
+      Destroy_IPJ(hIPJ);
 
-   if (iExistSymb_DB(hDBo, "Line", DB_SYMB_CHAN))
-   {
-      // --- sort by line/station ---
 
-      SetString_SYS("SORTALL2", "CHANNEL1", "Line");
-      SetString_SYS("SORTALL2", "ORDER1", "ASCENDING");
-      SetString_SYS("SORTALL2", "CHANNEL2", "Station");
-      SetString_SYS("SORTALL2", "ORDER2", "ASCENDING");
-      SetString_SYS("SORTALL2", "READONLY", "YES");
+	   // --- Remove any temp copied channels from the input survey database ---
 
+	   n = iSize_LST(hCopyLST);
+	   for(i = 0; i<n; i++)
+	   {
+         GetItem_LST(hCopyLST, LST_ITEM_VALUE, i, sTo);
+		   REMOVE_FROMSURVEY(sTo)
+      }
+
+	   // --- Rename back any channels renamed above ---
+
+	   n = iSize_LST(hRenameLST);
+	   if (n > 0)
+	   {
+         for(i=0; i<n; i++)
+		   {
+            GetItem_LST(hRenameLST, LST_ITEM_NAME, i, sFrom);
+			   GetItem_LST(hRenameLST, LST_ITEM_VALUE, i, sTo);
+
+			   Chan = FindChan_DB(hDBi, sTo);
+			   LOCK_RW(hDBi, Chan);
+			   SetChanName_DB(hDBi, Chan, sFrom);
+			   UNLOCK(hDBi, Chan);
+		   }
+	   }
+
+
+      // --- delete line 0 and display all ---
+
+      UnLock_EDB(eDBi);
       UnLock_EDB(eDBo);
-		MakeCurrent_EDB(eDBo);
-      if (iRunGX_SYS("sortal2") != 0)
-         Abort_SYS(_("Sort failed."));
-      hDBo = Lock_EDB(eDBo);
-   }
-   else
-   {
-      // --- sort by  station ---
+      DelLine0_EDB(eDBo);
 
-      SetString_SYS("SORTALL", "CHANNEL", "Station");
-      SetString_SYS("SORTALL", "ORDER", "ASCENDING");
-      SetString_SYS("SORTALL", "READONLY", "YES");
-
-      UnLock_EDB(eDBo);
-		MakeCurrent_EDB(eDBo);
-      if (iRunGX_SYS("sortal") != 0)
-         Abort_SYS(_("Sort failed."));
-      hDBo = Lock_EDB(eDBo);
-   }
-
-
-   // --- copy projections if not set ---
-
-   hIPJ = Create_IPJ();
-   Ch = GetXYZChanSymb_DB(hDBi, DB_CHAN_X);
-   if (Ch != NULLSYMB)
-   {
-      ChX = GetXYZChanSymb_DB(hDBo, DB_CHAN_X);
-      if (ChX != NULLSYMB)
+      iNChan = 1;
+      if (!iScript_SYS())
       {
-         GetIPJ_DB(hDBo, ChX, hIPJ);
-         if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE)
-         {
-            ChY = GetXYZChanSymb_DB(hDBo, DB_CHAN_Y);
-            if (ChY != NULLSYMB)
-            {
-               GetIPJ_DB(hDBi, Ch, hIPJ);
-               SetIPJ_DB(hDBo, ChX, ChY, hIPJ);
-            }
-         }
+         hLST = Create_LST(64);
+         iNChan = iDispChanLST_EDB(eDBo, hLST);
+      }
+
+      if (iNew || iNChan == 0)
+         LoadAllChans_EDB(eDBo);
+
+	   if (iSurveyLoaded == 0)
+		   UnLoad_EDB(sSurvey);
+
+
+      // --- Report to display? ---
+
+      if (iSize_LST(hCopyLST) > 0)
+      {
+         Destroy_WA(hWA);
+         iDisplayReportFile += 1;
       }
    }
-   Ch = FindSymb_DB(hDBi, "Longitude", DB_SYMB_CHAN);
-   if (Ch != NULLSYMB)
-   {
-      ChX = FindSymb_DB(hDBo, "Longitude", DB_SYMB_CHAN);
-      if (ChX != NULLSYMB)
-      {
-         GetIPJ_DB(hDBo, ChX, hIPJ);
-         if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE)
-         {
-            ChY = FindSymb_DB(hDBo, "Latitude", DB_SYMB_CHAN);
-            if (ChY != NULLSYMB)
-            {
-               GetIPJ_DB(hDBi, Ch, hIPJ);
-               SetIPJ_DB(hDBo, ChX, ChY, hIPJ);
-            }
-         }
-      }
-   }
-   Destroy_IPJ(hIPJ);
-
-	
-	// --- Remove any temp copied channels from the input survey database ---
-
-	n = iSize_LST(hCopyLST);
-	for(i = 0; i<n; i++)
-	{
-		GetItem_LST(hCopyLST, LST_ITEM_VALUE, i, sTo);		
-		REMOVE_FROMSURVEY(sTo)
-	}
-
-	// --- Rename back any channels renamed above ---
-
-	n = iSize_LST(hRenameLST);
-	if (n > 0)
-	{
-		for(i=0; i<n; i++)
-		{
-			GetItem_LST(hRenameLST, LST_ITEM_NAME, i, sFrom);
-			GetItem_LST(hRenameLST, LST_ITEM_VALUE, i, sTo);
-
-			Chan = FindChan_DB(hDBi, sTo);
-			LOCK_RW(hDBi, Chan);
-			SetChanName_DB(hDBi, Chan, sFrom);
-			UNLOCK(hDBi, Chan);
-		}
-	}
-
-
-   // --- delete line 0 and display all ---
-
-   UnLock_EDB(eDBi);
-   UnLock_EDB(eDBo);
-   DelLine0_EDB(eDBo);
-
-   iNChan = 1;
-   if (!iScript_SYS())
-   {
-      hLST = Create_LST(64);
-      iNChan = iDispChanLST_EDB(eDBo, hLST);
-   }
-
-   if (iNew || iNChan == 0)
-      LoadAllChans_EDB(eDBo);
 
    Destroy_SYS(hTypeVV);
    Destroy_SYS(hStnVV);
    Destroy_SYS(hSrcVV);
 
-	if (iSurveyLoaded == 0)
-		UnLoad_EDB(sSurvey);
+   MakeCurrent_EDB(eDBo);
 
-	MakeCurrent_EDB(eDBo);
 
-	
-	// --- Report to display? ---
+   // --- Report to display? ---
 
-	if (iSize_LST(hCopyLST) > 0) 
-	{
-		Destroy_WA(hWA);
-		if (iInteractive_SYS())
-		{  
-			// --- edit ---
-
-			SetString_SYS("EDIT","FILE",sReportFile);
-			SetString_SYS("EDIT","CHILD","Yes");
-			iRunGX_SYS("edit");         
-		}
+   if (iDisplayReportFile && iInteractive_SYS())
+   {
+      SetString_SYS("EDIT","FILE",sReportFile);
+      SetString_SYS("EDIT","CHILD","Yes");
+      iRunGX_SYS("edit");
 	}
 }
