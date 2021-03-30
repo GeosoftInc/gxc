@@ -22,7 +22,7 @@ Select a __[Release](https://github.com/GeosoftInc/gxc/releases)__ and download 
 
 The compiler and support tools are part of your Geosoft Desktop installation. You will need to add the Geosoft Desktop bin directory to the __PATH__ environment so the compiler programs can be found, and set the environment variable __INCLUDE__ to your ___gxc\include___ folder.  
 
-It is recommended to not change this system-wide (to avoid affecting other applications) but rather only in a commandline shell, or within a reusable batch script.
+To avoid affecting other applications or deceloper toolkits, it is not recommended to change this in the system-wide operating system settings. Rather only do it within a command-line shell or a reusable batch script.
 
 For example:
 
