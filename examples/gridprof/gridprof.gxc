@@ -57,10 +57,12 @@ string(STR_FILE) sGrid3;            // Name of grid file
 string(STR_FILE) sGrid4;            // Name of grid file
 string(STR_FILE) sGrid5;            // Name of grid file
 string(STR_FILE) sZG;
+string(STR_FILE) sGridChoice;
 string(STR_DB_SYMBOL) sLine,sChanName;
 string(STR_DB_SYMBOL) sZ,sZ1,sZ2,sZ3,sZ4,sZ5,sXCh,sYCh;
 string(512) sMessage;
 string(STR_DEFAULT_SHORT) sTmp;
+
 
 int         i,iLen;
 real        r,rD,rX0,rY0,rX,rY,rSample;
@@ -74,6 +76,7 @@ MAP         hMAP;
 MVIEW       View;
 DGW         Diag;                                   // Dialogue handle
 VV          VVx,VVy,VVd;                            // polyline VV's
+VV          VVGrids;
 DB_SYMB     XCh,YCh,ZCh1,ZCh2,ZCh3,ZCh4,ZCh5,Line;
 LST         List, ChanLST;
 IPJ         hIPJxy,hIPJpr;
@@ -81,6 +84,10 @@ PJ          hPJ;
 
 int         i2,i3,i4,i5;
 int         j,iMethod,iCount,iSame;
+int         VVLength,k;
+real        rX1,rX2,rY1,rY2;
+IMG         hIMG;
+IPJ         hIPJ;
 
 //===========================================================================
 //                            PROJECTION CODE
@@ -98,19 +105,16 @@ int         j,iMethod,iCount,iSame;
    EData = Current_EDB();
    Data = Lock_EDB(EData);
    hIPJpr = (IPJ)0;
-
-
+  
    // --- Get current X,Y channels ---
 
    GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
    GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
-
-
+	
    // --- get database IPJ ---
 
    hIPJxy = Create_IPJ();
-
-
+     
    if (iInteractive_SYS())
    {
       // --- Create the 1st Dialogue ---
@@ -195,21 +199,6 @@ int         j,iMethod,iCount,iSame;
    i4 = iStrlen_STR(sGrid4);
    i5 = iStrlen_STR(sGrid5);
 
-   // --- get default sample interval ---
-
-   if (rSample <= 0.0)
-   {
-      i = 0;
-      rX = rY = r = 0.0;
-      GridStat_IMU(sGrid1, i, i, i, rX, rY, i, r, r, r, r, r);
-
-      if (rX <= rY)
-         rSample = rX;
-      else
-         rSample = rY;
-   }
-
-
    // --- create VV's ---
 
    VVx = Create_VV(REAL, 0);
@@ -247,7 +236,79 @@ int         j,iMethod,iCount,iSame;
       }
    }
 
+   // --- get default sample interval ---
 
+   VVGrids = Create_VV(-STR_FILE, 0);  
+
+   if(iStrcmp_STR(sGrid1,"",STR_CASE_TOLERANT) != 0)     //Copy grid names 
+	  SetString_VV(VVGrids, 0, sGrid1);  
+
+   if(iStrcmp_STR(sGrid2,"",STR_CASE_TOLERANT) != 0) 
+	  SetString_VV(VVGrids, 1, sGrid2); 
+   
+   if(iStrcmp_STR(sGrid3,"",STR_CASE_TOLERANT) != 0) 
+	  SetString_VV(VVGrids, 2, sGrid3); 
+   
+   if(iStrcmp_STR(sGrid4,"",STR_CASE_TOLERANT) != 0) 
+	  SetString_VV(VVGrids, 3, sGrid4); 
+   
+   if(iStrcmp_STR(sGrid5,"",STR_CASE_TOLERANT) != 0) 
+	  SetString_VV(VVGrids, 4, sGrid5); 
+
+   VVLength = iLength_VV(VVGrids);
+ 
+   if (hIPJpr == (IPJ)0 || !iHasProjection_IPJ(hIPJpr))
+   {
+	  for(k = 0; k < VVLength; k++)
+	  { 
+	     GetString_VV(VVGrids, k, sGridChoice);	   
+		 hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGridChoice, IMG_FILE_READONLY);
+		 hIPJpr = Create_IPJ();
+		 GetIPJ_IMG(hIMG, hIPJpr);
+		 Destroy_IMG(hIMG);
+			
+		 if (iHasProjection_IPJ(hIPJpr))
+		   break;
+	  }
+   }
+	
+   if (rSample <= 0.0)
+   {  
+      i = 0;
+	    
+	  for(k = 0; k < VVLength; k++)
+      { 
+	     rX = rY = rX0 = rY0 = r = 0.0;
+		  
+		 GetString_VV(VVGrids, k, sGridChoice);	   
+         GridStat_IMU(sGridChoice, i, i, i, rX, rY, i, rX0, rY0, r, r, r); 
+		
+ 		 rX1 = rX0; rY1 = rY0;
+		 rX2 = rX0; rY2 = rY0;
+		  
+		 if (rX <= rY)
+		    rX2 += rX;
+		 else
+			rY2 += rY;
+	
+ 		 hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGridChoice, IMG_FILE_READONLY);
+		 hIPJ = Create_IPJ();
+		 GetIPJ_IMG(hIMG, hIPJ);
+         Destroy_IMG(hIMG);
+ 								  	
+		 hPJ = CreateIPJ_PJ(hIPJ,hIPJpr);
+			
+		 ConvertXY_PJ(hPJ,rX1,rY1);
+		 ConvertXY_PJ(hPJ,rX2,rY2);
+		 Destroy_PJ(hPJ);
+		
+		 rD = rHypot_MATH(rX2 - rX1, rY2 - rY1);
+	
+		 if (rSample <= 0.0 || rD < rSample)
+			rSample = rD;				
+		}
+	}
+	
    // --- get profile points ---
 
    i = 0;
@@ -541,8 +602,7 @@ int         j,iMethod,iCount,iSame;
       hIPJxy = Create_IPJ();
       GetIPJ_DB(Data, XCh, hIPJxy);
 
-      if (iMethod == 0 || iMethod == 2)
-      {
+      
          // --- reproject map coordinates to match database ---
 
          iSame = 0;
@@ -552,40 +612,28 @@ int         j,iMethod,iCount,iSame;
               iOrientationsAreTheSame_IPJ(hIPJpr, hIPJxy)))
             iSame = 1;
 
-         if ((iSourceType_IPJ(hIPJxy) != IPJ_TYPE_NONE) &&
-             (iSourceType_IPJ(hIPJpr) != IPJ_TYPE_NONE) &&
-             !iSame)
-         {
-            // --- check if local datum transform required/supported ---
-
-            if (iInteractive_SYS() && iSupportDatumTransform_IPJ(hIPJxy, hIPJpr) == 0)
-            {
-               if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between map and database coordinate systems may be inaccurate because the local datum transform for one or both systems is not defined.  Do want to continue?")) == 0)
-                  Exit_SYS();
-            }
-
-
-            // --- set up the projection ---
-
-            hPJ = CreateIPJ_PJ(hIPJpr, hIPJxy);
+      if ((iSourceType_IPJ(hIPJxy) != IPJ_TYPE_NONE) &&
+           (iSourceType_IPJ(hIPJpr) != IPJ_TYPE_NONE) &&
+           !iSame)
+      {
+          // --- check if local datum transform required/supported ---
+	  
+          if (iInteractive_SYS() && iSupportDatumTransform_IPJ(hIPJxy, hIPJpr) == 0)
+          {
+             if (iDisplayQuestion_SYS(_("WARNING: Possibly inaccurate coordinate translation"), _("Translation between map and database coordinate systems may be inaccurate because the local datum transform for one or both systems is not defined.  Do want to continue?")) == 0)
+                Exit_SYS();
+          }
+	  
+	  
+          // --- set up the projection ---
+	  
+          hPJ = CreateIPJ_PJ(hIPJpr, hIPJxy);
             ConvertVV_PJ(hPJ, VVx, VVy);
             Destroy_PJ(hPJ);
-         }
-
-
-         if (iSourceType_IPJ(hIPJxy) == IPJ_TYPE_NONE)
-            SetIPJ_DB(Data, XCh, YCh, hIPJpr);
-      }
-      else
-      {
-         // --- if no projection for manual points, assume first grid ---
-
-         if (iSourceType_IPJ(hIPJxy) == IPJ_TYPE_NONE)
-            GetIPJ_IMG(hIMG1, hIPJxy);
-
-         SetIPJ_DB(Data, XCh, YCh, hIPJxy);
       }
 
+      if (iSourceType_IPJ(hIPJxy) == IPJ_TYPE_NONE)
+         SetIPJ_DB(Data, XCh, YCh, hIPJpr);
 
       // --- put profile into database ---
 

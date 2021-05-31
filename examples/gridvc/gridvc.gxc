@@ -1,0 +1,173 @@
+//=====================g======================================================
+// clang-format off
+NAME          = "GRIDVC"
+#include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Filters"
+
+DESCRIPTION   = "\Apply vertical Continuation convolution filter to a grid.
+Parameters:
+       GRIDVC.GRD      File Name of the Input Grid.
+             .NEW      File Name of New Grid.\r\n"
+
+//===========================================================================
+
+RESOURCE = "gridvc.gr"
+#include "gridvc.grh"
+
+//===========================================================================
+
+#include <all.gxh>
+// clang-format on
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+DGW Diag;  // Dialogue handle
+
+int i;                  // utility int
+string(STR_FILE) sGrd;  // Name of input grid
+string(STR_FILE) sNew;  // Name of new resultant grid
+
+IMG IMGi;  // Image tied to the input grid
+IMG IMGo;  // Image for the output grid
+IMG IMGt;  // Image for the trend removed grid
+VV  rVV;
+VM VMcoef;  // VM contains trend coefficients (if any)
+
+int  iUpdown;  // 1 to calculate continuation up, 0 down
+real rDist;    // Continuation Distance
+real rDx, rDy, rXo, rYo, rRot;
+int  iNX, iNY;
+
+
+//===========================================================================
+//                            GRID UTIL CODE
+//===========================================================================
+
+{
+   if (iInteractive_SYS())
+   {
+      // --- Create the Dialogue ---
+
+      Diag = Create_DGW("GRIDVCForm");
+
+      // --- Set any Defaults from INI ---
+
+      SetInfoSYS_DGW(Diag, _GRIDVCFORM_0, DGW_FILEPATH, "GRIDVC", "GRD");
+      SetInfoSYS_DGW(Diag, _GRIDVCFORM_1, DGW_FILEPATH, "GRIDVC", "NEW");
+      SetInfoSYS_DGW(Diag, _GRIDVCFORM_2, DGW_LISTALIAS, "GRIDVC", "UPDOWN");
+      SetInfoSYS_DGW(Diag, _GRIDVCFORM_3, DGW_TEXT, "GRIDVC", "DIST");
+
+      // --- Run the Dialogue ---
+
+      i = iRunDialogue_DGW(Diag);
+      if (i != 0) Cancel_SYS();
+
+      // --- Get the Strings and replace in INI ---
+
+      GetInfoSYS_DGW(Diag, _GRIDVCFORM_0, DGW_FILEPATH, "GRIDVC", "GRD");
+      GetInfoSYS_DGW(Diag, _GRIDVCFORM_1, DGW_FILEPATH, "GRIDVC", "NEW");
+      GetInfoSYS_DGW(Diag, _GRIDVCFORM_2, DGW_LISTALIAS, "GRIDVC", "UPDOWN");
+      GetInfoSYS_DGW(Diag, _GRIDVCFORM_3, DGW_TEXT, "GRIDVC", "DIST");
+
+      // --- Destroy the Dialogue ---
+
+      Destroy_DGW(Diag);
+   }
+
+
+   // --- Get Parameters ---
+
+   GetString_SYS("GRIDVC", "GRD", sGrd);
+   GetString_SYS("GRIDVC", "NEW", sNew);
+   iUpdown = iGetInt_SYS("GRIDVC", "UPDOWN");
+   rDist   = rGetReal_SYS("GRIDVC", "DIST");
+
+   // --- Check for null input and output file name strings ---
+
+   if (!iStrMin2_STR(sGrd))
+      Abort_SYS(_("Input Grid Not Specified!"));
+
+   if (!iStrMin2_STR(sNew))
+      Abort_SYS(_("New Resultant Grid Not Specified!"));
+
+   if (!iStrcmp_STR(sGrd, sNew, STR_CASE_TOLERANT))
+      Abort_SYS(_("Names of Input Grid and New Resultant Grid Must be Different!"));
+
+   Progress_SYS(1);
+
+   ProgName_SYS(_("Creating Images..."), 1);
+
+
+   // --- Create Images tied to the grids ---
+
+   IMGi = CreateFile_IMG(GS_DOUBLE, sGrd, IMG_FILE_READONLY);
+   IMGo = CreateOutFile_IMG(GS_DOUBLE, sNew, IMGi);
+   IMGt = CreateOutFile_IMG(GS_DOUBLE, "__tr_tmp.grd", IMGi);
+
+   GetInfo_IMG(IMGi, rDx, rDy, rXo, rYo, rRot);
+   iNX = iNX_IMG(IMGi);
+   iNY = iNY_IMG(IMGi);
+
+   rDist = rDist/rDx;
+   if (rDist<=0.0)
+      Abort_SYS(_("'Continuation Distance' should be greater than 0.0!"));
+   if (rDist>5.0)
+      Abort_SYS(_("'Continuation Distance' is greate than 5 gridcell size, the GX only supports Continuation Distance within 5 gridcell size!"));
+
+
+   // --- Grid Trend Remove ---
+
+   ProgName_SYS(_("Grid Trend Remove ..."), 1);
+
+   VMcoef = Create_VM(REAL, 10);
+
+   GridTrnd_IMU(IMGi, IMGt, 0, IMU_TREND_EDGE, 1, VMcoef, 3);
+
+   // --- Convoluting the grid ---
+
+   ProgName_SYS(_("Grid Convolution..."), 1);
+
+   GridVC_IMU(IMGt, IMGo, iUpdown, rDist);
+   Destroy_IMG(IMGo);
+
+   // --- Grid Trend replace back ---
+
+   IMGo = CreateFile_IMG(GS_DOUBLE, sNew, IMG_FILE_READWRITE);    
+   iNX = iNX_IMG(IMGo);
+   iNY = iNY_IMG(IMGo);
+
+   rVV = Create_VV(REAL, iNX);
+   for (i = 0; i < iNY; i++)
+   {   
+       ReadY_IMG(IMGo, i, 0, iNX, rVV);
+       Trans_VV(rVV, 0.0, rDx);
+       WriteY_IMG(IMGo, i, 0, iNX, rVV);
+   }
+
+   GridTrnd_IMU(IMGo, IMGo, 2, IMU_TREND_EDGE, 1, VMcoef, 3);
+
+   // --- Destroy the Images and VV ---
+
+   Destroy_IMG(IMGi);
+   Destroy_IMG(IMGo);
+   Destroy_IMG(IMGt);
+   Destroy_VV(rVV);
+   if (VMcoef) Destroy_VM(VMcoef);
+   if (iFileExist_SYS("__tr_tmp.grd"))
+      iDeleteFile_SYS("__tr_tmp.grd");
+   if (iFileExist_SYS("__tr_tmp.grd.gi"))
+      iDeleteFile_SYS("__tr_tmp.grd.gi");
+
+   // --- done ---
+
+   Progress_SYS(0);
+
+   // --- Add this grid to the current project ---
+
+   if (iInteractive_SYS())
+      iAddDocument_PROJ(sNew, "Grid", 1);
+}

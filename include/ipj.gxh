@@ -623,12 +623,23 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
-// ClearOrientation_IPJ Clear an orientation warp from an IPJ.
+// ClearOrientation_IPJ Clear any orientation and/or warp from an IPJ.
 //
 // Available            5.1.6
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void ClearOrientation_IPJ(IPJ);  // IPJ object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CopyOrientation_IPJ Copy any orientation and/or warp from one IPJ to another.
+//
+// Available           9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void CopyOrientation_IPJ(IPJ,   // Source IPJ
+                                   IPJ);  // Destination IPJ
 
 
   
@@ -913,6 +924,33 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// iCompareDatumsToSpecifiedToleranceWithFeedback_IPJ Compare the datums of two coordinate systems, but allows for a specified accuracy and returns the reason if they are different
+//
+// Returns                                            0 - Datums are different
+//                                                    1 - Datums are the same, but different LDT
+//                                                    2 - Datums and LTD are the same
+//
+// Notes                                              To transform between different datums requires the use of a local
+//                                                    datum transform.  The local datum transform can be defined when
+//                                                    a coordinate system is created, but the definition is optional.
+//                                                    This function will test that the local datum transforms are defined.
+//                                                    Note that a coordinate transformation between datums without a
+//                                                    local datum transform is still possible, but only the effect of
+//                                                    ellipsoid shape will be modelled in the transform.
+//
+// Available                                          9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iCompareDatumsToSpecifiedToleranceWithFeedback_IPJ(IPJ,          // IPJ 1
+                                                                 IPJ,          // IPJ 2
+                                                                 int,          // Significant digits (0 for exact)
+                                                                 var string,   // Reason if different returned
+                                                                 int);         // Reason buffer size
+#define _iCompareDatumsToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, str_val) iCompareDatumsToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, str_val, sizeof(str_val))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // iConvertWarp_IPJ Converts a point X, Y, Z to the new IPJ plane.
 //
 // Returns          0 if ok - 1 otherwise
@@ -970,6 +1008,25 @@
 
 [_public] int iCoordinateSystemsAreTheSameWithinASmallTolerance_IPJ(IPJ,   // IPJ 1
                                                                     IPJ);  // IPJ 2
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iCoordinateSystemsAreTheSameToSpecifiedToleranceWithFeedback_IPJ Same as iCoordinateSystemsAreTheSame_IPJ, but allows for a specified accuracy and returns the reason if they are different
+//
+// Returns                                                          0 - No
+//                                                                  1 - Yes
+//
+// Available                                                        9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iCoordinateSystemsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(IPJ,          // IPJ 1
+                                                                               IPJ,          // IPJ 2
+                                                                               int,          // Significant digits (0 for exact)
+                                                                               int,          // Significant digits for high-precision parameters like easting and northing (0 for exact)
+                                                                               var string,   // Reason if different returned
+                                                                               int);         // Reason buffer size
+#define _iCoordinateSystemsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, sig_digits_EN, str_val) iCoordinateSystemsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, sig_digits_EN, str_val, sizeof(str_val))
 
 
   
@@ -1217,6 +1274,24 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// iOrientationsAreTheSameToSpecifiedToleranceWithFeedback_IPJ Same as iOrientationsAreTheSame_IPJ, but allows for small numerical differences
+//
+// Returns                                                     0 - No
+//                                                             1 - Yes
+//
+// Available                                                   9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iOrientationsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(IPJ,          // IPJ 1
+                                                                          IPJ,          // IPJ 2
+                                                                          int,          // Significant digits (0 for exact)
+                                                                          var string,   // Reason if different returned
+                                                                          int);         // Reason buffer size
+#define _iOrientationsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, str_val) iOrientationsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, str_val, sizeof(str_val))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // iHasSectionOrientation_IPJ Does this projection contain an orientation used by section plots?
 //
 // Returns                    0 - No
@@ -1369,6 +1444,24 @@
 
 [_public] int iWarpsAreTheSameWithinASmallTolerance_IPJ(IPJ,   // IPJ 1
                                                         IPJ);  // IPJ 2
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iWarpsAreTheSameToSpecifiedToleranceWithFeedback_IPJ Same as iWarpsAreTheSame_IPJ, but allows for a specified accuracy and returns the reason if they are different
+//
+// Returns                                              0 - No
+//                                                      1 - Yes
+//
+// Available                                            9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iWarpsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(IPJ,          // IPJ 1
+                                                                   IPJ,          // IPJ 2
+                                                                   int,          // Significant digits (0 for exact)
+                                                                   var string,   // Reason if different returned
+                                                                   int);         // Reason buffer size
+#define _iWarpsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, str_val) iWarpsAreTheSameToSpecifiedToleranceWithFeedback_IPJ(ipj1, ipj2, sig_digits, str_val, sizeof(str_val))
 
 
   
@@ -2060,6 +2153,73 @@
                                         var real,   // X cell size of grid (input initial value, output new value)
                                         var real,   // Y cell size of grid (input initial value, output new value)
                                         var real);  // Grid rotation (degrees CCW) (input initial value, output new value)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetAuthorityID_IPJ Get Authority ID (e.g. EPSG, ESRI) for coordinate system or iDUMMY if unknown.
+//
+// Returns             IPJ_ORIENT
+//
+// Available           9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetAuthorityID_IPJ(IPJ,          // IPJ object
+                                  var string,   // Authority ID (e.g. EPSG and ESRI)
+                                  int);         // Authority ID string length.
+#define _iGetAuthorityID_IPJ(ipj, authority) iGetAuthorityID_IPJ(ipj, authority, sizeof(authority))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetEPSGIDForDatum_IPJ Get EPSG ID for datum of coordinate system or iDUMMY if unknown.
+//
+// Returns                IPJ_ORIENT
+//
+// Available              9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetEPSGIDForDatum_IPJ(IPJ);  // IPJ object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// AddAsFavouriteCoordinateSystem_IPJ Add as favourite coordinate system to Settings.
+//
+// Available                          9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void AddAsFavouriteCoordinateSystem_IPJ(IPJ);  // IPJ object.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetNumberOfFavouriteCoordinateSystems_IPJ Get number of favourite coordinate systems in Settings.
+//
+// Available                                  9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetNumberOfFavouriteCoordinateSystems_IPJ();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetFavouriteCoordinateSystem_IPJ Get a favourite coordinate system from Settings.
+//
+// Available                        9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] IPJ GetFavouriteCoordinateSystem_IPJ(int);  // Index of item.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// RemoveFavouriteCoordinateSystem_IPJ Remove favourite coordinate system from Settings.
+//
+// Available                           9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void RemoveFavouriteCoordinateSystem_IPJ(int);  // Index of item.
 
 
 
