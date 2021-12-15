@@ -39,6 +39,8 @@
 //
 //-----------------------------------------------------------------------------------------------------------
 
+
+
 //*** endblock Header
 
 //*** block Editable
@@ -163,6 +165,9 @@
 // ITR_MODEL_LOGLIN
 // The ITR is set up with a log-linear transform.
 //
+// ITR_ZONE_MODEL_LOGLIN
+// The ITR is set up with a log-linear transform.
+//
 //===========================================================================================================
 
 
@@ -172,6 +177,7 @@
 #define ITR_ZONE_MODEL_NORMAL 2
 #define ITR_ZONE_MODEL_EQUAL 3
 #define ITR_MODEL_LOGLIN 4
+#define ITR_ZONE_MODEL_LOGLIN 4
 
 
 
@@ -182,6 +188,30 @@
 // Miscellaneous Functions
 //
 //===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetName_ITR Set the name of the ITR.
+//
+// Available   2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetName_ITR(ITR,      // ITR object
+                           string);  // Name to set
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// IGetName_ITR Get the name of the ITR.
+//
+// Available    2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void IGetName_ITR(ITR,          // ITR object
+                            var string,   // Name returned
+                            int);         // Name size
+#define GetName_ITR(itr, name) IGetName_ITR(itr, name, sizeof(name))
 
 
   
@@ -366,6 +396,21 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// GetZoneBaseColor_ITR Get the base color in a zone of the ITR
+//
+// Notes                Valid indices are 0 to N-1, where N is the size of the ITR.
+//                      The base colour is the colour in the ITR before any brightness is applied.
+//
+// Available            2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetZoneBaseColor_ITR(ITR,       // ITR object
+                                    int,       // Number of the zone to set.
+                                    var int);  // MVIEW_COLOR
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // iColorValue_ITR Transform single data value to color
 //
 // Returns         MVIEW_COLOR
@@ -402,6 +447,46 @@
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] int iGetZoneModelType_ITR(ITR);  // ITR object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetZoneModel_ITR Get the ITR zone model (e.g. Linear, LogLin, Equal Area) and the accompanying values (if defined)
+//
+// Notes            The following parameters are returned for the following values returned for ITR_ZONE_MODEL:
+//                  ITR_ZONE_MODEL_LINEAR: [0]: Contour, [1]: Min, [2]: Max
+//                  ITR_ZONE_MODEL_LOGLIN: [0]: Contour, [1]: Min, [2]: Max
+//                  ITR_ZONE_MODEL_NORMAL: [0]: Contour, [1]: Mean, [2]: Standard Deviation, [3]: Exponent
+//                  ITR_ZONE_MODEL_EQUAL: [0]: Contour
+//                  All other types do not return any values (the VV will be empty).
+//
+// Available        2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetZoneModel_ITR(ITR,       // ITR object
+                                var int,   // ITR_ZONE_MODEL
+                                VV);       // VV object (REAL): see notes for values returned
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetZoneModel_ITR Set the ITR zone model (e.g. Linear, LogLin, Equal Area) and the accompanying values (if defined)
+//
+// Notes            The following parameters are required for the following values of ITR_ZONE_MODEL:
+//                  ITR_ZONE_MODEL_LINEAR: [0]: Contour, [1]: Min, [2]: Max
+//                  ITR_ZONE_MODEL_LOGLIN: [0]: Contour, [1]: Min, [2]: Max
+//                  ITR_ZONE_MODEL_NORMAL: [0]: Contour, [1]: Mean, [2]: Standard Deviation, [3]: Exponent
+//                  ITR_ZONE_MODEL_EQUAL: [0]: Contour
+//                  All other types do not require any values (the VV will be empty).
+//                  NOTE: This will not change the actual ranges, so care is needed when using this function that the input
+//                  specification accurately reflects the actual ranges.
+//
+// Available        2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetZoneModel_ITR(ITR,   // ITR object
+                                int,   // ITR_ZONE_MODEL
+                                VV);   // VV object (REAL): see notes for values returned
 
 
   
@@ -478,12 +563,44 @@
 //                    This brightness control is relative to the normal color
 //                    when the ITR is created.
 //
-// See also           ChangeBrightness_ITR, rGetBrightness_AGG, ChangeBrightness_AGG
+// See also           ChangeBrightness_ITR, rGetContrast_ITR, SetBrightContrast_ITR
 //
 // Available          5.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] real rGetBrightness_ITR(ITR);  // ITR object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetContrast_ITR Get the contrast setting of the ITR
+//
+// Returns          The contrast setting of the ITR
+//
+// Notes            Brightness can range from 0.0 (flat) to 1.0 (normal full contrast).
+//
+// See also         ChangeBrightness_ITR, rGetBrightness_AGG, SetBrightContrast_ITR
+//
+// Available        2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetContrast_ITR(ITR);  // ITR object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetContour_ITR Get the contour value associated with the current transform model of the ITR
+//
+// Returns         The contour setting of the ITR
+//
+// Notes           The Linear, Normal and Equal-Area transforms accept a contour value as part of their definitions on creation.
+//                 All the colour-breaks are rounded to the nearest integral multiple of the contour value (if defined).
+//                 This function returns the value defined, and rDUMMY if none is defined.
+//
+// Available       2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetContour_ITR(ITR);  // ITR object
 
 
   
@@ -619,7 +736,11 @@
 //-----------------------------------------------------------------------------------------------------------
 // SetZoneColor_ITR Set the color in a zone of the ITR
 //
-// Notes            Valid indices are 0 to N-1, where N is the size of the ITR.
+// Notes            "
+//                                 Valid indices are 0 to N-1, where N is the size of the ITR.
+//                                 This function modifies the colours as rendered, including applied
+//                                 brightness, and triggers an internal reset of the ITR brightness
+//                                 to zero, with all the "rendered" colours becoming the "base" colours.
 //
 // Available        5.0
 //-----------------------------------------------------------------------------------------------------------
@@ -627,6 +748,51 @@
 [_public] void SetZoneColor_ITR(ITR,   // ITR object
                                 int,   // Number of the zone to set.
                                 int);  // MVIEW_COLOR
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetZoneBaseColor_ITR Set the color in a zone of the ITR
+//
+// Notes                "
+//                                     Valid indices are 0 to N-1, where N is the size of the ITR.
+//                                     This function modifies the "base" colours directly. The base colours have
+//                                     the current brightness applied to produce the rendered colours. The 
+//                                     internal brightness remains unchanged.
+//
+// Available            2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetZoneBaseColor_ITR(ITR,   // ITR object
+                                    int,   // Number of the zone to set.
+                                    int);  // MVIEW_COLOR
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetZoneActive_ITR Set whether a zone of the ITR is active (1) or rendered trasparent (0)
+//
+// Notes             Valid indices are 0 to N-1, where N is the size of the ITR.
+//
+// Available         2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetZoneActive_ITR(ITR,   // ITR object
+                                 int,   // Number of the zone to set.
+                                 int);  // 1: active, 0: inactive (transparent)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetZoneActive_ITR Get whether a zone of the ITR is active (1) or rendered trasparent (0)
+//
+// Notes              Valid indices are 0 to N-1, where N is the size of the ITR.
+//
+// Available          2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetZoneActive_ITR(ITR,   // ITR object
+                                 int);  // Number of the zone to set.
 
 
   

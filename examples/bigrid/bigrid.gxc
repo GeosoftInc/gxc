@@ -12,6 +12,7 @@ DESCRIPTION   = "
       
 "
 // Revision History:
+// v9.10.0:Added GenValidChanSymb_DB() to generate a valid channel name.
 // v7.0.1: Unload/delete existing grid to ensure proper refresh of grid window.
 // v6.3    Set correct SMX and GAPLIM into con file for iTRA==1 bigrid run.
 //         Save the correct con file in both cases of iTRA==0 or 1.
@@ -84,6 +85,7 @@ int iRunMode;
 #define MODE_CONTROL_FILE 2
 int iCounter, iN;
 string(STR_DB_SYMBOL) sMask, sChannelToGrid, sTempChan, sLine;
+string(STR_DEFAULT_LONG) sZChannel;
 string(STR_DEFAULT_LONG) sExp;
 DB_SYMB TempChan;
 EXP Exp;            
@@ -430,7 +432,21 @@ DB_SYMB Line;
    if (!iStrlen_STR(sPRESORT))  // Presort: "None"
       Strcpy_STR(sPRESORT, "0");
 
-   if (!iStrlen_STR(sLOGOPT))  // Log option: "Linear"
+   if (iStrcmp_STR(sLOGOPT, _n("log"), STR_CASE_TOLERANT) == 0 ||
+       iStrcmp_STR(sLOGOPT, _n("log, save as linear"), STR_CASE_TOLERANT) == 0)
+      Strcpy_STR(sLOGOPT, "-1");
+   else if (iStrcmp_STR(sLOGOPT, _n("log +/-"), STR_CASE_TOLERANT) == 0 ||
+            iStrcmp_STR(sLOGOPT, _n("log +/-, save as linear"), STR_CASE_TOLERANT) == 0)
+      Strcpy_STR(sLOGOPT, "-2");
+   else if (iStrcmp_STR(sLOGOPT, _n("log, save as log"), STR_CASE_TOLERANT) == 0)
+      Strcpy_STR(sLOGOPT, "1");
+   else if (iStrcmp_STR(sLOGOPT, _n("log +/-, save as log"), STR_CASE_TOLERANT) == 0)
+      Strcpy_STR(sLOGOPT, "2");
+   else if (iStrcmp_STR(sLOGOPT, "-2", STR_CASE_TOLERANT) != 0 &&
+            iStrcmp_STR(sLOGOPT, "-1", STR_CASE_TOLERANT) != 0 &&
+            iStrcmp_STR(sLOGOPT, "0", STR_CASE_TOLERANT) != 0 &&
+            iStrcmp_STR(sLOGOPT, "1", STR_CASE_TOLERANT) != 0 &&
+            iStrcmp_STR(sLOGOPT, "2", STR_CASE_TOLERANT) != 0)
       Strcpy_STR(sLOGOPT, "0");
 
 
@@ -447,9 +463,8 @@ DB_SYMB Line;
    }
 
 
-	// --- If specifying the pre-filter sampling increment, then either WS or WL must be defined ---
-
-   rLS = rGetReal_SYS("BIGRID", "LS");
+   // --- If specifying the pre-filter sampling increment, then either WS or WL must be defined ---
+   rLS = rGetReal_SYS("BIGRID", "WL");
    rFDX = rGetReal_SYS("BIGRID", "FDX");
    if (rFDX != rDUMMY && rWS == rDUMMY && rLS == rDUMMY)
    {
@@ -587,7 +602,7 @@ DB_SYMB Line;
 
    if (iFileExist_SYS(sGrid))
    {
-      if (iInteractive_SYS())
+      if (iScript_SYS() == 0)
          iRemoveDocument_PROJ(sGrid);
       iDeleteGridFile_SYS(sGrid);
    }
@@ -604,12 +619,14 @@ DB_SYMB Line;
    if (iStrlen_STR(sMask) > 0)
    {
       Strcpy_STR(sTempChan, "_");
-      Strcat_STR(sTempChan, sChan);
+	  GenValidChanSymb_DB(sChan, sZChannel, sizeof(sChan));  
+      Strcat_STR(sTempChan, sZChannel);
+	  
       iCounter = 0;
       while (iExistSymb_DB(Data, sTempChan, DB_SYMB_CHAN))
       {
-         iCounter++;
-         Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sChan, iCounter);
+         iCounter++;	 
+		 Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sZChannel, iCounter);
       }
 
       TempChan = CreateSymb_DB(Data, sTempChan, DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);  

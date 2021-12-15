@@ -13,7 +13,10 @@ DESCRIPTION   = "
            .GRID2    - second grid name (optional)
            .GRID3    - third grid name (optional)
            .GRID4    - fourth grid name (optional)
-           .GRID5    - fourth grid name (optional)
+           .GRID5    - fifth grid name (optional)
+           .GRID6    - sixth grid name (optional - script only)
+           .GRID7    - seventh grid name (optional - script only)
+           .GRID8    - eighth grid name (optional - script only)
            .COLOR    - color table file name (.TBL, .ZON .ITR or .AGG)
            .ZONE     - zoning method:  1 - linear
                                        2 - normal distribution
@@ -21,6 +24,9 @@ DESCRIPTION   = "
                                        5 - log-linear
            .CONTOUR - optional contour interval
 "
+// Revision History:
+// v 2021.2: Remove call to SetString_SYS(() not used in script mode, it was
+//           resetting the parameter block used by the script to null.
 
 //===========================================================================
 
@@ -60,7 +66,7 @@ ITR hITR;
 BF hBF;
 ST hST;
 
-string(STR_FILE) sGrid1, sGrid2, sGrid3, sGrid4, sGrid5, sColor, sFile, sExt;
+string(STR_FILE) sGrid1, sGrid2, sGrid3, sGrid4, sGrid5, sGrid6, sGrid7, sGrid8, sColor, sFile, sExt;
 int iMethod, iST, iN, iNTot, iDum, iRun, iSt;
 real rMn, rMx, rMean, rStdDev, rMin, rMax, rContour;
 
@@ -74,43 +80,59 @@ real rMn, rMx, rMean, rStdDev, rMin, rMax, rContour;
 
    if (iInteractive_SYS())
    {
-      // --- Create the Dialogue ---
+      iRun = -1;
+      while(iRun != 1)
+      {
+         // --- Create the Dialogue ---
 
-      Diag = Create_DGW("GRIDZONE");
-
-
-      // --- Set any Defaults from INI ---
-
-      SetInfoSYS_DGW(Diag, _GRIDZONE_0, DGW_FILEPATH, "GRIDZONE", "FILE");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_1, DGW_FILEPATH, "GRIDZONE", "GRID1");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_2, DGW_FILEPATH, "GRIDZONE", "GRID2");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_3, DGW_FILEPATH, "GRIDZONE", "GRID3");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_4, DGW_FILEPATH, "GRIDZONE", "GRID4");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_5, DGW_FILEPATH, "GRIDZONE", "GRID5");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_6, DGW_FILEPATH, "GRIDZONE", "COLOR");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_7, DGW_LISTALIAS, "GRIDZONE", "METHOD");
-      SetInfoSYS_DGW(Diag, _GRIDZONE_8, DGW_TEXT, "GRIDZONE", "CONTOUR");
+         Diag = Create_DGW("GRIDZONE");
 
 
-      // --- Run the Dialogue ---
+         // --- Set any Defaults from INI ---
 
-      iRun = iRunDialogue_DGW(Diag);
-      if (iRun == -1) Cancel_SYS();
+         SetInfoSYS_DGW(Diag, _GRIDZONE_0, DGW_FILEPATH, "GRIDZONE", "FILE");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_1, DGW_FILEPATH, "GRIDZONE", "GRID1");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_2, DGW_FILEPATH, "GRIDZONE", "GRID2");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_3, DGW_FILEPATH, "GRIDZONE", "GRID3");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_4, DGW_FILEPATH, "GRIDZONE", "GRID4");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_5, DGW_FILEPATH, "GRIDZONE", "GRID5");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_6, DGW_FILEPATH, "GRIDZONE", "COLOR");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_7, DGW_LISTALIAS, "GRIDZONE", "METHOD");
+         SetInfoSYS_DGW(Diag, _GRIDZONE_8, DGW_TEXT, "GRIDZONE", "CONTOUR");
 
 
-      // --- Put values back in INI ---
+         // --- Run the Dialogue ---
 
-      GetInfoSYS_DGW(Diag, _GRIDZONE_0, DGW_FILEPATH, "GRIDZONE", "FILE");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_1, DGW_FILEPATH, "GRIDZONE", "GRID1");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_2, DGW_FILEPATH, "GRIDZONE", "GRID2");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_3, DGW_FILEPATH, "GRIDZONE", "GRID3");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_4, DGW_FILEPATH, "GRIDZONE", "GRID4");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_5, DGW_FILEPATH, "GRIDZONE", "GRID5");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_6, DGW_FILEPATH, "GRIDZONE", "COLOR");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_7, DGW_LISTALIAS, "GRIDZONE", "METHOD");
-      GetInfoSYS_DGW(Diag, _GRIDZONE_8, DGW_TEXT, "GRIDZONE", "CONTOUR");
+         iRun = iRunDialogue_DGW(Diag);
+         if (iRun == -1) Cancel_SYS();
 
-      Destroy_DGW(Diag);
+
+         // --- Put values back in INI ---
+
+         GetInfoSYS_DGW(Diag, _GRIDZONE_0, DGW_FILEPATH, "GRIDZONE", "FILE");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_1, DGW_FILEPATH, "GRIDZONE", "GRID1");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_2, DGW_FILEPATH, "GRIDZONE", "GRID2");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_3, DGW_FILEPATH, "GRIDZONE", "GRID3");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_4, DGW_FILEPATH, "GRIDZONE", "GRID4");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_5, DGW_FILEPATH, "GRIDZONE", "GRID5");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_6, DGW_FILEPATH, "GRIDZONE", "COLOR");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_7, DGW_LISTALIAS, "GRIDZONE", "METHOD");
+         GetInfoSYS_DGW(Diag, _GRIDZONE_8, DGW_TEXT, "GRIDZONE", "CONTOUR");
+
+         Destroy_DGW(Diag);
+
+         // --- Histogram display ---
+
+         if (iRun == 2)
+         {
+            GetString_SYS("GRIDZONE", "GRID1", sGrid1);
+            GetString_SYS("GRIDZONE", "GRID2", sGrid2);
+            GetString_SYS("GRIDZONE", "GRID3", sGrid3);
+            GetString_SYS("GRIDZONE", "GRID4", sGrid4);
+            GetString_SYS("GRIDZONE", "GRID5", sGrid5);
+            GridStatHist5_GUI(sGrid1, sGrid2, sGrid3, sGrid4, sGrid5);
+         }
+      }
    }
 
 
@@ -125,6 +147,15 @@ real rMn, rMx, rMean, rStdDev, rMin, rMax, rContour;
    GetString_SYS("GRIDZONE", "COLOR", sColor);
    iMethod = iGetInt_SYS("GRIDZONE", "METHOD");
    rContour = rGetReal_SYS("GRIDZONE", "CONTOUR");
+
+
+   // --- Script-only parameters ---
+   if (iInteractive_SYS() == 0)
+   {
+      GetString_SYS("GRIDZONE", "GRID6", sGrid6);   
+      GetString_SYS("GRIDZONE", "GRID7", sGrid7);
+      GetString_SYS("GRIDZONE", "GRID8", sGrid8);
+   }   
 
 
    // --- Validate ---
@@ -165,6 +196,9 @@ real rMn, rMx, rMean, rStdDev, rMin, rMax, rContour;
    RANGE(sGrid3)
    RANGE(sGrid4)
    RANGE(sGrid5)
+   RANGE(sGrid6)
+   RANGE(sGrid7)
+   RANGE(sGrid8)
 
    if (iNTot == 0)
       Abort_SYS(_("There appears to be no data in the grid(s)."));
@@ -192,6 +226,9 @@ real rMn, rMx, rMean, rStdDev, rMin, rMax, rContour;
       GRIDST(sGrid3)
       GRIDST(sGrid4)
       GRIDST(sGrid5)
+      GRIDST(sGrid6)
+      GRIDST(sGrid7)
+      GRIDST(sGrid8)
 
       rStdDev = rGetInfo_ST(hST, ST_STDDEV);
       rMean = rGetInfo_ST(hST, ST_MEAN);

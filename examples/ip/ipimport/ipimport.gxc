@@ -96,6 +96,7 @@ string(STR_DEFAULT_LONG) sMsg;
 int  iSystem, iDone, iFiles, iScale, iArray, iType, iExt, iAppend, iSupressXYZ;
 int  iMaxChans, iMaxLines;
 real rLine, rPosMult;
+DB_SYMB nChan;
 
 //===========================================================================
 //                                   CODE
@@ -1134,6 +1135,9 @@ real rLine, rPosMult;
    }
    else if(!iStrcmp_STR(sSource,"GDD",STR_CASE_TOLERANT)) {     // Instrumentation GDD file
 
+
+      nChan = FindChan_DB(Data, "_N");
+
       GetString_SYS("IP","GDDFILE",sFiles);
       
       Progress_SYS(1);
@@ -1151,7 +1155,9 @@ real rLine, rPosMult;
          
          ImportInstrumentationGDD_IP(Ip, Data, sFile);
       }
-
+      
+      if (iInteractive_SYS() && nChan == NULLSYMB && FindChan_DB(Data, "_N") != NULLSYMB)
+         DisplayMessage_SYS(_("Import IP Data"), _("Channel N of the input file has been saved in channel  _N."));
    }
    else 
       Abort_SYS(_("Invalid IP Data Source - Use \"D\" \"I\" or \"F\" for IP.IMPSOURCE"));

@@ -37,6 +37,7 @@ Parameters:
 				 
 "
 // Revision History:
+// v9.10.0:Added GenValidChanSymb_DB() to generate a valid channel name.
 // v7.3.0: Added strike angle and strike weight options for anisotropy.
 // v7.0.1: Unload/delete existing grid to ensure proper refresh of grid window.
 // v6.2:   Variogram map name takes variogram file name. Fixes in initial sizing.
@@ -111,6 +112,7 @@ int iRunMode;
 #define MODE_CONTROL_FILE 2
 int iCounter, iN;
 string(STR_DB_SYMBOL) sMask, sChannelToGrid, sTempChan, sLine;
+string(STR_DEFAULT_LONG) sZChannel;
 string(STR_DEFAULT_LONG) sExp;
 DB_SYMB TempChan;
 EXP Exp;            
@@ -575,20 +577,22 @@ DB_SYMB Line;
 
    if (iFileExist_SYS(sGrid))
    {
-      if (iInteractive_SYS())
+      if (iScript_SYS() == 0)
          iRemoveDocument_PROJ(sGrid);
       iDeleteGridFile_SYS(sGrid);
    }
 
    if (iStrlen_STR(sMask) > 0)
    {
-      Strcpy_STR(sTempChan, "_");
-      Strcat_STR(sTempChan, sZCh);
+      Strcpy_STR(sTempChan, "_"); 
+	  GenValidChanSymb_DB(sZCh, sZChannel, sizeof(sZCh));  
+      Strcat_STR(sTempChan, sZChannel); 
+	 
       iCounter = 0;
       while (iExistSymb_DB(Data, sTempChan, DB_SYMB_CHAN))
       {
          iCounter++;
-         Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sZCh, iCounter);
+         Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sZChannel, iCounter);
       }
 
       TempChan = CreateSymb_DB(Data, sTempChan, DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);  

@@ -18,6 +18,7 @@ Parameters:
   
 "
 // Revision History
+// v9.10	  Do not hard-wire PATH parameters. Do not clip path to view.
 // v8.5:   Enabled for batch operation.
 // v6.3.0: New GX.
 //===========================================================================
@@ -63,7 +64,7 @@ string(STR_DB_SYMBOL) sChan, sCh, sChFlag, sLine, sLastLine, sTie, sLastTie;  //
 string(STR_GROUP) sExp, sBuff, sFont, sGrpName, sName, sGroup;
 string(STR_DEFAULT_SHORT) sLFid, sLZ, sTFid, sTZ, sVal, sColor;
 
-int iInteract, iShowDialog, iPlotToMap, iPlotPath;
+int iInteract, iShowDialog, iPlotToMap, iPlotPath, iGrpClipMode;
 
 //===========================================================================
 //                             INTERSECTION CODE
@@ -485,21 +486,13 @@ int iInteract, iShowDialog, iPlotToMap, iPlotPath;
 
       if (iPlotPath)
       {
-         SetString_SYS("PATH", "LINE_THICKNESS", "0.15");
-         SetString_SYS("PATH", "LINE_COLOR", "k");
-         SetString_SYS("PATH", "TICKFLAG", "0");
-         SetString_SYS("PATH", "LABEL_FORMAT", "TL");
-         SetString_SYS("PATH", "LABEL_LOCATION", "1");
-         SetString_SYS("PATH", "LABEL_SIZE", "2.5");
-         SetString_SYS("PATH", "LABEL_COLOR", "k");
-         SetString_SYS("PATH", "LABEL_WEIGHT", "0");
-         SetString_SYS("PATH", "H_OFFSET", "2.0");
-         SetString_SYS("PATH", "V_OFFSET", "0");
-         SetString_SYS("PATH", "GAP", "0");
-         SetString_SYS("PATH", "LABEL_COMPASS", "-1");
+			iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
+			SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
 
-         if (iRunGX_SYS("path.gx"))
-            Cancel_SYS();
+			if (iRunGX_SYS("path.gx"))     
+				Cancel_SYS(); 
+
+			SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
       }
 
       SetInteractive_SYS(iInteract);

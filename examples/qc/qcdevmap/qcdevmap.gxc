@@ -21,6 +21,7 @@ Parameters:
             .LEGEND  -  Set to 0 to NOT plot a legend.
 "    
 // Revision History:
+//	v9.10   Do not hard-wire PATH parameters. Do not clip path to view.
 // v7.1:   QA 13870: Don't just plot line path in legend on a new map.
 // v7.0.1: QA 13867: Allow calling GXs to turn off legend plotting.
 // v7.0.0: QA 11032: Ensure initial location for legend is defined.
@@ -77,7 +78,7 @@ real        rScaleMM,rXo,rYo,rTxtSize;
 real        rNomDir, rLineDir, rXOff, rYOff;
 real        rXCoord, rYCoord;
 
-int         iInteract, iLegend;
+int         iInteract, iLegend, iGrpClipMode;
 
 //===========================================================================
 //                                   CODE
@@ -177,6 +178,11 @@ int         iInteract, iLegend;
 
    rXCoord = rGetReal_SYS("QCDEVMAP","XCOORD");     
    rYCoord = rGetReal_SYS("QCDEVMAP","YCOORD");  
+
+   if (rOffset == rDUMMY)
+      rOffset = 0.5;
+   if (rThick == rDUMMY)
+      rThick = 0.2;
 
 
    // --- reset nominal line direction back to dummy for future GX calls ---
@@ -377,26 +383,17 @@ int         iInteract, iLegend;
 
       // --- Plot line path and flag ---
       
-      SetString_SYS("PATH","LINE_THICKNESS","0.15");
-      SetString_SYS("PATH","LINE_COLOR","k");
-      SetString_SYS("PATH","TICKFLAG","0");
-      SetString_SYS("PATH","LABEL_FORMAT","TL");
-      SetString_SYS("PATH","LABEL_LOCATION","1");
-      SetString_SYS("PATH","LABEL_SIZE","2.5");
-      SetString_SYS("PATH","LABEL_COLOR","k");
-      SetString_SYS("PATH","LABEL_WEIGHT","0");
-      SetString_SYS("PATH","H_OFFSET","2.0");
-      SetString_SYS("PATH","V_OFFSET","0");
-      SetString_SYS("PATH","GAP","0");
-   //   SetString_SYS("PATH","TICK_SIZE","");
-   //   SetString_SYS("PATH","TICK_STATION","");
-   //   SetString_SYS("PATH","TICK_MOD","");
-   //   SetString_SYS("PATH","TICK_MTMOD","");
-   //   SetString_SYS("PATH","TICK_MTSIZE","");
-
       if (iInteract)
          SetInteractive_SYS(0);
-      if (iRunGX_SYS("path.gx"))     Cancel_SYS(); 
+
+		iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
+		SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
+
+		if (iRunGX_SYS("path.gx"))     
+			Cancel_SYS(); 
+
+		SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
+
       if (iInteract)
          SetInteractive_SYS(1);   
 
@@ -515,19 +512,13 @@ int         iInteract, iLegend;
 
       // --- Plot line path and flag ---
       
-      SetString_SYS("PATH","LINE_THICKNESS","0.15");
-      SetString_SYS("PATH","LINE_COLOR","k");
-      SetString_SYS("PATH","TICKFLAG","0");
-      SetString_SYS("PATH","LABEL_FORMAT","TL");
-      SetString_SYS("PATH","LABEL_LOCATION","1");
-      SetString_SYS("PATH","LABEL_SIZE","2.5");
-      SetString_SYS("PATH","LABEL_COLOR","k");
-      SetString_SYS("PATH","LABEL_WEIGHT","0");
-      SetString_SYS("PATH","H_OFFSET","2.0");
-      SetString_SYS("PATH","V_OFFSET","0");
-      SetString_SYS("PATH","GAP","0");
+		iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
+		SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
 
-      if (iRunGX_SYS("path.gx"))     Cancel_SYS(); 
+		if (iRunGX_SYS("path.gx"))     
+			Cancel_SYS(); 
+
+		SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
 
 
 		if (iLegend != 0)

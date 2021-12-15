@@ -48,33 +48,73 @@ DGW         Diag;                   // Dialogue handle
 LST         List;                   // Channel list handle
 EXP         Exp;
 EXP         ExpGrav;
+LST         hFormulaLST;
+REG         hWorkREG;               // Gravity work REG
 
 DB_SYMB     Line,LatCh,GravityCh,OutCh,OutGravCor;
 
 int         i;                      // Utility
+int         index;
+int         globalIndex;
+int         latestIndex;
 
-string(STR_DEFAULT)  sLatCh,sOutCh,sMethod,sGravCh,sOutGravCor;
-string(512)          sFormula;
+string(STR_DEFAULT)  sLatitude,sOutCh,sGravCh,sOutGravCor;
+string(512)          sGlobalDefault;
+string(512)          sFormula,sFormulaName;
 string(512)          sFormulaGrav;
 //===========================================================================
 //                                 CODE
 //===========================================================================
-
 {
+   // --- workspace REG ---
+   
+   hWorkREG = Create_REG(256);
+   GetWorkspaceREG_SYS(hWorkREG);
+   Get_REG(hWorkREG,"GRAVRED.FORMULA",sGlobalDefault,sizeof(sGlobalDefault));
+   
    // --- Get database ---
    
    EData = Current_EDB();
    Data = Lock_EDB(EData);
    
+   // --- Formula references ---
+
+   hFormulaLST = Create_LST(256);
+   LoadFile_LST(hFormulaLST,"Gravity_Latitude");
+   if (iSize_LST(hFormulaLST) == 0) {
+   
+      // --- default formulas are shared with other GX's ---
+#include "../../../gr/gravity_formulas.gxh"
+   
+      SaveFile_LST(hFormulaLST,"Gravity_Latitude");
+   }
 
    // --- Are we running interactively ? ---
 
    if (iInteractive_SYS())
    {
+      // --- default formula ---
+      
+      if (iStrlen_STR(sFormulaName) == 0 || iFindItem_LST(hFormulaLST,0,sFormulaName)==-1)
+      {
+         globalIndex = -1;
+         if (iStrlen_STR(sGlobalDefault) != 0) 
+            globalIndex = iFindItem_LST(hFormulaLST,0,sGlobalDefault);
+         latestIndex = iFindItem_LST(hFormulaLST,0,"1980 IAG");
+      
+         if (globalIndex != -1) // list contains gr parm default
+           GetItem_LST(hFormulaLST,0,globalIndex,sFormulaName);
+         else if (latestIndex != -1) // list contains 1980 IAG (latest)
+           GetItem_LST(hFormulaLST,0,latestIndex,sFormulaName);
+         else // default to first item
+           GetItem_LST(hFormulaLST,0,0,sFormulaName);
+      }
 
       // --- Create the Dialogue ---
 
       Diag = Create_DGW("AGLATCOR");
+      Copy_LST(GetList_DGW(Diag,_AGLATCOR_4),hFormulaLST);
+      SetInfo_DGW(Diag,_AGLATCOR_4,DGW_TEXT,sFormulaName);
                                                  
 
       // --- Set up channel lists ---
@@ -100,9 +140,7 @@ string(512)          sFormulaGrav;
 	  SetInfoSYS_DGW(Diag,_AGLATCOR_0,DGW_TEXT,"AGLATCOR","GRAV");
       SetInfoSYS_DGW(Diag,_AGLATCOR_1,DGW_TEXT,"AGLATCOR","LAT");
       SetInfoSYS_DGW(Diag,_AGLATCOR_2,DGW_TEXT,"AGLATCOR","OUTCH");
-	  SetInfoSYS_DGW(Diag,_AGLATCOR_3,DGW_TEXT,"AGLATCOR","OUTGRAVCOR");  	   
-      SetInfoSYS_DGW(Diag,_AGLATCOR_4,DGW_LISTALIAS,"AGLATCOR","METHOD");
-
+	  SetInfoSYS_DGW(Diag,_AGLATCOR_3,DGW_TEXT,"AGLATCOR","OUTGRAVCOR");
      
       // --- Run the Dialogue ---
 
@@ -115,9 +153,9 @@ string(512)          sFormulaGrav;
       GetInfoSYS_DGW(Diag,_AGLATCOR_0,DGW_TEXT,"AGLATCOR","GRAV"); 
       GetInfoSYS_DGW(Diag,_AGLATCOR_1,DGW_TEXT,"AGLATCOR","LAT");
       GetInfoSYS_DGW(Diag,_AGLATCOR_2,DGW_TEXT,"AGLATCOR","OUTCH");
-	  GetInfoSYS_DGW(Diag,_AGLATCOR_3,DGW_TEXT,"AGLATCOR","OUTGRAVCOR");
-      GetInfoSYS_DGW(Diag,_AGLATCOR_4,DGW_LISTALIAS,"AGLATCOR","METHOD");
-     
+      GetInfoSYS_DGW(Diag,_AGLATCOR_3,DGW_TEXT,"AGLATCOR","OUTGRAVCOR");
+      GetInfoSYS_DGW(Diag,_AGLATCOR_4,DGW_TEXT,"AGLATCOR","METHOD");
+
       // --- Destroy the Dialogue ---
      
       Destroy_DGW(Diag);
@@ -125,21 +163,24 @@ string(512)          sFormulaGrav;
 
    // --- Get Parameters ---
    GetString_SYS("AGLATCOR","GRAV",sGravCh);
-   GetString_SYS("AGLATCOR","LAT",sLatCh);
+   GetString_SYS("AGLATCOR","LAT",sLatitude);
    GetString_SYS("AGLATCOR","OUTCH",sOutCh);
-   GetString_SYS("AGLATCOR","OUTGRAVCOR",sOutGravCor);  
-   GetString_SYS("AGLATCOR","METHOD",sMethod);
-    
+   GetString_SYS("AGLATCOR","OUTGRAVCOR",sOutGravCor);
+   GetString_SYS("AGLATCOR","METHOD",sFormulaName);
+
+   index = iFindItem_LST(hFormulaLST,0,sFormulaName);
+      if( index != -1)
+         GetItem_LST(hFormulaLST,1,index,sFormula);
    
    // --- Get handles to the input data channels ---
 
    if (!iExistChan_DB(Data,sGravCh))
       Abort_SYS(_("The gravity channel does not exist."));
 	  
-   if (!iExistChan_DB(Data,sLatCh))
+   if (!iExistChan_DB(Data,sLatitude))
       Abort_SYS(_("The latitude channel does not exist."));
 
-   LatCh  = FindChan_DB(Data,sLatCh);
+   LatCh  = FindChan_DB(Data,sLatitude);
    LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
 
    GravityCh  = FindChan_DB(Data,sGravCh);
@@ -165,27 +206,7 @@ string(512)          sFormulaGrav;
       LockSymb_DB(Data,OutGravCor,DB_LOCK_READWRITE,DB_WAIT_NONE);                                  
       SetChanProtect_DB(Data,OutGravCor,DB_CHAN_UNPROTECTED);     
    } 
-	
-   // --- Formula references ---
-   //1930 - IGF ( Blakely R, 1996, p135, Potential theory in gravity & Magnetic Application )
-   //1967 -  IGSN71  ( Blakely R, 1996, p135, Potential theory in gravity & Magnetic Application )  
-   //1976 - IAG ( Telford W, etal 1976, p17, Applied Geophysics)
-   //1980 - GRS80  Moritz  (Blakely R, 1996, p135, Potential theory in gravity & Magnetic Application )
-   //1980 - IAG ( Telford W, etal 1980, p10, Applied Geophysics)
    
-   // --- Create expression ---
-	Strcpy_STR(sFormula,"@r2d=57.29578;@lat=$sLatCh/@r2d;@slat2=sin(@lat)**2;@slat2L=sin(2*@lat)**2;");
-	if(iStrcmp_STR(sMethod, _n("1930"), STR_CASE_TOLERANT) == 0)
-		Strcat_STR(sFormula,"$sOutCh=978049*(1+0.0052884*@slat2 - 0.0000059 * @slat2L);");
-	if(iStrcmp_STR(sMethod, _n("1967"), STR_CASE_TOLERANT) == 0)
-		Strcat_STR(sFormula,"$sOutCh= 978032.7 *(1+0.0053024 *@slat2 - 0.0000058 * @slat2L);");
-	if(iStrcmp_STR(sMethod, _n("1976"), STR_CASE_TOLERANT) == 0)	
-		Strcat_STR(sFormula,"$sOutCh= 978031.55 *(1+0.005278895 *@slat2 + 0.000023462 * @slat2**2);");
-	if(iStrcmp_STR(sMethod, _n("GRS80"), STR_CASE_TOLERANT) == 0)
-		Strcat_STR(sFormula,"$sOutCh= 978032.67714 *(1+0.00193185138639 * @slat2)/sqrt(1-0.00669437999013*@slat2);");
-	if(iStrcmp_STR(sMethod, _n("1980"), STR_CASE_TOLERANT) == 0)
-	    Strcat_STR(sFormula,"$sOutCh=978031.846*(1+0.005278895 * @slat2 + 0.000023462 * @slat2**2);");
-
    Exp = Create_EXP(Data,sFormula,512);
 
 

@@ -23,6 +23,7 @@ PARAMETERS:
                     calculation using the default editor.
 "
 // Revision History:
+// v9.10 : Added padding for extra-long line names to align values with column headers.
 // v6.1.4: Increase string buffers to max to increase number of channels you can enter using a string.
 // v5.1.7: Display of log file now uses EDIT GX,
 //         Stats not displayed in script mode.
@@ -78,7 +79,7 @@ string(STR_DB_SYMBOL) sInCh, sChan, sXCh, sYCh;
 string(STR_VERY_LONG) sWALine;
 string(STR_FILE) sFile, sData, sRelData;
 
-string(STR_VERY_LONG) sMsg, sMsg2;
+string(STR_VERY_LONG) sMsg, sMsg2, sExtraSpaces;
 
 real rItems, rItemsX, rItemsY, rDummies, rMean, rDev;
 real rMin, rMax, rMinX, rMinY, rMaxX, rMaxY;
@@ -102,7 +103,7 @@ int iLenVV, iChan;
 int iColVA;
 int iLine;
 int iTotLines;  // Total Number of Lines to Process
-int iShowLog;
+int iShowLog, iExtraSpaces;
 
 //===========================================================================
 //                                    CODE
@@ -245,6 +246,23 @@ int iShowLog;
    SelectedLineLST_DB(Data, hLineLST);
    iTotLines = iSize_LST(hLineLST);
 
+   // --- Calculate extra spaces to add to accomodate long line names ---
+
+   iExtraSpaces = 0;
+   for(i=0; i<iTotLines; i++)
+   {
+      Line = (DB_SYMB)iGetInt_LST(hLineLST, 1, i);
+      LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+      LineLabel_DB(Data, Line, sLine2, DB_LINE_LABEL_FORMAT_FULL);
+      UnLockSymb_DB(Data, Line);
+      j = iStrlen_STR(sLine2);
+      if (j > 14 + iExtraSpaces)
+        iExtraSpaces =  j - 14;
+   }
+
+   Strcpy_STR(sExtraSpaces, "");
+   for(i = 0; i<iExtraSpaces; i++)
+        Strcat_STR(sExtraSpaces, " ");
 
    // ----------------------------------------------------------------------
    // --- Print out X,Y stats ---
@@ -282,10 +300,14 @@ int iShowLog;
 
       if ((iXChType > 0) && (iYChType > 0))
       {
-         Puts_WA(hWA, _n("Line Number    X-minimum      X-maximum      Y-minimum      "));
+         Puts_WA(hWA, _n("Line Number    "));
+         Puts_WA(hWA, sExtraSpaces);
+         Puts_WA(hWA, _n("X-minimum      X-maximum      Y-minimum      "));
          Puts_WA(hWA, _n("Y-maximum      # of points Total distance"));
          NewLine_WA(hWA);
-         Puts_WA(hWA, "-----------    ---------      ---------      ---------      ");
+         Puts_WA(hWA, "-----------    ");
+         Puts_WA(hWA, sExtraSpaces);
+         Puts_WA(hWA, "---------      ---------      ---------      ");
          Puts_WA(hWA, "--------       ----------- --------------");
          NewLine_WA(hWA);
 
@@ -420,8 +442,8 @@ int iShowLog;
 
             Strcpy_STR(sWALine, sLine2);  // Line number
             iStrlen = iStrlen_STR(sWALine);
-            if (iStrlen < 16)
-               for (j = 1; j < (16 - iStrlen); j++)
+            if (iStrlen < 16 + iExtraSpaces)
+               for (j = 1; j < (16 + iExtraSpaces - iStrlen); j++)
                   Strcat_STR(sWALine, " ");
 
             if (rMinX != rMAX)
@@ -509,6 +531,7 @@ int iShowLog;
          // --- Build output string ---
 
          Strcpy_STR(sWALine, "ALL            ");
+         Strcat_STR(sWALine, sExtraSpaces);
 
          if (rMin != rDUMMY)
             FormatR2_STR(rMin, sTemp, 15, iXChDecimal);  // Minimum
@@ -808,10 +831,14 @@ int iShowLog;
          }
          NewLine_WA(hWA);
 
-         Puts_WA(hWA, _n("Line Number    Minimum        Maximum        Mean           "));
+         Puts_WA(hWA, _n("Line Number    "));
+         Puts_WA(hWA, sExtraSpaces);
+         Puts_WA(hWA, _n("Minimum        Maximum        Mean           "));
          Puts_WA(hWA, _n("Std.dev.       # of points # of dummies"));
          NewLine_WA(hWA);
-         Puts_WA(hWA, "------------   -------        -------        ----           ");
+         Puts_WA(hWA, "------------   ");
+         Puts_WA(hWA, sExtraSpaces);
+         Puts_WA(hWA, "-------        -------        ----           ");
          Puts_WA(hWA, "--------       ----------- ------------");
          NewLine_WA(hWA);
 
@@ -836,8 +863,8 @@ int iShowLog;
 
             Strcpy_STR(sWALine, sLine2);  // Line number
             iStrlen = iStrlen_STR(sLine2);
-            if (iStrlen < 16)
-               for (j = 1; j < (16 - iStrlen); j++)
+            if (iStrlen < 16 + iExtraSpaces)
+               for (j = 1; j < (16 + iExtraSpaces - iStrlen); j++)
                   Strcat_STR(sWALine, " ");
 
             if (rMin != rDUMMY)
@@ -927,6 +954,7 @@ int iShowLog;
          // --- Build output string ---
 
          Strcpy_STR(sWALine, "ALL            ");
+         Strcat_STR(sWALine, sExtraSpaces);
 
          if (rMin != rDUMMY)
             FormatR2_STR(rMin, sTemp, 15, iChDecimal);  // Minimum

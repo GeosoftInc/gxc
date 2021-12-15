@@ -50,7 +50,7 @@ int         i;                // Utility
 string(STR_DB_SYMBOL) sCurLine, sChan, sQCChan;
 string(STR_DEFAULT_SHORT) sLines;
 string(STR_DEFAULT) sMsg;
-int iDone, iOut;
+int iDone, iOut, iInteractive, iCalcXYZ;
 
 //===========================================================================
 //                                   CODE
@@ -81,8 +81,9 @@ int iDone, iOut;
 
    // --- Are we running interactively ? ---
 
+   iInteractive = iInteractive_SYS();
    iDone = 0;
-   while (iInteractive_SYS() && !iDone)
+   while (iInteractive && !iDone)
    {
       // --- Create the Dialogue ---
 
@@ -220,9 +221,20 @@ int iDone, iOut;
 
    Destroy_IP(Ip);
 
+
    // --- run the recalc GX, but do not recalculate XYZ, because the user may have set the current XYZ to other channels ---
 
-	SetInt_SYS("IPRECALC", "CALCULATE_XYZ", 0);
+   SetInteractive_SYS(0);
+   iCalcXYZ = iGetInt_SYS("IPRECALC", "CALCULATE_XYZ");
+   SetInt_SYS("IPRECALC", "CALCULATE_XYZ", 0);
+   
    iRunGX_SYS("iprecalc.gx");
+
+
+   // --- Restore state ---
+
+   SetInteractive_SYS(iInteractive);
+   SetInt_SYS("IPRECALC", "CALCULATE_XYZ", iCalcXYZ);
+
    
 }

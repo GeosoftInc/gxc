@@ -22,6 +22,8 @@ Parameters:
   
 "
 // Revision History:
+// v9.10   Use QCDEVMAP values for THICK and OFFSET
+//	        Do not hard-wire PATH parameters. Do not clip path to view.
 // v8.5:   Enabled for batch operation.
 // v7.0.1: QA 13867: Prevent QCDEVMAP from plotting legend, it's done here.
 // v6.2.0: Made it possible to run the two tests separately,as indicated in the help.
@@ -69,14 +71,14 @@ real        rLineDir, rNomSep,rMaxSep,rAllSep,rDist;
 real        rXFidStart,rXFidIncr,rYFidStart,rYFidIncr;
 real        rMinX,rMinY,rMaxX,rMaxY;
 real        rScaleMM,rXo,rYo,rTxtSize;
-real        rXLegend, rYLegend;
+real        rXLegend, rYLegend, rOffset;
 
 int         i,k, iInit, iQCType;
 int         iNew;
 int         iLines;           // Number of Lines Processed
 int         iTotLines;        // Total Number of Lines to Process
 
-int         iInteract, iShowDialog, iPlotToMap, iPlotPath;
+int         iInteract, iShowDialog, iPlotToMap, iPlotPath, iGrpClipMode;
 
 //===========================================================================
 //                                   CODE
@@ -500,28 +502,24 @@ int         iInteract, iShowDialog, iPlotToMap, iPlotPath;
 
 		if (iPlotPath)
 		{
-			SetString_SYS("PATH","LINE_THICKNESS","0.15");
-			SetString_SYS("PATH","LINE_COLOR","k");
-			SetString_SYS("PATH","TICKFLAG","0");
-			SetString_SYS("PATH","LABEL_FORMAT","TL");
-			SetString_SYS("PATH","LABEL_LOCATION","1");
-			SetString_SYS("PATH","LABEL_SIZE","2.5");
-			SetString_SYS("PATH","LABEL_COLOR","k");
-			SetString_SYS("PATH","LABEL_WEIGHT","0");
-			SetString_SYS("PATH","H_OFFSET","2.0");
-			SetString_SYS("PATH","V_OFFSET","0");
-			SetString_SYS("PATH","GAP","0");
-			SetString_SYS("PATH","LABEL_COMPASS","-1");
+			iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
+			SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
 
 			if (iRunGX_SYS("path.gx"))     
 				Cancel_SYS(); 
+
+			SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
 		}
+
+      rOffset = rGetReal_SYS("QCDEVMAP","OFFSET");
+      if (rOffset == rDUMMY)
+         rOffset = 0.5;
 
 		SetString_SYS("QCDEVMAP","MAP","0");
 		SetString_SYS("QCDEVMAP","RESULT","Flag_SepR");
 		SetString_SYS("QCDEVMAP","THICK","0.2");
 		SetString_SYS("QCDEVMAP","COLOR", sColorR);
-		SetReal_SYS("QCDEVMAP","OFFSET",0.5);
+		SetReal_SYS("QCDEVMAP","OFFSET",rOffset);
 		SetInt_SYS("QCDEVMAP", "LEGEND", 0);  // legend is plotted here.
 
 		// --- Set the nominal line direction parameter for QCDEVMAP 
@@ -533,11 +531,13 @@ int         iInteract, iShowDialog, iPlotToMap, iPlotPath;
    
 		SetString_SYS("QCDEVMAP","RESULT","Flag_SepL");
 		SetString_SYS("QCDEVMAP","COLOR", sColorL);
-		SetReal_SYS("QCDEVMAP","OFFSET",-0.5);
+		SetReal_SYS("QCDEVMAP","OFFSET",-rOffset);
 		SetReal_SYS("QCDEVMAP","NOMDIR",rLineDir);
 		SetInt_SYS("QCDEVMAP", "LEGEND", 0);  // legend is plotted here.
 
 		if (iRunGX_SYS("qcdevmap.gx")) Cancel_SYS(); 
+
+		SetReal_SYS("QCDEVMAP","OFFSET",rOffset);  // restore original value
 
 		SetInteractive_SYS(iInteract);   
 

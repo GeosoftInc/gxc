@@ -45,6 +45,8 @@
 //
 //-----------------------------------------------------------------------------------------------------------
 
+
+
 //*** endblock Header
 
 //*** block Editable
@@ -66,6 +68,72 @@
 
 #define IMG_NULL ((IMG)0)
 
+
+
+//===========================================================================================================
+//
+// IMG_DISPLAY_PROPERTY Definitions
+//
+// Image display property
+//
+// IMG_SHADING_INCLINATION
+// Shading inclination
+//
+// IMG_SHADING_DECLINATION
+// Shading declination
+//
+// IMG_SHADING_SCALE
+// Shading scale
+//
+// IMG_SHADING_CONTRAST
+// Shading contrast (0-1)
+//
+// IMG_SHADING_BRIGHTNESS
+// Shading brightness (0-1)
+//
+// IMG_SHADING_WETLOOK
+// Shading wet look (0 or 1)?
+//
+// IMG_COLOURS_REVERSED
+// Zone colours reversed from originals (0 or 1)?
+//
+// IMG_SMOOTHING_ENABLED
+// Is smoothing enabled (0 or 1)?
+//
+// IMG_SHADING_ENABLED
+// Is shading enabled (0 or 1)?
+//
+//===========================================================================================================
+
+
+#define IMG_SHADING_INCLINATION 0
+#define IMG_SHADING_DECLINATION 1
+#define IMG_SHADING_SCALE 2
+#define IMG_SHADING_CONTRAST 3
+#define IMG_SHADING_BRIGHTNESS 4
+#define IMG_SHADING_WETLOOK 5
+#define IMG_COLOURS_REVERSED 6
+#define IMG_SMOOTHING_ENABLED 7
+#define IMG_SHADING_ENABLED 8
+
+
+//===========================================================================================================
+//
+// IMG_FAULT Definitions
+//
+// Fault type
+//
+// IMG_FAULT_POLYLINE
+// 
+//
+// IMG_FAULT_POLYGON
+// 
+//
+//===========================================================================================================
+
+
+#define IMG_FAULT_POLYLINE 0
+#define IMG_FAULT_POLYGON 1
 
 
 //===========================================================================================================
@@ -860,6 +928,22 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// rGetDisplayProperty_IMG Gets display information about this image.
+//
+// Notes                   These values do not necessarily match the grid as currently displayed; they are retrieved and used whenever
+//                         the grid is displayed in a viewer or map, and are used (for instance) to set the default values
+//                         in the Display Grid GX.
+//                         Some values return only values of 0 or 1.
+//
+// Available               2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] real rGetDisplayProperty_IMG(IMG,   // Image Object
+                                       int);  // IMG_DISPLAY_PROPERTY
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // rGetZ_IMG Gets the grid value at a point
 //
 // Returns   Grid value
@@ -886,6 +970,51 @@
 
 [_public] real rQuery_IMG(IMG,   // IMG object
                           int);  // IMG_QUERY
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetDisplayProperty_IMG Sets display information about this image.
+//
+// Notes                  These values do NOT take immediate effect; they are retrieved and used whenever
+//                        the grid is displayed in a viewer or map, and are used (for instance) to set the default values
+//                        in the Display Grid GX.
+//                        Some values take on only values of 0 or 1.
+//
+// Available              2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetDisplayProperty_IMG(IMG,    // Image Object
+                                      int,    // IMG_DISPLAY_PROPERTY
+                                      real);  // Value
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// IGetShadowGridPath_IMG Gets the name of a view.
+//
+// Available              2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void IGetShadowGridPath_IMG(IMG,          // Image object
+                                      var string,   // Shadow grid path name returned
+                                      int);         // Shadow grid path name string size
+#define GetShadowGridPath_IMG(img, path) IGetShadowGridPath_IMG(img, path, sizeof(path))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetShadowGridPath_IMG Sets display information about this image.
+//
+// Notes                 This values does NOT take immediate effect; it is retrieved and used whenever
+//                       the grid is displayed in a viewer or map, and is used (for instance) to set the default value
+//                       in the Display Grid GX.
+//
+// Available             2021.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetShadowGridPath_IMG(IMG,      // Image Object
+                                     string);  // Grid path for the shadow grid
 
 
   
@@ -1038,6 +1167,68 @@
 
 [_public] real rGetRealParameter_IMG(IMG,      // IMG handle
                                      string);  // Parameter name (case insensitive)
+
+
+
+//===========================================================================================================
+//
+// Faults Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iNumberOfFaults_IMG Returns the number of individual fault traces stored in the IMG
+//
+// Notes               Faults are paths of (X, Y) locations, and are either polylines or polygons.
+//
+// Available           9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iNumberOfFaults_IMG(IMG);  // Source IMG
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetFault_IMG Retrieve a fault trace
+//
+// Available    9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetFault_IMG(IMG,       // Source IMG
+                            int,       // Fault index (0 to N-1)
+                            VV,        // X locations VV (REAL)
+                            VV,        // Y locations VV (REAL)
+                            var int);  // Fault type IMG_FAULT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iAddFault_IMG Add a fault trace
+//
+// Returns       index of the added fault
+//
+// Notes         The X and Y values cannot be dummies. Polygons require at least three locations, Polylines require at least two.
+//
+// Available     9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iAddFault_IMG(IMG,   // Source IMG
+                            VV,    // X locations VV
+                            VV,    // Y locations VV
+                            int);  // Fault type IMG_FAULT
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// DeleteFault_IMG Delete a fault trace
+//
+// Available       9.10
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void DeleteFault_IMG(IMG,   // Source IMG
+                               int);  // Fault index (0 to N-1)
 
 
 

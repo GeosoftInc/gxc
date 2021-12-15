@@ -29,7 +29,7 @@ Internal tension (0-1)                 .TENS                (optional)
 Cells to extend beyond data            .EDGCLP              (optional)
 Weighting power                        .IWT                 (optional)
 Weighting slope                        .WTSLP               (optional)
-Mash Channel                           .MASK_CHANNEL        (optional)
+Mask Channel                           .MASK_CHANNEL        (optional)
 
 Run Modes      RANGRID.RUNMODE   0: Normal behaviour
                                  1: Run advanced options dialog only
@@ -37,6 +37,7 @@ Run Modes      RANGRID.RUNMODE   0: Normal behaviour
                RANGRID.CONTROL_FILE - for RUNMODE = 2                                 
 "
 // Revision History:
+// v9.10.0:Added GenValidChanSymb_DB() to generate a valid channel name.
 // v7.0.1: Unload/delete existing grid to ensure proper refresh of grid window.
 // v6.3.0: Added "Advanced Options" and control file modes
 // v6.1.0: Fixed double-lock when called from external GX and cancel out.
@@ -99,6 +100,7 @@ string(STR_FILE) sDatabase;
 int iCounter, iN;
 string(STR_DB_SYMBOL) sMask, sChannelToGrid, sTempChan, sLine;
 string(STR_DEFAULT_LONG) sExp;
+string(STR_DEFAULT_LONG) sZChannel;
 DB_SYMB TempChan;
 EXP Exp;
 LST LineLST;
@@ -532,7 +534,7 @@ DB_SYMB Line;
 
    if (iFileExist_SYS(sGrid))
    {
-      if (iInteractive_SYS())
+      if (iScript_SYS() == 0)
          iRemoveDocument_PROJ(sGrid);
       iDeleteGridFile_SYS(sGrid);
    }
@@ -545,12 +547,14 @@ DB_SYMB Line;
    if (iStrlen_STR(sMask) > 0)
    {
       Strcpy_STR(sTempChan, "_");
-      Strcat_STR(sTempChan, sZCh);
+      GenValidChanSymb_DB(sZCh, sZChannel, sizeof(sZCh));  
+      Strcat_STR(sTempChan, sZChannel);
+      
       iCounter = 0;
       while (iExistSymb_DB(Data, sTempChan, DB_SYMB_CHAN))
       {
          iCounter++;
-         Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sZCh, iCounter);
+         Printf_STR(sTempChan, sizeof(sTempChan), _n("_%s_%d"), sZChannel, iCounter);
       }
 
       TempChan = CreateSymb_DB(Data, sTempChan, DB_SYMB_CHAN, DB_OWN_SHARED, GS_DOUBLE);

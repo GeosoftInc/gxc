@@ -50,7 +50,7 @@ VV VVr;
 VV VVu;
 REG Reg;
 
-string(STR_FILE) sBackupDB, sDB, sTok, sTable, sTemplate, sTokTemp;
+string(STR_FILE) sBackupDB, sDB, sTok, sTable, sTemplate, sTokTemp, sFirstTemplate;
 string(2048) sMsg;
 string(STR_FILE) sProject;
 string(64) sLicClass;
@@ -66,7 +66,7 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
    // --- Are we running inside ArcGIS ---
    GetLicenseClass_SYS(sLicClass);
    iArcGISPro = iStrcmp_STR(sLicClass, _n("ArcGISPro"), STR_CASE_TOLERANT) == 0;
-   
+
    // --- Get Drill Hole Object ---
 
    EData = Current_EDB();
@@ -84,9 +84,9 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
          Destroy_DH(Drill);
          // The source import will call back into refresh with DHREFRESH.MXDEPOSIT_CALLBACK == 1
          iRunGXEx_SYS("geogxnet.dll(Geosoft.GX.DrillHole.MXDeposit.ImportData;RefreshData)", iRet);
-		 if (iRet != 0)
-		    Abort_SYS(_("Unable to refresh from MX Deposit after cancel/error detected during the refresh."));
-		 else
+         if (iRet != 0)
+            Abort_SYS(_("Unable to refresh from MX Deposit after cancel/error detected during the refresh."));
+         else
             Exit_SYS();
       }
       else
@@ -145,7 +145,7 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
 
    VVf = Create_VV(-STR_FILE, 0);
    GetDatabasesVV_DH(Drill, VVf);
-   
+
    VVr = Create_VV(-STR_FILE, 0);
    VVu = Create_VV(-STR_FILE, 0);
 
@@ -159,7 +159,7 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
    // --- For each constituent database, get the template and call the import ---
 
    Progress_SYS(1);
-   
+
 
    iUnLoaded = 0;
    iRefreshed = 0;
@@ -169,22 +169,21 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
       GetString_VV(VVf, i, sDB);
       EData = Load_EDB(sDB);
       Data = Lock_EDB(EData);
-	  
-	  // Determine table name, DH class rule is everything after first _ in DB name
-	  FileNamePart_STR(sDB, sTok, STR_FILE_PART_NAME);
-	  iTok = iTokens_STR(sTok,"_");
-	  Strcpy_STR(sTable, "");
-	  for (iT = 1; iT < iTok; iT++)
-	  {
-		 GetToken_STR(sTokTemp, sTok, iT);
-		 if (iT > 1)
-			Strcat_STR(sTable, "_");
-		 Strcat_STR(sTable, sTokTemp);
-	  }		 
-	  
-	  TempFileExt_SYS("tmp", sTemplate);
+
+      // Determine table name, DH class rule is everything after first _ in DB name
+      FileNamePart_STR(sDB, sTok, STR_FILE_PART_NAME);
+      iTok = iTokens_STR(sTok, "_");
+      Strcpy_STR(sTable, "");
+      for (iT = 1; iT < iTok; iT++)
+      {
+         GetToken_STR(sTokTemp, sTok, iT);
+         if (iT > 1)
+            Strcat_STR(sTable, "_");
+         Strcat_STR(sTable, sTokTemp);
+      }
+
+      TempFileExt_SYS("tmp", sTemplate);
       iTemplate = iGetTemplateBlob_DH(Data, sTemplate, iType);
-      UnLock_EDB(EData);
 
       if (iTemplate)
       {
@@ -199,13 +198,18 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
          else if (iType == 1)
             SetString_SYS("DHIMPDB", "TEMPLATE", sTemplate);
          else if (iType == 2)
+         {
             SetString_SYS("DHIMPODBC", "TEMPLATE", sTemplate);
+            if (i != 0 && iStrlen_STR(sTemplate) && iStrlen_STR(sFirstTemplate))
+               UpdateTemplateBlob_DH(Data, sTemplate, sFirstTemplate, iType);
+         }
          else if (iType == 4)
          {
             SetString_SYS("ACQIMPORT", "PARFILE", sTemplate);
             SetString_SYS("ACQIMPORT", "PROJECT", sProject);
          }
 
+         UnLock_EDB(EData);
 
          // --- Copy the database to temp file, so if any error occurs, the original will be restored ---
 
@@ -224,7 +228,6 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
          else
             iRet = iRunGX_SYS("dhimport.gx");
          SetInteractive_SYS(iInteractive);
-
 
          // --- If an error occurred, or the user cancelled, restore/replace the original database with
          //     the backup copy. ---
@@ -263,12 +266,22 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
             Abort_SYS(sMsg);
          }
          else
+         {
             iDeleteFile_SYS(sBackupDB);
-			
-		 if (!iArcGISPro)
-		    SetString_VV(VVr, iRefreshed, sDB);
-		 else
-		    SetString_VV(VVr, iRefreshed, sTable);
+            if (i == 0)
+            {
+               EData = Load_EDB(sDB);
+               Data = Lock_EDB(EData);
+               iGetTemplateBlob_DH(Data, sTemplate, iType);
+               Strcpy_STR(sFirstTemplate, sTemplate);
+               UnLock_EDB(EData);
+            }
+         }
+
+         if (!iArcGISPro)
+            SetString_VV(VVr, iRefreshed, sDB);
+         else
+            SetString_VV(VVr, iRefreshed, sTable);
          iRefreshed++;
 
          if (iType == 4)
@@ -276,22 +289,24 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
       }
       else
       {
-		 if (!iArcGISPro)
+         UnLock_EDB(EData);
+         if (!iArcGISPro)
             SetString_VV(VVu, iUnLoaded, sDB);
-		 else
-		    SetString_VV(VVu, iUnLoaded, sTable);
+         else
+            SetString_VV(VVu, iUnLoaded, sTable);
          iUnLoaded++;
       }
-	  iDeleteFile_SYS(sTemplate);
+      if (i != 0)
+         iDeleteFile_SYS(sTemplate);
    }
 
+   if (iStrlen_STR(sFirstTemplate))
+      iDeleteFile_SYS(sFirstTemplate);
    SetInteractive_SYS(iInteractive);
    Progress_SYS(0);
 
 
    // --- Clean up ---
-
-   
 
 
    // --- Announce results ---
@@ -300,54 +315,54 @@ int i, iT, iTok, iMXDeposit, iArcGISPro, iN, iOverwrite, iType, iTemplate, iRefr
    {
       if (iUnLoaded)
       {
-	     if (!iArcGISPro)
-		 {
-			 if (iUnLoaded == 1)
-				Strcpy_STR(sMsg, _("The following database:\r\n\r\n"));
-			 else
-				Strcpy_STR(sMsg, _("The following databases:\r\n\r\n"));
-		 }
-		 else
-		    Strcpy_STR(sMsg, _("\r\nThe following data:\r\n"));
+         if (!iArcGISPro)
+         {
+            if (iUnLoaded == 1)
+               Strcpy_STR(sMsg, _("The following database:\r\n\r\n"));
+            else
+               Strcpy_STR(sMsg, _("The following databases:\r\n\r\n"));
+         }
+         else
+            Strcpy_STR(sMsg, _("\r\nThe following data:\r\n"));
          for (i = 0; i < iUnLoaded; i++)
          {
             GetString_VV(VVu, i, sDB);
-			Strcat_STR(sMsg, "\t");
+            Strcat_STR(sMsg, "\t");
             Strcat_STR(sMsg, sDB);
             Strcat_STR(sMsg, "\r\n");
          }
          Strcat_STR(sMsg, _("could not be refreshed, either because they were not created\r\nusing the ASCII/XLS/Database/ODBC import, or because they were\r\ncreated before the latest version of the software.\r\nIf the latter is true, import manually using the specific wizard\r\nand the databases will be set up properly for automatic refresh."));
-		 if (!iArcGISPro)
+         if (!iArcGISPro)
             DisplayMessage_SYS(_("Refresh Drillhole Imports"), sMsg);
-		 else
-		    AddWarning_ARCPY(sMsg);
+         else
+            AddWarning_ARCPY(sMsg);
       }
-	  
-	  
+
+
       if (iRefreshed)
       {
          if (!iArcGISPro)
-		 {
-			 if (iRefreshed == 1)
-				Strcpy_STR(sMsg, _("The following database was refreshed:\r\n\r\n"));
-			 else
-				Strcpy_STR(sMsg, _("The following databases were refreshed:\r\n\r\n"));
-		 }
-		 else
+         {
+            if (iRefreshed == 1)
+               Strcpy_STR(sMsg, _("The following database was refreshed:\r\n\r\n"));
+            else
+               Strcpy_STR(sMsg, _("The following databases were refreshed:\r\n\r\n"));
+         }
+         else
             Strcpy_STR(sMsg, _("\r\nThe following data was refreshed:\r\n"));
          for (i = 0; i < iRefreshed; i++)
          {
             GetString_VV(VVr, i, sDB);
-			Strcat_STR(sMsg, "\t");
+            Strcat_STR(sMsg, "\t");
             Strcat_STR(sMsg, sDB);
             if (i < iN - 1)
                Strcat_STR(sMsg, "\r\n");
          }
-	     
-	     if (!iArcGISPro)
+
+         if (!iArcGISPro)
             DisplayMessage_SYS(_("Refresh Drillhole Imports"), sMsg);
          else
-		    AddMessage_ARCPY(sMsg);
+            AddMessage_ARCPY(sMsg);
       }
    }
 }
