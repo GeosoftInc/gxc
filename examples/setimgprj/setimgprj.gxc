@@ -86,7 +86,11 @@ string(STR_FILE) s1,s2,s3,s4,s5;
 
       // --- Edit/modify the IPJ ---
 
-      iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Grids"), sGrids);
+      if (iCoordSysWizard_GUI(hIPJ, TRUE, COORDSYS_MODE_ALL, _("Grids"), sGrids) == 1)
+      {
+         Destroy_IPJ(hIPJ);
+         Cancel_SYS();
+      }
 
       // --- Export IPJ parameters as GXF strings for scripting. ---
 
@@ -133,19 +137,8 @@ string(STR_FILE) s1,s2,s3,s4,s5;
    {
       GetMFile_STR(sGrids, sGrid, i);
       Strcat_STR(sGrid, sXGD);
-      //DisplayMessage_SYS(_("Grid"),sGrid);
       hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGrid, IMG_FILE_READORWRITE);
 
-
-      // --- Get the exiting IPJ from the grid ---
-
-      GetIPJ_IMG(hIMG, hIPJ);
-
-
-      // --- Set the PCS or GCS using the GXF strings, because this leaves
-      //     any existing warp or orientation unchanged ---
-
-      SetGXF_IPJ(hIPJ, s1, s2, s3, s4, s5);
       SetIPJ_IMG(hIMG, hIPJ);
       Destroy_IMG(hIMG);
    }

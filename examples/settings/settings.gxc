@@ -51,8 +51,7 @@ RESOURCE = "settings.gr"
    //                             VARIABLES
    //===========================================================================
 
-   string(STR_FILE) sTemp,
-   sName;
+string(STR_FILE) sTemp, sName, sProjectPath;
 string(STR_FILE) sTTFile;
 string(STR_FILE) sMessage;
 string(STR_DEFAULT_SHORT) sXGD, sNest, sNoNest, sAliasLoadLast, sAliasConfirmGDBSave, sAliasNewGDBProjection;
@@ -60,6 +59,7 @@ DGW Diag;
 LTB hUNI;
 LST List;
 int i, iNesting;
+int iIsESRI;
 
 
 //===========================================================================
@@ -73,7 +73,14 @@ int i, iNesting;
 
 
    // --- set current defaults ---
+   iIsESRI = iIsESRI_DH();
 
+   if (!iIsESRI)
+   {
+      GetDefaultProjectPath_PROJ(sProjectPath);
+      SetString_SYS("SETTINGS", "DEFAULT_PROJECT_PATH", sProjectPath);
+   }
+   
    if (iGlobal_SYS("MONTAJ.CORE_MENUS", sTemp) == 0)
    {
       ReplaceChar_STR(sTemp, ";", "|");
@@ -240,22 +247,26 @@ int i, iNesting;
                // --- Create the Dialogue ---
 
                Diag = Create_DGW("settings0");
-               GetLST_LTB(hUNI, iFindField_LTB(hUNI, "Description"), GetList_DGW(Diag, _SETTINGS0_4));
-               FontLST_SYS(GetList_DGW(Diag, _SETTINGS0_5), SYS_FONT_GFN);
-               FontLST_SYS(GetList_DGW(Diag, _SETTINGS0_5), SYS_FONT_TT);
+               GetLST_LTB(hUNI, iFindField_LTB(hUNI, "Description"), GetList_DGW(Diag, _SETTINGS0_5));
                FontLST_SYS(GetList_DGW(Diag, _SETTINGS0_6), SYS_FONT_GFN);
+               FontLST_SYS(GetList_DGW(Diag, _SETTINGS0_6), SYS_FONT_TT);
+               FontLST_SYS(GetList_DGW(Diag, _SETTINGS0_7), SYS_FONT_GFN);
 
                // --- Set any Defaults from INI ---
 
-               SetInfoSYS_DGW(Diag, _SETTINGS0_0, DGW_FILEPATH, "SETTINGS", "CORE_MENUS");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_1, DGW_FILEPATH, "SETTINGS", "DEFAULT_COLOUR");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_2, DGW_FILEPATH, "SETTINGS", "DEFAULT_CSYMB_COLOUR");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_3, DGW_LISTALIAS, "SETTINGS", "DEFAULT_COLOUR_METHOD");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_4, DGW_LISTALIAS, "SETTINGS", "DEFAULT_UNIT");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_5, DGW_LISTALIAS, "SETTINGS", "DEFAULT_MAP_FONT");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_6, DGW_LISTALIAS, "SETTINGS", "DEFAULT_SYMBOL_FONT");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_7, DGW_LISTALIAS, "SETTINGS", "COMPRESSION");
-               SetInfoSYS_DGW(Diag, _SETTINGS0_8, DGW_FILEPATH, "SETTINGS", "EDITOR");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_0, DGW_FILEPATH, "SETTINGS", "DEFAULT_PROJECT_PATH");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_1, DGW_FILEPATH, "SETTINGS", "CORE_MENUS");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_2, DGW_FILEPATH, "SETTINGS", "DEFAULT_COLOUR");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_3, DGW_FILEPATH, "SETTINGS", "DEFAULT_CSYMB_COLOUR");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_4, DGW_LISTALIAS, "SETTINGS", "DEFAULT_COLOUR_METHOD");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_5, DGW_LISTALIAS, "SETTINGS", "DEFAULT_UNIT");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_6, DGW_LISTALIAS, "SETTINGS", "DEFAULT_MAP_FONT");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_7, DGW_LISTALIAS, "SETTINGS", "DEFAULT_SYMBOL_FONT");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_8, DGW_LISTALIAS, "SETTINGS", "COMPRESSION");
+               SetInfoSYS_DGW(Diag, _SETTINGS0_9, DGW_FILEPATH, "SETTINGS", "EDITOR");
+
+               if (iIsESRI)
+	               SetInfo_DGW(Diag,_SETTINGS0_0,DGW_HIDE, "1");
 
 
                // --- Run the Dialogue ---
@@ -265,16 +276,60 @@ int i, iNesting;
 
 
                // --- Put values back in INI ---
+               if (!iIsESRI)
+                  GetInfoSYS_DGW(Diag, _SETTINGS0_0, DGW_FILEPATH, "SETTINGS", "DEFAULT_PROJECT_PATH");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_1, DGW_FILEPATH, "SETTINGS", "CORE_MENUS");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_2, DGW_FILEPATH, "SETTINGS", "DEFAULT_COLOUR");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_3, DGW_FILEPATH, "SETTINGS", "DEFAULT_CSYMB_COLOUR");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_4, DGW_LISTALIAS, "SETTINGS", "DEFAULT_COLOUR_METHOD");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_5, DGW_LISTALIAS, "SETTINGS", "DEFAULT_UNIT");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_6, DGW_LISTALIAS, "SETTINGS", "DEFAULT_MAP_FONT");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_7, DGW_LISTALIAS, "SETTINGS", "DEFAULT_SYMBOL_FONT");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_8, DGW_LISTALIAS, "SETTINGS", "COMPRESSION");
+               GetInfoSYS_DGW(Diag, _SETTINGS0_9, DGW_FILEPATH, "SETTINGS", "EDITOR");
 
-               GetInfoSYS_DGW(Diag, _SETTINGS0_0, DGW_FILEPATH, "SETTINGS", "CORE_MENUS");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_1, DGW_FILEPATH, "SETTINGS", "DEFAULT_COLOUR");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_2, DGW_FILEPATH, "SETTINGS", "DEFAULT_CSYMB_COLOUR");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_3, DGW_LISTALIAS, "SETTINGS", "DEFAULT_COLOUR_METHOD");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_4, DGW_LISTALIAS, "SETTINGS", "DEFAULT_UNIT");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_5, DGW_LISTALIAS, "SETTINGS", "DEFAULT_MAP_FONT");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_6, DGW_LISTALIAS, "SETTINGS", "DEFAULT_SYMBOL_FONT");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_7, DGW_LISTALIAS, "SETTINGS", "COMPRESSION");
-               GetInfoSYS_DGW(Diag, _SETTINGS0_8, DGW_FILEPATH, "SETTINGS", "EDITOR");
+               if (!iIsESRI)
+               {
+                  GetString_SYS("SETTINGS", "DEFAULT_PROJECT_PATH", sProjectPath);
+                  AbsoluteFileName_SYS(sProjectPath, sProjectPath);
+                  SetString_SYS("SETTINGS", "DEFAULT_PROJECT_PATH", sProjectPath);
+               
+                  if (!iStrlen_STR(sProjectPath))
+                  {
+                     DisplayMessage_SYS(_("Default Project Directory"), _("Default project folder cannot be empty."));
+                     i = 0;
+                     Destroy_DGW(Diag);
+                     break;
+                  }
+
+                  // --- Does it exist ? ---
+
+                  if (!iDirExist_SYS(sProjectPath))
+                  {
+                     Printf_STR(sMessage, sizeof(sMessage), _("The directory \"%s\" does not exist. Do you want to create it?"), sProjectPath);
+                     if (iDisplayQuestion_SYS(_("Default Project Directory"), sMessage) == 1)
+                     {
+                        if (iMakeDir_SYS(sProjectPath))
+                        {
+                           DisplayMessage_SYS(_("Default Project Directory"), _("Unable to create directory."));
+                           i = 0;
+                        }
+                     }
+                     else
+                        i = 0;
+                  }
+                  else
+                  {
+                     // --- Can we write in it ? ---
+
+                     if (!iWriteInDir_SYS(sProjectPath))
+                     {
+                        Printf_STR(sMessage, sizeof(sMessage), _("The directory \"%s\" does not have write permission. Please choose another directory."), sProjectPath);
+                        DisplayMessage_SYS(_("Default Project Directory"), sMessage);
+                        i = 0;
+                     }
+                  }
+               }
 
                Destroy_DGW(Diag);
                break;
@@ -396,6 +451,15 @@ int i, iNesting;
 
 
    // --- get/set parameters ---
+
+   if (!iIsESRI)
+   {
+      GetString_SYS("SETTINGS", "DEFAULT_PROJECT_PATH", sTemp);
+      if (!iStrlen_STR(sTemp))
+         Abort_SYS(_("Default project folder cannot be empty."));
+
+      SetDefaultProjectPath_PROJ(sTemp);
+   }
 
    GetString_SYS("SETTINGS", "CORE_MENUS", sTemp);
    ReplaceChar_STR(sTemp, "|", ";");

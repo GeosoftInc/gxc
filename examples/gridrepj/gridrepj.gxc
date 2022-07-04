@@ -371,44 +371,41 @@ real rNCell;
 
             iOrientation = iGetOrientation_IPJ(hOldIPJ);            
             iCrooked = iOrientation == IPJ_ORIENT_SECTION_CROOKED;
-
             rXd = rYd = rX0 = rY0 = rRot = 0.0;
-            GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
-            rOldCell = rXd;
-         
-
-            if (!iSame || (rNewCell != rOldCell) || iCrooked)
+            if (iCrooked)
             {
-               if (iCrooked)
-               {
-                  GetName_IPJ(hOldIPJ, IPJ_NAME_UNIT_ABBR, sUnitOld);
-                  GetName_IPJ(hNewIPJ, IPJ_NAME_UNIT_ABBR, sUnitNew);
-                  rUnitScaleOld = rUnitScale_IPJ(sUnitOld, 1.0);
-                  rUnitScaleNew = rUnitScale_IPJ(sUnitNew, 1.0);
-                  rScale = rUnitScaleOld / rUnitScaleNew;
-                  rNewCell = rXd * rScale;
-                  rXd *= rScale;
-                  rYd *= rScale;
-                  rX0 *= rScale;
-                  rY0 *= rScale;
-                  rRot = 0.0;
-                  iX = iNX_IMG(hOldIMG);  // unchanged
-                  iY = iNY_IMG(hOldIMG);
-               }
-               else
+               GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);  
+               rOldCell = rXd;
+               GetName_IPJ(hOldIPJ, IPJ_NAME_UNIT_ABBR, sUnitOld);
+               GetName_IPJ(hNewIPJ, IPJ_NAME_UNIT_ABBR, sUnitNew);
+               rUnitScaleOld = rUnitScale_IPJ(sUnitOld, 1.0);
+               rUnitScaleNew = rUnitScale_IPJ(sUnitNew, 1.0);
+               rScale = rUnitScaleOld / rUnitScaleNew;
+               rNewCell = rXd * rScale;
+               rXd *= rScale;
+               rYd *= rScale;
+               rX0 *= rScale;
+               rY0 *= rScale;
+               rRot = 0.0;
+            }
+            else 
+            {
+               if (!iSame || (rNewCell != rOldCell))
                {
                   Progress_SYS(1);
                   CreateProjected2_IMG(hOldIMG, hNewIPJ, rNewCell);
-                  rNewCell = rXd;
+                  Progress_SYS(0);
                }
-               Progress_SYS(0);
+               GetInfo_IMG(hOldIMG, rXd, rYd, rX0, rY0, rRot);
+               if (rOldCell == rDUMMY) rOldCell = rXd;
             }
-
-
+            iX = iNX_IMG(hOldIMG);
+            iY = iNY_IMG(hOldIMG);
+			
             if (rNewCell == rDUMMY)
-                rNCell = rOldCell;
+               rNCell = rOldCell;
             else
-                rNCell = rNewCell;
+               rNCell = rNewCell;
 
             if (iCrooked)
             {
@@ -651,7 +648,7 @@ real rNCell;
          FileCombineParts_STR(sVolume, sDir, sNewGrid, sExt, sQual, sNewGrid);
 
          iOrientation = iGetOrientation_IPJ(hOldIPJ);
-         if (iOrientation == IPJ_ORIENT_DEFAULT)
+         if (iOrientation == IPJ_ORIENT_DEFAULT || iOrientation == IPJ_ORIENT_PLAN)
          {
             // --- inherit the projection ---
 
@@ -876,7 +873,7 @@ real rNCell;
       }
 
       iOrientation = iGetOrientation_IPJ(hOldIPJ);
-      if (iOrientation == IPJ_ORIENT_DEFAULT)
+      if (iOrientation == IPJ_ORIENT_DEFAULT || iOrientation == IPJ_ORIENT_PLAN)
       {
          // --- inherit the projection based on the cell size ---
 
@@ -962,13 +959,6 @@ real rNCell;
 
          GetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);
 
-         ReprojectSectionGrid_IPJ(hOldIPJ, hNewIPJ, rX0, rY0, rXd, rYd, rRot);
-
-         Copy_IMG(hOldIMG, hNewIMG);                      // Copy_IMG(Source, Target): Copies the data, independent of projections.
-         SetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);  // Set Modified grid info
-         SetIPJ_IMG(hNewIMG, hNewIPJ);                    // Set the projection
-
-
          // --- Resample if necessary ---
 
          if (iExistReal_SYS("GRIDREPJ", "NEWCELL"))
@@ -977,9 +967,16 @@ real rNCell;
             if (rNewCell != rXd ||
                 rNewCell != rYd)
             {
-               CreateProjected2_IMG(hNewIMG, hNewIPJ, rNewCell);
+               rXd = rNewCell;
+               rYd = rNewCell;
             }
          }
+
+         ReprojectSectionGrid_IPJ(hOldIPJ, hNewIPJ, rX0, rY0, rXd, rYd, rRot);
+
+         Copy_IMG(hOldIMG, hNewIMG);                      // Copy_IMG(Source, Target): Copies the data, independent of projections.
+         SetInfo_IMG(hNewIMG, rXd, rYd, rX0, rY0, rRot);  // Set Modified grid info
+         SetIPJ_IMG(hNewIMG, hNewIPJ);                    // Set the projection
       }
 
       Destroy_SYS(hOldIMG);

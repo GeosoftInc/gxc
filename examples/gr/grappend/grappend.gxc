@@ -35,22 +35,22 @@ DGW hDGW;  // Dialogue handle
 
 EDB eDBi, eDBo;
 DB hDBi, hDBo;
-DB_SYMB Chan, TypeChan, StnChan, Group, SrcChan, Ch, ChX, ChY;
+DB_SYMB Chan, TypeChan, StnChan, Group, SrcChan, Ch, ChX, ChY, LineSymbol;
 REG hDataREG;  // Gravity data REG
 REG hWorkREG;  // Gravity work REG
 VV hTypeVV, hStnVV, hSrcVV;
 IPJ hIPJ;
-LST hLST, hChanLST, hCopyLST, hRenameLST, List;
+LST hLST, hChanLST, hCopyLST, hRenameLST, List, hLineSymbolLST;
 WA hWA;
 
 string(STR_FILE) sMaster, sSurvey, sReportFile, sCurrentSurveyFile, sSurveyFile;
 string(STR_DEFAULT_SHORT) sType;
 string(STR_DEFAULT_SHORT) sSrc, sSrcNew;
 string(STR_DEFAULT_LONG) sMsg;
-string(STR_DB_SYMBOL) sStation, sLatitude, sLongitude, sFrom, sTo, sChan;
+string(STR_DB_SYMBOL) sStation, sLatitude, sLongitude, sFrom, sTo, sChan, sLineName;
 int i, ii, iNew, iLen, iNChan, iAlternateChannels, iInteractive, n;
 int iGscale, iClosure, iType, iCheck, iSurveyLoaded, iFile, iFiles;
-int iDisplayReportFile;
+int iDisplayReportFile, iLineEmpty;
 real rStart, rIncr;
 
 //===========================================================================
@@ -179,7 +179,7 @@ real rStart, rIncr;
       // --- create new database ---
 
       iDeleteFile_SYS(sMaster);
-      Create_DB(sMaster, 100, 100, 250, 10, 100, "SUPER", "");
+      Create_DB(sMaster, 100, 200, 250, 10, 100, "SUPER", "");
    }
 
    eDBo = Load_EDB(sMaster);
@@ -662,7 +662,7 @@ real rStart, rIncr;
 	   {
          GetItem_LST(hCopyLST, LST_ITEM_VALUE, i, sTo);
 		   REMOVE_FROMSURVEY(sTo)
-      }
+       }
 
 	   // --- Rename back any channels renamed above ---
 
@@ -681,34 +681,47 @@ real rStart, rIncr;
 		   }
 	   }
 
+	   // --- remove empty line/group(s) ---
+	   hLineSymbolLST = CreateSymbLST_DB();
+	   LineLST_DB(hDBo, hLineSymbolLST);
+	   n = iSize_LST(hLineSymbolLST);
+	   for (i = 0; i < n; i++)
+	   {
+		  GtSymbItem_LST(hLineSymbolLST, i, sLineName, STR_DB_SYMBOL, LineSymbol);
+		  iLineEmpty = iIsLineEmpty_DB(hDBo, LineSymbol);
+		  if (iLineEmpty)
+		  {
+			 LockSymb_DB(hDBo, LineSymbol, DB_LOCK_READWRITE, DB_WAIT_INFINITY); 
+	         DeleteSymb_DB(hDBo, LineSymbol);
+		  }
+	   }
 
-      // --- delete line 0 and display all ---
+       // --- display all ---
 
-      UnLock_EDB(eDBi);
-      UnLock_EDB(eDBo);
-      DelLine0_EDB(eDBo);
+       UnLock_EDB(eDBi);
+       UnLock_EDB(eDBo);
+   
+       iNChan = 1;
+       if (!iScript_SYS())
+       {
+          hLST = Create_LST(64);
+          iNChan = iDispChanLST_EDB(eDBo, hLST);
+       }
 
-      iNChan = 1;
-      if (!iScript_SYS())
-      {
-         hLST = Create_LST(64);
-         iNChan = iDispChanLST_EDB(eDBo, hLST);
-      }
-
-      if (iNew || iNChan == 0)
+       if (iNew || iNChan == 0)
          LoadAllChans_EDB(eDBo);
 
 	   if (iSurveyLoaded == 0)
 		   UnLoad_EDB(sSurvey);
 
 
-      // --- Report to display? ---
+       // --- Report to display? ---
 
-      if (iSize_LST(hCopyLST) > 0)
-      {
-         Destroy_WA(hWA);
-         iDisplayReportFile += 1;
-      }
+       if (iSize_LST(hCopyLST) > 0)
+       {
+          Destroy_WA(hWA);
+          iDisplayReportFile += 1;
+       }
    }
 
    Destroy_SYS(hTypeVV);
@@ -725,5 +738,5 @@ real rStart, rIncr;
       SetString_SYS("EDIT","FILE",sReportFile);
       SetString_SYS("EDIT","CHILD","Yes");
       iRunGX_SYS("edit");
-	}
+   }
 }

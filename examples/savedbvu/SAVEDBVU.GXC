@@ -40,11 +40,13 @@ RESOURCE = "savedbvu.gr"
 //===========================================================================
 
 string(STR_FILE)          sList;               // List file name
+string(STR_FILE)          sGDB;                // GDB file name
 string(STR_DB_SYMBOL)     sChan;               // Channel name
 string(STR_DB_SYMBOL)     sLine;               // Line name
 string(STR_DB_SYMBOL)     sCurLine;            // Current Line name
 string(STR_DEFAULT_LONG)  sItemValue, sVal, sParam;
 string(STR_DB_SYMBOL)     sLineNumber;         // Alpha-numeric line number
+string(STR_DEFAULT_LONG)  sMsg;                // error message
 
 EDB         EData;               // Edited database
 DB          Data;                // Database
@@ -66,6 +68,7 @@ int         iAutoRescaleX, iVerticalGridLines;
 real        rVerticalGridLineInterval;
 
 int         iLineCategory;
+int         iLoaded;
 
 //===========================================================================
 //                                CODE
@@ -114,9 +117,27 @@ int         iLineCategory;
 
    GetString_SYS("SAVEDBVU","FILE",sList);
 
-   // --- Get the current editted database ---
-
-   EData = Current_EDB();
+   GetString_SYS("SAVEDBVU", "GDB", sGDB);
+	iLoaded = 0;
+	if (iStrlen_STR(sGDB) > 0)
+	{
+      SetString_SYS("SAVEDBVU", "GDB", "");  // force reset each time
+      iLoaded = iLoaded_EDB(sGDB);
+      if (iLoaded)
+      {
+         EData = LoadNoActivate_EDB(sGDB);
+      }
+      else
+      {
+         Printf_STR(sMsg, sizeof(sMsg), _("%s is not loaded in the current project."), sGDB);
+         Abort_SYS(sMsg);
+      }
+	}
+   else
+   {
+      // --- Get the current editted database ---
+      EData = Current_EDB();
+   }
 
    // --- Create a VV to hold channel symbols ---
 
