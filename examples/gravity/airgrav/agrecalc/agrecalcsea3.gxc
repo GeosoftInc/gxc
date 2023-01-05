@@ -10,15 +10,18 @@ DESCRIPTION   = "
 
    AGRECALCSEA3.SPRTENS    Name of the spring tension channel
                .BEAM       Name of the beam velocity channel
-			   .TIME	   Name of the time channel
-	           .CRSCPLVCC  Name of the VCC cross coupling channel	   
-		       .CRSCPLVE   Name of the VE cross coupling channel		   
-		       .CRSCPLAL   Name of the AL cross coupling channel	
-		       .CRSCPLAX   Name of the AX cross coupling channel	
-		       .CRSCPLVX2  Name of the AX2cross coupling channel			   
-	           .OUTCH      Output (recalculated gravity) channel
+               .TIME	   Name of the time channel
+               .CRSCPLVCC  Name of the VCC cross coupling channel
+               .CRSCPLVE   Name of the VE cross coupling channel
+               .CRSCPLAL   Name of the AL cross coupling channel
+               .CRSCPLAX   Name of the AX cross coupling channel
+               .CRSCPLVX2  Name of the AX2cross coupling channel
+               .CRSGYRO    Name of the cross gyro correction channel
+               .LONGGYRO   Name of the long gyto correction channel
+               .OUTCH      Output (recalculated gravity) channel
 "
 // Revision History:
+// v2022.2
 // v9.9 New GX
 //===========================================================================
 //                                 RESOURCES
@@ -41,16 +44,16 @@ RESOURCE = "agrecalcsea3.gr"
 EDB         EData;            // Edited database handle
 DB          Data;             // Database handle
 DGW         Diag;             // Dialogue handle
-DB_SYMB     Line,STCh,BMCh,CCVCCh,CCVEh,CCALh,CCAXh,CCAX2h,BDCh,OutCh,TimeCh,ST2Ch;
+DB_SYMB     Line,STCh,BMCh,CCVCCh,CCVEh,CCALh,CCAXh,CCAX2h,BDCh,OutCh,TimeCh,ST2Ch,CrossGyroCh,LongGyroCh;
 LST         List;           
 EXP         Exp;
 VV          hVV;
 VV          hVVTime,hVVBDerivative;
 
-string(STR_DEFAULT) sSTCh,sBMCh,sCCVCCh,sCCVEh,sCCALh,sCCAXh,sCCAX2h,sBDCh,sOutCh,sTimeCh,sST2Ch;
+string(STR_DEFAULT) sSTCh,sBMCh,sCCVCCh,sCCVEh,sCCALh,sCCAXh,sCCAX2h,sBDCh,sOutCh,sTimeCh,sST2Ch,sCrossGyro,sLongGyro;
 
-string(512)         sFormula;
-int i,n;
+string(1024)         sFormula;
+int i,n,validCrossGyro,validLongGyro;
 
 //===========================================================================
 //                                   CODE
@@ -85,7 +88,8 @@ int i,n;
       List = GetList_DGW(Diag,_AGRECALCSEA3_2);
       SymbLST_DB(Data,List,DB_SYMB_CHAN);
       Sort_LST(List,0,0);	  
-	  
+      
+     
       List = GetList_DGW(Diag,_AGRECALCSEA3_3);
       SymbLST_DB(Data,List,DB_SYMB_CHAN);
       Sort_LST(List,0,0);
@@ -110,18 +114,27 @@ int i,n;
       SymbLST_DB(Data,List,DB_SYMB_CHAN);
       Sort_LST(List,0,0);
 
+      List = GetList_DGW(Diag,_AGRECALCSEA3_9);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
+
+      List = GetList_DGW(Diag,_AGRECALCSEA3_10);
+      SymbLST_DB(Data,List,DB_SYMB_CHAN);
+      Sort_LST(List,0,0);
 
       // --- Set any Defaults ---
 
       SetInfoSYS_DGW(Diag,_AGRECALCSEA3_0,DGW_TEXT,"AGRECALCSEA3","SPRTENS");
       SetInfoSYS_DGW(Diag,_AGRECALCSEA3_1,DGW_TEXT,"AGRECALCSEA3","BEAM");
-	  SetInfoSYS_DGW(Diag,_AGRECALCSEA3_2,DGW_TEXT,"AGRECALCSEA3","TIME");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_2,DGW_TEXT,"AGRECALCSEA3","TIME");
       SetInfoSYS_DGW(Diag,_AGRECALCSEA3_3,DGW_TEXT,"AGRECALCSEA3","CRSCPLVCC");
       SetInfoSYS_DGW(Diag,_AGRECALCSEA3_4,DGW_TEXT,"AGRECALCSEA3","CRSCPLVE");	  
       SetInfoSYS_DGW(Diag,_AGRECALCSEA3_5,DGW_TEXT,"AGRECALCSEA3","CRSCPLAl");
       SetInfoSYS_DGW(Diag,_AGRECALCSEA3_6,DGW_TEXT,"AGRECALCSEA3","CRSCPLAX");
-	  SetInfoSYS_DGW(Diag,_AGRECALCSEA3_7,DGW_TEXT,"AGRECALCSEA3","CRSCPLVX2");
-	  SetInfoSYS_DGW(Diag,_AGRECALCSEA3_8,DGW_TEXT,"AGRECALCSEA3","OUTCH");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_7,DGW_TEXT,"AGRECALCSEA3","CRSCPLVX2");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_8,DGW_TEXT,"AGRECALCSEA3","CRSGYRO");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_9,DGW_TEXT,"AGRECALCSEA3","LONGGYRO");
+      SetInfoSYS_DGW(Diag,_AGRECALCSEA3_10,DGW_TEXT,"AGRECALCSEA3","OUTCH");
 
 
       // --- Run the Dialogue ---
@@ -133,13 +146,15 @@ int i,n;
 
       GetInfoSYS_DGW(Diag,_AGRECALCSEA3_0,DGW_TEXT,"AGRECALCSEA3","SPRTENS");
       GetInfoSYS_DGW(Diag,_AGRECALCSEA3_1,DGW_TEXT,"AGRECALCSEA3","BEAM");
-	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_2,DGW_TEXT,"AGRECALCSEA3","TIME");  
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_2,DGW_TEXT,"AGRECALCSEA3","TIME");  
       GetInfoSYS_DGW(Diag,_AGRECALCSEA3_3,DGW_TEXT,"AGRECALCSEA3","CRSCPLVCC");
-	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_4,DGW_TEXT,"AGRECALCSEA3","CRSCPLVE");
-	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_5,DGW_TEXT,"AGRECALCSEA3","CRSCPLAL");
-	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_6,DGW_TEXT,"AGRECALCSEA3","CRSCPLAX");
-	  GetInfoSYS_DGW(Diag,_AGRECALCSEA3_7,DGW_TEXT,"AGRECALCSEA3","CRSCPLVX2");  
-      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_8,DGW_TEXT,"AGRECALCSEA3","OUTCH");
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_4,DGW_TEXT,"AGRECALCSEA3","CRSCPLVE");
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_5,DGW_TEXT,"AGRECALCSEA3","CRSCPLAL");
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_6,DGW_TEXT,"AGRECALCSEA3","CRSCPLAX");
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_7,DGW_TEXT,"AGRECALCSEA3","CRSCPLVX2");  
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_8,DGW_TEXT,"AGRECALCSEA3","CRSGYRO");
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_9,DGW_TEXT,"AGRECALCSEA3","LONGGYRO");
+      GetInfoSYS_DGW(Diag,_AGRECALCSEA3_10,DGW_TEXT,"AGRECALCSEA3","OUTCH");
 
       // --- Destroy the Dialogue ---
 
@@ -151,14 +166,26 @@ int i,n;
 
     GetString_SYS("AGRECALCSEA3","SPRTENS",sSTCh);
     GetString_SYS("AGRECALCSEA3","BEAM",sBMCh);   
-	GetString_SYS("AGRECALCSEA3","TIME",sTimeCh);  	
+    GetString_SYS("AGRECALCSEA3","TIME",sTimeCh);  	
     GetString_SYS("AGRECALCSEA3","CRSCPLVCC",sCCVCCh);
     GetString_SYS("AGRECALCSEA3","CRSCPLVE",sCCVEh);
     GetString_SYS("AGRECALCSEA3","CRSCPLAL",sCCALh);
     GetString_SYS("AGRECALCSEA3","CRSCPLAX",sCCAXh);
     GetString_SYS("AGRECALCSEA3","CRSCPLVX2",sCCAX2h);  
     GetString_SYS("AGRECALCSEA3","OUTCH",sOutCh);            
-            
+    GetString_SYS("AGRECALCSEA3","CRSGYRO",sCrossGyro);            
+    GetString_SYS("AGRECALCSEA3","LONGGYRO",sLongGyro);
+
+    // --- Check for valid CrossGyro and LongGyro channels
+    if (iStrlen_STR(sCrossGyro) && iExistChan_DB(Data,sCrossGyro))
+        validCrossGyro = 1;
+    else 
+        validCrossGyro = 0;
+
+    if (iStrlen_STR(sLongGyro) && iExistChan_DB(Data,sLongGyro))
+       validLongGyro = 1;
+    else 
+       validLongGyro = 0;		
 
     // --- Get handles to the input data channels ---
 
@@ -180,8 +207,8 @@ int i,n;
     STCh = FindChan_DB(Data,sSTCh);
     BMCh = FindChan_DB(Data,sBMCh);
 	
-	if (iExistString_SYS("AGRECALCSEA3",sTimeCh) == 1)
-	{
+	if(iStrlen_STR(sTimeCh)>0) 
+    {
 	    if (iExistChan_DB(Data,sTimeCh) == 0)
 		{
 			Abort_SYS(_("The \"Time\" channel is missing from the gravity database."));
@@ -191,13 +218,26 @@ int i,n;
 			TimeCh = FindChan_DB(Data,sTimeCh);	
 			LockSymb_DB(Data,TimeCh,DB_LOCK_READONLY,DB_WAIT_NONE);		
 		}		
-	}	
+	}
 	
     CCVCCh = FindChan_DB(Data,sCCVCCh);
     CCVEh = FindChan_DB(Data,sCCVEh);
     CCALh = FindChan_DB(Data,sCCALh);
     CCAXh = FindChan_DB(Data,sCCAXh);
-    CCAX2h = FindChan_DB(Data,sCCAX2h);  
+    CCAX2h = FindChan_DB(Data,sCCAX2h);
+
+    if (validCrossGyro)
+    {
+        CrossGyroCh	= FindChan_DB(Data,sCrossGyro);
+        LockSymb_DB(Data,CrossGyroCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    }
+
+    if (validLongGyro)
+    {
+        LongGyroCh	= FindChan_DB(Data,sLongGyro);
+        LockSymb_DB(Data,LongGyroCh,DB_LOCK_READONLY,DB_WAIT_NONE);
+    }
+
     LockSymb_DB(Data,STCh,DB_LOCK_READONLY,DB_WAIT_NONE);
     LockSymb_DB(Data,BMCh,DB_LOCK_READONLY,DB_WAIT_NONE);
     LockSymb_DB(Data,CCVCCh,DB_LOCK_READONLY,DB_WAIT_NONE);
@@ -238,21 +278,39 @@ int i,n;
       SetChanProtect_DB(Data,ST2Ch,DB_CHAN_UNPROTECTED);        
    }
  
-	  // --- Create expression ---
+	// --- Create expression ---
   
-    // --- The original coefficents VECoefficient,ALCoefficient,AXCoefficient,AX2Coefficient,VCCCoefficient,STCoefficient are from the .ini file supplied by MicroG-Lacoste System
-    // --- ("@VECoef=-5.682110000000000; @ALCoef=-2.556790000000000; @AXCoef=0.865320000000000; @AX2Coef=5.522490000000000; @VCCCoef=1.678030000000000; @STCoef=1.000000;")
+    // --- The original coefficients VECoefficient,ALCoefficient,AXCoefficient,AX2Coefficient,VCCCoefficient,STCoefficient are from the .ini file supplied by MicroG-Lacoste System
+    // ---("@VECoef=2.116009; @ALCoef=-2.556790000000000; @AXCoef=0.865320000000000; @AX2Coef=5.522490000000000; @VCCCoef=1.678030000000000; @STCoef=1.000000;")
+    // --- Updated coefficients VECoefficient,ALCoefficient,AXCoefficient,AX2Coefficient,VCCCoefficient,STCoefficient are from the .ini file supplied by MicroG-Lacoste System
+    // ---("@VECoef=-5.682110000000000; @ALCoef=-2.556790000000000; @AXCoef=0.865320000000000; @AX2Coef=5.522490000000000; @VCCCoef=1.678030000000000; @STCoef=1.000000;")
  
-   Strcpy_STR(sFormula,_n("@VECoef=2.116009; @ALCoef=-0.759598; @AXCoef=-0.703733; @AX2Coef=0.010473; @VCCCoef=0.518657; @STCoef=1.000000;"));  
- 
+   Strcpy_STR(sFormula,_n("@@VECoef=-5.682110000000000; @ALCoef=-2.556790000000000; @AXCoef=0.865320000000000; @AX2Coef=5.522490000000000; @VCCCoef=1.678030000000000; @STCoef=1.000000;"));  
+  
    Strcat_STR(sFormula,_n("@rP0=78933.350000000006000; @rP1=994.630999999999970; @rP2=-59.361199999999997; @rQ1=1.851700000000000; @rQ2=-0.066900000000000;"));  
   
-   Strcat_STR(sFormula,_n("@SumCh=@VCCCoef*($sCCVCCh)+@VECoef*($sCCVEh)+@ALCoef*($sCCALh)+@AXCoef*($sCCAXh)+@AX2Coef*($sCCAX2h);"));
- 
-   Strcat_STR(sFormula,_n("$sOutCh=@STCoef*($sSTCh+$sBDCh*(@rP0+@rP1*$sBMCh+@rP2*$sBMCh*$sBMCh)+@rQ1*$sBMCh+@rQ2*($sBMCh*$sBMCh))+(@SumCh);"));
-
+   Strcat_STR(sFormula,_n("@SumCh=@VCCCoef*($sCCVCCh)+@VECoef*($sCCVEh)+@ALCoef*($sCCALh)+@AXCoef*($sCCAXh)+@AX2Coef*($sCCAX2h);"));       //CCCorr
+    
+   Strcat_STR(sFormula,_n("@BVCor=$sBDCh*(@rP0+@rP1*$sBMCh+@rP2*$sBMCh*$sBMCh)+@rQ1*$sBMCh+@rQ2*($sBMCh*$sBMCh);"));                       //BVCorr
+   
+   if (validCrossGyro && validLongGyro)
+   {
+      Strcat_STR(sFormula,_n("$sOutCh=@STCoef*($sST2Ch+@BVCor+@SumCh)+$sCrossGyro+$sLongGyro;"));
+   }
+   else if (validLongGyro)
+   {
+      Strcat_STR(sFormula,_n("$sOutCh=@STCoef*($sST2Ch+@BVCor+@SumCh)+$sLongGyro;"));
+   }
+   else if (validCrossGyro)
+   {
+      Strcat_STR(sFormula,_n("$sOutCh=@STCoef*($sST2Ch+@BVCor+@SumCh)+$sCrossGyro;"));
+   }
+   else
+   {
+      Strcat_STR(sFormula,_n("$sOutCh=@STCoef*($sST2Ch+@BVCor+@SumCh);"));
+   }
+   
    Exp = Create_EXP(Data,sFormula,512);
-
 
    hVV = Create_VV(REAL,0);
    hVVTime = Create_VV(REAL,0);
@@ -272,42 +330,45 @@ int i,n;
       
       if(iGetChannelLength_DB(Data, Line, STCh) > 0) {
 
-         GetChanVV_DB(Data,Line,BMCh,hVV);	
-         Copy_VV(hVVBDerivative,hVV);  
-		 ReFidVV_VV(hVVBDerivative, hVV);  		 
-         Diff_VV(hVVBDerivative,1);   	 
+         GetChanVV_DB(Data,Line,BMCh,hVV);	       //Beam Velocity
+         Copy_VV(hVVBDerivative,hVV);  	 		 
+		 ReFidVV_VV(hVVBDerivative, hVV);
 		 
-		 if (iExistString_SYS("AGRECALCSEA3",sTimeCh) == 1)
-		 {
-		     GetChanVV_DB(Data,Line,TimeCh,hVVTime);
-			 Trans_VV(hVVTime,0.0,3600.0);		 
+         Diff_VV(hVVBDerivative,1);  
+		
+	     if(iStrlen_STR(sTimeCh)>0) 
+         {
+		     GetChanVV_DB(Data,Line,TimeCh,hVVTime);					 	 
+			 Trans_VV(hVVTime,0.0,3600.0);		      //Convert time(hr) to time(s)			 			 	 
+			 
 			 Diff_VV(hVVTime,1);
+			 
+			 DummyRange_VVU(hVV,0.0,1.0,FALSE,FALSE);				
+			 Divide_VV(hVVBDerivative,hVVTime,hVVBDerivative );    //use time channel if provided to calculate beam derivative
+													
+		     for (i = 0, n = iLength_VV(hVV); i < n; i++)  
+             {		
+		         SetReal_VV(hVV,i+1,rGetReal_VV(hVVBDerivative,i));				
+             }		 			
 
-			DummyRange_VVU(hVV,0.0,1.0,FALSE,FALSE);			 				
-			Divide_VV(hVVBDerivative,hVVTime,hVVBDerivative );    //use time channel if provided to calculate beam derivative
-					
-		    for (i = 0, n = iLength_VV(hVV); i < n; i++)  
-            {		
-				SetReal_VV(hVV,i+1,rGetReal_VV(hVVBDerivative,i));
-            }	
-
-			Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);
-		    PutChanVV_DB(Data,Line,BDCh,hVV);                  //beam derivative		   
+			 Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);
+		     PutChanVV_DB(Data,Line,BDCh,hVV);                  //beam derivative		   
 		 }
 		 else
-		 {	 		 	 
-			DummyRange_VVU(hVV,0.0,1.0,FALSE,FALSE);
+		 {	
+			//default value is 1.0 sec.
+           DummyRange_VVU(hVV,0.0,1.0,FALSE,FALSE);				
+		    
+			for (i = 0, n = iLength_VV(hVV); i < n; i++)  
+            {		
+		         SetReal_VV(hVV,i+1,rGetReal_VV(hVVBDerivative,i));					 
+            }	
 			
-		    for (i = 0, n = iLength_VV(hVV); i < n; i++)  
-            {
-				SetReal_VV(hVV,i+1,rGetReal_VV(hVVBDerivative,i));
-            }				 
-				 				
 			Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);	 
-		    PutChanVV_DB(Data,Line,BDCh,hVV);                  //beam derivative
-		 }
+			PutChanVV_DB(Data,Line,BDCh,hVV);                  //beam derivative			
+         }		 
 
-         GetChanVV_DB(Data,Line,STCh,hVV);
+         GetChanVV_DB(Data,Line,STCh,hVV);                     //Spring Tension
          DummyRepeat_VVU(hVV,VVU_DUMMYREPEAT_FIRST);
          Interp_VVU(hVV,VVU_INTERP_LINEAR,VVU_INTERP_EDGE_LINEAR);
          PutChanVV_DB(Data,Line,ST2Ch,hVV);
@@ -348,7 +409,17 @@ int i,n;
    // --- Unlock channels ---
    if (iExistString_SYS("AGRECALCSEA3",sTimeCh) == 1)
    {
-	 UnLockSymb_DB(Data,TimeCh);
+     UnLockSymb_DB(Data,TimeCh);
+   }
+   
+   if (validCrossGyro)
+   {
+     UnLockSymb_DB(Data,CrossGyroCh);
+   }
+
+   if (validLongGyro)
+   {
+     UnLockSymb_DB(Data,LongGyroCh);
    }
 
    UnLockSymb_DB(Data,ST2Ch);

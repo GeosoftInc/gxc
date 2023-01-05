@@ -40,7 +40,7 @@ DB          Data;             // Database handle
 DGW         Diag;             // Dialogue handle
 IP          Ip;               // IP handle
 DB_SELECT   Select;           // current selection mode
-LST         List;
+LST         List, LineLST;
 
 int         i;                // Utility 
 
@@ -49,7 +49,7 @@ string(STR_DEFAULT_LONG) sTitle;
 string(STR_DEFAULT_SHORT) sLines;
 string(STR_DB_SYMBOL) sChan;
 string(STR_DEFAULT) sDir;
-int iDone;
+int iDone, iSelectedLines;
 
 //===========================================================================
 //                                   CODE
@@ -65,6 +65,10 @@ int iDone;
    GetCurLine_EDB(EData,sCurLine);
 
    Data = Lock_EDB(EData);
+
+   LineLST = CreateSymbLST_DB();
+   SelectedLineLST_DB(Data, LineLST);
+   iSelectedLines = iSize_LST(LineLST);
 
 
    // --- Are we running interactively ? ---
@@ -94,7 +98,6 @@ int iDone;
       i = iRunDialogue_DGW(Diag);
       if (i != 0) Cancel_SYS();    // He hit cancel
 
-
       // --- Get the Strings ---
 
       GetInfoSYS_DGW(Diag,_IPEXPIPDATA_0,DGW_TEXT,"IP","IPCHAN");
@@ -107,6 +110,14 @@ int iDone;
       Destroy_DGW(Diag);
 
       // --- Verify input ---
+
+      GetString_SYS("IP","LINES",sLines);
+      ToUpper_STR(sLines);
+      if(iCharComp_STR(sLines,"S") && iSelectedLines == 0)
+      {
+         DisplayMessage_SYS(_("Line Selection"), _("No lines are currently selected.\nAt least one line must be selected."));
+         continue;
+      }
  
       iDone = 1;
    } 
@@ -115,6 +126,9 @@ int iDone;
 
    GetString_SYS("IP","LINES",sLines);
    ToUpper_STR(sLines);
+
+   if(iCharComp_STR(sLines,"S") && iSelectedLines == 0)
+      Abort_SYS(_("No lines are currently selected. At least one line must be selected."));
 
    GetString_SYS("IP","IPDATATITLE",sTitle);
    GetString_SYS("IP","IPCHAN",sChan);

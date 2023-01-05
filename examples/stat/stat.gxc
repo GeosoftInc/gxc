@@ -21,6 +21,7 @@ STAT.CHAN - input database channel
 	TRANSLATIONFRIENDLYPATH = "GX/Montaj Popups/Selected Data"
 
 	// Revision History:
+   // v2022.2.0: Added extra stats
 	// v7.4:   Added support for exponent display format.
 	// v7.2:   Added length-weighted mean values for From-To drillhole datasets.
 	//         Display stats to number of decimals shown in the GDB.
@@ -46,17 +47,87 @@ STAT.CHAN - input database channel
    else if (iFormat == DB_CHAN_FORMAT_EXP)                   \
       FormatReal_STR(A, Str, FORMAT_EXP, 20, iChanDecimals); \
    else                                                      \
-      FormatR2_STR(A, Str, 20, iChanDecimals);
+      FormatR2_STR(A, Str, 20, iChanDecimals)
 
-   //===========================================================================
-   //                             GLOBAL VARIABLES
-   //===========================================================================
+// Output an integer statistic (significant digits only)
+#define SETDIALOG_INT(STAT) \
+   rVal = rGetInfo_ST(hST, STAT);   \
+   FormatR_STR(rVal, Str, 20, 19);  \
+   SetInfo_DGW(Diag, iDlg++, DGW_TEXT, Str)
 
-   real rItems,
-   rDummies, rMin, rMax, rMean, rDev, rSum;
-real rWeightedMean, rLength;
-string(STR_DEFAULT) sItems, sDummies, sMin, sMax, sMean, sDev, sSum;
-string(STR_DEFAULT) sTemp;
+// Output a real-valued static in the channel numeric format and decimals (Normal, Exponential, Geographic)
+#define SETDIALOG_REAL(STAT) \
+   rVal = rGetInfo_ST(hST, STAT);   \
+   FORMATREAL(rVal); \
+   SetInfo_DGW(Diag, iDlg++, DGW_TEXT, Str)
+
+// Output a real-valued static in Normal format with specified number of decimals
+#define SETDIALOG_REAL2(STAT, DEC) \
+   rVal = rGetInfo_ST(hST, STAT);   \
+   FormatR2_STR(rVal, Str, 20, DEC);  \
+   SetInfo_DGW(Diag, iDlg++, DGW_TEXT, Str)
+
+
+#define WRITELINE(TEXT, VAL) \
+   Puts_WA(hWA, TEXT);   \
+   iLen = iWidth - iStrlen_STR(TEXT); \
+   if (iLen < 0) iLen = 0; \
+   for(i=0; i<iLen; i++) Puts_WA(hWA, " ");  \
+   Puts_WA(hWA, " ");   \
+   Puts_WA(hWA, VAL);   \
+   NewLine_WA(hWA)     
+
+// Output an integer statistic (significant digits only) to a file
+#define WRITELINE_INT(STAT, TEXT) \
+   rVal = rGetInfo_ST(hST, STAT);   \
+   FormatR_STR(rVal, sVal, 20, 19);  \
+   WRITELINE(TEXT, sVal)
+
+// Output a real-valued static in the channel numeric format and decimals (Normal, Exponential, Geographic)
+// to a file
+#define WRITELINE_REAL(STAT, TEXT) \
+   rVal = rGetInfo_ST(hST, STAT);   \
+   FORMATREAL(rVal); \
+   WRITELINE(TEXT, Str)
+
+// Output a real-valued static in Normal format with specified number of decimals to a file
+#define WRITELINE_REAL2(STAT, TEXT, DEC) \
+   rVal = rGetInfo_ST(hST, STAT);   \
+   FormatR2_STR(rVal, sVal, 20, DEC); \
+   WRITELINE(TEXT, sVal)
+
+#define SET_ARRAY_CHANNEL_STRING(CHAN, TEXT) \
+      if (iVAColumn > 1)   \
+      {  \
+         Strcpy_STR(Str, CHAN);  \
+         Strcat_STR(Str, TEXT);  \
+         FormatI_STR(iStart, sVal, 6);  \
+         Strcat_STR(Str, sVal);   \
+         Strcat_STR(Str, _(" to "));   \
+         FormatI_STR(iEnd, sVal, 6);   \
+         Strcat_STR(Str, sVal);  \
+         Strcat_STR(Str, _n("]"));  \
+      }  \
+      else  \
+      {  \
+         Strcpy_STR(Str, CHAN);  \
+      }  
+
+#define WRITE_CHANNEL(CHAN) \
+      SET_ARRAY_CHANNEL_STRING(CHAN, _(" [Columns: ")) \
+      WRITELINE(_("Channel Name:"), Str);
+
+#define SETDIALOG_CHANNEL(DIAG, CHAN) \
+      SET_ARRAY_CHANNEL_STRING(CHAN, _n(" [")) \
+      SetInfo_DGW(DIAG, iDlg++, DGW_TEXT, Str)
+
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
+
+real rVal, rWeightedMean, rLength;
+string(STR_DEFAULT) sTemp, sVal;
+int iLen;
 
 EDB EData;
 DB Data;
@@ -66,8 +137,9 @@ string(STR_DEFAULT_SHORT) sFid;
 DB_SYMB Chan;
 DB_SYMB Line;
 
-int i, i2, iNLines, iFormat, iDrillHole, iInteractive, iChanDecimals;
+int i, i2, iNLines, iFormat, iDrillHole, iInteractive, iChanDecimals, iDec;
 int iVAColumn, iStart, iEnd, iStartOld, iEndOld, iSelection, iOK;
+int iDlg, iWidth;
 
 ST hST;
 DGW Diag, Diag2;
@@ -84,6 +156,13 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
    // --- Report statistics ---
 
    iDrillHole = 0;
+
+   iWidth = iStrlen_STR(_("Number of Valid Items:"));
+
+   // --- Create ST object to hold channel stats ---
+
+   hST = CreateExact_ST();
+
    if (iInteractive_SYS())
    {
       // ---------------------------------------- INTERACTIVE MODE ---------------------------------------
@@ -111,6 +190,9 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
       LockSymb_DB(Data, Chan, DB_LOCK_READONLY, DB_WAIT_INFINITY);
       iFormat = iGetChanFormat_DB(Data, Chan);
       iChanDecimals = iGetChanDecimal_DB(Data, Chan);
+      iDec = iChanDecimals;
+      if (iDec < 3)
+         iDec = 3;
       iVAColumn = iGetColVA_DB(Data, Chan);
       UnLockSymb_DB(Data, Chan);
 
@@ -249,19 +331,7 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
 
       // --- Do the work ---
 
-      hST = Create_ST();
-
       Statistics_EDB(EData, hST);
-
-      rDummies = rGetInfo_ST(hST, ST_DUMMIES);
-      rItems = rGetInfo_ST(hST, ST_ITEMS) + rDummies;
-      rMin = rGetInfo_ST(hST, ST_MIN);
-      rMax = rGetInfo_ST(hST, ST_MAX);
-      rMean = rGetInfo_ST(hST, ST_MEAN);
-      rDev = rGetInfo_ST(hST, ST_STDDEV);
-      rSum = rGetInfo_ST(hST, ST_SUM);
-
-      Destroy_ST(hST);
 
       if (iVAColumn > 1)
       {
@@ -290,67 +360,80 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
 
       if (iDrillHole == 1)
       {
-         SetInfo_DGW(Diag, _STATFORMDH_0, DGW_TEXT, sChan);
+         iDlg = _STATFORMDH_0;
+         SETDIALOG_CHANNEL(Diag, sChan);
          SetInfo_DGW(Diag, _STATFORMDH_1, DGW_TEXT, sLine);
          SetInfo_DGW(Diag, _STATFORMDH_2, DGW_TEXT, sFid);
 
-         FormatR_STR(rItems, Str, 20, 19);
-         SetInfo_DGW(Diag, _STATFORMDH_3, DGW_TEXT, Str);
+         iDlg = _STATFORMDH_2 + 1;
+         SETDIALOG_INT(ST_TOTAL);
+         SETDIALOG_INT(ST_ITEMS);
+         SETDIALOG_INT(ST_DUMMIES);
 
-         FormatR_STR(rDummies, Str, 20, 19);
-         SetInfo_DGW(Diag, _STATFORMDH_4, DGW_TEXT, Str);
-
-         FormatR2_STR(rMin, Str, 20, iChanDecimals);
-         SetInfo_DGW(Diag, _STATFORMDH_5, DGW_TEXT, Str);
-
-         FormatR2_STR(rMax, Str, 20, iChanDecimals);
-         SetInfo_DGW(Diag, _STATFORMDH_6, DGW_TEXT, Str);
-
-         FormatR2_STR(rMean, Str, 20, iChanDecimals);
-         SetInfo_DGW(Diag, _STATFORMDH_7, DGW_TEXT, Str);
+         SETDIALOG_REAL(ST_MIN);
+         SETDIALOG_REAL(ST_MAX);
+         SETDIALOG_REAL(ST_MEAN);
 
          FormatR2_STR(rWeightedMean, Str, 20, iChanDecimals);
          if (iStrcmp_STR(Str, "*", STR_CASE_TOLERANT) != 0 && iStrlen_STR(sSkippedLines) > 0)
             Strcat_STR(Str, "*");
-         SetInfo_DGW(Diag, _STATFORMDH_8, DGW_TEXT, Str);
+         SetInfo_DGW(Diag, iDlg++, DGW_TEXT, Str);
 
          FormatR2_STR(rLength, Str, 20, 2);
          if (iStrcmp_STR(Str, "*", STR_CASE_TOLERANT) != 0 && iStrlen_STR(sSkippedLines) > 0)
             Strcat_STR(Str, "*");
-         SetInfo_DGW(Diag, _STATFORMDH_9, DGW_TEXT, Str);
+         SetInfo_DGW(Diag, iDlg++, DGW_TEXT, Str);
 
-         FormatR2_STR(rDev, Str, 20, iChanDecimals);
-         SetInfo_DGW(Diag, _STATFORMDH_10, DGW_TEXT, Str);
+         if (iFormat == DB_CHAN_FORMAT_GEOGR)
+         {
+            SETDIALOG_REAL(ST_STDDEV);
+         }
+         else
+         {
+            SETDIALOG_REAL2(ST_STDDEV, iDec);
+         }
 
-         FormatR2_STR(rSum, Str, 20, iChanDecimals);
-         SetInfo_DGW(Diag, _STATFORMDH_11, DGW_TEXT, Str);
+         SETDIALOG_REAL2(ST_STDERR, iDec);
+         SETDIALOG_REAL2(ST_VARIANCE, iDec);
+         SETDIALOG_REAL2(ST_SKEW, iDec);
+         SETDIALOG_REAL2(ST_KURTOSIS, iDec);
+
+         SETDIALOG_REAL(ST_SUM);
       }
       else
       {
-         SetInfo_DGW(Diag, _STATFORM_0, DGW_TEXT, sChan);
+         iDlg = _STATFORM_0;
+         SETDIALOG_CHANNEL(Diag, sChan);
          SetInfo_DGW(Diag, _STATFORM_1, DGW_TEXT, sLine);
          SetInfo_DGW(Diag, _STATFORM_2, DGW_TEXT, sFid);
 
-         FormatR_STR(rItems, Str, 20, 19);
-         SetInfo_DGW(Diag, _STATFORM_3, DGW_TEXT, Str);
+         iDlg = _STATFORM_2 + 1;
+         SETDIALOG_INT(ST_TOTAL);
+         SETDIALOG_INT(ST_ITEMS);
+         SETDIALOG_INT(ST_DUMMIES);
 
-         FormatR_STR(rDummies, Str, 20, 19);
-         SetInfo_DGW(Diag, _STATFORM_4, DGW_TEXT, Str);
+         SETDIALOG_REAL(ST_MIN);
+         SETDIALOG_REAL(ST_MAX);
+         SETDIALOG_REAL(ST_RANGE);
+         SETDIALOG_REAL(ST_MEAN);
+         SETDIALOG_REAL(ST_MEDIAN);
+         SETDIALOG_REAL(ST_SIMPLE_MODE);
 
-         FORMATREAL(rMin)
-         SetInfo_DGW(Diag, _STATFORM_5, DGW_TEXT, Str);
+         if (iFormat == DB_CHAN_FORMAT_GEOGR)
+         {
+            SETDIALOG_REAL(ST_STDDEV);
+         }
+         else
+         {
+            SETDIALOG_REAL2(ST_STDDEV, iDec);
+         }
 
-         FORMATREAL(rMax)
-         SetInfo_DGW(Diag, _STATFORM_6, DGW_TEXT, Str);
+         SETDIALOG_REAL2(ST_STDERR, iDec);
+         SETDIALOG_REAL2(ST_VARIANCE, iDec);
+         SETDIALOG_REAL2(ST_SKEW, iDec);
+         SETDIALOG_REAL2(ST_KURTOSIS, iDec);
 
-         FORMATREAL(rMean)
-         SetInfo_DGW(Diag, _STATFORM_7, DGW_TEXT, Str);
-
-         FORMATREAL(rDev)
-         SetInfo_DGW(Diag, _STATFORM_8, DGW_TEXT, Str);
-
-         FORMATREAL(rSum)
-         SetInfo_DGW(Diag, _STATFORM_9, DGW_TEXT, Str);
+         SETDIALOG_REAL(ST_SUM);
       }
 
       // --- Run the Dialogue ---
@@ -381,87 +464,49 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
                NewLine_WA(hWA);
                NewLine_WA(hWA);
 
-               Puts_WA(hWA, _n("          Database: "));
-               Puts_WA(hWA, sDB);
+               WRITELINE(_("Database:"), sDB);
+               WRITE_CHANNEL(sChan)
+               WRITELINE(_("Line:"), sLine);
+               WRITELINE(_("Fiducial range:"), sFid);
                NewLine_WA(hWA);
 
-               Puts_WA(hWA, _n("           Channel: "));
-               Puts_WA(hWA, sChan);
+               WRITELINE_INT(ST_TOTAL, _("Number of Items:"));
+               WRITELINE_INT(ST_ITEMS, _("Number of Valid Items:"));
+               WRITELINE_INT(ST_DUMMIES, _("Number of Dummies:"));
                NewLine_WA(hWA);
 
-               Puts_WA(hWA, _n("              Line: "));
-               Puts_WA(hWA, sLine);
+               WRITELINE_REAL(ST_MIN, _("Minimum value:"));
+               WRITELINE_REAL(ST_MAX, _("Maximum value:"));
+               WRITELINE_REAL(ST_RANGE, _("Range:"));
                NewLine_WA(hWA);
-
-               Puts_WA(hWA, _n("    Fiducial range: "));
-               Puts_WA(hWA, sFid);
-               NewLine_WA(hWA);
-               NewLine_WA(hWA);
-
-               FormatR_STR(rItems, Str, 20, 19);
-               Puts_WA(hWA, _n("   Number of items: "));
-               Puts_WA(hWA, Str);
-               NewLine_WA(hWA);
-
-               FormatR_STR(rDummies, Str, 20, 17);
-               Puts_WA(hWA, _n(" Number of dummies: "));
-               Puts_WA(hWA, Str);
-               NewLine_WA(hWA);
-
-               if (iFormat == DB_CHAN_FORMAT_GEOGR)
-                  FormatReal_STR(rMin, Str, FORMAT_GEOGRAPHIC, 20, 2);
-               else
-                  FormatR_STR(rMin, Str, 20, 17);
-               Puts_WA(hWA, _n("     Minimum value: "));
-               Puts_WA(hWA, Str);
-               NewLine_WA(hWA);
-
-               if (iFormat == DB_CHAN_FORMAT_GEOGR)
-                  FormatReal_STR(rMax, Str, FORMAT_GEOGRAPHIC, 20, 2);
-               else
-                  FormatR_STR(rMax, Str, 20, 17);
-               Puts_WA(hWA, _n("     Maximum value: "));
-               Puts_WA(hWA, Str);
-               NewLine_WA(hWA);
-
-
-               if (iFormat == DB_CHAN_FORMAT_GEOGR)
-                  FormatReal_STR(rMean, Str, FORMAT_GEOGRAPHIC, 20, 2);
-               else
-                  FormatR_STR(rMean, Str, 20, 17);
-               Puts_WA(hWA, _n("        Mean value: "));
-               Puts_WA(hWA, Str);
-               NewLine_WA(hWA);
-
+               
+               WRITELINE_REAL(ST_MEAN, _("Mean value:"));
 
                if (iDrillHole == 1)
                {
-                  FormatR_STR(rWeightedMean, Str, 20, 17);
-                  Puts_WA(hWA, _n("  Length Wt'd Mean: "));
-                  Puts_WA(hWA, Str);
-                  NewLine_WA(hWA);
-
-                  FormatR_STR(rLength, Str, 20, 17);
-                  Puts_WA(hWA, _n("      Total length: "));
-                  Puts_WA(hWA, Str);
-                  NewLine_WA(hWA);
+                  FormatR2_STR(rWeightedMean, Str, 20, iChanDecimals);
+                  WRITELINE(_("Length Weighted Mean:"), Str);
+                  FormatR2_STR(rLength, Str, 20, iChanDecimals);
+                  WRITELINE(_("Total length:"), Str);
                }
-
-               if (iFormat == DB_CHAN_FORMAT_GEOGR)
-                  FormatReal_STR(rDev, Str, FORMAT_GEOGRAPHIC, 20, 2);
-               else
-                  FormatR_STR(rDev, Str, 20, 17);
-               Puts_WA(hWA, _n("Standard deviation: "));
-               Puts_WA(hWA, Str);
+               WRITELINE_REAL(ST_MEDIAN, _("Median value:"));
+               WRITELINE_REAL(ST_SIMPLE_MODE, _("Mode value:"));
+               WRITELINE_REAL(ST_SUM, _("Sum of values:"));
                NewLine_WA(hWA);
 
-
                if (iFormat == DB_CHAN_FORMAT_GEOGR)
-                  FormatReal_STR(rSum, Str, FORMAT_GEOGRAPHIC, 20, 2);
+               {
+                  WRITELINE_REAL(ST_STDDEV, _("Standard Deviation:"));
+               }
                else
-                  FormatR_STR(rSum, Str, 20, 17);
-               Puts_WA(hWA, _n("    Arithmetic sum: "));
-               Puts_WA(hWA, Str);
+               {
+                  WRITELINE_REAL2(ST_STDDEV, _("Standard Deviation:"), iDec);
+               }
+
+               WRITELINE_REAL2(ST_STDERR, _("Standard Error:"), iDec);
+               WRITELINE_REAL2(ST_VARIANCE, _("Variance:"), iDec);
+               WRITELINE_REAL2(ST_SKEW, _("Skew:"), iDec);
+               WRITELINE_REAL2(ST_KURTOSIS, _("Kurtosis:"), iDec);
                NewLine_WA(hWA);
 
                Destroy_WA(hWA);
@@ -516,13 +561,19 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
       Chan = FindChan_DB(Data, sChan);
 
 
+      LockSymb_DB(Data, Chan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
+
+      iChanDecimals = iGetChanDecimal_DB(Data, Chan);
+      iDec = iChanDecimals;
+      if (iDec < 3)
+         iDec = 3;
+
       // --- Get VA channel handling
 
       iSelection = iGetInt_SYS("STAT_VA", "SELECTION");
       iVAColumn = 1;
       if (iSelection >= 1 && iSelection <= 3)
       {
-         LockSymb_DB(Data, Chan, DB_LOCK_READWRITE, DB_WAIT_INFINITY);
          iVAColumn = iGetColVA_DB(Data, Chan);
 
          if (iSelection == 1)
@@ -550,13 +601,8 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
             if (iEnd > iVAColumn - 1) iEnd = iVAColumn - 1;
          }
          SetVAWindows_DB(Data, Chan, iStart, iEnd);
-         UnLockSymb_DB(Data, Chan);
       }
-
-
-      // --- Create ST object to hold channel stats ---
-
-      hST = Create_ST();
+      UnLockSymb_DB(Data, Chan);
 
 
       // --- Turn on the progress bar ---
@@ -595,87 +641,49 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
 
       // --- Get data from ST and display it ---
 
-      Puts_WA(hWA, _n("CHANNEL STATISTICS REPORT"));
+      Puts_WA(hWA, _("CHANNEL STATISTICS REPORT"));
       NewLine_WA(hWA);
       NewLine_WA(hWA);
 
-      Strcpy_STR(Str, _n("          Database: "));
-      Strcat_STR(Str, sDB);
-      Puts_WA(hWA, Str);
+      WRITELINE(_("Database:"), sDB);
+      WRITE_CHANNEL(sChan)
       NewLine_WA(hWA);
 
-      Strcpy_STR(Str, _n("      Channel Name: "));
-      Strcat_STR(Str, sChan);
-      Puts_WA(hWA, Str);
+      WRITELINE_INT(ST_TOTAL, _("Number of Items:"));
+      WRITELINE_INT(ST_ITEMS, _("Number of Valid Items:"));
+      WRITELINE_INT(ST_DUMMIES, _("Number of Dummies:"));
+      NewLine_WA(hWA);
 
-      if (iVAColumn > 1)
+      WRITELINE_REAL(ST_MIN, _("Minimum value:"));
+      WRITELINE_REAL(ST_MAX, _("Maximum value:"));
+      WRITELINE_REAL(ST_RANGE, _("Range: "));
+      NewLine_WA(hWA);
+
+      WRITELINE_REAL(ST_MEAN, _("Mean value:"));
+      WRITELINE_REAL(ST_MEDIAN, _("Median value:"));
+      WRITELINE_REAL(ST_SIMPLE_MODE, _("Mode value:"));
+      WRITELINE_REAL(ST_SUM, _("Sum of values:"));
+      NewLine_WA(hWA);
+
+      if (iFormat == DB_CHAN_FORMAT_GEOGR)
       {
-         Strcpy_STR(Str, _n(" [Columns: "));
-         Puts_WA(hWA, Str);
-         FormatI_STR(iStart, sItems, 6);
-         Puts_WA(hWA, sItems);
-         Puts_WA(hWA, _n(" to "));
-         FormatI_STR(iEnd, sItems, 6);
-         Puts_WA(hWA, sItems);
-         Puts_WA(hWA, "]");
+         WRITELINE_REAL(ST_STDDEV, _("Standard Deviation:"));
+      }
+      else
+      {
+         WRITELINE_REAL2(ST_STDDEV, _("Standard Deviation:"), iDec);
       }
 
-      NewLine_WA(hWA);
-      NewLine_WA(hWA);
-
-      rItems = rGetInfo_ST(hST, ST_ITEMS);
-      FormatR_STR(rItems, sItems, 20, 19);
-      Strcpy_STR(Str, _n("   Number of Items: "));
-      Strcat_STR(Str, sItems);
-      Puts_WA(hWA, Str);
+      WRITELINE_REAL2(ST_STDERR, _("Standard Error:"), iDec);
+      WRITELINE_REAL2(ST_VARIANCE, _("Variance:"), iDec);
+      WRITELINE_REAL2(ST_SKEW, _("Skew:"), iDec);
+      WRITELINE_REAL2(ST_KURTOSIS, _("Kurtosis:"), iDec);
       NewLine_WA(hWA);
 
-      rDummies = rGetInfo_ST(hST, ST_DUMMIES);
-      FormatR_STR(rDummies, sDummies, 20, 19);
-      Strcpy_STR(Str, _n(" Number of Dummies: "));
-      Strcat_STR(Str, sDummies);
-      Puts_WA(hWA, Str);
-      NewLine_WA(hWA);
-
-      rMin = rGetInfo_ST(hST, ST_MIN);
-      FormatR_STR(rMin, sMin, 16, 16);
-      Strcpy_STR(Str, _n("     Minimum value: "));
-      Strcat_STR(Str, sMin);
-      Puts_WA(hWA, Str);
-      NewLine_WA(hWA);
-
-      rMax = rGetInfo_ST(hST, ST_MAX);
-      FormatR_STR(rMax, sMax, 16, 16);
-      Strcpy_STR(Str, _n("     Maximum value: "));
-      Strcat_STR(Str, sMax);
-      Puts_WA(hWA, Str);
-      NewLine_WA(hWA);
-
-      rMean = rGetInfo_ST(hST, ST_MEAN);
-      FormatR_STR(rMean, sMean, 16, 16);
-      Strcpy_STR(Str, _n("        Mean value: "));
-      Strcat_STR(Str, sMean);
-      Puts_WA(hWA, Str);
-      NewLine_WA(hWA);
-
-      rDev = rGetInfo_ST(hST, ST_STDDEV);
-      FormatR_STR(rDev, sDev, 16, 16);
-      Strcpy_STR(Str, _n("Standard Deviation: "));
-      Strcat_STR(Str, sDev);
-      Puts_WA(hWA, Str);
-      NewLine_WA(hWA);
-
-      rSum = rGetInfo_ST(hST, ST_SUM);
-      FormatR_STR(rSum, sSum, 16, 16);
-      Strcpy_STR(Str, _n("     Sum of values: "));
-      Strcat_STR(Str, sSum);
-      Puts_WA(hWA, Str);
-      NewLine_WA(hWA);
 
 
       // --- Done ---
 
-      Destroy_ST(hST);
       Destroy_WA(hWA);
       Progress_SYS(0);
 

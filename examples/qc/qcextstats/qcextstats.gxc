@@ -1,0 +1,1467 @@
+//===========================================================================
+// clang-format off
+NAME          = "QCEXTSTATS GX"
+#include <version.gxh>
+DESCRIPTION   = "
+
+PARAMETERS:
+
+  UCENOISEST.USECHAN    Selection method for channels
+            .FILE       Name of the stats file
+            .HIST       Option to display channel histogram(s)
+"
+// Revision History:
+// v6.3:   Modified to use improved multiple channels selection tool.
+// v5.1.8: Re-write report files to put the line of total number and length
+//         in the begining.
+// v5.1.8: Add histogram option
+// v5.1.3: Created
+//===========================================================================
+//                                 RESOURCES
+//===========================================================================
+
+RESOURCE = "qcextstats.gr"
+
+//===========================================================================
+//                                  INCLUDE
+//===========================================================================
+
+#include <all.gxh>
+#include "qcextstats.grh"
+// clang-format on                 // system
+
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
+
+EDB         EData;
+DB          Data;
+DB_SYMB     Line;              // line handle
+DGW         Diag;              // dialogue handle
+LST         hLineLST;
+DB_SYMB     InCh,XCh,YCh;
+VV          InVV,InDVV,InD4VV;
+VV          CumVV,CumDVV,CumD4VV;
+VV          XVV,YVV,CumXVV,CumYVV;
+WA          hWA;
+RA          hRA;
+ST          hST, hSTD, hSTD4;
+LST         DispChanLST, AllChanLST, SelChanLST;
+
+string(STR_DEFAULT_LONG) sLine2;
+string(STR_DEFAULT) sLabel;
+string(STR_DEFAULT_LONG) sTemp;
+string(4096) sInChStr,sChannels;
+string(STR_DB_SYMBOL) sInCh,sXCh,sYCh;
+string(4096) sWALine;
+string(STR_FILE)   sFile,sData;
+//string(STR_FILE)   sDbFile;
+
+string(STR_DEFAULT_LONG)  sDefEdit,sDefEditType;
+string(STR_DEFAULT_SHORT) sWait;
+string(4096)              sMsg;
+string(STR_FILE)          sTempFile, sGDB;       
+string(STR_FILE)          sReport;
+string(STR_DEFAULT_LONG)  sDate, sTime, sMessage, sIndent;
+string(STR_DEFAULT)       sChanStats;
+string(STR_VERY_LONG)     sStats, sExtraSpaces;
+
+real        rItems, rDummies, rMin, rMax, rMean, rDev, rDevD, rDevD4, rMode, rMedian;
+real        rTotlDist,rDist;
+real        rMAXConst;
+real        rStartTime, rElapsedTime;
+
+int         iSNum,iENum;
+int         iTok;
+int         iStrlen,iChType,iChDecimal;
+int         iXChType,iXChDecimal;
+int         iYChType,iYChDecimal;
+int         i,j,k,i1,i2;
+int         iLines;           // Number of Lines Processed
+int         iTotLines;        // Total Number of Lines to Process
+int         iHist;            // Histogram option
+int         iUseChannel,iNChan;
+int         iQCReport, iWithinAnotherGX, iNew;
+int         iHistogramStarted;	// flag to control that the histogrm will be fired once
+int         iExtraSpaces;
+int         iRunMode;
+#define MODE_UXO 0
+#define MODE_NO_UXO 1
+
+//===========================================================================
+//                                    MACRO
+//===========================================================================
+
+#define QC_FILE       ".\\QCReport.log"
+#define QC_TITLE      "Survey QA QC Log"
+#define PROCESS_FILE  ".\\Process.log"
+#define PROCESS_TITLE "Process Log"
+
+
+#define QCReportHeader_QC(hWA, sDate, rStartTime, rElapsedTime, sTitle) \
+   NewLine_WA(hWA); \
+   NewLine_WA(hWA); \
+   Puts_WA(hWA, "******************************************************************"); \
+   NewLine_WA(hWA); \
+   NewLine_WA(hWA); \
+   \
+   Strcpy_STR(sMessage, "Date     : "); \
+   FormatDate_STR(rDate_SYS(), sDate, 20, DATE_FORMAT_YYYYMMDD); \
+   Strcat_STR(sMessage, sDate); \
+   Puts_WA(hWA, sMessage); \
+   NewLine_WA(hWA); \
+   \
+   Strcpy_STR(sMessage, "Time     : "); \
+   FormatTime_STR(rSecondstoTime_SYS(rStartTime), sTime, 20, 0, TIME_FORMAT_COLON); \
+   Strcat_STR(sMessage, sTime); \
+   Puts_WA(hWA, sMessage); \
+   NewLine_WA(hWA); \
+   \
+   Strcpy_STR(sMessage, "Duration : "); \
+   FormatTime_STR(rSecondstoTime_SYS(rElapsedTime), sTime, 20, 0, TIME_FORMAT_COLON); \
+   Strcat_STR(sMessage, sTime); \
+   Puts_WA(hWA, sMessage); \
+   NewLine_WA(hWA); \
+   NewLine_WA(hWA); \
+   NewLine_WA(hWA); \
+   \
+   Strcpy_STR(sMessage, sTitle); \
+   Puts_WA(hWA, sMessage); \
+   NewLine_WA(hWA); \
+   for(i = 0; i < iStrlen_STR(sTitle); i++) \
+      Puts_WA(hWA, "-"); \
+   NewLine_WA(hWA); \
+   NewLine_WA(hWA) \
+
+
+#define QCReportGXInfo_QC(hWA, sMenu, sGXName, iIndent) \
+   Strcpy_STR(sIndent, ""); \
+   for(i = 0; i < iIndent * 3; i++) \
+      Strcat_STR(sIndent, " "); \
+   \
+   Strcpy_STR(sMessage, sIndent); \
+   Strcat_STR(sMessage, sMenu); \
+   Puts_WA(hWA,sMessage); \
+   NewLine_WA(hWA); \
+   \
+   Strcpy_STR(sMessage, sIndent); \
+   Strcat_STR(sMessage,"Process: "); \
+   Strcat_STR(sMessage, sGXName); \
+   Puts_WA(hWA,sMessage); \
+   NewLine_WA(hWA); \
+   NewLine_WA(hWA) \
+
+#define QCReportGeneralContent1_QC(hWA, sLabel, sValue, iIndent) \
+   Strcpy_STR(sIndent, ""); \
+   for(i = 0; i < iIndent * 3; i++) \
+      Strcat_STR(sIndent, " "); \
+   \
+   Strcpy_STR(sMessage, sIndent); \
+   Strcat_STR(sMessage, sLabel); \
+   Strcat_STR(sMessage, " : "); \
+   Strcat_STR(sMessage, sValue); \
+   Puts_WA(hWA,sMessage); \
+   NewLine_WA(hWA) \
+
+
+#define ADDTOREPORT(A, B, MODE) \
+	iNew = iFileExist_SYS(A);\
+	if (iNew == 0)\
+	{\
+		hWA = Create_WA(A, WA_NEW);\
+		Strcpy_STR(sMessage, B);\
+		Puts_WA(hWA, sMessage);\
+		NewLine_WA(hWA);\
+	}\
+	else\
+		hWA = Create_WA(A, WA_APPEND);\
+\
+	QCReportHeader_QC(hWA, sDate, rStartTime, rElapsedTime, "Data Preparation");\
+	QCReportGXInfo_QC(hWA, "QC QA Tools/Statistics", "ucenoisest.gx", 1);\
+\
+	QCReportGeneralContent1_QC(hWA, "Input database", sGDB, 2);\
+	if (MODE == MODE_UXO)\
+		GetString_SYS("UCENOISEST", "USECHAN",sTemp);\
+	else\
+		GetString_SYS("QCEXTSTATS", "USECHAN",sTemp);\
+	QCReportGeneralContent1_QC(hWA, "Channels to Use", sTemp, 2);\
+	if (MODE == MODE_UXO)\
+		GetString_SYS("UCENOISEST", "FILE",sTemp);\
+	else\
+		GetString_SYS("QCEXTSTATS", "FILE",sTemp);\
+	QCReportGeneralContent1_QC(hWA, "Output filename for statistics summary report", sTemp, 2);\
+	if (MODE == MODE_UXO)\
+		GetString_SYS("UCENOISEST", "HIST",sTemp);\
+	else\
+		GetString_SYS("QCEXTSTATS", "HIST",sTemp);\
+	QCReportGeneralContent1_QC(hWA, "Display channel(s) histogram?", sTemp, 2);\
+\
+	NewLine_WA(hWA);\
+	NewLine_WA(hWA);\
+\
+	Destroy_WA(hWA);
+
+//===========================================================================
+//                                    CODE
+//===========================================================================
+
+{
+	// --- Start counting the time to calculate the duration
+
+	rStartTime = rElapsedTime = 0.0;
+	iGetTimer_SYS(1, rStartTime, rElapsedTime);
+
+
+	// --- Set constant ---
+
+	rMAXConst = (real)iMAX;
+
+
+	// ---- make list of channels ---
+
+	DispChanLST = CreateSymbLST_DB();
+	AllChanLST  = CreateSymbLST_DB();
+	SelChanLST  = CreateSymbLST_DB();
+
+	// --- Get the database ---
+
+	EData = Current_EDB();
+	GetName_EDB(EData, sGDB);
+	if (iScript_SYS() == 0)
+		iNChan = iDispChanLST_EDB(EData, DispChanLST);
+
+	Data = Lock_EDB(EData);
+	SymbLST_DB(Data,AllChanLST,DB_SYMB_CHAN);
+	iNChan = iSize_LST(AllChanLST);
+	if(iNChan==0)
+		Abort_SYS("No channels in database");
+
+
+	GetName_DB(Data,DB_NAME_FILE,sData);
+	if (iExistInt_SYS("QCEXTSTATS", "RUNMODE"))
+		iRunMode = iGetInt_SYS("QCEXTSTATS", "RUNMODE");
+	else
+		iRunMode = 1;
+	
+	SetInt_SYS("QCEXTSTATS", "RUNMODE", 1);  // must set every time, default to normal behaviour
+
+	if (iRunMode == MODE_UXO)
+		GetString_SYS("UCENOISEST","FILE",sFile);
+	else // MODE_NO_UXO
+		GetString_SYS("QCEXTSTATS","FILE",sFile);
+	if (iStrlen_STR(sFile) == 0)
+	{
+		Strcpy_STR(sFile,".\\");
+		FileNamePart_STR(sData,sData,STR_FILE_PART_NAME); 
+		Strcat_STR(sFile,sData);
+		Strcat_STR(sFile,"_stats.txt");
+		if (iRunMode == MODE_UXO)
+			SetString_SYS("UCENOISEST","FILE",sFile);
+		else // MODE_NO_UXO
+			SetString_SYS("QCEXTSTATS","FILE",sFile);
+	}
+
+
+	// --- Get current X, Y channels ---
+
+	GetXYZChan_DB(Data, DB_CHAN_X, sXCh);
+	GetXYZChan_DB(Data, DB_CHAN_Y, sYCh);
+
+
+	// --- Are we running interactively ? ---
+
+	if (iInteractive_SYS())
+	{
+
+		// --- Create the 1st dialogue ---
+		
+		if (iRunMode == MODE_UXO)
+		{
+			Diag = Create_DGW("UCENOISEST");
+			
+			// --- Set any defaults ---
+
+			SetInfoSYS_DGW(Diag,_QCEXTSTATS_0,DGW_LISTALIAS,"UCENOISEST","USECHAN");
+			SetInfoSYS_DGW(Diag,_QCEXTSTATS_1,DGW_FILEPATH,"UCENOISEST","FILE");
+			SetInfoSYS_DGW(Diag,_QCEXTSTATS_2,DGW_LISTALIAS,"UCENOISEST","HIST");
+		}
+		else // MODE_NO_UXO
+		{
+			Diag = Create_DGW("QCEXTSTATS");
+			
+			// --- Set any defaults ---
+
+			SetInfoSYS_DGW(Diag,_QCEXTSTATS_0,DGW_LISTALIAS,"QCEXTSTATS","USECHAN");
+			SetInfoSYS_DGW(Diag,_QCEXTSTATS_1,DGW_FILEPATH,"QCEXTSTATS","FILE");
+			SetInfoSYS_DGW(Diag,_QCEXTSTATS_2,DGW_LISTALIAS,"QCEXTSTATS","HIST");
+		}
+		
+
+		
+
+
+		// --- Run the dialogue ---
+
+		i = iRunDialogue_DGW(Diag);
+		if (i == -1) Cancel_SYS();    // He hit cancel
+
+
+		// --- Get the strings ---
+
+		if (iRunMode == MODE_UXO)
+		{
+			GetInfoSYS_DGW(Diag,_QCEXTSTATS_0,DGW_LISTALIAS,"UCENOISEST","USECHAN");
+			GetInfoSYS_DGW(Diag,_QCEXTSTATS_1,DGW_FILEPATH,"UCENOISEST","FILE");
+			GetInfoSYS_DGW(Diag,_QCEXTSTATS_2,DGW_LISTALIAS,"UCENOISEST","HIST"); 
+		}
+		else  // MODE_NO_UXO
+		{
+			GetInfoSYS_DGW(Diag,_QCEXTSTATS_0,DGW_LISTALIAS,"QCEXTSTATS","USECHAN");
+			GetInfoSYS_DGW(Diag,_QCEXTSTATS_1,DGW_FILEPATH,"QCEXTSTATS","FILE");
+			GetInfoSYS_DGW(Diag,_QCEXTSTATS_2,DGW_LISTALIAS,"QCEXTSTATS","HIST"); 
+		}
+
+		// --- Destroy the dialogue ---
+
+		Destroy_DGW(Diag);
+
+	}
+
+
+	// --- Get channel selection option ---
+
+	if (iRunMode == MODE_UXO)
+		iUseChannel = iGetInt_SYS("UCENOISEST", "USECHAN");  
+	else // MODE_NO_UXO
+		iUseChannel = iGetInt_SYS("QCEXTSTATS", "USECHAN");  
+	if(iUseChannel==iDUMMY)   iUseChannel = 1;     // default to displayed channels
+
+
+	// --- Make a list to hold channels to process ---
+
+	Copy_LST(SelChanLST, AllChanLST);  
+
+
+	// --- Channel selection options ---
+
+	if(iUseChannel==1)   // Displayed channels
+	{      
+		if(iSize_LST(DispChanLST)==0)
+			Abort_SYS("There are no displayed channels in the current database.");
+
+		Copy_LST(SelChanLST, DispChanLST);
+
+	} else if(iUseChannel==2) {   // Select from a list 
+
+		// --- Get previous selection ---
+
+		if (iRunMode == MODE_UXO)
+			GetString_SYS("UCENOISEST", "SELECTED", sChannels);
+		else // MODE_NO_UXO
+			GetString_SYS("QCEXTSTATS", "SELECTED", sChannels);
+
+		// --- User selection ---
+
+		if(iInteractive_SYS()) {
+
+			// --- Set starting selection for GUI ---
+
+			ConvertFromCSVString_LST(SelChanLST, sChannels);
+
+			i = iTwoPanelSelection_GUI(AllChanLST, SelChanLST, "Select Channels to Process");
+			if(i!=0) Cancel_SYS();
+
+			// --- Save selection ---
+
+			ConvertToCSVString_LST(SelChanLST, sChannels);
+			if (iRunMode == MODE_UXO)
+				SetString_SYS("UCENOISEST", "SELECTED", sChannels);
+			else //MODE_NO_UXO
+				SetString_SYS("QCEXTSTATS", "SELECTED", sChannels);
+
+		} else 
+
+			SelectCSVStringItems_LST(AllChanLST, sChannels, SelChanLST);
+	}
+
+
+	// --- Any channels selected? ---
+
+	iNChan = iSize_LST(SelChanLST);
+	if(iNChan==0)
+		Abort_SYS("No channels have been selected for processing");
+
+
+	// --- Get parameters ---
+
+	if (iRunMode == MODE_UXO)
+		GetString_SYS("UCENOISEST","FILE",sFile);
+	else // MODE_NO_UXO
+		GetString_SYS("QCEXTSTATS","FILE",sFile);
+	if (iStrMin2_STR(sFile) == 0)
+		Abort_SYS("No output stats file name has been entered.");
+
+	if (iRunMode == MODE_UXO)
+		iHist = iGetInt_SYS("UCENOISEST","HIST");
+	else
+		iHist = iGetInt_SYS("QCEXTSTATS","HIST");
+	if ((iHist != 0) && (iHist != 1))
+		iHist = 1;                             // Default is to display histogram
+
+
+	// --- Get the start and end points ---
+
+	if (iRunMode == MODE_UXO)
+		iSNum = iGetInt_SYS("UCENOISEST","SNUM");
+	else // MODE_NO_UXO
+		iSNum = iGetInt_SYS("QCEXTSTATS","SNUM");
+	if (iDUMMY == iSNum) iSNum = 0;
+
+	if (iRunMode == MODE_UXO)
+		iENum = iGetInt_SYS("UCENOISEST","ENUM");
+	else // MODE_NO_UXO
+		iENum = iGetInt_SYS("QCEXTSTATS","ENUM");
+	if (iDUMMY == iSNum) iSNum = 0;
+
+
+	// ---- Get channel string ---
+
+	ConvertToCSVString_LST(SelChanLST, sInChStr);
+
+
+	// --- Tokenize the string ---
+
+	iTok = iTokens_STR(sInChStr,",");                // No of comma delimited tokens
+
+
+	// --- WA and ST ---
+
+	hWA = Create_WA(sFile,0);
+
+
+	// --- Full line number ---
+
+	Puts_WA(hWA, "Database name: ");
+	Puts_WA(hWA, sData);
+	NewLine_WA(hWA);
+
+	FormatDate_STR(rDate_SYS(), sTemp, 20, DATE_FORMAT_YYYYMMDD);
+	Puts_WA(hWA, "Date         : ");
+	Puts_WA(hWA, sTemp);
+	NewLine_WA(hWA);
+	FormatTime_STR(rTime_SYS(), sTemp, 30, 19, TIME_FORMAT_COLON);
+	Substr_STR(sTemp, sTemp, 0, 11);
+	Puts_WA(hWA, "Time         : ");
+	Puts_WA(hWA, sTemp);
+	NewLine_WA(hWA);
+	Puts_WA(hWA, "");
+	NewLine_WA(hWA);
+	
+	// --- Get a LST of selected lines ---
+	hLineLST = Create_LST(256);
+	SelectedLineLST_DB(Data, hLineLST);
+	iTotLines = iSize_LST(hLineLST);
+	
+	// --- Calculate extra spaces to add to accomodate long line names ---
+	
+	iExtraSpaces = 0;
+	for(i=0; i<iTotLines; i++)
+	{
+	Line = (DB_SYMB)iGetInt_LST(hLineLST, 1, i);
+	LockSymb_DB(Data, Line, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+	LineLabel_DB(Data, Line, sLine2, DB_LINE_LABEL_FORMAT_FULL);
+	UnLockSymb_DB(Data, Line);
+	j = iStrlen_STR(sLine2);
+	if (j > 14 + iExtraSpaces)
+		iExtraSpaces =  j - 14;
+	}
+	
+	Strcpy_STR(sExtraSpaces, "");
+	for(i = 0; i<iExtraSpaces; i++)
+		Strcat_STR(sExtraSpaces, " ");
+
+	// ---------------------------
+	// --- Print out X,Y stats ---
+	// ---------------------------
+
+	XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+	YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+	if (XCh!=NULLSYMB && YCh!=NULLSYMB) {
+
+		// --- Initialize total distance ---
+
+		rTotlDist = 0.0;
+
+
+		// --- Lock the X and Y channel ---
+
+		LockSymb_DB(Data,XCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+		LockSymb_DB(Data,YCh,DB_LOCK_READWRITE,DB_WAIT_INFINITY);
+
+
+		// --- Get channel type and decimal places ---
+
+		iXChType = iGetChanType_DB(Data,XCh);
+		iXChDecimal = iGetChanDecimal_DB(Data,XCh);     
+		if (iXChType <= 3) iXChDecimal = 0;
+
+
+		iYChType = iGetChanType_DB(Data,YCh);
+		iYChDecimal = iGetChanDecimal_DB(Data,YCh);
+		if (iYChType <= 3) iYChDecimal = 0;
+
+
+		// --- Skip if X/Y channel type is STRING ---
+
+		if ((iXChType > 0) && (iYChType > 0))
+		{            
+
+			Puts_WA(hWA, _n("Line Number    "));
+			Puts_WA(hWA, sExtraSpaces);
+			Puts_WA(hWA, _n("X-minimum      X-maximum      Y-minimum      "));
+			Puts_WA(hWA, _n("Y-maximum      # of points    Total distance"));
+			NewLine_WA(hWA);
+			Puts_WA(hWA, "-----------    ");
+			Puts_WA(hWA, sExtraSpaces);
+			Puts_WA(hWA, "---------      ---------      ---------      ");
+			Puts_WA(hWA, "---------      -----------    --------------");
+			NewLine_WA(hWA);
+
+
+			// --- X/Y VVs ---
+
+			XVV = Create_VV(REAL,0);
+			YVV = Create_VV(REAL,0);
+			CumXVV = Create_VV(REAL,0);
+			CumYVV = Create_VV(REAL,0);
+
+
+			// --- Go through all selected Lines ---
+
+			Progress_SYS(1);
+			ProgName_SYS("X/Y stats",1);
+			iLines = 0;
+			Line = FirstSelLine_DB(Data);
+			iTotLines = iCountSelLines_DB(Data);
+			while (iIsLineValid_DB(Data,Line))
+			{
+
+				// --- Line type and number ---
+
+				LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+				LineLabel_DB(Data,Line,sLine2,DB_LINE_LABEL_FORMAT_FULL);
+				UnLockSymb_DB(Data,Line);
+
+
+				// --- Update the Progress Bar ---
+
+				Strcpy_STR(sLabel,"X/Y stats on Line: ");
+				Strcat_STR(sLabel,sLine2);
+				ProgName_SYS(sLabel,0);
+				ProgUpdateL_SYS(iLines,iTotLines);
+
+				// --- Channels to VVs ---
+
+				GetChanVV_DB(Data, Line, XCh, XVV);
+				GetChanVV_DB(Data, Line, YCh, YVV);
+
+
+				// --- Append VVs ---
+
+				Append_VV(CumXVV, XVV);
+				Append_VV(CumYVV, YVV);
+
+
+				// --- Get X statistics ---
+
+				hST = Create_ST();  
+				Statistics_VV(hST, XVV);
+
+				rMin = rGetInfo_ST(hST, ST_MIN);
+				rMax = rGetInfo_ST(hST, ST_MAX);
+
+				Destroy_ST(hST);
+
+				// --- Build output string ---
+
+				Strcpy_STR(sWALine, sLine2);     // Line number
+				iStrlen = iStrlen_STR(sWALine);
+				if (iStrlen < 16 + iExtraSpaces)
+					for (j = 1; j < (16 + iExtraSpaces - iStrlen); j++)
+						Strcat_STR(sWALine, " ");
+
+				if (rMin != rDUMMY) 
+					FormatR2_STR(rMin, sTemp, 15, iXChDecimal);   // X Minimum
+				else 
+					Strcpy_STR(sTemp,"*");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+				if (rMax != rDUMMY) 
+					FormatR2_STR(rMax, sTemp, 15, iXChDecimal);   // X Maximum
+				else 
+					Strcpy_STR(sTemp,"*");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+				// --- Get Y statistics ---
+
+				hST = Create_ST();  
+				Statistics_VV(hST, YVV);
+
+				rItems = rGetInfo_ST(hST, ST_ITEMS);
+				rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+				rMin = rGetInfo_ST(hST, ST_MIN);
+				rMax = rGetInfo_ST(hST, ST_MAX);
+
+				Destroy_ST(hST);
+
+
+				// --- Append output string ---
+
+				if (rMin != rDUMMY) 
+					FormatR2_STR(rMin, sTemp, 15, iYChDecimal);   // Y Minimum
+				else 
+					Strcpy_STR(sTemp,"*");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+				if (rMax != rDUMMY) 
+					FormatR2_STR(rMax, sTemp, 15, iYChDecimal);   // Y Maximum
+				else 
+					Strcpy_STR(sTemp,"*");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+				if (rItems != rDUMMY)
+					FormatI_STR((int)rItems, sTemp, 12);         // # of items
+				else Strcpy_STR(sTemp,"*");
+				Strcat_STR(sWALine, sTemp);
+				iStrlen = iStrlen_STR(sTemp);
+				if (iStrlen < 15)
+					for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+
+				// -- Get distance ---
+
+				rDist = rDUMMY;            
+				Distline_DU(Data,Line,XCh,YCh,rDist);
+				rTotlDist += rDist;
+
+				if (rDist != rDUMMY)
+					FormatR2_STR(rDist, sTemp, 15, 3);            // Total distance
+				else Strcpy_STR(sTemp,"*");
+				Strcat_STR(sWALine, sTemp);
+
+
+
+				// --- Output to file ---
+
+				Puts_WA(hWA, sWALine);  NewLine_WA(hWA);
+
+				// --- Advance to Next Line ---
+
+				Line = NextSelLine_DB(Data, Line );
+				iLines++;
+
+			}
+
+
+			// --- Get X statistics of all lines ---
+
+			hST = Create_ST();  
+			Statistics_VV(hST, CumXVV);
+
+			rItems = rGetInfo_ST(hST, ST_ITEMS);
+			rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+			rMin = rGetInfo_ST(hST, ST_MIN);
+			rMax = rGetInfo_ST(hST, ST_MAX);
+
+			Destroy_ST(hST);
+
+
+			// --- Build output string ---
+
+			Strcpy_STR(sWALine, "ALL            ");
+			Strcat_STR(sWALine, sExtraSpaces);
+
+			if (rMin != rDUMMY)  
+				FormatR2_STR(rMin, sTemp, 15, iXChDecimal);   // X Minimum
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+			if (rMax != rDUMMY) 
+				FormatR2_STR(rMax, sTemp, 15, iXChDecimal);   // X Maximum
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			// --- Get Y statistics of all lines ---
+
+			hST = Create_ST();  
+			Statistics_VV(hST, CumYVV);
+
+			rItems = rGetInfo_ST(hST, ST_ITEMS);
+			rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+			rMin = rGetInfo_ST(hST, ST_MIN);
+			rMax = rGetInfo_ST(hST, ST_MAX);
+
+			Destroy_ST(hST);
+
+
+			// --- Append output string ---
+
+			if (rMin != rDUMMY) 
+				FormatR2_STR(rMin, sTemp, 15, iYChDecimal);   // Y Minimum
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+			if (rMax != rDUMMY) 
+				FormatR2_STR(rMax, sTemp, 15, iYChDecimal);   // Y Maximum
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+			if (rItems != rDUMMY)
+				FormatI_STR((int)rItems, sTemp, 12);         // # of items
+			else Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			// -- Get distance ---
+
+			if (rTotlDist != rDUMMY)
+				FormatR2_STR(rTotlDist, sTemp, 15, 3);    // Total distance
+			else Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+
+
+			// --- Output to file ---
+
+			Puts_WA(hWA, sWALine);  NewLine_WA(hWA);
+			NewLine_WA(hWA);
+
+
+			// --- 100% ---
+
+			ProgUpdate_SYS(100);
+			Progress_SYS(0);
+		}   
+
+		UnLockSymb_DB(Data, XCh);
+		UnLockSymb_DB(Data, YCh);
+
+	}
+
+
+	// --- clear CHAN_STATS parameters first ---
+
+	iNChan = iSize_LST(AllChanLST);
+	for (i = 0; i < iNChan; i++)
+	{
+		FormatI_STR(i, sTemp, 12);
+		Strcpy_STR(sChanStats, "CHAN_STATS");
+		Strcat_STR(sChanStats, sTemp);
+		if (iRunMode == MODE_UXO)
+			SetString_SYS("UCENOISEST", sChanStats, "");
+		else // MODE_NO_UXO
+			SetString_SYS("QCEXTSTATS", sChanStats, "");
+	}
+
+
+	// ---------------------------------------
+	// --- Print out other channels stats ---
+	// ---------------------------------------
+
+	i2 = 0;
+	for (iHistogramStarted=0, i=0; i < iTok; ++i) {
+
+		// --- Get channel ---
+
+		GetToken_STR(sInCh, sInChStr, i);
+
+
+		// --- Skip if current X/Y channels ---
+
+		if ((iStrcmp_STR(sInCh,sXCh,STR_CASE_TOLERANT) == 0) || 
+			(iStrcmp_STR(sInCh,sYCh,STR_CASE_TOLERANT) == 0)) continue; 
+
+		// --- Does the Input Channel Exist ? ---
+
+		if (!iExistSymb_DB(Data, sInCh, DB_SYMB_CHAN)) {
+			if (iStrMin2_STR(sMsg) > 0)
+				Strcat_STR(sMsg,", ");   
+			Strcat_STR(sMsg,sInCh);
+			continue;
+		}
+		//InCh = FindSymb_DB(Data,sInCh,DB_SYMB_CHAN);
+		InCh = FindChan_DB(Data, sInCh);
+
+		// --- Skip if a STRING channel ---
+
+		iChType = iGetChanType_DB(Data,InCh);
+		if (iChType < 0) continue;
+
+		iChDecimal = iGetChanDecimal_DB(Data,InCh);
+		if (iChType <= 3) iChDecimal = 0;
+
+
+		// --- Not locked before now in case it is a string channel ---
+
+		LockSymb_DB(Data,InCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+
+
+		// --- Cum. VV ---
+
+		CumVV = Create_VV(REAL,0);
+		CumDVV = Create_VV(REAL,0);
+		CumD4VV = Create_VV(REAL,0);
+
+
+		// --- Print out channel name ---
+
+		NewLine_WA(hWA);
+		Puts_WA(hWA,"Channel:       ");
+		Puts_WA(hWA,sInCh);
+		NewLine_WA(hWA);
+
+		Puts_WA(hWA, _n("Line Number    "));
+		Puts_WA(hWA, sExtraSpaces);
+		Puts_WA(hWA, _n("Minimum        Maximum        Mean           Median         "));
+		Puts_WA(hWA, _n("Mode           Std.dev.       1st diff.StD.  4th diff.StD.  # of points # of dummies"));
+		NewLine_WA(hWA);
+		Puts_WA(hWA, "------------   ");
+		Puts_WA(hWA, sExtraSpaces);
+		Puts_WA(hWA, "-------        -------        ----           ------         ");
+		Puts_WA(hWA, "----           --------       ------------   ------------   ----------- ------------");
+		NewLine_WA(hWA);
+
+
+		// --- Go through all selected Lines ---
+
+		Progress_SYS(1);
+		ProgName_SYS("",1);
+		iLines = 0;
+		iTotLines = iCountSelLines_DB(Data);
+		Line = FirstSelLine_DB(Data);
+		while (iIsLineValid_DB(Data,Line))
+		{
+
+			// --- Line type and number ---
+
+			LockSymb_DB(Data,Line,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+			LineLabel_DB(Data,Line,sLine2,DB_LINE_LABEL_FORMAT_FULL);
+			UnLockSymb_DB(Data,Line);
+
+			// --- Update the Progress Bar ---
+
+			Strcpy_STR(sLabel,sInCh);
+			Strcpy_STR(sLabel," stats on Line: ");
+			Strcat_STR(sLabel,sLine2);
+			ProgName_SYS(sLabel,0);
+			ProgUpdateL_SYS(iLines,iTotLines);
+
+
+			// --- REAL or INT channel ---
+
+			InVV = Create_VV(REAL,0);
+			InDVV = Create_VV(REAL,0);
+			InD4VV = Create_VV(REAL,0);
+
+			GetChanVV_DB(Data, Line, InCh, InVV);
+			Copy_VV(InDVV, InVV);
+			Copy_VV(InD4VV, InVV);
+			Diff_VV(InDVV, 1);
+			Diff_VV(InD4VV, 4);
+
+			// --- Append VVs ---
+
+			Append_VV(CumVV, InVV);
+			Append_VV(CumDVV, InDVV);
+			Append_VV(CumD4VV, InD4VV);
+
+			// --- Get statistics ---
+
+			hST = Create_ST();  
+			Statistics_VV(hST, InVV);
+			Histogram_ST(hST, 50);
+			Statistics_VV(hST, InVV);
+
+			hSTD = Create_ST();
+			Statistics_VV(hSTD, InDVV);
+
+			hSTD4 = Create_ST();
+			Statistics_VV(hSTD4, InD4VV);
+
+			rMin = rGetInfo_ST(hST, ST_MIN);
+			rMax = rGetInfo_ST(hST, ST_MAX);
+			rMean = rGetInfo_ST(hST, ST_MEAN);
+			rMedian = rGetInfo_ST(hST, ST_MEDIAN);        
+			rMode = rGetInfo_ST(hST, ST_MODE);
+			rDev = rGetInfo_ST(hST, ST_STDDEV);
+			rDevD = rGetInfo_ST(hSTD, ST_STDDEV);
+			rDevD4 = rGetInfo_ST(hSTD4, ST_STDDEV);
+			rItems = rGetInfo_ST(hST, ST_ITEMS);
+			rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+
+			Destroy_ST(hST);
+			Destroy_ST(hSTD);
+			Destroy_ST(hSTD4);
+
+			// --- Build output string ---
+
+			Strcpy_STR(sWALine, sLine2);     // Line number
+			iStrlen = iStrlen_STR(sLine2);
+			if (iStrlen < 16 + iExtraSpaces)
+				for (j = 1; j < (16 + iExtraSpaces - iStrlen); j++) 
+					Strcat_STR(sWALine, " ");
+
+			if (rMin != rDUMMY) 
+				FormatR2_STR(rMin, sTemp, 15, iChDecimal);   // Minimum
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rMax != rDUMMY) 
+				FormatR2_STR(rMax, sTemp, 15, iChDecimal);   // Maximum
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rMean != rDUMMY) 
+				FormatR2_STR(rMean, sTemp, 15, iChDecimal);   // Mean
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rMedian != rDUMMY) 
+				FormatR2_STR(rMedian, sTemp, 15, iChDecimal);   // Median
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rMode != rDUMMY) 
+				FormatR2_STR(rMode, sTemp, 15, iChDecimal);   // Mode
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rDev != rDUMMY) 
+				FormatR2_STR(rDev, sTemp, 15, iChDecimal);   // Stddev
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rDevD != rDUMMY) 
+				FormatR2_STR(rDevD, sTemp, 15, iChDecimal);   // Stddev of 1st diff
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rDevD4 != rDUMMY) 
+				FormatR2_STR(rDevD4, sTemp, 15, iChDecimal);   // Stddev of 4th diff
+			else 
+				Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 15)
+				for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rItems != rDUMMY)
+				FormatI_STR((int)rItems, sTemp, 12);   // # of items
+			else Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+			iStrlen = iStrlen_STR(sTemp);
+			if (iStrlen < 12)
+				for (j = 1; j <= (12 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+			if (rDummies != rDUMMY)
+				FormatI_STR((int)rDummies, sTemp, 12);   // # of dummies
+			else Strcpy_STR(sTemp,"*");
+			Strcat_STR(sWALine, sTemp);
+
+
+			// --- Output to file ---
+
+			Puts_WA(hWA, sWALine);  NewLine_WA(hWA);
+
+
+			// --- Advance to Next Line ---
+
+			Line = NextSelLine_DB(Data, Line );
+			iLines++;
+
+
+			// --- Clean VV ---
+
+			Destroy_VV(InVV);
+			Destroy_VV(InDVV);
+			Destroy_VV(InD4VV);
+		}   
+
+
+		// --- Get statistics ---
+
+		hST = Create_ST();  
+		Statistics_VV(hST, CumVV);
+		Histogram_ST(hST, 50);
+		Statistics_VV(hST, CumVV);
+
+		hSTD = Create_ST();  
+		Statistics_VV(hSTD, CumDVV);
+
+		hSTD4 = Create_ST();  
+		Statistics_VV(hSTD4, CumD4VV);
+
+		rMin = rGetInfo_ST(hST, ST_MIN);
+		rMax = rGetInfo_ST(hST, ST_MAX);
+		rMean = rGetInfo_ST(hST, ST_MEAN);
+		rMedian = rGetInfo_ST(hST, ST_MEDIAN);
+		rMode = rGetInfo_ST(hST, ST_MODE);
+		rDev = rGetInfo_ST(hST, ST_STDDEV);
+		rDevD = rGetInfo_ST(hSTD, ST_STDDEV);
+		rDevD4 = rGetInfo_ST(hSTD4, ST_STDDEV);
+		rItems = rGetInfo_ST(hST, ST_ITEMS);
+		rDummies = rGetInfo_ST(hST, ST_DUMMIES);
+
+		Strcpy_STR(sStats, "");
+		Strcat_STR(sStats, sInCh);
+		Strcat_STR(sStats, ",");
+		FormatR2_STR(rMin, sTemp, 15, iChDecimal);
+		Strcat_STR(sStats, sTemp);
+		Strcat_STR(sStats, ",");
+		FormatR2_STR(rMax, sTemp, 15, iChDecimal);
+		Strcat_STR(sStats, sTemp);
+		Strcat_STR(sStats, ",");
+		FormatR2_STR(rMean, sTemp, 15, iChDecimal);
+		Strcat_STR(sStats, sTemp);
+		Strcat_STR(sStats, ",");
+		FormatR2_STR(rDev, sTemp, 15, iChDecimal);
+		Strcat_STR(sStats, sTemp);
+		Strcat_STR(sStats, ",");
+		FormatI_STR((int)rItems, sTemp, 12);
+		Strcat_STR(sStats, sTemp);
+
+		Strcpy_STR(sChanStats, "CHAN_STATS");
+		FormatI_STR(i2++, sTemp, 12);
+		Strcat_STR(sChanStats, sTemp);
+		if (iRunMode == MODE_UXO)
+		{
+			SetString_SYS("UCENOISEST", sChanStats, sStats);
+			
+			SetReal_SYS ( "UCENOISEST","RMIN",rMin);     
+			SetReal_SYS ( "UCENOISEST","RMAX",rMax);      
+			SetReal_SYS ( "UCENOISEST","RMEAN",rMean);    
+			SetReal_SYS ( "UCENOISEST","RMEDIAN",rMedian); 
+			SetReal_SYS ( "UCENOISEST","RMODE",rMode);    
+			SetReal_SYS ( "UCENOISEST","RDEV",rDev);       
+			SetReal_SYS ( "UCENOISEST","RDEVD",rDevD );    
+			SetReal_SYS ( "UCENOISEST","RDEVD4",rDevD4);  
+			SetReal_SYS ( "UCENOISEST","RITEMS",rItems);   
+			SetReal_SYS ( "UCENOISEST","RDUMMIES",rDummies); 
+		}
+		else // MODE_NO_UXO
+		{
+			SetString_SYS("QCEXTSTATS", sChanStats, sStats);
+			
+			SetReal_SYS ( "QCEXTSTATS","RMIN",rMin);     
+			SetReal_SYS ( "QCEXTSTATS","RMAX",rMax);      
+			SetReal_SYS ( "QCEXTSTATS","RMEAN",rMean);    
+			SetReal_SYS ( "QCEXTSTATS","RMEDIAN",rMedian); 
+			SetReal_SYS ( "QCEXTSTATS","RMODE",rMode);    
+			SetReal_SYS ( "QCEXTSTATS","RDEV",rDev);       
+			SetReal_SYS ( "QCEXTSTATS","RDEVD",rDevD );    
+			SetReal_SYS ( "QCEXTSTATS","RDEVD4",rDevD4);  
+			SetReal_SYS ( "QCEXTSTATS","RITEMS",rItems);   
+			SetReal_SYS ( "QCEXTSTATS","RDUMMIES",rDummies); 
+		}
+		
+
+		
+
+		Destroy_ST(hST);
+		Destroy_ST(hSTD4);
+
+		// --- Build output string ---
+
+		Strcpy_STR(sWALine, "ALL            ");
+		Strcat_STR(sWALine, sExtraSpaces);
+
+		if (rMin != rDUMMY) 
+			FormatR2_STR(rMin, sTemp, 15, iChDecimal);   // Minimum
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rMax != rDUMMY) 
+			FormatR2_STR(rMax, sTemp, 15, iChDecimal);   // Maximum
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rMean != rDUMMY) 
+			FormatR2_STR(rMean, sTemp, 15, iChDecimal);   // Mean
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+		if (rMedian != rDUMMY) 
+			FormatR2_STR(rMedian, sTemp, 15, iChDecimal);   // Median
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rMode != rDUMMY) 
+			FormatR2_STR(rMode, sTemp, 15, iChDecimal);   // Mode
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rDev != rDUMMY) 
+			FormatR2_STR(rDev, sTemp, 15, iChDecimal);   // Stddev
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rDevD != rDUMMY) 
+			FormatR2_STR(rDevD, sTemp, 15, iChDecimal);   // Stddev of 1st diff
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rDevD4 != rDUMMY) 
+			FormatR2_STR(rDevD4, sTemp, 15, iChDecimal);   // Stddev of 4th diff
+		else 
+			Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 15)
+			for (j = 1; j <= (15 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rItems != rDUMMY)
+			FormatI_STR((int)rItems, sTemp, 12);   // # of items
+		else Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+		iStrlen = iStrlen_STR(sTemp);
+		if (iStrlen < 12)
+			for (j = 1; j <= (12 - iStrlen); j++) Strcat_STR(sWALine, " ");
+
+
+		if (rDummies != rDUMMY)
+			FormatI_STR((int)rDummies, sTemp, 12);   // # of dummies
+		else Strcpy_STR(sTemp,"*");
+		Strcat_STR(sWALine, sTemp);
+
+
+		// --- Output to file ---
+
+		Puts_WA(hWA, sWALine);  
+		NewLine_WA(hWA);
+		NewLine_WA(hWA);
+
+
+		// --- 100% ---
+
+		ProgUpdate_SYS(100);
+		Progress_SYS(0);
+
+
+		// --- Clean up ---
+
+		UnLockSymb_DB(Data, InCh);
+		Destroy_VV(CumVV);
+		Destroy_VV(CumDVV);
+		Destroy_VV(CumD4VV);
+
+
+		// --- Display histogram? ---
+
+		if (iHist==1 && iHistogramStarted==0) { // need only once to LaunchHistogram
+
+			iHistogramStarted = 1;
+
+			UnLock_EDB(EData);
+
+			LaunchHistogram_EDB(EData,sInCh);
+
+			//GetName_EDB(EData,sDbFile);
+			//LaunchHistogram_UCE_USACE(sDbFile,sInCh);
+
+			Data = Lock_EDB(EData);
+		}
+
+	}
+
+
+	// --- Msg ---
+
+	if (iStrMin_STR(sMsg) > 0) {
+		NewLine_WA(hWA);
+		Puts_WA(hWA, "The following channels do not exist in the database: "); 
+		Puts_WA(hWA, sMsg);                       
+		Puts_WA(hWA, ".");
+	}
+
+
+	// --- Save ---
+
+	Destroy_WA(hWA);
+	UnLock_EDB(EData);
+
+
+	// --- Re-write the Stats File ---
+
+	Strcpy_STR( sTempFile, "sTemp_Stats" );
+	hWA = Create_WA( sTempFile, WA_NEW );
+	if ( 0 != iFileExist_SYS( sTempFile ) )  
+		iDeleteFile_SYS( sTempFile ); 
+
+	hRA  = Create_RA(sFile);
+	j = iLen_RA( hRA );
+	k = 0;
+
+	// --- Copy file head lines ---
+
+	for( i = 0 ; i < 4 ; i++ ) {
+		if(iGets_RA(hRA,sTemp))  break;                    
+		Puts_WA(hWA,sTemp);   
+		NewLine_WA(hWA);
+	}
+
+	// --- Copy X,Y stats lines ---
+
+	if (XCh!=NULLSYMB && YCh!=NULLSYMB && iXChType>0 && iYChType>0) {
+
+		for( i = 0 ; i < 2 ; i++ ) {
+			if(iGets_RA(hRA,sTemp))  break;                    
+			Puts_WA(hWA,sTemp);   
+			NewLine_WA(hWA);
+		}
+
+		for( i = 6 ; i < j ; i++ ) {
+			if(iGets_RA(hRA,sTemp))  break;                    
+			if(iStrStr_STR(sTemp,"ALL",STR_CASE_TOLERANT) != -1)  {
+				Puts_WA(hWA,sTemp);   
+				NewLine_WA(hWA);
+				NewLine_WA(hWA);
+				k = i;
+				break; 
+			}
+		}
+
+		iSeek_RA (hRA,6);
+		for( i = 6 ; i < k ; i++ ) {
+			if(iGets_RA(hRA,sTemp))  break;                    
+			Puts_WA(hWA,sTemp);   
+			NewLine_WA(hWA);
+		}
+		NewLine_WA(hWA);
+		NewLine_WA(hWA);
+	}
+
+	// --- Copy other channels stats lines ---
+
+	i2 = k+1;
+	for(k=0; k<iTok; k++) {
+		i1 = -1;
+		iSeek_RA (hRA,i2);
+		for( i = i2 ; i < j ; i++ ) {
+			if(iGets_RA(hRA,sTemp))  break;                    
+			if(iStrStr_STR(sTemp,"Channel",STR_CASE_TOLERANT) != -1)  i1 = i;
+			if(iStrStr_STR(sTemp,"ALL",STR_CASE_TOLERANT) != -1)
+			{  i2 = i;  break;  } 
+		}
+
+		if(i1==-1)  break;    // no more lines to copy, end of file
+
+		iSeek_RA (hRA,i1);
+		for( i = 0 ; i < 3 ; i++ ) {
+			if(iGets_RA(hRA,sTemp))  break;                    
+			Puts_WA(hWA,sTemp);   
+			NewLine_WA(hWA);
+		}
+
+		iSeek_RA (hRA,i2);
+		if(iGets_RA(hRA,sTemp))  break;                    
+		Puts_WA(hWA,sTemp);   
+		NewLine_WA(hWA);
+		NewLine_WA(hWA);
+
+		i1 += 3;
+		iSeek_RA (hRA,i1);
+		for( i = 0 ; i < i2-i1 ; i++ ) {
+			if(iGets_RA(hRA,sTemp))  break;                    
+			Puts_WA(hWA,sTemp);   
+			NewLine_WA(hWA);
+		}
+		NewLine_WA(hWA);
+		NewLine_WA(hWA);
+		i2++;
+	}
+	Destroy_RA(hRA);
+	Destroy_WA(hWA);
+
+	// --- Rename the file ---
+
+	iDeleteFile_SYS(sFile); 
+	FileRen_SYS(sTempFile,sFile);
+
+
+	// ----------------------
+	// --- View the stats ---
+	// ----------------------   
+
+	// --- Get editor ---
+
+	if (iInteractive_SYS())
+	{
+		if (iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit))
+			iRunGX_SYS("newedit");
+		iGlobal_SYS("MONTAJ.DEFAULT_EDITOR",sDefEdit);
+
+
+		// --- get windows wait ---
+
+		GetString_SYS("EDIT","WAIT",sWait);
+		if (iCharComp_STR(sWait,"W"))
+			i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_WAIT;
+		else   
+			i = SYS_RUN_TYPE_WINDOWS+SYS_RUN_WIN_NOWAIT;
+
+
+		// --- reset to default no wait ---
+
+		SetString_SYS("EDIT","WAIT","NOWAIT");
+
+		// --- check if DOS editor ---
+
+		if (!iGlobal_SYS("MONTAJ.DEFAULT_EDITOR_TYPE",sDefEditType)) {
+
+			ToUpper_STR(sDefEditType);
+			if (iCharComp_STR(sDefEditType,"D"))
+				i = SYS_RUN_TYPE_DOS;
+
+		}
+
+
+		// --- edit ---
+
+		if (iRun_SYS(sDefEdit,sFile,i)) {
+
+			Strcpy_STR(sFile,"Unable to run ");
+			Strcat_STR(sFile,sDefEdit);
+			Abort_SYS(sFile);
+
+		}
+	}
+
+	// --- Clean up ---
+
+	Destroy_LST(DispChanLST);
+	Destroy_LST(AllChanLST);
+	Destroy_LST(SelChanLST);
+
+	// --- Finish counting the time
+
+	iGetTimer_SYS(0, rStartTime, rElapsedTime);
+
+
+	// --- QC Report ---
+
+	iQCReport = iGetInt_SYS("UCESETUP", "QCREPORT");
+	Strcpy_STR(sReport, ".\\QCReport.log");
+
+	iWithinAnotherGX = iGetInt_SYS("USACE", "NOQCREPORT");
+
+	if (iQCReport != 0 && iWithinAnotherGX != 1)
+	{
+		ADDTOREPORT(sReport, QC_TITLE, iRunMode)
+		ADDTOREPORT(PROCESS_FILE, PROCESS_TITLE, iRunMode)
+	}
+}

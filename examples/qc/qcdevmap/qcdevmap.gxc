@@ -78,7 +78,7 @@ real        rScaleMM,rXo,rYo,rTxtSize;
 real        rNomDir, rLineDir, rXOff, rYOff;
 real        rXCoord, rYCoord;
 
-int         iInteract, iLegend, iGrpClipMode;
+int         iInteract, iLegend, iGrpClipMode, iIncludeLinePath;
 
 //===========================================================================
 //                                   CODE
@@ -101,6 +101,10 @@ int         iInteract, iLegend, iGrpClipMode;
    iLegend = iGetInt_SYS("QCDEVMAP", "LEGEND");
    if(iLegend != 0) iLegend = 1;
    SetInt_SYS("QCDEVMAP", "LEGEND", 1);
+
+   iIncludeLinePath = iGetInt_SYS("QCDEVMAP", "INCLUDE_LINE_PATH");
+   if(iIncludeLinePath != 0) iIncludeLinePath = 1;
+   SetInt_SYS("QCDEVMAP", "INCLUDE_LINE_PATH", 1);
    
 
    // --- Are we running interactively ? ---
@@ -386,13 +390,16 @@ int         iInteract, iLegend, iGrpClipMode;
       if (iInteract)
          SetInteractive_SYS(0);
 
-		iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
-		SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
+		if (iIncludeLinePath != 0)
+      {
+		   iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
+		   SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
 
-		if (iRunGX_SYS("path.gx"))     
-			Cancel_SYS(); 
+         if (iRunGX_SYS("path.gx"))     
+			   Cancel_SYS(); 
 
-		SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
+         SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
+      }
 
       if (iInteract)
          SetInteractive_SYS(1);   
@@ -469,16 +476,17 @@ int         iInteract, iLegend, iGrpClipMode;
 
       
 			// --- Line path ---
-
-			TextColor_MVIEW(View,iColor_MVIEW("k"));
-			LineThick_MVIEW(View,0.15*rScaleMM);
-			LineStyle_MVIEW(View,0,0.0);
-			LineColor_MVIEW(View,iColor_MVIEW("k"));
+         if (iIncludeLinePath != 0)
+         {
+			   TextColor_MVIEW(View,iColor_MVIEW("k"));
+			   LineThick_MVIEW(View,0.15*rScaleMM);
+			   LineStyle_MVIEW(View,0,0.0);
+			   LineColor_MVIEW(View,iColor_MVIEW("k"));
        
-			Text_MVIEW(View,_("Line path"),rXo+15.0*rScaleMM,rYo);
-			Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
-			rYo += 5.0*rScaleMM;  
-
+			   Text_MVIEW(View,_("Line path"),rXo+15.0*rScaleMM,rYo);
+			   Line_MVIEW(View,rXo,rYo+1.25*rScaleMM,rXo+10.0*rScaleMM,rYo+1.25*rScaleMM);
+			   rYo += 5.0*rScaleMM;  
+         }
 
 			// --- QC results ---
 	      
@@ -512,15 +520,16 @@ int         iInteract, iLegend, iGrpClipMode;
 
       // --- Plot line path and flag ---
       
-		iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
-		SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
-
-		if (iRunGX_SYS("path.gx"))     
-			Cancel_SYS(); 
-
-		SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
-
-
+		
+      if (iIncludeLinePath != 0)
+      {
+         iGrpClipMode = iGetInt_SYS("PATH", "GROUP_CLIP_MODE");
+		   SetInt_SYS("PATH", "GROUP_CLIP_MODE", CLIP_OFF);
+		   if (iRunGX_SYS("path.gx"))     
+			   Cancel_SYS(); 
+         SetInt_SYS("PATH", "GROUP_CLIP_MODE", iGrpClipMode);
+      }
+		
 		if (iLegend != 0)
 		{
 

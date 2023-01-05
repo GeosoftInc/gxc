@@ -49,14 +49,11 @@ int iTerm, nTerm;               // Number of Taylor expansion terms
 real rHeight;
 
 IMG IMGi;  // Image tied to the input grid
-//IMG IMGo;  // Image for the output grid
 IMG IMGe;  // Image tied to the elevation grid
 IMG IMGd;  // Image for the drape grid
 
 int   iInteractive;
-int i, j, iNLines;                  // utility int
-//int  iNX, iNY;
-
+int i, j, iNLines;                   // utility int
 int iN;                              // n!iNewElev
 IMG IMGIN, IMGIN2, IMGOUT;           // IMGs for FFT2 functions
 VM VMcoef;                           // holds coefficients for GridTrnd_IMU
@@ -66,12 +63,16 @@ int iNXA, iNYA;                      // gridstat variables
 real rMin, rMax, rMean1, rMean2, rSD;  // gridstat variables
 real rDist;                          // continuation distance rDist=rMean2-rMean1
 real rNyquist;                       // Nyquist wavenumber
+real rTmp1, rTmp2;
+real rD1;                            // Half elevation grid value range
+real rR1;                            // Highcut of DCOS
 RA RA_in;                            // input read ascii buffer
 WA WA_out;                           // output write ascii buffer
 
 string(100) sGrid;                   // string for temporary storage of text
 string(100) sGridNumber;             // string for temporary storage of text
 string(1000) sTemp;                  // string for temporary storage of text
+
 string(1000) sTemp2;                 // string for temporary storage of text
 string(100) sText;                   // line of text from file
 string(100) sFltDefCon;              // name of default magmap control file
@@ -85,7 +86,6 @@ string(1000) sFGrids;                // string of grids at various DRVZ terms
 string(1000) sTGrids;                // string of grids at various G terms
 
 IEXP IEXP_GridMath;                  // grid expression of grid math
-VV   hVV;                            // to hold the hanning filter values 
 
 //int DEBUG;  // debug parameter
 
@@ -166,7 +166,7 @@ VV   hVV;                            // to hold the hanning filter values
          Abort_SYS("You must specify the New observation drape grid");
    }
 
-    GetString_SYS("GRIDDRAPE", "NITERATIONS", sTemp);
+   GetString_SYS("GRIDDRAPE", "NITERATIONS", sTemp);
    if (!iStrlen_STR(sTemp))
       nIter=2;
    else
@@ -174,7 +174,7 @@ VV   hVV;                            // to hold the hanning filter values
 
    GetString_SYS("GRIDDRAPE", "NTERMS", sTemp);
    if (!iStrlen_STR(sTemp))
-      nTerm=4;
+      nTerm=2;
    else
       nTerm = iGetInt_SYS("GRIDDRAPE", "NTERMS");
 
@@ -185,9 +185,6 @@ VV   hVV;                            // to hold the hanning filter values
 
    if (!iStrMin2_STR(sElevGrd))
       Abort_SYS(_("Elevation Grid Not Specified!"));
-
-   //if (!iStrMin2_STR(sDrapeGrd))
-   //   Abort_SYS(_("Drape Grid Not Specified!"));
 
    if (!iStrMin2_STR(sOutputGrd))
       Abort_SYS(_("Output Grid Not Specified!"));
@@ -229,27 +226,15 @@ VV   hVV;                            // to hold the hanning filter values
        }
    }
    
-   //IMGo = CreateOutFile_IMG(GS_DOUBLE, sOutputGrd, IMGi);  
-   
-    if(rDy > rDx)
-       rNyquist = 1.0/(2.0*rDy);
-    else
-       rNyquist = 1.0/(2.0*rDx);
+   if(rDy > rDx)
+      rNyquist = 1.0/(2.0*rDy);
+   else
+      rNyquist = 1.0/(2.0*rDx);
 
-    hVV = Create_VV(REAL, 10);
-    SetReal_VV(hVV, 0, 0.06);
-    SetReal_VV(hVV, 1, 0.1);
-    SetReal_VV(hVV, 2, 0.06);
-    SetReal_VV(hVV, 3, 0.1);
-    SetReal_VV(hVV, 4, 0.36);
-    SetReal_VV(hVV, 5, 0.1);
-    SetReal_VV(hVV, 6, 0.06);
-    SetReal_VV(hVV, 7, 0.1);
-    SetReal_VV(hVV, 8, 0.06);
 
    // --- Step 1 : Continuation from Elevation drape surface to elevation mean horizontal level
 
-   ProgName_SYS(_("Continuation from Elevation drape surface to mean flat ..."), 1);
+   ProgName_SYS(_("from elev surface to elev mean flat ..."), 1);
    Progress_SYS(1);
 
    // Find rMean of elevation grid:
@@ -262,6 +247,21 @@ VV   hVV;                            // to hold the hanning filter values
    rSD = 0.0;
 
    GridStatExt_IMU(sElevGrd, 1, iNXA, iNYA, rMin, rMax, rMean1, rSD);
+
+   if(rMax - rMin == 0.0) 
+      rR1 = rNyquist;
+   else
+   {
+       rTmp1 = rMax - rMean1;
+       rTmp2 = rMean1 - rMin;
+       if (rTmp1>rTmp2)
+          rD1 = rTmp1;
+       else
+          rD1 = rTmp2;
+       rR1 = 1.0/rD1;
+       if(rR1 > rNyquist)
+          rR1 = rNyquist;
+   }
 
    // create Z(x,y) grid = sElevGrd - rMean1:
 
@@ -289,20 +289,54 @@ VV   hVV;                            // to hold the hanning filter values
        Strcat_STR(sGrid, sGridNumber);
        Strcat_STR(sGrid, ".grd");
 
-       IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMG_FILE_READONLY);
-       IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
-       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
-       GridAdd_IMU(IMGIN, (real)iTerm, IMGIN2, 0.0, IMGOUT);
+        if(iTerm == 1)
+        {
+            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
+            Copy_IMG(IMGIN, IMGOUT);
+            Destroy_IMG(IMGOUT);
+            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+            Copy_IMG(IMGIN, IMGOUT);
+            Destroy_IMG(IMGIN);
+            Destroy_IMG(IMGOUT);              
+        } 
+        else 
+        {
+            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+            IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMG_FILE_READONLY);
+            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+            IEXP_GridMath = Create_IEXP();
+            AddGrid_IEXP(IEXP_GridMath, IMGIN, "Z");
+            AddGrid_IEXP(IEXP_GridMath, IMGIN2, "Z1");
+            AddGrid_IEXP(IEXP_GridMath, IMGOUT, "Z2");
 
-       Destroy_IMG(IMGIN);
-       Destroy_IMG(IMGIN2);
-       Destroy_IMG(IMGOUT);
+            DoFormula_IEXP(IEXP_GridMath, "Z2 = Z*Z1;", 1024);
+
+            Destroy_IMG(IMGIN);
+            Destroy_IMG(IMGIN2);
+            Destroy_IMG(IMGOUT);
+            Destroy_IEXP(IEXP_GridMath);
+
+            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
+            Copy_IMG(IMGIN, IMGOUT);
+            Destroy_IMG(IMGIN);
+            Destroy_IMG(IMGOUT);
+
+        }
+        IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+        IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
+        Copy_IMG(IMGIN, IMGOUT);
+        Destroy_IMG(IMGIN);
+        Destroy_IMG(IMGOUT);
 
        Strcat_STR(sZGrids, sGrid);
        Strcat_STR(sZGrids, " ");
    }
    iDeleteFile_SYS("xxxxxxxZ.grd");
    iDeleteFile_SYS("xxxxxTmp.grd");
+   iDeleteFile_SYS("xxxxTmp1.grd");
+   iDeleteFile_SYS("xxxxTmp2.grd");
 
 
    // COMPUTE ITERATION PROCESURE OF CONTINUATIONS
@@ -313,6 +347,7 @@ VV   hVV;                            // to hold the hanning filter values
    Destroy_IMG(IMGIN);
    Destroy_IMG(IMGOUT);
 
+   iZ = iTokens_STR(sZGrids, " ");
    for (iIter = 0; iIter < nIter; iIter++)
    {  
        Strcpy_STR(sFGrids, "");
@@ -348,10 +383,16 @@ VV   hVV;                            // to hold the hanning filter values
           Puts_WA(WA_out, sCONT);
           NewLine_WA(WA_out);
 
-          Strcpy_STR(sCONT, "BTWR ");
-          FormatR_STR(rNyquist/2.0, sText, 20, 10);
+          //Strcpy_STR(sCONT, "BTWR ");
+          //FormatR_STR(rNyquist/2.0, sText, 20, 10);
+          //Strcat_STR(sCONT, sText);
+          //Strcat_STR(sCONT, " 16 1 /");    // low pass
+
+          Strcpy_STR(sCONT, "COSN 0.0 ");
+          FormatR_STR(rR1, sText, 20, 10);
           Strcat_STR(sCONT, sText);
-          Strcat_STR(sCONT, " 8 1 /");    // low pass
+          Strcat_STR(sCONT, " 2 1 /");    // low pass
+
           Puts_WA(WA_out, sCONT);
           NewLine_WA(WA_out);
 
@@ -374,13 +415,19 @@ VV   hVV;                            // to hold the hanning filter values
 
           SetInteractive_SYS(0);
           if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.FFT2D.MAGMAPFiltering;Run)") < 0)
-              Abort_SYS(_("Failed Up/Down Contuniation using magmap1.gx."));
+              Abort_SYS(_("Failed Geosoft.GX.FFT2D.MAGMAPFiltering."));
           SetInteractive_SYS(iInteractive);
 
-          IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxF.grd", IMG_FILE_READONLY);
+          SetString_SYS("GRIDFLTN", "GRD", "xxxxxxxF.grd");
+          SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
+
+          SetInteractive_SYS(0);
+          if (iRunGX_SYS("gridflt9") < 0)
+              Abort_SYS(_("Failed smooth using gridflt9.gx."));
+          SetInteractive_SYS(iInteractive);
+
+          IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
-          //if (GridFilt_IMU(IMGIN, IMGOUT, 5, 1.0, IMU_FILT_DUMMY_NO, IMU_FILT_HZDRV_NO, IMU_FILT_FILE_NO, "", hVV))
-          //   Abort_SYS(_("Grid filter operation failed."));
           Copy_IMG(IMGIN, IMGOUT);
           Destroy_IMG(IMGIN);
           Destroy_IMG(IMGOUT);
@@ -395,7 +442,7 @@ VV   hVV;                            // to hold the hanning filter values
 
        Strcpy_STR(sTGrids, "");
        iN = 1;
-       iZ = iTokens_STR(sZGrids, " ");
+       //iZ = iTokens_STR(sZGrids, " ");
        iF = iTokens_STR(sFGrids, " ");
        for (iTerm = 1; iTerm <= nTerm; iTerm++)
        { 
@@ -422,8 +469,17 @@ VV   hVV;                            // to hold the hanning filter values
            Destroy_IMG(IMGIN);
            Destroy_IMG(IMGIN2);
            Destroy_IMG(IMGOUT);
+           Destroy_IEXP(IEXP_GridMath);
 
-           IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxT.grd", IMG_FILE_READONLY);
+           SetString_SYS("GRIDFLTN", "GRD", "xxxxxxxT.grd");
+           SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
+
+           SetInteractive_SYS(0);
+           if (iRunGX_SYS("gridflt9") < 0)
+               Abort_SYS(_("Failed smooth using gridflt9.gx."));
+           SetInteractive_SYS(iInteractive);
+
+           IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
            Copy_IMG(IMGIN, IMGOUT);
            Destroy_IMG(IMGIN);
@@ -432,7 +488,7 @@ VV   hVV;                            // to hold the hanning filter values
            Strcat_STR(sTGrids, sGrid);
            Strcat_STR(sTGrids, " ");
        }
-       iDeleteFile_SYS("xxxxxxxT.grd");
+       //iDeleteFile_SYS("xxxxxxxT.grd");
 
        iT = iTokens_STR(sTGrids, " ");
        GetToken_STR(sTemp, sTGrids, 0);
@@ -471,7 +527,7 @@ VV   hVV;                            // to hold the hanning filter values
                Destroy_IMG(IMGOUT);           
            }
        }
-       iDeleteFile_SYS("xxxxxTmp.grd");
+       //iDeleteFile_SYS("xxxxxTmp.grd");
 
        // iterated results
 
@@ -491,8 +547,8 @@ VV   hVV;                            // to hold the hanning filter values
        Destroy_IMG(IMGIN);
        Destroy_IMG(IMGOUT);
 
-       iDeleteFile_SYS("xxxxTmp2.grd");
-       iDeleteFile_SYS("xxxxxOut.grd");
+       //iDeleteFile_SYS("xxxxTmp2.grd");
+       //iDeleteFile_SYS("xxxxxOut.grd");
 
        ProgUpdateL_SYS(iIter+1, nIter);
    }
@@ -506,13 +562,13 @@ VV   hVV;                            // to hold the hanning filter values
    Destroy_IMG(IMGOUT);
 
 
-   // --- Step 2 : Contuniation from elevation mean horizontal level to new horizontal level
+  // --- Step 2 : Contuniation from elevation mean level to new level
 
    if (iNewElev == 1)
-      ProgName_SYS(_("Continuation to new observation height ..."), 1);
+      ProgName_SYS(_("from elev mean flat to new height ..."), 1);
 
    if (iNewElev == 2)
-      ProgName_SYS(_("Continuation to new observation drape mean flat ..."), 1);
+      ProgName_SYS(_("from elev mean flat to new drape mean flat ..."), 1);
 
    Progress_SYS(1);
 
@@ -523,7 +579,7 @@ VV   hVV;                            // to hold the hanning filter values
    Destroy_IMG(IMGOUT);
 
    if (iNewElev == 1)
-      rDist = rAbs_MATH(rHeight - rMean1);
+      rDist = (rHeight - rMean1);
 
    if (iNewElev == 2)
    {
@@ -537,7 +593,7 @@ VV   hVV;                            // to hold the hanning filter values
 
        GridStatExt_IMU(sDrapeGrd, 1, iNXA, iNYA, rMin, rMax, rMean2, rSD);
 
-       rDist = rAbs_MATH(rMean2-rMean1);
+       rDist = (rMean2-rMean1);
    }
 
    // FFT Up/Down filter
@@ -563,7 +619,7 @@ VV   hVV;                            // to hold the hanning filter values
        Strcpy_STR(sCONT, "CNUP ");
    else
        Strcpy_STR(sCONT, "CNDN ");
-   FormatR_STR(rDist, sDist, 20, 10);
+   FormatR_STR(rAbs_MATH(rDist), sDist, 20, 10);
    Strcat_STR(sCONT, sDist);
    Strcat_STR(sCONT, " /");
    Puts_WA(WA_out, sCONT);
@@ -571,10 +627,24 @@ VV   hVV;                            // to hold the hanning filter values
 
    if(rDist < 0.0)
    {
-       Strcpy_STR(sCONT, "BTWR ");
-       FormatR_STR(rNyquist/2.0, sText, 20, 10);
+       //Strcpy_STR(sCONT, "BTWR ");
+       //FormatR_STR(rNyquist/2.0, sText, 20, 10);
+       //Strcat_STR(sCONT, sText);
+       //Strcat_STR(sCONT, " 16 1 /");    // low pass
+
+       if(rDist == 0.0) 
+          rR1 = rNyquist;
+       else
+      {
+          rR1 = 1.0/rAbs_MATH(rDist);
+          if(rR1 > rNyquist)
+             rR1 = rNyquist;
+       }
+       Strcpy_STR(sCONT, "COSN 0.0 ");
+       FormatR_STR(rR1, sText, 20, 10);
        Strcat_STR(sCONT, sText);
-       Strcat_STR(sCONT, " 8 1 /");    // low pass
+       Strcat_STR(sCONT, " 2 1 /");    // low pass
+
        Puts_WA(WA_out, sCONT);
        NewLine_WA(WA_out);
    }
@@ -589,12 +659,6 @@ VV   hVV;                            // to hold the hanning filter values
    Destroy_RA(RA_in);
    Destroy_WA(WA_out);
 
-   //IMGIN = CreateFile_IMG(GS_DOUBLE, sInGrid, IMG_FILE_READONLY);
-   //IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxTmpIn.grd", IMGIN);
-   //Copy_IMG(IMGIN, IMGOUT);
-   //Destroy_IMG(IMGIN);
-   //Destroy_IMG(IMGOUT);
-
    SetString_SYS("MAGMAP1", "INGRD", "xxxTmpIn.grd");
    SetString_SYS("MAGMAP1", "OUTGRD", "xxxxxOut.grd");
    SetString_SYS("MAGMAP1", "CONFIL", "xxxxCont.con");
@@ -604,6 +668,24 @@ VV   hVV;                            // to hold the hanning filter values
    if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.FFT2D.MAGMAPFiltering;Run)") < 0)
        Abort_SYS(_("Failed Up/Down Contuniation using magmap1.gx."));
    SetInteractive_SYS(iInteractive);
+
+   if(rDist < 0.0)
+   {
+       IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READWRITE);
+       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxTmpIn.grd", IMGIN);
+       Copy_IMG(IMGIN, IMGOUT);
+       Destroy_IMG(IMGIN);
+       Destroy_IMG(IMGOUT);
+       //iDeleteFile_SYS("xxxxxOut.grd");
+
+       SetString_SYS("GRIDFLTN", "GRD", "xxxTmpIn.grd");
+       SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
+
+       SetInteractive_SYS(0);
+       if (iRunGX_SYS("gridflt9") < 0)
+           Abort_SYS(_("Failed smooth using gridflt9.gx."));
+       SetInteractive_SYS(iInteractive);
+   }
 
    if (iNewElev == 1)
    {
@@ -626,7 +708,7 @@ VV   hVV;                            // to hold the hanning filter values
    {
        // --- Step 3 : Continuation from Drape mean horizontal level to Drape surface
 
-       ProgName_SYS(_("Continuation from drape mean flat to Drape surface ..."), 1);
+       ProgName_SYS(_("from drape mean flat to drape surface ..."), 1);
        Progress_SYS(1);
 
        IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
@@ -635,7 +717,33 @@ VV   hVV;                            // to hold the hanning filter values
        Destroy_IMG(IMGIN);
        Destroy_IMG(IMGOUT);
 
-       // create Z(x,y) grid = sDrapeGrd - rMeanElev:
+       // Find rMean of drape grid:
+
+       iNXA = 0;
+       iNYA = 0;
+       rMin = 0.0;
+       rMax = 0.0;
+       rMean1 = 0.0;
+       rSD = 0.0;
+
+       GridStatExt_IMU(sDrapeGrd, 1, iNXA, iNYA, rMin, rMax, rMean2, rSD);
+
+       if(rMax - rMin == 0.0) 
+          rR1 = rNyquist;
+       else
+       {
+           rTmp1 = rMax - rMean2;
+           rTmp2 = rMean2 - rMin;
+           if (rTmp1>rTmp2)
+              rD1 = rTmp1;
+           else
+              rD1 = rTmp2;
+           rR1 = 1.0/rD1;
+           if(rR1 > rNyquist)
+              rR1 = rNyquist;
+       }
+
+       // create Z(x,y) grid = sDrapeGrd - rMean2:
 
        VMcoef = Create_VM(REAL, 10);
        IMGIN = CreateFile_IMG(GS_DOUBLE, sDrapeGrd, IMG_FILE_READONLY);
@@ -661,24 +769,59 @@ VV   hVV;                            // to hold the hanning filter values
            Strcat_STR(sGrid, sGridNumber);
            Strcat_STR(sGrid, ".grd");
 
-           IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMG_FILE_READONLY);
-           IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
-           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
-           GridAdd_IMU(IMGIN, (real)iTerm, IMGIN2, 0.0, IMGOUT);
+            if(iTerm == 1)
+            {
+                IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
+                Copy_IMG(IMGIN, IMGOUT);
+                Destroy_IMG(IMGOUT);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+                Copy_IMG(IMGIN, IMGOUT);
+                Destroy_IMG(IMGIN);
+                Destroy_IMG(IMGOUT);              
+            } 
+            else 
+            {
+                IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+                IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMG_FILE_READONLY);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+                IEXP_GridMath = Create_IEXP();
+                AddGrid_IEXP(IEXP_GridMath, IMGIN, "Z");
+                AddGrid_IEXP(IEXP_GridMath, IMGIN2, "Z1");
+                AddGrid_IEXP(IEXP_GridMath, IMGOUT, "Z2");
 
-           Destroy_IMG(IMGIN);
-           Destroy_IMG(IMGIN2);
-           Destroy_IMG(IMGOUT);
+                DoFormula_IEXP(IEXP_GridMath, "Z2 = Z*Z1;", 1024);
+
+                Destroy_IMG(IMGIN);
+                Destroy_IMG(IMGIN2);
+                Destroy_IMG(IMGOUT);
+                Destroy_IEXP(IEXP_GridMath);
+
+                IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
+                Copy_IMG(IMGIN, IMGOUT);
+                Destroy_IMG(IMGIN);
+                Destroy_IMG(IMGOUT);
+
+            }
+            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
+            Copy_IMG(IMGIN, IMGOUT);
+            Destroy_IMG(IMGIN);
+            Destroy_IMG(IMGOUT);
 
            Strcat_STR(sZGrids, sGrid);
            Strcat_STR(sZGrids, " ");
         }
         iDeleteFile_SYS("xxxxxxxZ.grd");
         iDeleteFile_SYS("xxxxxTmp.grd");
+        iDeleteFile_SYS("xxxxTmp1.grd");
+        iDeleteFile_SYS("xxxxTmp2.grd");
 
-       Strcpy_STR(sFGrids, "");
-       for (iTerm = 1; iTerm <= nTerm; iTerm++)
-       {   
+        iZ = iTokens_STR(sZGrids, " ");
+        Strcpy_STR(sFGrids, "");
+        for (iTerm = 1; iTerm <= nTerm; iTerm++)
+        {   
           Strcpy_STR(sGrid, "xxFGrid");
           FormatI_STR(iTerm, sGridNumber, 2);
           Strcat_STR(sGrid, sGridNumber);
@@ -710,10 +853,16 @@ VV   hVV;                            // to hold the hanning filter values
           Puts_WA(WA_out, sCONT);
           NewLine_WA(WA_out);
 
-          Strcpy_STR(sCONT, "BTWR ");
-          FormatR_STR(rNyquist/2.0, sText, 20, 10);
+          //Strcpy_STR(sCONT, "BTWR ");
+          //FormatR_STR(rNyquist/2.0, sText, 20, 10);
+          //Strcat_STR(sCONT, sText);
+          //Strcat_STR(sCONT, " 8 1 /");    // low pass
+
+          Strcpy_STR(sCONT, "COSN 0.0 ");
+          FormatR_STR(rR1, sText, 20, 10);
           Strcat_STR(sCONT, sText);
-          Strcat_STR(sCONT, " 8 1 /");    // low pass
+          Strcat_STR(sCONT, " 2 1 /");    // low pass
+
           Puts_WA(WA_out, sCONT);
           NewLine_WA(WA_out);
 
@@ -736,13 +885,11 @@ VV   hVV;                            // to hold the hanning filter values
 
           SetInteractive_SYS(0);
           if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.FFT2D.MAGMAPFiltering;Run)") < 0)
-              Abort_SYS(_("Failed Up/Down Contuniation using magmap1.gx."));
+              Abort_SYS(_("Failed Geosoft.GX.FFT2D.MAGMAPFiltering."));
           SetInteractive_SYS(iInteractive);
 
           IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxF.grd", IMG_FILE_READONLY);
           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
-          //if (GridFilt_IMU(IMGIN, IMGOUT, 5, 1.0, IMU_FILT_DUMMY_NO, IMU_FILT_HZDRV_NO, IMU_FILT_FILE_NO, "", hVV))
-          //   Abort_SYS(_("Grid filter operation failed."));
           Copy_IMG(IMGIN, IMGOUT);
           Destroy_IMG(IMGIN);
           Destroy_IMG(IMGOUT);
@@ -759,7 +906,7 @@ VV   hVV;                            // to hold the hanning filter values
 
         Strcpy_STR(sTGrids, "");
         iN = 1;
-        iZ = iTokens_STR(sZGrids, " ");
+        //iZ = iTokens_STR(sZGrids, " ");
         iF = iTokens_STR(sFGrids, " ");
         for (iTerm = 1; iTerm <= nTerm; iTerm++)
         {   
@@ -786,8 +933,17 @@ VV   hVV;                            // to hold the hanning filter values
             Destroy_IMG(IMGIN);
             Destroy_IMG(IMGIN2);
             Destroy_IMG(IMGOUT);
+            Destroy_IEXP(IEXP_GridMath);
 
-            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxT.grd", IMG_FILE_READONLY);
+            SetString_SYS("GRIDFLTN", "GRD", "xxxxxxxT.grd");
+            SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
+
+            SetInteractive_SYS(0);
+            if (iRunGX_SYS("gridflt9") < 0)
+               Abort_SYS(_("Failed smooth using gridflt9.gx."));
+            SetInteractive_SYS(iInteractive);
+
+            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
             IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
             Copy_IMG(IMGIN, IMGOUT);
             Destroy_IMG(IMGIN);
@@ -796,7 +952,7 @@ VV   hVV;                            // to hold the hanning filter values
             Strcat_STR(sTGrids, sGrid);
             Strcat_STR(sTGrids, " ");
         }
-        iDeleteFile_SYS("xxxxxxxT.grd");
+        //iDeleteFile_SYS("xxxxxxxT.grd");
 
         iT = iTokens_STR(sTGrids, " ");
         GetToken_STR(sTemp, sTGrids, 0);
@@ -889,7 +1045,7 @@ VV   hVV;                            // to hold the hanning filter values
    iDeleteFile_SYS("xxxxxOut.grd");   
    iDeleteFile_SYS("xxxxxTmp.grd");
    iDeleteFile_SYS("xxxxTmp2.grd");
-   iDeleteFile_SYS("xxxTmpIn.grd");
+   //iDeleteFile_SYS("xxxTmpIn.grd");
    iDeleteFile_SYS("xxxxiter.spc");
    iDeleteFile_SYS("xxxxiter.grd");   
    iDeleteFile_SYS("xxxxiter_prp.grd");
@@ -902,8 +1058,7 @@ VV   hVV;                            // to hold the hanning filter values
    Destroy_IMG(IMGi);
    Destroy_IMG(IMGe);
    Destroy_IMG(IMGd);
-   Destroy_VV(hVV);
-   //Destroy_IMG(IMGo);
+
 
    // --- done ---
 

@@ -33,14 +33,12 @@ RESOURCE = "totldist.gr"
 //===========================================================================
 
 #include <all.gxh>
-   // clang-format on
+// clang-format on
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
 
-   //===========================================================================
-   //                               VARIABLES
-   //===========================================================================
-
-   string(STR_DB_SYMBOL) sXCh,
-   sYCh;  // Channel names
+string(STR_DB_SYMBOL) sXCh, sYCh, sTmpl;  // Channel names
 string(STR_DEFAULT) sLabel;
 string(STR_DEFAULT) sTemp, sUnit;
 string(STR_FILE) sReport;
@@ -57,6 +55,7 @@ IPJ hIPJ;          // For units
 
 int i;          // utility
 int iLines;     // Number of Lines Processed
+int iTmp;
 int iTotLines;  // Total Number of Lines to Process
 real rDist, rTotlDist;
 
@@ -84,9 +83,48 @@ real rDist, rTotlDist;
 
       List = GetList_DGW(Diag, _TOTLDIST_0);
       SymbLST_DB(Data, List, DB_SYMB_CHAN);
+	  
+      iTmp = -1;
+      GetString_SYS("TOTLDIST", "X", sTmpl);
+      if (iStrlen_STR(sTmpl) > 0)
+         iTmp = iFindItem_LST(List, LST_ITEM_NAME, sTmpl);
+      
+      if (iTmp == -1)
+      {
+         XCh = GetXYZChanSymb_DB(Data, DB_CHAN_X);
+         if (XCh != NULLSYMB)
+         {
+            LockSymb_DB(Data, XCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+            GetChanName_DB(Data, XCh, sTmpl);
+            UnLockSymb_DB(Data, XCh);
+            
+            SetString_SYS("TOTLDIST", "X", sTmpl);
+         }
+      } 
+      
       Sort_LST(List, 0, 0);
+
       List = GetList_DGW(Diag, _TOTLDIST_1);
       SymbLST_DB(Data, List, DB_SYMB_CHAN);
+      
+      iTmp = -1;
+      GetString_SYS("TOTLDIST", "Y", sTmpl);
+      if (iStrlen_STR(sTmpl) > 0)
+         iTmp = iFindItem_LST(List, LST_ITEM_NAME, sTmpl);
+
+      if (iTmp == -1)
+      {
+         YCh = GetXYZChanSymb_DB(Data, DB_CHAN_Y);
+         if (YCh != NULLSYMB)
+         {
+            LockSymb_DB(Data, YCh, DB_LOCK_READONLY, DB_WAIT_INFINITY);
+            GetChanName_DB(Data, YCh, sTmpl);
+            UnLockSymb_DB(Data, YCh);
+            
+            SetString_SYS("TOTLDIST", "Y", sTmpl);
+         }
+      } 
+	  
       Sort_LST(List, 0, 0);
 
       // --- Set any Defaults ---

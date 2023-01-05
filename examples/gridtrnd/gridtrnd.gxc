@@ -13,18 +13,20 @@ Parameters:
 
      GRIDTRND.GRDIN      Name of Input Grid file
              .GRDOUT     Name of Output Grid with trend removed
+             .REPLACE    Trend action
+                           ('Remove a trend' or 'Add trend back from grid header'. Default is 'Remove a trend')
+                           This is IGNORED if ANY of .POINTS,
+                           .ORDER or .COEFF are set.			 
              .POINTS     Points to Use in trend removal
-                           ('EDGE' points only or 'ALL' points)
+                           ('EDGE' points only or 'ALL' points)			   					   
              .ORDER      Order of trend to remove:
                            (0,1,2, or 3. Default is 1.)
              .COEFF      Coefficients of the polynomial to 
                            remove. This is a comma-delimited
-                           string of up to 10 real numbers.
-             .REPLACE    Replace a previously removed trend.
-                           ('NO' or 'YES'. Default is 'NO')
-                           This is IGNORED if ANY of .POINTS,
-                           .ORDER or .COEFF are set.\r\n"
+                           string of up to 10 real numbers.\r\n"	
 
+// Revision History:
+// v2022.2.0
 //===========================================================================
 
 RESOURCE = "gridtrnd.gr"
@@ -39,7 +41,7 @@ RESOURCE = "gridtrnd.gr"
    //                             GLOBAL VARIABLES
    //===========================================================================
 
-   DGW Diag;  // Dialogue handle
+DGW Diag;  // Dialogue handle
 
 int i;      // utility int
 int iToks;  // Tokens in sCoeffs string
@@ -49,6 +51,7 @@ string(STR_FILE) sGrdout;                    // Name of output grid
 string(STR_DEFAULT_LONG) sCoeffs;            // Comma-delimited string of up
                                              // to 10 coefficients (reals
 string(STR_DEFAULT_LONG) sTemp, sAliasFlag;  // Temp. string
+string(STR_DEFAULT_LONG) szMsg;
 
 int iEdge;      // Which set of grid points to use (edge/all)
 int iOrder;     // Order of trend to remove
@@ -62,56 +65,137 @@ VM VMcoef;  // VM contains all of the coefficients
 
 IMG IMGI, IMGO;  // Input and output images
 
+int iNumCoeff, iTrendFlag,ilength;
+int iChoice; 
+
+real rX0 , rY0;
+
+WA Report;                         // Report File
+string(STR_DEFAULT_LONG) sFile; 
+string(STR_DEFAULT) sTitle;
+string(STR_DEFAULT) sNumCoeff, sTrendFlag;
+string(STR_DEFAULT) sTime,sDate;
+string(STR_DEFAULT) sCoeff;
+
+VV VVcoeff,VVCoeffChoice;
+VM VMcoeff;               // VM contains trend coefficients (if any)
+
 //===========================================================================
 //                            GRID UTIL CODE
 //===========================================================================
 
 {
+    //Initialize local variables
+   
+    iChoice = 1;
+	ilength = 0;
+	iNumCoeff = 0;
+	iTrendFlag = 0;	
+			
    if (iInteractive_SYS())
-   {
-      // --- Create the Dialogue ---
+   { 
+	   VVCoeffChoice = Create_VV(-22, 0);	  
+       SetString_VV(VVCoeffChoice,0,"Coeff (A)     Co:   ");
+       SetString_VV(VVCoeffChoice,1,"Coeff (Bx)    Cx:   ");
+       SetString_VV(VVCoeffChoice,2,"Coeff (Cy)    Cy:   ");
+       SetString_VV(VVCoeffChoice,3,"Coeff (Dx^2)  Cxx:  ");	
+       SetString_VV(VVCoeffChoice,4,"Coeff (Exy)   Cxy:  ");	
+       SetString_VV(VVCoeffChoice,5,"Coeff (Fy^2)  Cyy:  ");	
+       SetString_VV(VVCoeffChoice,6,"Coeff (Gx^3)  Cxxx: ");
+       SetString_VV(VVCoeffChoice,7,"Coeff (Hx^2y) Cxxy: ");	
+       SetString_VV(VVCoeffChoice,8,"Coeff (Ixy^2) Cxyy: ");	
+       SetString_VV(VVCoeffChoice,9,"Coeff (Jy^3)  Cyyy: ");
+	
+       while (iChoice != 0) 
+       { 
+	       switch (iChoice) 
+           {
+               case 1:   
+	   	  
+				  // --- Create the Dialogue ---
 
-      Diag = Create_DGW("GRIDTRNDForm");
+				  Diag = Create_DGW("GRIDTRNDForm");
 
-      // --- Set any Defaults from INI ---
+				  // --- Set any Defaults from INI ---
 
-      SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_0, DGW_FILEPATH, "GRIDTRND", "GRDIN");
-      SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_1, DGW_FILEPATH, "GRIDTRND", "GRDOUT");
-      SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_2, DGW_LISTALIAS, "GRIDTRND", "POINTS");
-      SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_3, DGW_LISTALIAS, "GRIDTRND", "ORDER");
-      SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_4, DGW_TEXT, "GRIDTRND", "COEFF");
-      SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_5, DGW_LISTALIAS, "GRIDTRND", "REPLACE");
+				  SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_0, DGW_FILEPATH, "GRIDTRND", "GRDIN");
+				  SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_1, DGW_FILEPATH, "GRIDTRND", "GRDOUT");
+				  SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_2, DGW_LISTALIAS, "GRIDTRND", "REPLACE");				  
+				  SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_3, DGW_LISTALIAS, "GRIDTRND", "POINTS");
+				  SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_4, DGW_LISTALIAS, "GRIDTRND", "ORDER");
+				  SetInfoSYS_DGW(Diag, _GRIDTRNDFORM_5, DGW_TEXT, "GRIDTRND", "COEFF");
 
-      // --- Run the Dialogue ---
+				  // --- Run the Dialogue ---
 
-      i = iRunDialogue_DGW(Diag);
-      if (i != 0) Cancel_SYS();  // He hit cancel
+				  iChoice = iRunDialogue_DGW(Diag);
+				  if (iChoice == -1) Cancel_SYS();
 
+				  // --- Get the Strings and replace in INI ---
 
-      // --- Get the Strings and replace in INI ---
+				  GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_0, DGW_FILEPATH, "GRIDTRND", "GRDIN");
+				  GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_1, DGW_FILEPATH, "GRIDTRND", "GRDOUT");
+				  GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_2, DGW_LISTALIAS, "GRIDTRND", "REPLACE");				  
+				  GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_3, DGW_LISTALIAS, "GRIDTRND", "POINTS");
+				  GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_4, DGW_LISTALIAS, "GRIDTRND", "ORDER");
+				  GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_5, DGW_TEXT, "GRIDTRND", "COEFF");
 
-      GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_0, DGW_FILEPATH, "GRIDTRND", "GRDIN");
-      GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_1, DGW_FILEPATH, "GRIDTRND", "GRDOUT");
-      GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_2, DGW_LISTALIAS, "GRIDTRND", "POINTS");
-      GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_3, DGW_LISTALIAS, "GRIDTRND", "ORDER");
-      GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_4, DGW_TEXT, "GRIDTRND", "COEFF");
-      GetInfoSYS_DGW(Diag, _GRIDTRNDFORM_5, DGW_LISTALIAS, "GRIDTRND", "REPLACE");
+				  GetInfo_DGW(Diag, _GRIDTRNDFORM_2, DGW_LISTALIAS, sAliasFlag);
 
-      GetInfo_DGW(Diag, _GRIDTRNDFORM_5, DGW_LISTALIAS, sAliasFlag);
+			      // --- Get Parameters ---
 
-      // --- Destroy the Dialogue ---
+			      GetString_SYS("GRIDTRND", "GRDIN", sGrdin);
+			      GetString_SYS("GRIDTRND", "GRDOUT", sGrdout);
+				 
+				  GetString_SYS("GRIDTRND", "REPLACE", sTemp);
+				 
+				  // --- VM to hold coefficients ---  
+			   
+				  VMcoeff = Create_VM(REAL, 10);
+			   
+				  GridStatTrendExt_IMU(sGrdin,iTrendFlag ,iNumCoeff, rX0, rY0,VMcoeff);
 
-      Destroy_DGW(Diag);
+				  if (VMcoeff)
+				     Destroy_VM(VMcoeff);
+				  
+				  if ((iNumCoeff == 0) && !iStrcmp_STR(sTemp, "1", STR_CASE_TOLERANT))    //YES
+				  {
+				       DisplayMessage_SYS(_("Modify trend"), _("Please update the Trend action selection and try again"));						  
+					   iChoice = 1;	
+						  
+					   SetString_SYS("GRIDTRND", "REPLACE",_("Remove a trend"));
+				  }
+				  else if((iNumCoeff > 0) && !iStrcmp_STR(sTemp, "0", STR_CASE_TOLERANT))
+                  {
+					  Strcpy_STR(szMsg, _("Do you want to reproduce the original grid (Yes), remove a different trend (No), or Cancel?"));	 
+						 
+					  iChoice = iDisplayQuestionWithCancel_SYS(_("A trend has already been removed"),szMsg);
+                      if (iChoice == 2) iChoice = 1;
+					  else if(iChoice == 1)   //YES
+					  {
+					      iChoice = 0;						  
+						  SetString_SYS("GRIDTRND", "REPLACE", _("Add trend back from grid header"));					  
+					  }
+					  else if(iChoice == 0)  //NO
+					  {
+					      iChoice = 0;						  	
+						  SetString_SYS("GRIDTRND", "REPLACE",_("Remove a trend"));							 
+					  }					  				  
+                  }				  
+
+			      // --- Destroy the Dialogue ---
+
+				  Destroy_DGW(Diag);
+
+	           break;	
+           }	  
+	  
+       } //end while
    }
-
-
+ 
    // --- Flag for blank and TrOption parameters ---
 
    iBlank = 1;
    iTrOption = 0;  // calculate
-
-
-   // --- Get Parameters ---
 
    GetString_SYS("GRIDTRND", "GRDIN", sGrdin);
    GetString_SYS("GRIDTRND", "GRDOUT", sGrdout);
@@ -123,7 +207,6 @@ IMG IMGI, IMGO;  // Input and output images
 
    if (!iStrlen_STR(sGrdout))
       Abort_SYS(_("Output Grid was Not Specified!"));
-
 
    // --- Check the POINTS and ORDER parameters ---
 
@@ -209,38 +292,143 @@ IMG IMGI, IMGO;  // Input and output images
       }
    }
 
+    // --- Check the .REPLACE parameter ---
 
-   // --- Check the .REPLACE parameter ---
+    GetString_SYS("GRIDTRND", "REPLACE", sTemp);
+  
+    if (!iStrcmp_STR(sTemp, "1" , STR_CASE_TOLERANT) || !iStrcmp_STR(sTemp, "Add trend back from grid header" , STR_CASE_TOLERANT)  || !iStrcmp_STR(sAliasFlag, "1", STR_CASE_TOLERANT))   //YES replace
+       iTrOption = 2;  // replace
 
-   GetString_SYS("GRIDTRND", "REPLACE", sTemp);
+    Progress_SYS(1);
 
-   if (!iStrcmp_STR(sTemp, "YES", STR_CASE_TOLERANT) || !iStrcmp_STR(sAliasFlag, "1", STR_CASE_TOLERANT))
+    ProgName_SYS(_("Creating Trend-Removed Grid File..."), 1);
+	
+    // --- Create Images tied to the grids ---
 
-      iTrOption = 2;  // replace
+    IMGI = CreateFile_IMG(GS_DOUBLE, sGrdin, IMG_FILE_READONLY);
+    IMGO = CreateOutFile_IMG(GS_DOUBLE, sGrdout, IMGI);
 
+    // --- Create the Grid file ---
 
-   Progress_SYS(1);
+    GridTrnd_IMU(IMGI, IMGO, iTrOption, iEdge, iOrder, VMcoef, iToks);
+        
+    Destroy_SYS(IMGI);
+    Destroy_SYS(IMGO);
 
-   ProgName_SYS(_("Creating Trend-Removed Grid File..."), 1);
+   if (iInteractive_SYS())
+   {
+		// --- VM to hold coefficients ---  
+	   
+		VMcoeff = Create_VM(REAL, 10);
 
-   // --- Create Images tied to the grids ---
+		GridStatTrendExt_IMU(sGrdout,iTrendFlag ,iNumCoeff, rX0, rY0,VMcoeff);	
 
-   IMGI = CreateFile_IMG(GS_DOUBLE, sGrdin, IMG_FILE_READONLY);
-   IMGO = CreateOutFile_IMG(GS_DOUBLE, sGrdout, IMGI);
+		// --- Create report file ---
 
-   // --- Create the Grid file ---
+		ilength = iStrlen_STR(sGrdout);
+		IFileNamePart_STR(sGrdout,sGrdout,ilength ,STR_FILE_PART_NAME);     
+	   
+		Strcpy_STR(sFile, sGrdout);
+		Strcat_STR(sFile, _n("_Coefficients"));
+		Strcat_STR(sFile, _n(".txt"));
+		Report = Create_WA(sFile, 0);
 
-   GridTrnd_IMU(IMGI, IMGO, iTrOption, iEdge, iOrder, VMcoef, iToks);
+		Strcpy_STR(sTitle, _n("        Removed Trend Coefficients"));  
+		Puts_WA(Report, sTitle);   
+		NewLine_WA(Report);
+		NewLine_WA(Report);
 
+		Puts_WA(Report, _n("Date of report..............: "));	 
+		FormatDate_STR(rDate_SYS(), sDate, 20, DATE_FORMAT_YYYYMMDD);
+		Puts_WA(Report,sDate); 
+		NewLine_WA(Report);
+		Puts_WA(Report, _n("Time of report..............: "));
+		FormatTime_STR(rTime_SYS(), sTime, 30, 19, TIME_FORMAT_COLON);
+		Substr_STR(sTime, sTime, 0, 11);
+		Puts_WA(Report,sTime);
+		NewLine_WA(Report);
+		NewLine_WA(Report);
 
+		Puts_WA(Report,"Input Grid File:  ");
+		Puts_WA(Report,sGrdin); 
+		NewLine_WA(Report);
+		NewLine_WA(Report);
+		
+		Puts_WA(Report,"Output Grid File:  ");		
+		Puts_WA(Report,sFile); 
+		NewLine_WA(Report);
+		NewLine_WA(Report);	
+
+		//Convert int to string
+		Puts_WA(Report, _n("Trend Order   "));
+		IFormatI_STR(iTrendFlag,sTrendFlag,10,8);
+		Puts_WA(Report,sTrendFlag);
+		NewLine_WA(Report);
+		NewLine_WA(Report);
+	   
+		//Convert int to string
+		Puts_WA(Report, _n("Number of Coefficients   "));
+		IFormatI_STR(iNumCoeff,sNumCoeff,10,8);
+		Puts_WA(Report,sNumCoeff);
+		NewLine_WA(Report);
+		NewLine_WA(Report);	
+
+		//Convert int to string
+		Puts_WA(Report, _n("Origin Xo:   "));
+		IFormatR2_STR(rX0,sTrendFlag,20,20,0);
+		Puts_WA(Report,sTrendFlag);
+		NewLine_WA(Report);
+		NewLine_WA(Report);
+	   
+		//Convert int to string
+		Puts_WA(Report, _n("Origin Yo:   "));
+		IFormatR2_STR(rY0,sTrendFlag,20,20,0);
+		Puts_WA(Report,sTrendFlag);
+		NewLine_WA(Report);
+		NewLine_WA(Report);
+
+		if(iNumCoeff > 0)
+		{
+			VVcoeff = Create_VV(REAL,0);
+			CopyVMtoVV_VV(VVcoeff, VMcoeff);
+		
+		   for (i = 0; i < iNumCoeff; i++)
+		   {
+			   rTemp = rGetReal_VV(VVcoeff,i);
+		  
+			   if(rTemp != rDUMMY)
+			   {
+					//Convert real to string			
+				   IGetString_VV(VVCoeffChoice,i,sCoeff,22);
+				   Puts_WA(Report, sCoeff); 			
+				   IFormatR2_STR(rTemp,sTemp,20,20,8);   
+				   Puts_WA(Report,sTemp);
+				   NewLine_WA(Report);
+				   NewLine_WA(Report);	
+			   }  	  
+		   }
+		}
+		
+		Destroy_WA(Report);
+		
+		SetString_SYS(_n("EDIT"), _n("CHILD"), _("Trend Coefficients Summary"));
+		SetString_SYS(_n("EDIT"), _n("FILE"), sFile);
+		iRunGX_SYS("edit.gx");
+
+	   if (VMcoeff)
+		  Destroy_VM(VMcoeff);
+	   if (VVcoeff)
+		  Destroy_VV(VVcoeff);
+	   if (VVCoeffChoice)
+		  Destroy_VV(VVCoeffChoice);
+   }
+   
    // --- Destroy the VM ---
 
    if (VMcoef)
       Destroy_VM(VMcoef);
-   Destroy_SYS(IMGI);
-   Destroy_SYS(IMGO);
-
-
+	  
+	  
    // --- done ---
 
    Progress_SYS(0);
