@@ -82,7 +82,7 @@ LST List, LineLST;       // List handle
 IPJ hOldIPJ, hNewIPJ;
 PJ hPJ;
 
-int i, iR, iLines, iNew;
+int i, iR, iLines, iNew, iInputGCS, iOutputPCS;
 
 //===========================================================================
 //                                 CODE
@@ -210,6 +210,7 @@ int i, iR, iLines, iNew;
             else  // user cancelled
                Cancel_SYS();
 
+            iInputGCS = iIsGeographic_IPJ(hOldIPJ);
             break;
 
 
@@ -303,9 +304,9 @@ int i, iR, iLines, iNew;
 
             if (iNew)
             {
+               // in interactive mode, hNewIPJ will be *unknown
+               // if we are defining non-existent X/Y channels
                hNewIPJ = Create_IPJ();
-               Copy_IPJ(hOldIPJ, hNewIPJ);
-               ClearWarp_IPJ(hNewIPJ);
             }
             else
             {
@@ -332,19 +333,24 @@ int i, iR, iLines, iNew;
             Strcat_STR(sTemp, sNewYCh);
             UnLock_EDB(EData);
             iR = iCoordSysWizard_GUI(hNewIPJ, TRUE, COORDSYS_MODE_ALL, _("New/Destination channels"), sTemp);
-            if (iR == 0)
+
+            // --- set the new IPJ in the channels ---
+
+            Data = Lock_EDB(EData);
+            LockSymb_DB(Data, NewXCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
+            LockSymb_DB(Data, NewYCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
+            SetIPJ_DB(Data, NewXCh, NewYCh, hNewIPJ);
+            iOutputPCS = iHasProjection_IPJ(hNewIPJ);
+            if (iInputGCS == 1 && iOutputPCS == 1)
             {
-               // --- set the new IPJ in the channels ---
-
-               Data = Lock_EDB(EData);
-               LockSymb_DB(Data, NewXCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
-               LockSymb_DB(Data, NewYCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
-               SetIPJ_DB(Data, NewXCh, NewYCh, hNewIPJ);
-               UnLockSymb_DB(Data, NewXCh);
-               UnLockSymb_DB(Data, NewYCh);
-
-               i = 99;
+                SetChanDecimal_DB(Data, NewXCh, 2);
+                SetChanDecimal_DB(Data, NewYCh, 2);
             }
+            UnLockSymb_DB(Data, NewXCh);
+            UnLockSymb_DB(Data, NewYCh);
+
+            if (iR == 0)
+               i = 99;
             else  // user cancelled
                Cancel_SYS();
 
@@ -468,9 +474,16 @@ int i, iR, iLines, iNew;
       GetString_SYS("NEWXY", "NEWIPJ_LOCALDATUM", s5);
       hNewIPJ = Create_IPJ();
       SetGXF_IPJ(hNewIPJ, s1, s2, s3, s4, s5);
+      iInputGCS = iIsGeographic_IPJ(hOldIPJ);
+      iOutputPCS = iHasProjection_IPJ(hNewIPJ);
       LockSymb_DB(Data, NewXCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
       LockSymb_DB(Data, NewYCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
       SetIPJ_DB(Data, NewXCh, NewYCh, hNewIPJ);
+      if (iInputGCS == 1 && iOutputPCS == 1)
+      {
+        SetChanDecimal_DB(Data, NewXCh, 2);
+        SetChanDecimal_DB(Data, NewYCh, 2);
+      }
       UnLockSymb_DB(Data, NewXCh);
       UnLockSymb_DB(Data, NewYCh);
    }

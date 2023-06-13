@@ -40,15 +40,16 @@ REG hDataREG;  // Gravity data REG
 REG hWorkREG;  // Gravity work REG
 VV hTypeVV, hStnVV, hSrcVV;
 IPJ hIPJ;
-LST hLST, hChanLST, hCopyLST, hRenameLST, List, hLineSymbolLST;
+LST hLST, hChanLST, hCopyLST, hRenameLST, List, hLineSymbolLST, hLineSymbolLSTIn, hLineSymbolLSTOut;
 WA hWA;
 
 string(STR_FILE) sMaster, sSurvey, sReportFile, sCurrentSurveyFile, sSurveyFile;
 string(STR_DEFAULT_SHORT) sType;
 string(STR_DEFAULT_SHORT) sSrc, sSrcNew;
 string(STR_DEFAULT_LONG) sMsg;
-string(STR_DB_SYMBOL) sStation, sLatitude, sLongitude, sFrom, sTo, sChan, sLineName;
-int i, ii, iNew, iLen, iNChan, iAlternateChannels, iInteractive, n;
+string(STR_DEFAULT_LONG) sSameLineNames;
+string(STR_DB_SYMBOL) sStation, sLatitude, sLongitude, sFrom, sTo, sChan, sLineName, sLineNameIn, sLineNameOut;
+int i, ii, iNew, iLen, iNChan, iAlternateChannels, iInteractive, n, inLineCount, outLineCount, j, k, sameLineCount, maxSameLineCount;
 int iGscale, iClosure, iType, iCheck, iSurveyLoaded, iFile, iFiles;
 int iDisplayReportFile, iLineEmpty;
 real rStart, rIncr;
@@ -142,6 +143,7 @@ real rStart, rIncr;
          GetInfoSYS_DGW(hDGW, _GRAPPEND_1, DGW_FILEPATH, "GRAPPEND", "MASTER");
 
          GetString_SYS("GRAPPEND", "MASTER", sMaster);
+         GetString_SYS("GRAPPEND", "SURVEY", sSurvey);
 
          if (!iFileExist_SYS(sMaster))
          {
@@ -149,7 +151,66 @@ real rStart, rIncr;
             if (i) iNew = TRUE;
          }
          else
-            i = 1;
+         {
+            // --- Get selected line list from survey db ---
+            eDBi = Load_EDB(sSurvey);
+            hDBi = Lock_EDB(eDBi);
+            hLineSymbolLSTIn = CreateSymbLST_DB();
+            SelectedLineLST_DB(hDBi, hLineSymbolLSTIn);
+            inLineCount = iSize_LST(hLineSymbolLSTIn);
+            UnLock_EDB(eDBi);
+            
+            // --- Get selected line list from master db ---
+            eDBo = Load_EDB(sMaster);
+            hDBo = Lock_EDB(eDBo);
+            hLineSymbolLSTOut = CreateSymbLST_DB();
+            SelectedLineLST_DB(hDBo, hLineSymbolLSTOut);
+            outLineCount = iSize_LST(hLineSymbolLSTOut);
+            UnLock_EDB(eDBo);
+
+            // --- Check if there is any same line in both dbs ---
+            sameLineCount = 0;
+            maxSameLineCount = 10;
+            Strcpy_STR(sSameLineNames, "");
+            for (k = 0; k < inLineCount; k++)
+            {
+               GetItem_LST(hLineSymbolLSTIn, 0, k, sLineNameIn);
+               for (j = 0; j < outLineCount; j++)
+               {
+                  GetItem_LST(hLineSymbolLSTOut, 0, j, sLineNameOut);
+                  if (iStrcmp_STR(sLineNameIn, sLineNameOut, STR_CASE_TOLERANT) == 0)
+                  {
+                     sameLineCount++;
+                     Strcat_STR(sSameLineNames, "\r\n");
+                     if (sameLineCount >= maxSameLineCount)
+                     {
+                        Strcat_STR(sSameLineNames, _("and more ..."));
+                        break;
+                     }
+                     else
+                     {
+                        Strcat_STR(sSameLineNames, sLineNameOut);
+                     }
+                  }
+               }
+               if (sameLineCount >= maxSameLineCount)
+                  break;
+            }
+
+            if (sameLineCount > 0)
+            {
+               if (sameLineCount > 1)
+                  Printf_STR(sMsg, sizeof(sMsg), _("Groups/lines %s \r\nalready exist.  Append?"), sSameLineNames);
+               else
+                  Printf_STR(sMsg, sizeof(sMsg), _("Group/line %s \r\nalready exists.  Append?"), sSameLineNames);
+
+               i = iDisplayQuestion_SYS(sMaster, sMsg);
+            }
+            else
+            {
+               i = 1;
+            }
+         }
       }
 
       Destroy_DGW(hDGW);
@@ -552,30 +613,35 @@ real rStart, rIncr;
 
       if (TypeChan != NULLSYMB)
       {
-         LOCK_RW(hDBo, TypeChan);
-         GetChanVV_DB(hDBo, Group, TypeChan, hTypeVV);
-         UNLOCK(hDBo, TypeChan);
-
-         rStart = rGetFidStart_VV(hTypeVV);
-         rIncr = rGetFidIncr_VV(hTypeVV);
-         iLen = iLength_VV(hTypeVV);
-         for (i = 0; i < iLen; i++)
+         // --- go through all line groups ---
+		 
+         hLineSymbolLST = CreateSymbLST_DB();
+         LineLST_DB(hDBo, hLineSymbolLST);
+         n = iSize_LST(hLineSymbolLST);
+         for (iNChan = 0; iNChan < n; iNChan++)
          {
-            ii = iGetInt_VV(hTypeVV, i);
-            if (ii != iDUMMY && ii != 1)
-            {
-               // --- not a reading, remove it ---
+            LOCK_RW(hDBo, TypeChan);
+            GtSymbItem_LST(hLineSymbolLST, iNChan, sLineName, STR_DB_SYMBOL, LineSymbol);
+            GetChanVV_DB(hDBo, LineSymbol, TypeChan, hTypeVV);
+            UNLOCK(hDBo, TypeChan);
 
-               ModFidRange_DU(hDBo, Group, rStart, rIncr, i, 1, DU_MODFID_DELETE);
-               if (i + 1 < iLen) Copy2_VV(hTypeVV, i, hTypeVV, i + 1, (iLen - i - 1));
-               i--;
-               iLen--;
+            rStart = rGetFidStart_VV(hTypeVV);
+            rIncr = rGetFidIncr_VV(hTypeVV);
+            iLen = iLength_VV(hTypeVV);
+            for (i = 0; i < iLen; i++)
+            {
+               ii = iGetInt_VV(hTypeVV, i);
+               if (ii != iDUMMY && ii != 1)
+               {
+                  // --- not a reading, remove it ---
+
+                  ModFidRange_DU(hDBo, LineSymbol, rStart, rIncr, i, 1, DU_MODFID_DELETE);
+                  if (i + 1 < iLen) Copy2_VV(hTypeVV, i, hTypeVV, i + 1, (iLen - i - 1));
+                  i--;
+                  iLen--;
+               }
             }
          }
-
-         // --- don't need type any more ---
-
-         REMOVE(iType, _n("Type"))
       }
 
 

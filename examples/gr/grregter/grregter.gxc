@@ -70,16 +70,27 @@ int iSurveyReg;
 int i, iEdge, iOpt;
 int iSurveyType;  // 0-Ground Survey, 1-Shipborne Survey, 2-Airborne Survey
 
+REG hWorkREG;  // Gravity work REG
+
 
 //===========================================================================
 //                                 CODE
 //===========================================================================
+
+#define SET(A, B)                                            \
+   GetString_SYS("GRREGTER", A, sTemp);                      \
+   if (iStrlen_STR(sTemp) == 0)                              \
+      Get_REG(hWorkREG, B, sTemp, sizeof(sTemp));           
+
 
 {
    // --- Are we running interactively ? ---
 
    if (iInteractive_SYS())
    {
+      hWorkREG = Create_REG(256);
+      GetWorkspaceREG_SYS(hWorkREG);
+
       i = 1;
       while (i != 0)
       {
@@ -95,8 +106,19 @@ int iSurveyType;  // 0-Ground Survey, 1-Shipborne Survey, 2-Airborne Survey
          SetInfoSYS_DGW(Diag, _GRREGTER_2, DGW_FILEPATH, "GRREGTER", "OUTGRD");
          SetInfoSYS_DGW(Diag, _GRREGTER_3, DGW_LISTALIAS, "GRREGTER", "ELEVUNIT");
          SetInfoSYS_DGW(Diag, _GRREGTER_4, DGW_TEXT, "GRREGTER", "WATERELEV");
-         SetInfoSYS_DGW(Diag, _GRREGTER_5, DGW_TEXT, "GRREGTER", "DENST");
-         SetInfoSYS_DGW(Diag, _GRREGTER_6, DGW_TEXT, "GRREGTER", "WATERDENS");
+         
+         SET("DENST", "GRAVRED.DENSITY_EARTH")
+         if (iStrlen_STR(sTemp) != 0)
+            SetInfo_DGW(Diag, _GRREGTER_5, DGW_TEXT, sTemp);
+         else
+            SetInfoSYS_DGW(Diag, _GRREGTER_5, DGW_TEXT, "GRREGTER", "DENST");
+
+         SET("WATERDENS", "GRAVRED.DENSITY_WATER")
+         if (iStrlen_STR(sTemp) != 0)
+            SetInfo_DGW(Diag, _GRREGTER_6, DGW_TEXT, sTemp);   
+         else
+            SetInfoSYS_DGW(Diag, _GRREGTER_6, DGW_TEXT, "GRREGTER", "WATERDENS");
+         
          SetInfoSYS_DGW(Diag, _GRREGTER_7, DGW_TEXT, "GRREGTER", "DOUTER");
          SetInfoSYS_DGW(Diag, _GRREGTER_8, DGW_TEXT, "GRREGTER", "DINNER");
          SetInfoSYS_DGW(Diag, _GRREGTER_9, DGW_LISTALIAS, "GRREGTER", "OPT");
@@ -104,7 +126,12 @@ int iSurveyType;  // 0-Ground Survey, 1-Shipborne Survey, 2-Airborne Survey
          SetInfoSYS_DGW(Diag, _GRREGTER_11, DGW_TEXT, "GRREGTER", "MIN_Y");
          SetInfoSYS_DGW(Diag, _GRREGTER_12, DGW_TEXT, "GRREGTER", "MAX_X");
          SetInfoSYS_DGW(Diag, _GRREGTER_13, DGW_TEXT, "GRREGTER", "MAX_Y");
-         SetInfoSYS_DGW(Diag, _GRREGTER_14, DGW_LISTALIAS, "GRREGTER", "SURVEYTYPE");
+
+         SET("SURVEYTYPE", "GRAVRED.SURVEYTYPE")
+         if (iStrlen_STR(sTemp) != 0)
+            SetInfo_DGW(Diag, _GRREGTER_14, DGW_TEXT, sTemp);
+         else
+            SetInfoSYS_DGW(Diag, _GRREGTER_14, DGW_LISTALIAS, "GRREGTER", "SURVEYTYPE");
 
 
          // --- Run the Dialogue ---
@@ -180,7 +207,7 @@ int iSurveyType;  // 0-Ground Survey, 1-Shipborne Survey, 2-Airborne Survey
    {
       rDensT = rGetReal_SYS("GRREGTER", "DENST");
       if (rDensT == rDUMMY)
-         Abort_SYS(_("Invalid terrain density! Must be a real number or blank."));
+         Abort_SYS(_("Invalid earth density! Must be a real number or blank."));
    }
 
    rDinner = rDUMMY;

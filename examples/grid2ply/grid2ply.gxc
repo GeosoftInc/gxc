@@ -73,7 +73,6 @@ MVIEW View;
 PLY hPLY, hPLY2;
 IMG hIMG;
 IPJ hIPJ;
-IPJ hUserIPJ;
 META hMETA;
 VV VVx, VVy;
 
@@ -89,7 +88,6 @@ real rMinX, rMinY, rMaxX, rMaxY;
 int i, iN, iExc;
 int iMode, iStyle;
 int iMinPoints;
-int iOrient;
 
 //===========================================================================
 //                                  CODE
@@ -150,6 +148,8 @@ int iOrient;
 
             hDGW = Create_DGW("GRID2PLY2");
 
+			SetInt_SYS("SCLMAP", "GRID_SAVE", 1);
+            if (iRunGX_SYS("sclmap")) Cancel_SYS();
 
             // --- get line pattern list ---
 
@@ -216,20 +216,14 @@ int iOrient;
    SetGridUnchanged_IMG(hIMG);
 
    hPLY = Create_PLY();
+   hPLY2 = Create_PLY();
    GridEdgePLY_IMU(hIMG, hPLY, iMinPoints);
+
 
    // --- Get grid cell size for thinning ---
 
    GetInfo_IMG(hIMG, rDX, rDY, rX0, rY0, rRot);
 
-   hIPJ = Create_IPJ();
-   GetIPJ_IMG(hIMG, hIPJ);
-   if (!iHasProjection_IPJ(hIPJ) || iCharComp_STR(sAction, "S"))
-   {
-      // --- Rotate polygon ---
-      Rotate_PLY(hPLY, rX0, rY0, rRot);
-   }
-   Destroy_SYS(hIPJ);
 
    // --- put the polygon in the grid header ---
 
@@ -238,7 +232,6 @@ int iOrient;
    Clear_PLY(hPLY);
    GridPLY_IMU(hIMG, hPLY, 0);
    Destroy_IMG(hIMG);
-
 
    ProgUpdate_SYS(100);
    Progress_SYS(0);
@@ -269,7 +262,8 @@ int iOrient;
       rScale = rScaleMM_MVIEW(View);
 
 
-      // --- get the view extent, thin and clip the PLY ---
+      // --- get the view extent, thin the PLY. Do NOT clip it - Grids are not clipped physically, they are
+      //     masked to the clipping area, so the grid outline should be as well. ---
 
       Extent_MVIEW(View, MVIEW_EXTENT_CLIP, MVIEW_EXTENT_UNIT_VIEW, rMinX, rMinY, rMaxX, rMaxY);
 
@@ -279,84 +273,61 @@ int iOrient;
       hIPJ = Create_IPJ();
       GetIPJ_MVIEW(View, hIPJ);
 
-      hUserIPJ = Create_IPJ();
-      GetUserIPJ_MVIEW(View, hUserIPJ);
-
-
-      // --- If this is an oriented section, you must use the native view
-      //     projection, otherwise, one dimension ("Z") is lost because only the
-      //     true "X" and "Y" values are recovered from UserIPJ. This means the
-      //     PLY would collapse to a line.  In a section view, the native view
-      //     "X" coordinate corresponds to either Easting (for azimuth = 90), or
-      //     northing (for azimuth = 0), or begins at 0 on the left side. ---
-
-      iOrient = iGetOrientation_IPJ(hIPJ);
-      if (iOrient == IPJ_ORIENT_SECTION)
-      {
-         ClearOrientation_IPJ(hIPJ);
-         Copy_IPJ(hIPJ, hUserIPJ);
-      }
-
-
-      // --- If there is no projection in the polygon, assume it
-      //     is the same as the User Projection, otherwise
-      //     transform it to the User Projection ---
-
-      if (iSourceType_IPJ(hIPJ) == IPJ_TYPE_NONE)
-         SetIPJ_PLY(hPLY, hUserIPJ);
-      else
-         ChangeIPJ_PLY(hPLY, hUserIPJ);
-
-      // --- set the working projection ---
-
-      SetWorkingIPJ_MVIEW(View, hUserIPJ);
-
+      ChangeIPJ_PLY(hPLY, hIPJ);
 
       Thin_PLY(hPLY, rScaleMM_MVIEW(View) * rEdgeRes);
 
       ProgUpdate_SYS(100);
 
-      ProgName_SYS(_("Clipping polygon"), 0);
-      if (iClipArea_PLY(hPLY, rMinX, rMinY, rMaxX, rMaxY))
+      // --- See if the PLY falls inside the map's clipping area ---
+
+      Copy_PLY(hPLY2, hPLY);
+      if (iClipArea_PLY(hPLY2, rMinX, rMinY, rMaxX, rMaxY) == 0)
       {
-         // --- create a group ---
-
-         FileNamePart_STR(sGrid, sGridName, STR_FILE_PART_NAME);
-         GenGroupName_STR("EDGE", sGridName, "", sGrpName);
-         StartGroup_MVIEW(View, sGrpName, MVIEW_GROUP_NEW);
-
-
-         // --- put the grid meta in the group ---
-
-         hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGrid, IMG_FILE_READORWRITE);
-         hMETA = Create_META();
-         GetMETA_IMG(hIMG, hMETA);
-         Meta_MVIEW(View, hMETA, "Grid Properties");
-         Destroy_META(hMETA);
-         Destroy_IMG(hIMG);
-
-
-         // --- set drawing attributes ---
-
-         LineStyle_MVIEW(View, iStyle, rPitch * rScale);
-         LineThick_MVIEW(View, rThick * rScale);
-         LineColor_MVIEW(View, iColor_MVIEW(sLineColor));
-         FillColor_MVIEW(View, iColor_MVIEW(sFillColor));
-
-
-         // --- draw polygon ---
-
-         PolygonPLY_MVIEW(View, hPLY);
-
-
-         // --- Add maker object ---
-
-         EasyMaker_MVIEW(View, _("Grid edge..."), "GRID2PLY;");
+         DisplayMessage_SYS(_("Draw grid edge on the map"), _("The grid edge does not fall within the bounds of the current map's clipping region."));
+         Cancel_SYS();
       }
-      else
-      {
-         DisplayMessage_SYS(_("Draw grid edge on the map"), _("The grid edge does not fall within the bounds of the current map."));
-      }
+
+      // --- create a group ---
+
+      FileNamePart_STR(sGrid, sGridName, STR_FILE_PART_NAME);
+      GenGroupName_STR("EDGE", sGridName, "", sGrpName);
+      StartGroup_MVIEW(View, sGrpName, MVIEW_GROUP_NEW);
+
+
+      // --- put the grid meta in the group ---
+
+      hIMG = CreateFile_IMG(GS_TYPE_DEFAULT, sGrid, IMG_FILE_READORWRITE);
+      hMETA = Create_META();
+      GetMETA_IMG(hIMG, hMETA);
+      Meta_MVIEW(View, hMETA, "Grid Properties");
+      Destroy_META(hMETA);
+      Destroy_IMG(hIMG);
+
+
+      // --- set drawing attributes ---
+
+      LineStyle_MVIEW(View, iStyle, rPitch * rScale);
+      LineThick_MVIEW(View, rThick * rScale);
+      LineColor_MVIEW(View, iColor_MVIEW(sLineColor));
+      FillColor_MVIEW(View, iColor_MVIEW(sFillColor));
+
+
+      // --- draw polygon ---
+
+      PolygonPLY_MVIEW(View, hPLY);
+
+
+      // --- clip it to the view ---
+
+      MarkAllGroups_MVIEW(View, 0);
+      MarkGroup_MVIEW(View, sGrpName, 1);
+      ClipMarkedGroups_MVIEW(View, 1);
+
+
+      // --- Add maker object ---
+
+      EasyMaker_MVIEW(View, _("Grid edge..."), "GRID2PLY;");
 
 
       ProgUpdate_SYS(100);
@@ -365,7 +336,6 @@ int iOrient;
       Destroy_SYS(View);
       UnLock_EMAP(eMAP);
       Destroy_SYS(hIPJ);
-      Destroy_SYS(hUserIPJ);
       Destroy_SYS(hPLY);
    }
    else
@@ -387,7 +357,6 @@ int iOrient;
       iMode = iGetInt_SYS("GRID2PLY", "MODE");
       if (iMode == 1 && iFileExist_SYS(sPLY))
       {
-         hPLY2 = Create_PLY();
          VVx = Create_VV(REAL, 0);
          VVy = Create_VV(REAL, 0);
 
