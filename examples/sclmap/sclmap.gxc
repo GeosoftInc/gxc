@@ -37,10 +37,11 @@ EMAP EMap;
 MAP Map, NewMap;
 DGW Diag;
 MVIEW View;
+IPJ ViewIPJ;
 
 real rScale, rNewScale, rMinX, rMinY, rMaxX, rMaxY;
 
-int i, i3D, iGrid, iGridSave, iGridOnly, iPackedFiles;
+int i, i3D, iGrid, iGridSave, iGridOnly, iPackedFiles, iReSize;
 int iArcGIS, iSection;
 int iManual;
 
@@ -61,6 +62,7 @@ string(STR_FILE) sMap;
       Abort_SYS(_("This GX cannot be run without a current map."));
 
    EMap = CurrentNoActivate_EMAP();
+
 
    iGrid = 0;
    iGridSave = iGetInt_SYS("SCLMAP", "GRID_SAVE");
@@ -100,6 +102,7 @@ string(STR_FILE) sMap;
    SetRedrawFlag_EMAP(EMap, EMAP_REDRAW_NO);
 
    iManual = 1;
+   iReSize = 0;
 
    if (iArcGIS)
    {
@@ -188,6 +191,23 @@ string(STR_FILE) sMap;
 
          DupMap_MAP(Map, NewMap, DUPMAP_COPY);
 
+         
+         // --- remove any plan orientation from the map projection if we are duplicating a grid viewer ---
+
+         iReSize = 0;
+         if (iExistView_MAP(NewMap, _n("*Data")) == 1)
+         {
+            View = Create_MVIEW(NewMap, _n("*Data"), MVIEW_WRITEOLD);
+            ViewIPJ = Create_IPJ();
+            GetIPJ_MVIEW(View, ViewIPJ);
+            if (iGetOrientation_IPJ(ViewIPJ) == IPJ_ORIENT_PLAN)
+            {
+               ClearOrientation_IPJ(ViewIPJ);
+               SetIPJ_MVIEW(View, ViewIPJ);
+               iReSize = 1;
+            }
+         }
+
          UnLock_EMAP(EMap);
          UnLoad_EMAP(sGrd);
 
@@ -258,6 +278,12 @@ string(STR_FILE) sMap;
    Destroy_MVIEW(View);
 
    UnLock_EMAP(EMap);
+
+   if (iReSize)
+   {
+      SetInt_SYS("RESZMAP", "CHILD", 1);
+      iRunGX_SYS("reszmap.gx");
+   }
 
    if (!iArcGIS && iInteractive_SYS())
    {

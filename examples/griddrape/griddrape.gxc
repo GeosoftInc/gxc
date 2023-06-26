@@ -1,4 +1,4 @@
-//=====================g======================================================
+//=============================================================================
 // clang-format off
 NAME          = "GRIDDRAPE"
 #include <version.gxh>
@@ -9,12 +9,12 @@ TRANSLATIONFRIENDLYPATH = "GX/Grid and Image/Filters"
 DESCRIPTION   = "\Apply drape to drape continuation filter to a grid.
 Parameters:
        GRIDDRAPE.INGRD       File Name of the input Grid.
-                .ELEVGRD     File Name of the elevation Grid.
+                .OBSELEV     Observation elevation option
+                .OBSELEVHT   Observation height
+                .OBSELEVGRD  File Name of Observation drape grid.
                 .NEWELEV     New observation elevation option
                 .ELEVHT      New observation height
                 .DRAPEGRD    File Name of new observation drape grid.
-                .ITERNUM     Number of iteration to apply
-                .EXPNNUM     Number of Taylor expansion terms
                 .OUTGRD      File Name of the output Grid.\r\n"
 
 //The GX is using Tayler method and FFT approach to do the fast calculation.
@@ -40,13 +40,15 @@ DGW Diag;  // Dialogue handle
 
 string(STR_FILE) sInputGrd;     // Name of input grid
 string(STR_FILE) sOutputGrd;    // Name of output grid
-string(STR_FILE) sElevGrd;      // Name of elevation grid
+string(STR_FILE) sElevGrd;      // Name of Observation drape grid
+string(100)      sObsHeight;    // Observation height
 string(STR_FILE) sDrapeGrd;     // Name of new drape grid
 string(100)      sHeight;       // New observation height
 int iNewElev;                   // New observation elevation option
+int iObsElev;                   // Observation elevation option
 int iIter, nIter;               // Number of iteration to apply
 int iTerm, nTerm;               // Number of Taylor expansion terms
-real rHeight;
+real rHeight, rObsHeight;
 
 IMG IMGi;  // Image tied to the input grid
 IMG IMGe;  // Image tied to the elevation grid
@@ -55,15 +57,16 @@ IMG IMGd;  // Image for the drape grid
 int   iInteractive;
 int i, j, iNLines;                   // utility int
 int iN;                              // n!iNewElev
+int iNX, iNY;
+VV  zVV;
 IMG IMGIN, IMGIN2, IMGOUT;           // IMGs for FFT2 functions
-VM VMcoef;                           // holds coefficients for GridTrnd_IMU
 real rDx, rDy, rXo, rYo, rRot;       // gridstat variables
 real rDx2, rDy2, rXo2, rYo2, rRot2;  // gridstat variables
 int iNXA, iNYA;                      // gridstat variables
-real rMin, rMax, rMean1, rMean2, rSD;  // gridstat variables
+real rMin1, rMax1, rMean1, rSD;      // gridstat variables
+real rMin2, rMax2, rMean2;           // gridstat variables
 real rDist;                          // continuation distance rDist=rMean2-rMean1
 real rNyquist;                       // Nyquist wavenumber
-real rTmp1, rTmp2;
 real rD1;                            // Half elevation grid value range
 real rR1;                            // Highcut of DCOS
 RA RA_in;                            // input read ascii buffer
@@ -105,13 +108,14 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
       // --- Set any Defaults from INI ---
 
       SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_0, DGW_FILEPATH, "GRIDDRAPE", "INGRD");
-      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_1, DGW_FILEPATH, "GRIDDRAPE", "ELEVGRD");
-      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_2, DGW_LISTALIAS, "GRIDDRAPE", "NEWELEV");
-      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_3, DGW_TEXT, "GRIDDRAPE", "ELEVHT");
-      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_4, DGW_FILEPATH, "GRIDDRAPE", "DRAPEGRD");
-      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_5, DGW_TEXT, "GRIDDRAPE", "NITERATIONS");
-      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_6, DGW_TEXT, "GRIDDRAPE", "NTERMS");
+      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_1, DGW_LISTALIAS, "GRIDDRAPE", "OBSELEV");
+      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_2, DGW_TEXT, "GRIDDRAPE", "OBSELEVHT");
+      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_3, DGW_FILEPATH, "GRIDDRAPE", "OBSELEVGRD");
+      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_4, DGW_LISTALIAS, "GRIDDRAPE", "NEWELEV");
+      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_5, DGW_TEXT, "GRIDDRAPE", "ELEVHT");
+      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_6, DGW_FILEPATH, "GRIDDRAPE", "DRAPEGRD");
       SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_7, DGW_FILEPATH, "GRIDDRAPE", "OUTGRD");
+      SetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_8, DGW_LISTALIAS, "GRIDDRAPE", "OPTION");
 
       // --- Run the Dialogue ---
 
@@ -121,13 +125,14 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
       // --- Get the Strings and replace in INI ---
 
       GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_0, DGW_FILEPATH, "GRIDDRAPE", "INGRD");
-      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_1, DGW_FILEPATH, "GRIDDRAPE", "ELEVGRD");
-      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_2, DGW_LISTALIAS, "GRIDDRAPE", "NEWELEV");
-      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_3, DGW_TEXT, "GRIDDRAPE", "ELEVHT");
-      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_4, DGW_FILEPATH, "GRIDDRAPE", "DRAPEGRD");
-      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_5, DGW_TEXT, "GRIDDRAPE", "NITERATIONS");
-      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_6, DGW_TEXT, "GRIDDRAPE", "NTERMS");
+      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_1, DGW_LISTALIAS, "GRIDDRAPE", "OBSELEV");
+      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_2, DGW_TEXT, "GRIDDRAPE", "OBSELEVHT");
+      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_3, DGW_FILEPATH, "GRIDDRAPE", "OBSELEVGRD");
+      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_4, DGW_LISTALIAS, "GRIDDRAPE", "NEWELEV");
+      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_5, DGW_TEXT, "GRIDDRAPE", "ELEVHT");
+      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_6, DGW_FILEPATH, "GRIDDRAPE", "DRAPEGRD");
       GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_7, DGW_FILEPATH, "GRIDDRAPE", "OUTGRD");
+      GetInfoSYS_DGW(Diag, _GRIDDRAPEFORM_8, DGW_LISTALIAS, "GRIDDRAPE", "OPTION");
 
       // --- Destroy the Dialogue ---
 
@@ -138,12 +143,21 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
    // --- Get Parameters ---
 
    GetString_SYS("GRIDDRAPE", "INGRD", sInputGrd);
-   GetString_SYS("GRIDDRAPE", "ELEVGRD", sElevGrd);
    GetString_SYS("GRIDDRAPE", "OUTGRD", sOutputGrd);
+
+   GetString_SYS("GRIDDRAPE", "OBSELEV", sTemp);
+   if (!iStrlen_STR(sTemp))
+      iObsElev = 2;
+   else if (!iStrcmp_STR(sTemp, "Observation drape grid", STR_CASE_TOLERANT))
+      iObsElev = 2;
+   else if (!iStrcmp_STR(sTemp, "Observation height", STR_CASE_TOLERANT))
+      iObsElev = 1;
+   else
+      Abort_SYS(_("Invalid elevation option specified. Must be Observation height or Observation drape grid"));
 
    GetString_SYS("GRIDDRAPE", "NEWELEV", sTemp);
    if (!iStrlen_STR(sTemp))
-      iNewElev = 1;
+      iNewElev = 2;
    else if (!iStrcmp_STR(sTemp, "New observation drape grid", STR_CASE_TOLERANT))
       iNewElev = 2;
    else if (!iStrcmp_STR(sTemp, "New observation height", STR_CASE_TOLERANT))
@@ -151,6 +165,21 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
    else
       Abort_SYS(_("Invalid new elevation option specified. Must be New observation height or New observation drape grid"));
  
+   if (iObsElev == 1)
+   {
+      GetString_SYS("GRIDDRAPE", "OBSELEVHT", sObsHeight);
+      if (!iStrcmp_STR(sObsHeight, "", 0))
+         Abort_SYS("You must specify the observation height");
+      rObsHeight = rGetReal_SYS("GRIDDRAPE", "OBSELEVHT");
+   }
+
+   if (iObsElev == 2)
+   {
+      GetString_SYS("GRIDDRAPE", "OBSELEVGRD", sElevGrd);
+      if (!iStrcmp_STR(sElevGrd, "", 0))
+         Abort_SYS("You must specify the observation drape grid");
+   }
+
    if (iNewElev == 1)
    {
       GetString_SYS("GRIDDRAPE", "ELEVHT", sHeight);
@@ -166,25 +195,37 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
          Abort_SYS("You must specify the New observation drape grid");
    }
 
-   GetString_SYS("GRIDDRAPE", "NITERATIONS", sTemp);
+   GetString_SYS("GRIDDRAPE", "OPTION", sTemp);
    if (!iStrlen_STR(sTemp))
+   {   
+       nIter=2;
+       nTerm=2;
+   }
+   else if (!iStrcmp_STR(sTemp, "2 iterations & 2 terms", STR_CASE_TOLERANT))
+    {   
+       nIter=2;
+       nTerm=2;
+   }
+   else if (!iStrcmp_STR(sTemp, "2 iterations & 4 terms", STR_CASE_TOLERANT))
+   {   
       nIter=2;
+      nTerm=4;
+   }
+   else if (!iStrcmp_STR(sTemp, "4 iterations & 4 terms", STR_CASE_TOLERANT))
+   {   
+       nIter=4;
+       nTerm=4;
+   }
    else
-      nIter = iGetInt_SYS("GRIDDRAPE", "NITERATIONS");
+      Abort_SYS(_("Invalid option specified."));
 
-   GetString_SYS("GRIDDRAPE", "NTERMS", sTemp);
-   if (!iStrlen_STR(sTemp))
-      nTerm=2;
-   else
-      nTerm = iGetInt_SYS("GRIDDRAPE", "NTERMS");
+   //nIter=2;
+   //nTerm=2;
 
    // --- Check for null input and output file name strings ---
 
    if (!iStrMin2_STR(sInputGrd))
       Abort_SYS(_("Input Grid Not Specified!"));
-
-   if (!iStrMin2_STR(sElevGrd))
-      Abort_SYS(_("Elevation Grid Not Specified!"));
 
    if (!iStrMin2_STR(sOutputGrd))
       Abort_SYS(_("Output Grid Not Specified!"));
@@ -202,398 +243,429 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
    IMGi = CreateFile_IMG(GS_DOUBLE, sInputGrd, IMG_FILE_READONLY);   
    GetInfo_IMG(IMGi, rDx, rDy, rXo, rYo, rRot);
    
-   IMGe = CreateFile_IMG(GS_DOUBLE, sElevGrd, IMG_FILE_READONLY);   
-   GetInfo_IMG(IMGi, rDx2, rDy2, rXo2, rYo2, rRot2);
-   if (iNX_IMG(IMGi) != iNX_IMG(IMGe) || iNY_IMG(IMGi) != iNY_IMG(IMGe) ||
-       rDx != rDx2 || rDy != rDy2 || rXo != rXo2 || rYo != rYo2 || rRot != rRot2)   
+   if (iObsElev == 2)
    {
-      Destroy_IMG(IMGi);
-      Destroy_IMG(IMGe);
-      Abort_SYS("Input Grids Must Have Same # of Elements in X and Y, Have Same Element Separation and Same First Point Location");
+       IMGe = CreateFile_IMG(GS_DOUBLE, sElevGrd, IMG_FILE_READONLY);
+       GetInfo_IMG(IMGe, rDx2, rDy2, rXo2, rYo2, rRot2);
+       if (iNX_IMG(IMGi) != iNX_IMG(IMGe) || iNY_IMG(IMGi) != iNY_IMG(IMGe) ||
+           rDx != rDx2 || rDy != rDy2 || rXo != rXo2 || rYo != rYo2 || rRot != rRot2)   
+       {
+          Destroy_IMG(IMGi);
+          Destroy_IMG(IMGe);
+          Abort_SYS("Input Grids Must Have Same # of Elements in X and Y, Have Same Element Separation and Same First Point Location");
+       }
    }
    
    if (iNewElev == 2)
    {
        IMGd = CreateFile_IMG(GS_DOUBLE, sDrapeGrd, IMG_FILE_READONLY);   
-       GetInfo_IMG(IMGi, rDx, rDy, rXo, rYo, rRot);
+       GetInfo_IMG(IMGd, rDx2, rDy2, rXo2, rYo2, rRot2);
        if (iNX_IMG(IMGi) != iNX_IMG(IMGd) || iNY_IMG(IMGi) != iNY_IMG(IMGd) ||   
            rDx != rDx2 || rDy != rDy2 || rXo != rXo2 || rYo != rYo2 || rRot != rRot2)
        {
           Destroy_IMG(IMGi);
-          Destroy_IMG(IMGe);
           Destroy_IMG(IMGd);
           Abort_SYS("Input Grids Must Have Same # of Elements in X and Y, Have Same Element Separation and Same First Point Location");
        }
    }
-   
+      
    if(rDy > rDx)
       rNyquist = 1.0/(2.0*rDy);
    else
       rNyquist = 1.0/(2.0*rDx);
 
 
-   // --- Step 1 : Continuation from Elevation drape surface to elevation mean horizontal level
-
-   ProgName_SYS(_("from elev surface to elev mean flat ..."), 1);
-   Progress_SYS(1);
-
-   // Find rMean of elevation grid:
-
-   iNXA = 0;
-   iNYA = 0;
-   rMin = 0.0;
-   rMax = 0.0;
-   rMean1 = 0.0;
-   rSD = 0.0;
-
-   GridStatExt_IMU(sElevGrd, 1, iNXA, iNYA, rMin, rMax, rMean1, rSD);
-
-   if(rMax - rMin == 0.0) 
-      rR1 = rNyquist;
-   else
+   if (iObsElev == 2)
    {
-       rTmp1 = rMax - rMean1;
-       rTmp2 = rMean1 - rMin;
-       if (rTmp1>rTmp2)
-          rD1 = rTmp1;
-       else
-          rD1 = rTmp2;
-       rR1 = 1.0/rD1;
-       if(rR1 > rNyquist)
+       // --- Step 1 : Continuation from observation drape surface to observation Mean level
+
+       ProgName_SYS(_("from obs surface to obs Mean level ..."), 1);
+       Progress_SYS(1);
+
+       // Find stats of observation grid:
+
+       iNXA = 0;
+       iNYA = 0;
+       rMin1 = 0.0;
+       rMax1 = 0.0;
+       rMean1 = 0.0;
+       rSD = 0.0;
+
+       GridStatExt_IMU(sElevGrd, 1, iNXA, iNYA, rMin1, rMax1, rMean1, rSD);
+
+       rD1 = rMax1 - rMin1;
+       if(rD1 == 0.0) 
           rR1 = rNyquist;
-   }
-
-   // create Z(x,y) grid = sElevGrd - rMean1:
-
-   VMcoef = Create_VM(REAL, 10);
-   IMGIN = CreateFile_IMG(GS_DOUBLE, sElevGrd, IMG_FILE_READONLY);
-   IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMGIN);
-   GridTrnd_IMU(IMGIN, IMGOUT, 0, IMU_TREND_ALL, 0, VMcoef, 1);
-   Destroy_IMG(IMGIN);
-   Destroy_IMG(IMGOUT);
-   Destroy_VM(VMcoef);
-
-   IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMG_FILE_READONLY);
-   IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
-   Copy_IMG(IMGIN, IMGOUT);
-   Destroy_IMG(IMGIN);
-   Destroy_IMG(IMGOUT);
-
-   // create Z^n(x,y) grids in sZGrids:
-
-   Strcpy_STR(sZGrids, "");
-   for (iTerm = 1; iTerm <= nTerm; iTerm++)
-   {   
-       Strcpy_STR(sGrid, "xxZGrid");
-       FormatI_STR(iTerm, sGridNumber, 2);
-       Strcat_STR(sGrid, sGridNumber);
-       Strcat_STR(sGrid, ".grd");
-
-        if(iTerm == 1)
-        {
-            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
-            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
-            Copy_IMG(IMGIN, IMGOUT);
-            Destroy_IMG(IMGOUT);
-            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
-            Copy_IMG(IMGIN, IMGOUT);
-            Destroy_IMG(IMGIN);
-            Destroy_IMG(IMGOUT);              
-        } 
-        else 
-        {
-            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
-            IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMG_FILE_READONLY);
-            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
-            IEXP_GridMath = Create_IEXP();
-            AddGrid_IEXP(IEXP_GridMath, IMGIN, "Z");
-            AddGrid_IEXP(IEXP_GridMath, IMGIN2, "Z1");
-            AddGrid_IEXP(IEXP_GridMath, IMGOUT, "Z2");
-
-            DoFormula_IEXP(IEXP_GridMath, "Z2 = Z*Z1;", 1024);
-
-            Destroy_IMG(IMGIN);
-            Destroy_IMG(IMGIN2);
-            Destroy_IMG(IMGOUT);
-            Destroy_IEXP(IEXP_GridMath);
-
-            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
-            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
-            Copy_IMG(IMGIN, IMGOUT);
-            Destroy_IMG(IMGIN);
-            Destroy_IMG(IMGOUT);
-
-        }
-        IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
-        IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
-        Copy_IMG(IMGIN, IMGOUT);
-        Destroy_IMG(IMGIN);
-        Destroy_IMG(IMGOUT);
-
-       Strcat_STR(sZGrids, sGrid);
-       Strcat_STR(sZGrids, " ");
-   }
-   iDeleteFile_SYS("xxxxxxxZ.grd");
-   iDeleteFile_SYS("xxxxxTmp.grd");
-   iDeleteFile_SYS("xxxxTmp1.grd");
-   iDeleteFile_SYS("xxxxTmp2.grd");
-
-
-   // COMPUTE ITERATION PROCESURE OF CONTINUATIONS
-
-   IMGIN = CreateFile_IMG(GS_DOUBLE, sInputGrd, IMG_FILE_READONLY);
-   IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxIter.grd", IMGIN);
-   Copy_IMG(IMGIN, IMGOUT);
-   Destroy_IMG(IMGIN);
-   Destroy_IMG(IMGOUT);
-
-   iZ = iTokens_STR(sZGrids, " ");
-   for (iIter = 0; iIter < nIter; iIter++)
-   {  
-       Strcpy_STR(sFGrids, "");
-       for (iTerm = 1; iTerm <= nTerm; iTerm++)
-       {   
-          Strcpy_STR(sGrid, "xxFGrid");
-          FormatI_STR(iTerm, sGridNumber, 2);
-          Strcat_STR(sGrid, sGridNumber);
-          Strcat_STR(sGrid, ".grd");
-
-          // FFT DRVZ filter
-
-          iFindPathNameEx_SYS("magmap.con", FIND_GEOSOFT, GEO_DIRECTORY_ETC, sFltDefCon);
-          RA_in = Create_RA(sFltDefCon);
-          iNLines = iLen_RA(RA_in);
-
-          // Write Continuation Filter Control File:
-
-          WA_out = Create_WA("xxxxCont.con", 0);
-          iSeek_RA(RA_in, 0);
-          j = 1;
-          while (j <= 5)
-          {
-             iGets_RA(RA_in, sText);
-             Puts_WA(WA_out, sText);
-             NewLine_WA(WA_out);
-             j++;
-          }
-          Strcpy_STR(sCONT, "DRVZ ");
-          FormatI_STR(iTerm, siTerm, 1);
-          Strcat_STR(sCONT, siTerm);
-          Strcat_STR(sCONT, " /");
-          Puts_WA(WA_out, sCONT);
-          NewLine_WA(WA_out);
-
-          //Strcpy_STR(sCONT, "BTWR ");
-          //FormatR_STR(rNyquist/2.0, sText, 20, 10);
-          //Strcat_STR(sCONT, sText);
-          //Strcat_STR(sCONT, " 16 1 /");    // low pass
-
-          Strcpy_STR(sCONT, "COSN 0.0 ");
-          FormatR_STR(rR1, sText, 20, 10);
-          Strcat_STR(sCONT, sText);
-          Strcat_STR(sCONT, " 2 1 /");    // low pass
-
-          Puts_WA(WA_out, sCONT);
-          NewLine_WA(WA_out);
-
-          while (j <= iNLines)
-          {
-             iGets_RA(RA_in, sText);
-             Puts_WA(WA_out, sText);
-             NewLine_WA(WA_out);
-             j++;
-          }
-          Destroy_RA(RA_in);
-          Destroy_WA(WA_out);
-
-          // Apply DRVZ filter:
-
-          SetString_SYS("MAGMAP1", "INGRD", "xxxxIter.grd");
-          SetString_SYS("MAGMAP1", "OUTGRD", "xxxxxxxF.grd");
-          SetString_SYS("MAGMAP1", "CONFIL", "xxxxCont.con");
-          SetInt_SYS("MAGMAP1", "ADDTOPROJECT", 0);
-
-          SetInteractive_SYS(0);
-          if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.FFT2D.MAGMAPFiltering;Run)") < 0)
-              Abort_SYS(_("Failed Geosoft.GX.FFT2D.MAGMAPFiltering."));
-          SetInteractive_SYS(iInteractive);
-
-          SetString_SYS("GRIDFLTN", "GRD", "xxxxxxxF.grd");
-          SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
-
-          SetInteractive_SYS(0);
-          if (iRunGX_SYS("gridflt9") < 0)
-              Abort_SYS(_("Failed smooth using gridflt9.gx."));
-          SetInteractive_SYS(iInteractive);
-
-          IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
-          IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
-          Copy_IMG(IMGIN, IMGOUT);
-          Destroy_IMG(IMGIN);
-          Destroy_IMG(IMGOUT);
-
-          Strcat_STR(sFGrids, sGrid);
-          Strcat_STR(sFGrids, " ");
-       }
-       //iDeleteFile_SYS("xxxxCont.con");
-       iDeleteFile_SYS("xxxxxxxF.grd");
-
-       // Taylor expansion calculation
-
-       Strcpy_STR(sTGrids, "");
-       iN = 1;
-       //iZ = iTokens_STR(sZGrids, " ");
-       iF = iTokens_STR(sFGrids, " ");
-       for (iTerm = 1; iTerm <= nTerm; iTerm++)
-       { 
-           Strcpy_STR(sGrid, "xxTGrid");
-           FormatI_STR(iTerm, sGridNumber, 2);
-           Strcat_STR(sGrid, sGridNumber);
-           Strcat_STR(sGrid, ".grd");
-
-           GetToken_STR(sTemp, sZGrids, iTerm-1);
-           GetToken_STR(sTemp2, sFGrids, iTerm-1);
-           iN = iN*iTerm;
-           IMGIN = CreateFile_IMG(GS_DOUBLE, sTemp, IMG_FILE_READONLY);
-           IMGIN2 = CreateFile_IMG(GS_DOUBLE, sTemp2, IMG_FILE_READONLY);
-           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxxxT.grd", IMGIN);
-           IEXP_GridMath = Create_IEXP();
-           AddGrid_IEXP(IEXP_GridMath, IMGIN, "Z");
-           AddGrid_IEXP(IEXP_GridMath, IMGIN2, "F");
-           AddGrid_IEXP(IEXP_GridMath, IMGOUT, "T");
-
-           DoFormula_IEXP(IEXP_GridMath, "T = Z*F;", 1024);
-
-           GridAdd_IMU(IMGOUT, 1.0/(real)iN, IMGIN2, 0.0, IMGOUT);
-
-           Destroy_IMG(IMGIN);
-           Destroy_IMG(IMGIN2);
-           Destroy_IMG(IMGOUT);
-           Destroy_IEXP(IEXP_GridMath);
-
-           SetString_SYS("GRIDFLTN", "GRD", "xxxxxxxT.grd");
-           SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
-
-           SetInteractive_SYS(0);
-           if (iRunGX_SYS("gridflt9") < 0)
-               Abort_SYS(_("Failed smooth using gridflt9.gx."));
-           SetInteractive_SYS(iInteractive);
-
-           IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
-           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
-           Copy_IMG(IMGIN, IMGOUT);
-           Destroy_IMG(IMGIN);
-           Destroy_IMG(IMGOUT);
-
-           Strcat_STR(sTGrids, sGrid);
-           Strcat_STR(sTGrids, " ");
-       }
-       //iDeleteFile_SYS("xxxxxxxT.grd");
-
-       iT = iTokens_STR(sTGrids, " ");
-       GetToken_STR(sTemp, sTGrids, 0);
-       IMGIN = CreateFile_IMG(GS_DOUBLE, sTemp, IMG_FILE_READONLY);
-       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
-       Copy_IMG(IMGIN, IMGOUT);
-       Destroy_IMG(IMGIN);
-       Destroy_IMG(IMGOUT); 
-       if (nTerm==1)
-       {
-           IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
-           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
-           Copy_IMG(IMGIN, IMGOUT);
-           Destroy_IMG(IMGIN);
-           Destroy_IMG(IMGOUT);           
-       }
        else
        {
-           for (iTerm = 2; iTerm <= nTerm; iTerm++)
-           {   
-               GetToken_STR(sTemp2, sTGrids, iTerm-1);
-               IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READWRITE);
-               IMGIN2 = CreateFile_IMG(GS_DOUBLE, sTemp2, IMG_FILE_READONLY);
-               IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
-
-               GridAdd_IMU(IMGIN, 1.0, IMGIN2, 1.0, IMGOUT);
-
-               Destroy_IMG(IMGIN);
-               Destroy_IMG(IMGIN2);
-               Destroy_IMG(IMGOUT);
-
-               IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
-               IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
-               Copy_IMG(IMGIN, IMGOUT);
-               Destroy_IMG(IMGIN);
-               Destroy_IMG(IMGOUT);           
-           }
+          rR1 = 1.0/rD1;
+          if(rR1 > rNyquist)
+             rR1 = rNyquist;
        }
-       //iDeleteFile_SYS("xxxxxTmp.grd");
 
-       // iterated results
+       // Create Z(x,y) grid = sElevGrd - rMean1:
 
-       IMGIN = CreateFile_IMG(GS_DOUBLE, sInputGrd, IMG_FILE_READONLY);
-       IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
-       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMGIN);
+       IMGIN = CreateFile_IMG(GS_DOUBLE, sElevGrd, IMG_FILE_READONLY);
+       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
 
+       zVV = Create_VV(GS_REAL, 0);
+       iNX = iNX_IMG(IMGOUT);
+       iNY = iNY_IMG(IMGOUT);
+
+       for (i = 0; i < iNX; i++)
+       { 
+          ReadX_IMG(IMGOUT, i, 0, 0, zVV);
+          FillReal_VV(zVV, rMean1);
+          WriteX_IMG(IMGOUT, i, 0, 0, zVV);
+       }
+       Destroy_VV(zVV);
+       Destroy_IMG(IMGIN);
+       Destroy_IMG(IMGOUT);
+
+       IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+       IMGIN2 = CreateFile_IMG(GS_DOUBLE, sElevGrd, IMG_FILE_READONLY);
+       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMGIN2);
+   
        GridAdd_IMU(IMGIN, 1.0, IMGIN2, -1.0, IMGOUT);
 
        Destroy_IMG(IMGIN);
        Destroy_IMG(IMGIN2);
        Destroy_IMG(IMGOUT);
 
-       IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
+       IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMG_FILE_READONLY);
+       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
+       Copy_IMG(IMGIN, IMGOUT);
+       Destroy_IMG(IMGIN);
+       Destroy_IMG(IMGOUT);
+
+       // Create Z^n(x,y) grids in sZGrids:
+
+       Strcpy_STR(sZGrids, "");
+       for (iTerm = 1; iTerm <= nTerm; iTerm++)
+       {   
+           Strcpy_STR(sGrid, "xxZGrid");
+           FormatI_STR(iTerm, sGridNumber, 2);
+           Strcat_STR(sGrid, sGridNumber);
+           Strcat_STR(sGrid, ".grd");
+
+            if(iTerm == 1)
+            {
+                IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
+                Copy_IMG(IMGIN, IMGOUT);
+                Destroy_IMG(IMGOUT);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+                Copy_IMG(IMGIN, IMGOUT);
+                Destroy_IMG(IMGIN);
+                Destroy_IMG(IMGOUT);              
+            } 
+            else 
+            {
+                IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+                IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMG_FILE_READONLY);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+                IEXP_GridMath = Create_IEXP();
+                AddGrid_IEXP(IEXP_GridMath, IMGIN, "Z");
+                AddGrid_IEXP(IEXP_GridMath, IMGIN2, "Z1");
+                AddGrid_IEXP(IEXP_GridMath, IMGOUT, "Z2");
+
+                DoFormula_IEXP(IEXP_GridMath, "Z2 = Z*Z1;", 1024);
+
+                Destroy_IMG(IMGIN);
+                Destroy_IMG(IMGIN2);
+                Destroy_IMG(IMGOUT);
+                Destroy_IEXP(IEXP_GridMath);
+
+                IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+                IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp1.grd", IMGIN);
+                Copy_IMG(IMGIN, IMGOUT);
+                Destroy_IMG(IMGIN);
+                Destroy_IMG(IMGOUT);
+
+            }
+            IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+            IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
+            Copy_IMG(IMGIN, IMGOUT);
+            Destroy_IMG(IMGIN);
+            Destroy_IMG(IMGOUT);
+
+           Strcat_STR(sZGrids, sGrid);
+           Strcat_STR(sZGrids, " ");
+       }
+       iDeleteFile_SYS("xxxxxxxZ.grd");
+       iDeleteFile_SYS("xxxxxTmp.grd");
+       iDeleteFile_SYS("xxxxTmp1.grd");
+       iDeleteFile_SYS("xxxxTmp2.grd");
+
+
+       // COMPUTE ITERATION PROCESURE OF CONTINUATIONS
+
+       IMGIN = CreateFile_IMG(GS_DOUBLE, sInputGrd, IMG_FILE_READONLY);
        IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxIter.grd", IMGIN);
        Copy_IMG(IMGIN, IMGOUT);
        Destroy_IMG(IMGIN);
        Destroy_IMG(IMGOUT);
 
-       //iDeleteFile_SYS("xxxxTmp2.grd");
-       //iDeleteFile_SYS("xxxxxOut.grd");
+       iZ = iTokens_STR(sZGrids, " ");
+       for (iIter = 0; iIter < nIter; iIter++)
+       {  
+           Strcpy_STR(sFGrids, "");
+           for (iTerm = 1; iTerm <= nTerm; iTerm++)
+           {   
+              Strcpy_STR(sGrid, "xxFGrid");
+              FormatI_STR(iTerm, sGridNumber, 2);
+              Strcat_STR(sGrid, sGridNumber);
+              Strcat_STR(sGrid, ".grd");
 
-       ProgUpdateL_SYS(iIter+1, nIter);
+              // FFT DRVZ filter
+
+              iFindPathNameEx_SYS("magmap.con", FIND_GEOSOFT, GEO_DIRECTORY_ETC, sFltDefCon);
+              RA_in = Create_RA(sFltDefCon);
+              iNLines = iLen_RA(RA_in);
+
+              // Write Continuation Filter Control File:
+
+              WA_out = Create_WA("xxxxCont.con", 0);
+              iSeek_RA(RA_in, 0);
+              j = 1;
+              while (j <= 5)
+              {
+                 iGets_RA(RA_in, sText);
+                 Puts_WA(WA_out, sText);
+                 NewLine_WA(WA_out);
+                 j++;
+              }
+              Strcpy_STR(sCONT, "DRVZ ");
+              FormatI_STR(iTerm, siTerm, 1);
+              Strcat_STR(sCONT, siTerm);
+              Strcat_STR(sCONT, " /");
+              Puts_WA(WA_out, sCONT);
+              NewLine_WA(WA_out);
+
+              //Strcpy_STR(sCONT, "BTWR ");
+              //FormatR_STR(rNyquist/2.0, sText, 20, 10);
+              //Strcat_STR(sCONT, sText);
+              //Strcat_STR(sCONT, " 16 1 /");    // low pass
+
+              Strcpy_STR(sCONT, "COSN 0.0 ");
+              FormatR_STR(rR1, sText, 20, 10);
+              Strcat_STR(sCONT, sText);
+              Strcat_STR(sCONT, " 2 1 /");    // low pass
+
+              Puts_WA(WA_out, sCONT);
+              NewLine_WA(WA_out);
+
+              while (j <= iNLines)
+              {
+                 iGets_RA(RA_in, sText);
+                 Puts_WA(WA_out, sText);
+                 NewLine_WA(WA_out);
+                 j++;
+              }
+              Destroy_RA(RA_in);
+              Destroy_WA(WA_out);
+
+              // Apply DRVZ filter:
+
+              SetString_SYS("MAGMAP1", "INGRD", "xxxxIter.grd");
+              SetString_SYS("MAGMAP1", "OUTGRD", "xxxxxxxF.grd");
+              SetString_SYS("MAGMAP1", "CONFIL", "xxxxCont.con");
+              SetInt_SYS("MAGMAP1", "ADDTOPROJECT", 0);
+
+              SetInteractive_SYS(0);
+              if (iRunGX_SYS("geogxnet.dll(Geosoft.GX.FFT2D.MAGMAPFiltering;Run)") < 0)
+                  Abort_SYS(_("Failed Geosoft.GX.FFT2D.MAGMAPFiltering."));
+              SetInteractive_SYS(iInteractive);
+
+              SetString_SYS("GRIDFLTN", "GRD", "xxxxxxxF.grd");
+              SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
+
+              SetInteractive_SYS(0);
+              if (iRunGX_SYS("gridflt9") < 0)
+                  Abort_SYS(_("Failed smooth using gridflt9.gx."));
+              SetInteractive_SYS(iInteractive);
+
+              IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
+              IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
+              Copy_IMG(IMGIN, IMGOUT);
+              Destroy_IMG(IMGIN);
+              Destroy_IMG(IMGOUT);
+
+              Strcat_STR(sFGrids, sGrid);
+              Strcat_STR(sFGrids, " ");
+           }
+           iDeleteFile_SYS("xxxxxxxF.grd");
+
+           // Taylor expansion calculation
+
+           Strcpy_STR(sTGrids, "");
+           iN = 1;
+           iF = iTokens_STR(sFGrids, " ");
+           for (iTerm = 1; iTerm <= nTerm; iTerm++)
+           { 
+               Strcpy_STR(sGrid, "xxTGrid");
+               FormatI_STR(iTerm, sGridNumber, 2);
+               Strcat_STR(sGrid, sGridNumber);
+               Strcat_STR(sGrid, ".grd");
+
+               GetToken_STR(sTemp, sZGrids, iTerm-1);
+               GetToken_STR(sTemp2, sFGrids, iTerm-1);
+               iN = iN*iTerm;
+               IMGIN = CreateFile_IMG(GS_DOUBLE, sTemp, IMG_FILE_READONLY);
+               IMGIN2 = CreateFile_IMG(GS_DOUBLE, sTemp2, IMG_FILE_READONLY);
+               IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxxxT.grd", IMGIN);
+               IEXP_GridMath = Create_IEXP();
+               AddGrid_IEXP(IEXP_GridMath, IMGIN, "Z");
+               AddGrid_IEXP(IEXP_GridMath, IMGIN2, "F");
+               AddGrid_IEXP(IEXP_GridMath, IMGOUT, "T");
+
+               DoFormula_IEXP(IEXP_GridMath, "T = Z*F;", 1024);
+
+               GridAdd_IMU(IMGOUT, 1.0/(real)iN, IMGIN2, 0.0, IMGOUT);
+
+               Destroy_IMG(IMGIN);
+               Destroy_IMG(IMGIN2);
+               Destroy_IMG(IMGOUT);
+               Destroy_IEXP(IEXP_GridMath);
+
+               SetString_SYS("GRIDFLTN", "GRD", "xxxxxxxT.grd");
+               SetString_SYS("GRIDFLTN", "NEW9", "xxxxxOut.grd");
+
+               SetInteractive_SYS(0);
+               if (iRunGX_SYS("gridflt9") < 0)
+                   Abort_SYS(_("Failed smooth using gridflt9.gx."));
+               SetInteractive_SYS(iInteractive);
+
+               IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
+               IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sGrid, IMGIN);
+               Copy_IMG(IMGIN, IMGOUT);
+               Destroy_IMG(IMGIN);
+               Destroy_IMG(IMGOUT);
+
+               Strcat_STR(sTGrids, sGrid);
+               Strcat_STR(sTGrids, " ");
+           }
+           //iDeleteFile_SYS("xxxxxxxT.grd");
+
+           iT = iTokens_STR(sTGrids, " ");
+           GetToken_STR(sTemp, sTGrids, 0);
+           IMGIN = CreateFile_IMG(GS_DOUBLE, sTemp, IMG_FILE_READONLY);
+           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
+           Copy_IMG(IMGIN, IMGOUT);
+           Destroy_IMG(IMGIN);
+           Destroy_IMG(IMGOUT); 
+           if (nTerm==1)
+           {
+               IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+               IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+               Copy_IMG(IMGIN, IMGOUT);
+               Destroy_IMG(IMGIN);
+               Destroy_IMG(IMGOUT);           
+           }
+           else
+           {
+               for (iTerm = 2; iTerm <= nTerm; iTerm++)
+               {   
+                   GetToken_STR(sTemp2, sTGrids, iTerm-1);
+                   IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READWRITE);
+                   IMGIN2 = CreateFile_IMG(GS_DOUBLE, sTemp2, IMG_FILE_READONLY);
+                   IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMGIN);
+
+                   GridAdd_IMU(IMGIN, 1.0, IMGIN2, 1.0, IMGOUT);
+
+                   Destroy_IMG(IMGIN);
+                   Destroy_IMG(IMGIN2);
+                   Destroy_IMG(IMGOUT);
+
+                   IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+                   IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
+                   Copy_IMG(IMGIN, IMGOUT);
+                   Destroy_IMG(IMGIN);
+                   Destroy_IMG(IMGOUT);           
+               }
+           }
+           //iDeleteFile_SYS("xxxxxTmp.grd");
+
+           // iterated results
+
+           IMGIN = CreateFile_IMG(GS_DOUBLE, sInputGrd, IMG_FILE_READONLY);
+           IMGIN2 = CreateFile_IMG(GS_DOUBLE, "xxxxTmp2.grd", IMG_FILE_READONLY);
+           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMGIN);
+
+           GridAdd_IMU(IMGIN, 1.0, IMGIN2, -1.0, IMGOUT);
+
+           Destroy_IMG(IMGIN);
+           Destroy_IMG(IMGIN2);
+           Destroy_IMG(IMGOUT);
+
+           IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
+           IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxIter.grd", IMGIN);
+           Copy_IMG(IMGIN, IMGOUT);
+           Destroy_IMG(IMGIN);
+           Destroy_IMG(IMGOUT);
+
+           //iDeleteFile_SYS("xxxxTmp2.grd");
+           //iDeleteFile_SYS("xxxxxOut.grd");
+
+           ProgUpdateL_SYS(iIter+1, nIter);
+       }
+
+       Progress_SYS(0);
+
+       IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxIter.grd", IMG_FILE_READONLY);
+       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sOutputGrd, IMGIN);
+       Copy_IMG(IMGIN, IMGOUT);
+       Destroy_IMG(IMGIN);
+       Destroy_IMG(IMGOUT);
+
    }
 
-   Progress_SYS(0);
+   // --- Step 2 : Contuniation from observation Mean level to new observation level
 
-   IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxIter.grd", IMG_FILE_READONLY);
-   IMGOUT = CreateOutFile_IMG(GS_DOUBLE, sOutputGrd, IMGIN);
-   Copy_IMG(IMGIN, IMGOUT);
-   Destroy_IMG(IMGIN);
-   Destroy_IMG(IMGOUT);
+    if (iNewElev == 1 && iObsElev == 1)
+        ProgName_SYS(_("from obs height to new height ..."), 1);
 
+    if (iNewElev == 1 && iObsElev == 2)
+        ProgName_SYS(_("from obs Mean level to new height ..."), 1);
 
-  // --- Step 2 : Contuniation from elevation mean level to new level
+    if (iNewElev == 2 && iObsElev == 1)
+        ProgName_SYS(_("from obs height to new drape Mean level ..."), 1);
 
-   if (iNewElev == 1)
-      ProgName_SYS(_("from elev mean flat to new height ..."), 1);
+    if (iNewElev == 2 && iObsElev == 2)
+        ProgName_SYS(_("from obs Mean level to new drape Mean level ..."), 1);
 
-   if (iNewElev == 2)
-      ProgName_SYS(_("from elev mean flat to new drape mean flat ..."), 1);
+    Progress_SYS(1);
 
-   Progress_SYS(1);
-
-   IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxIter.grd", IMG_FILE_READONLY);
+   if (iObsElev == 1)
+      IMGIN = CreateFile_IMG(GS_DOUBLE, sInputGrd, IMG_FILE_READONLY);
+   if (iObsElev == 2)
+      IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxIter.grd", IMG_FILE_READONLY);
    IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxTmpIn.grd", IMGIN);
    Copy_IMG(IMGIN, IMGOUT);
    Destroy_IMG(IMGIN);
    Destroy_IMG(IMGOUT);
 
-   if (iNewElev == 1)
-      rDist = (rHeight - rMean1);
+   if (iNewElev == 1 && iObsElev == 1)
+       rDist = (rHeight - rObsHeight);
+   if (iNewElev == 1 && iObsElev == 2)
+       rDist = (rHeight - rMean1);
 
    if (iNewElev == 2)
    {
-       // Find rMean of elevation grid:
-       iNXA = 0;
-       iNYA = 0;
-       rMin = 0.0;
-       rMax = 0.0;
-       rMean2 = 0.0;
-       rSD = 0.0;
+        // Find rMean of elevation grid:
+        iNXA = 0;
+        iNYA = 0;
+        rMin2 = 0.0;
+        rMax2 = 0.0;
+        rMean2 = 0.0;
+        rSD = 0.0;
 
-       GridStatExt_IMU(sDrapeGrd, 1, iNXA, iNYA, rMin, rMax, rMean2, rSD);
+        GridStatExt_IMU(sDrapeGrd, 1, iNXA, iNYA, rMin2, rMax2, rMean2, rSD);
 
-       rDist = (rMean2-rMean1);
+        if (iObsElev == 1)
+            rDist = rMean2-rObsHeight;
+        if (iObsElev == 2)
+            rDist = rMean2-rMean1;
    }
 
    // FFT Up/Down filter
@@ -635,7 +707,7 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
        if(rDist == 0.0) 
           rR1 = rNyquist;
        else
-      {
+       {
           rR1 = 1.0/rAbs_MATH(rDist);
           if(rR1 > rNyquist)
              rR1 = rNyquist;
@@ -697,18 +769,13 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
       iDeleteFile_SYS("xxxxxOut.grd");
    }
 
-   //iDeleteFile_SYS("xxxxCont.con");
-   //iDeleteFile_SYS("xxxxIter.grd");
-   //iDeleteFile_SYS("xxxTmpIn.grd");
-
    Progress_SYS(0);
-
 
    if (iNewElev == 2)
    {
-       // --- Step 3 : Continuation from Drape mean horizontal level to Drape surface
+       // --- Step 3 : Continuation from Drape Mean horizontal level to Drape surface
 
-       ProgName_SYS(_("from drape mean flat to drape surface ..."), 1);
+       ProgName_SYS(_("from drape Mean flat to drape surface ..."), 1);
        Progress_SYS(1);
 
        IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxOut.grd", IMG_FILE_READONLY);
@@ -721,37 +788,51 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
 
        iNXA = 0;
        iNYA = 0;
-       rMin = 0.0;
-       rMax = 0.0;
-       rMean1 = 0.0;
+       rMin2 = 0.0;
+       rMax2 = 0.0;
+       rMean2 = 0.0;
        rSD = 0.0;
 
-       GridStatExt_IMU(sDrapeGrd, 1, iNXA, iNYA, rMin, rMax, rMean2, rSD);
+       GridStatExt_IMU(sDrapeGrd, 1, iNXA, iNYA, rMin2, rMax2, rMean2, rSD);
 
-       if(rMax - rMin == 0.0) 
+       rD1 = rMax2 - rMin2;
+       if(rD1 == 0.0) 
           rR1 = rNyquist;
        else
        {
-           rTmp1 = rMax - rMean2;
-           rTmp2 = rMean2 - rMin;
-           if (rTmp1>rTmp2)
-              rD1 = rTmp1;
-           else
-              rD1 = rTmp2;
-           rR1 = 1.0/rD1;
-           if(rR1 > rNyquist)
-              rR1 = rNyquist;
+          rR1 = 1.0/rD1;
+          if(rR1 > rNyquist)
+             rR1 = rNyquist;
        }
 
-       // create Z(x,y) grid = sDrapeGrd - rMean2:
+       // Create Z(x,y) grid = sDrapeGrd - rMean2:
 
-       VMcoef = Create_VM(REAL, 10);
        IMGIN = CreateFile_IMG(GS_DOUBLE, sDrapeGrd, IMG_FILE_READONLY);
-       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMGIN);
-       GridTrnd_IMU(IMGIN, IMGOUT, 0, IMU_TREND_ALL, 0, VMcoef, 1);
+       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
+
+       zVV = Create_VV(GS_REAL, 0);
+       iNX = iNX_IMG(IMGOUT);
+       iNY = iNY_IMG(IMGOUT);
+
+       for (i = 0; i < iNX; i++)
+       { 
+          ReadX_IMG(IMGOUT, i, 0, 0, zVV);
+          FillReal_VV(zVV, rMean2);
+          WriteX_IMG(IMGOUT, i, 0, 0, zVV);
+       }
+       Destroy_VV(zVV);
        Destroy_IMG(IMGIN);
        Destroy_IMG(IMGOUT);
-       Destroy_VM(VMcoef);
+
+       IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMG_FILE_READONLY);
+       IMGIN2 = CreateFile_IMG(GS_DOUBLE, sDrapeGrd, IMG_FILE_READONLY);
+       IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMGIN2);
+   
+       GridAdd_IMU(IMGIN, 1.0, IMGIN2, -1.0, IMGOUT);
+
+       Destroy_IMG(IMGIN);
+       Destroy_IMG(IMGIN2);
+       Destroy_IMG(IMGOUT);
 
        IMGIN = CreateFile_IMG(GS_DOUBLE, "xxxxxxxZ.grd", IMG_FILE_READONLY);
        IMGOUT = CreateOutFile_IMG(GS_DOUBLE, "xxxxxTmp.grd", IMGIN);
@@ -898,10 +979,6 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
           Strcat_STR(sFGrids, " ");
        }
 
-       //iDeleteFile_SYS("xxxxCont.con");
-       //iDeleteFile_SYS("xxxxxxxF.grd");
-
-
         // Taylor expansion calculation
 
         Strcpy_STR(sTGrids, "");
@@ -952,7 +1029,6 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
             Strcat_STR(sTGrids, sGrid);
             Strcat_STR(sTGrids, " ");
         }
-        //iDeleteFile_SYS("xxxxxxxT.grd");
 
         iT = iTokens_STR(sTGrids, " ");
         GetToken_STR(sTemp, sTGrids, 0);
@@ -1045,7 +1121,7 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
    iDeleteFile_SYS("xxxxxOut.grd");   
    iDeleteFile_SYS("xxxxxTmp.grd");
    iDeleteFile_SYS("xxxxTmp2.grd");
-   //iDeleteFile_SYS("xxxTmpIn.grd");
+   iDeleteFile_SYS("xxxTmpIn.grd");
    iDeleteFile_SYS("xxxxiter.spc");
    iDeleteFile_SYS("xxxxiter.grd");   
    iDeleteFile_SYS("xxxxiter_prp.grd");
@@ -1056,9 +1132,10 @@ IEXP IEXP_GridMath;                  // grid expression of grid math
    iDeleteFile_SYS("xxxtmpin_trn.grd");
 
    Destroy_IMG(IMGi);
-   Destroy_IMG(IMGe);
-   Destroy_IMG(IMGd);
-
+   if (iObsElev == 2)
+      Destroy_IMG(IMGe);
+   if (iNewElev == 2)
+      Destroy_IMG(IMGd);
 
    // --- done ---
 

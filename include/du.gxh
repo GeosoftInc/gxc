@@ -897,6 +897,22 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// AvgAzimuth2_DU Returns average azimuth of selected lines.
+//
+// Notes          Same as AvgAzimuth, but input the X and Y channels to use.
+//
+// Available      2023.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void AvgAzimuth2_DU(DB,         // Database Object
+                                string,     // X channel name
+                                string,     // Y channel name
+                                real,       // Precision in degrees (1 to 45)
+                                var real);  // Azimuth value returned
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // rAverageSpacing_DU Returns the average spacing along a line.
 //                    This is a simple average of the individual point separations after dummies are removed.
 //                    Returns DUMMY if there are fewer than two valid locations.
@@ -1751,6 +1767,71 @@
                                   DB_SYMB,   // Channel
                                   DB_SYMB,   // Mask Channel  (can be NULLSYMB)
                                   VV);       // VV object to populate
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// rGetGriddingAzimuthToMinimizePadding_DU Return the gridding azimuth (degrees CW from north) that minimizes padding.
+//
+// Notes                                   Especially if the survey lines do not run N-S or E-W, gridding parallel to the XY axes
+//                                         results in up to half the gridding area being dummies (padding), which is not only
+//                                         inefficient, but affects processes like filtering. This algorithm determines the data
+//                                         rotation required such that the gridding extents rectangle fit around the data minimizes the
+//                                         amount of padding. The result is good to the nearest degree.
+//                                         
+//                                         The corner points are returned and include a buffer around the edge equal to 1% of the maximum height/width.
+//                                         
+//                                         The returned azimuth will be in the range 0 to 89.
+//                                         
+//                                         Operates on all selected lines.
+//
+// Available                               2023.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real rGetGriddingAzimuthToMinimizePadding_DU(DB,         // Database
+                                                         DB_SYMB,    // X channel [DB_LOCK_READONLY]
+                                                         DB_SYMB,    // Y channel [DB_LOCK_READONLY]
+                                                         DB_SYMB,    // Data or mask channel [DB_LOCK_READONLY]
+                                                         var real,   // Returned Corner 1 - X
+                                                         var real,   // Returned Corner 1 - Y
+                                                         var real,   // Returned Corner 2 - X
+                                                         var real,   // Returned Corner 2 - Y
+                                                         var real,   // Returned Corner 3 - X
+                                                         var real,   // Returned Corner 3 - Y
+                                                         var real,   // Returned Corner 4 - X
+                                                         var real);  // Returned Corner 4 - Y
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetAngledBoundingRectangle_DU Return the angled bounding rectangle for data to be gridded on an angle.
+//
+// Notes                         Especially if the survey lines do not run N-S or E-W, gridding parallel to the XY axes
+//                               results in up to half the gridding area being dummies (padding), which is not only
+//                               inefficient, but affects processes like filtering.
+//                               This routine returns the rotated extents rectangle for a given gridding azimuth.
+//                               The data is rotated CCW by the input azimuth. The N-S and E-W extents of the rotated
+//                               data are determined and the bounding points rotated back by the input azimuth to locate
+//                               the angled bounding rectangle around the input data. As with GetGriddingAzimuthToMinimizePadding_DU
+//                               the extents are padded in each direction by 1% of the maximum height/width
+//                               Operates on all selected lines.
+//
+// Available                     2023.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetAngledBoundingRectangle_DU(DB,         // Database
+                                               DB_SYMB,    // X channel [DB_LOCK_READONLY]
+                                               DB_SYMB,    // Y channel [DB_LOCK_READONLY]
+                                               DB_SYMB,    // Data or mask channel [DB_LOCK_READONLY]
+                                               real,       // Input Azimuth Angle - degrees CW from North
+                                               var real,   // Returned Corner 1 - X
+                                               var real,   // Returned Corner 1 - Y
+                                               var real,   // Returned Corner 2 - X
+                                               var real,   // Returned Corner 2 - Y
+                                               var real,   // Returned Corner 3 - X
+                                               var real,   // Returned Corner 3 - Y
+                                               var real,   // Returned Corner 4 - X
+                                               var real);  // Returned Corner 4 - Y
 
 
   
