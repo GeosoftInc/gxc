@@ -11,6 +11,8 @@ DESCRIPTION   = "
                      \"All\" to include all lines
            .CHANNELS \"Displayed\" for displayed channels
                      \"All\" to include all channels
+                     \"List\" CSV list stored in...
+           .CHANLIST List of channels to export when using the \"List\" option in CHANNELS
            .DUMMY    \"No masking\" no masking is applied.
                      \"Leading/Trailing\" masks leading and trailing dummies.
                      \"All dummies\" masks all dummies.
@@ -30,6 +32,7 @@ TRANSLATIONDOMAIN = "core"
 TRANSLATIONFRIENDLYPATH = "GX/Database/Export"
 
 // Revision History:
+// v2023.2.0   Added "List" option for CHAN and associated CHANLIST items (non-interactive only)
 // v7.3:   ISSUE ### Fid problems corrected when first row in mask channel is a dummy.
 // v7.1.1: QA 16622 Output channels' fid increments should be the same as on input.
 // v7.1.0: Improve progress messages. Removed DB_SELECT usage; line selections not changed.
@@ -70,7 +73,7 @@ DB_SYMB     Line,SubsetLine,Line0;
 DB_SYMB     Ch,MaskCh,SubsetCh;
 DB_SYMB     Blob,SubsetBlob;
 BF          hBF;
-LST         List, LineLST;
+LST         List, LineLST, ChanLST;
 REG         hREG;
 
 DGW         Diag;
@@ -82,7 +85,7 @@ string(STR_FILE) sSubset,sSubsetN;
 string(STR_DB_SYMBOL) sMaskCh,sCh,sLine,sBlob;
 string(1024) sTemp;
 string(STR_DEFAULT_SHORT) sLines,sChans,sDummy;
-string(STR_DEFAULT_LONG) sProg;
+string(STR_DEFAULT_LONG) sProg, sChanList;
 
 int i,iChan,iBlob,iFirst,iLast,iLen,iMasterLoaded;
 int iChType,iMask,iCol,iDataLen, iMaskLen;
@@ -240,15 +243,29 @@ real rStart,rIncr,rEnd;
    
    // --- get the channel list ---
    
+   ChanLST = CreateSymbLST_DB();
+
    GetString_SYS("DBSUBSET","CHANNELS",sChans);
-   hVV = Create_VV(INT,0);
-   if (iCharComp_STR(sChans,_n("A")) || iMasterLoaded == 0) {
-      iChan = iSymbList_DB(Master,hVV,DB_SYMB_CHAN);
-   } else {
+   if (iCharComp_STR(sChans,_n("A")) || iMasterLoaded == 0) 
+   {
+      ChanLST_DB(Master, ChanLST);
+   }
+   else if (iCharComp_STR(sChans,_n("L"))) 
+   {
+      GetString_SYS("DBSUBSET","CHANLIST",sChanList);
+      CSVChanLST_DB(Master, ChanLST, sChanList);
+   } 
+   else 
+   {
 		UnLock_EDB(EMaster);
-      iChan = iDispChanList_EDB(EMaster,hVV);
+      iDispChanLST_EDB(EMaster,ChanLST);
       Master = Lock_EDB(EMaster);
    }
+
+   iChan = iSize_LST(ChanLST);
+   if (iChan == 0)
+      Abort_SYS(_("No channels have been selected for export"));
+
    
    // --- Compression ---
    
@@ -433,7 +450,7 @@ real rStart,rIncr,rEnd;
          
       
       // --- Go through standard channels ---
-   
+         
       for (i=0;i<iChan;i++) {
    
          // --- progress ---
@@ -444,8 +461,7 @@ real rStart,rIncr,rEnd;
    
          // --- Get channel name ---
       
-         Ch = (DB_SYMB)iGetInt_VV(hVV,i);
-         GetChanName_DB(Master,Ch,sCh);
+         GetSymbItem_LST(ChanLST, i, sCh, Ch);
 
 
          // --- For groups, add only associated channels ---
@@ -746,6 +762,7 @@ real rStart,rIncr,rEnd;
    
    // --- copy all blobs ---
    
+   hVV = Create_VV(INT,0);
    iBlob = iSymbList_DB(Master,hVV,DB_SYMB_BLOB);
    if (iBlob)
       hBF = Create_BF("",BF_READWRITE_NEW);
@@ -821,9 +838,6 @@ real rStart,rIncr,rEnd;
 
    if (iInteractive_SYS() && iMasterLoaded)
       ESubset = LoadWithView_EDB(sSubset,EMaster);
-   
-   Destroy_VV(hVV);
-   Destroy_VV(MaskVV);
    
    
    // --- progress off ---

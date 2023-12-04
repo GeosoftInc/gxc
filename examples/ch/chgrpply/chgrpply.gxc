@@ -14,10 +14,11 @@ DESCRIPTION   = "
 
    CHGRPPLY.GROUP    View\\Group name
            .MASK 		mask channel - default is \"ChemMask\"
-	        .AREA     Area \"Inside\" or \"Outside\" the polygons.
+	        .AREA     Area to mask: \"outside\" the polygons or \"inside\" (default) the polygons.
            .APPEND   Append (0) to mask data or create new (1) mask
 "
 // Revision History:
+// v2023.2: Changed options for AREA to match other GXs (still support legacy "Inside" and "Outside")
 // v5.1.3: Using "Current" X and Y channels
 //         Using FindChan_DB and iExistChan_DB
 // v5.1.4: Added this GX to the Geophysical Stats package
@@ -128,7 +129,7 @@ string(STR_DEFAULT) sLabel;
 
       SetInfoSYS_DGW(Diag, _CHGRPPLY_0, DGW_TEXT, "CHGRPPLY", "GROUP");
       SetInfoSYS_DGW(Diag, _CHGRPPLY_1, DGW_TEXT, "CHGRPPLY", "MASK");
-      SetInfoSYS_DGW(Diag, _CHGRPPLY_2, DGW_TEXT, "CHGRPPLY", "AREA");
+      SetInfoSYS_DGW(Diag, _CHGRPPLY_2, DGW_LISTALIAS, "CHGRPPLY", "AREA");
       SetInfoSYS_DGW(Diag, _CHGRPPLY_3, DGW_LISTALIAS, "CHGRPPLY", "APPEND");
 
 
@@ -141,7 +142,7 @@ string(STR_DEFAULT) sLabel;
 
       GetInfoSYS_DGW(Diag, _CHGRPPLY_0, DGW_TEXT, "CHGRPPLY", "GROUP");
       GetInfoSYS_DGW(Diag, _CHGRPPLY_1, DGW_TEXT, "CHGRPPLY", "MASK");
-      GetInfoSYS_DGW(Diag, _CHGRPPLY_2, DGW_TEXT, "CHGRPPLY", "AREA");
+      GetInfoSYS_DGW(Diag, _CHGRPPLY_2, DGW_LISTALIAS, "CHGRPPLY", "AREA");
       GetInfoSYS_DGW(Diag, _CHGRPPLY_3, DGW_LISTALIAS, "CHGRPPLY", "APPEND");
 
 
@@ -213,10 +214,10 @@ string(STR_DEFAULT) sLabel;
    // --- Mask dummy setting ---
 
    ToUpper_STR(sArea);
-   if (iCharComp_STR(sArea, "I"))
-      iFill = DU_FILL_INSIDE;
-   else
+   if (iCharComp_STR(sArea, "O"))
       iFill = DU_FILL_OUTSIDE;
+   else
+      iFill = DU_FILL_INSIDE;
 
 
    // --- Create the Poly ---

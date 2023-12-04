@@ -34,9 +34,11 @@ Mask Channel                           .MASK_CHANNEL        (optional)
 Run Modes      RANGRID.RUNMODE   0: Normal behaviour
                                  1: Run advanced options dialog only
                                  2: Write control file only
-               RANGRID.CONTROL_FILE - for RUNMODE = 2                                 
+               RANGRID.CONTROL_FILE - for RUNMODE = 2            
+               RANGRID.LOGFILE - default \"rangrid.log\"
 "
 // Revision History:
+// v2023.2 Allow user setting of log file name.
 // v9.10.0:Added GenValidChanSymb_DB() to generate a valid channel name.
 // v7.0.1: Unload/delete existing grid to ensure proper refresh of grid window.
 // v6.3.0: Added "Advanced Options" and control file modes
@@ -66,6 +68,7 @@ RESOURCE = "rangrid.gr"
 //===========================================================================
 
 string(STR_FILE) sCtl;           // Name of control file
+string(STR_FILE) sLog;           // Name of log file
 string(STR_FILE) sGrid;          // Name of new grid file
 string(STR_DB_SYMBOL) sXCh, sYCh, sZCh;  // channels
 string(STR_DEFAULT) sCS;                 // grid cell size
@@ -452,13 +455,9 @@ DB_SYMB Line;
 
    // --- write control file ---
 
-   if (iRunMode == MODE_CONTROL_FILE)
-   {
+   if (iRunMode == MODE_CONTROL_FILE || iScript_SYS() == 1)
       GetString_SYS("RANGRID", "CONTROL_FILE", sCtl);
-      if (!iStrlen_STR(sCtl))
-         Strcpy_STR(sCtl, "_rangrid.con");
-   }
-   else
+   if (!iStrlen_STR(sCtl))
       Strcpy_STR(sCtl, "_rangrid.con");
 
    WA_con = Create_WA(sCtl, 0);
@@ -591,7 +590,8 @@ DB_SYMB Line;
 
    // --- Execute rangrid program ---
 
-   iRun2_RGRD(Data, sXCh, sYCh, sChannelToGrid, sCtl, sGrid);
+   GetString_SYS("RANGRID", "LOGFILE", sLog);  // can be blank - defaults to rangrid.log
+   iRun3_RGRD(Data, sXCh, sYCh, sChannelToGrid, sCtl, sGrid, sLog);
 
    if (iStrlen_STR(sTempChan) > 0)
    {

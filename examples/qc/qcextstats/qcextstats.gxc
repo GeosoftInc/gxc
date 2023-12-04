@@ -2,6 +2,10 @@
 // clang-format off
 NAME          = "QCEXTSTATS GX"
 #include <version.gxh>
+
+TRANSLATIONDOMAIN = "core"
+TRANSLATIONFRIENDLYPATH = "GX/QC Utility"
+
 DESCRIPTION   = "
 
 PARAMETERS:
@@ -105,19 +109,19 @@ int         iRunMode;
    NewLine_WA(hWA); \
    NewLine_WA(hWA); \
    \
-   Strcpy_STR(sMessage, "Date     : "); \
+   Strcpy_STR(sMessage, _("Date     : ")); \
    FormatDate_STR(rDate_SYS(), sDate, 20, DATE_FORMAT_YYYYMMDD); \
    Strcat_STR(sMessage, sDate); \
    Puts_WA(hWA, sMessage); \
    NewLine_WA(hWA); \
    \
-   Strcpy_STR(sMessage, "Time     : "); \
+   Strcpy_STR(sMessage, _("Time     : ")); \
    FormatTime_STR(rSecondstoTime_SYS(rStartTime), sTime, 20, 0, TIME_FORMAT_COLON); \
    Strcat_STR(sMessage, sTime); \
    Puts_WA(hWA, sMessage); \
    NewLine_WA(hWA); \
    \
-   Strcpy_STR(sMessage, "Duration : "); \
+   Strcpy_STR(sMessage, _("Duration : ")); \
    FormatTime_STR(rSecondstoTime_SYS(rElapsedTime), sTime, 20, 0, TIME_FORMAT_COLON); \
    Strcat_STR(sMessage, sTime); \
    Puts_WA(hWA, sMessage); \
@@ -145,7 +149,7 @@ int         iRunMode;
    NewLine_WA(hWA); \
    \
    Strcpy_STR(sMessage, sIndent); \
-   Strcat_STR(sMessage,"Process: "); \
+   Strcat_STR(sMessage,_("Process: ")); \
    Strcat_STR(sMessage, sGXName); \
    Puts_WA(hWA,sMessage); \
    NewLine_WA(hWA); \
@@ -176,25 +180,25 @@ int         iRunMode;
 	else\
 		hWA = Create_WA(A, WA_APPEND);\
 \
-	QCReportHeader_QC(hWA, sDate, rStartTime, rElapsedTime, "Data Preparation");\
+	QCReportHeader_QC(hWA, sDate, rStartTime, rElapsedTime, _("Data Preparation"));\
 	QCReportGXInfo_QC(hWA, "QC QA Tools/Statistics", "ucenoisest.gx", 1);\
 \
-	QCReportGeneralContent1_QC(hWA, "Input database", sGDB, 2);\
+	QCReportGeneralContent1_QC(hWA, _("Input database"), sGDB, 2);\
 	if (MODE == MODE_UXO)\
 		GetString_SYS("UCENOISEST", "USECHAN",sTemp);\
 	else\
 		GetString_SYS("QCEXTSTATS", "USECHAN",sTemp);\
-	QCReportGeneralContent1_QC(hWA, "Channels to Use", sTemp, 2);\
+	QCReportGeneralContent1_QC(hWA, _("Channels to Use"), sTemp, 2);\
 	if (MODE == MODE_UXO)\
 		GetString_SYS("UCENOISEST", "FILE",sTemp);\
 	else\
 		GetString_SYS("QCEXTSTATS", "FILE",sTemp);\
-	QCReportGeneralContent1_QC(hWA, "Output filename for statistics summary report", sTemp, 2);\
+	QCReportGeneralContent1_QC(hWA, _("Output filename for statistics summary report"), sTemp, 2);\
 	if (MODE == MODE_UXO)\
 		GetString_SYS("UCENOISEST", "HIST",sTemp);\
 	else\
 		GetString_SYS("QCEXTSTATS", "HIST",sTemp);\
-	QCReportGeneralContent1_QC(hWA, "Display channel(s) histogram?", sTemp, 2);\
+	QCReportGeneralContent1_QC(hWA, _("Display channel(s) histogram?"), sTemp, 2);\
 \
 	NewLine_WA(hWA);\
 	NewLine_WA(hWA);\
@@ -234,7 +238,7 @@ int         iRunMode;
 	SymbLST_DB(Data,AllChanLST,DB_SYMB_CHAN);
 	iNChan = iSize_LST(AllChanLST);
 	if(iNChan==0)
-		Abort_SYS("No channels in database");
+		Abort_SYS(_("No channels in database"));
 
 
 	GetName_DB(Data,DB_NAME_FILE,sData);
@@ -347,7 +351,7 @@ int         iRunMode;
 	if(iUseChannel==1)   // Displayed channels
 	{      
 		if(iSize_LST(DispChanLST)==0)
-			Abort_SYS("There are no displayed channels in the current database.");
+			Abort_SYS(_("There are no displayed channels in the current database."));
 
 		Copy_LST(SelChanLST, DispChanLST);
 
@@ -368,7 +372,7 @@ int         iRunMode;
 
 			ConvertFromCSVString_LST(SelChanLST, sChannels);
 
-			i = iTwoPanelSelection_GUI(AllChanLST, SelChanLST, "Select Channels to Process");
+			i = iTwoPanelSelection_GUI(AllChanLST, SelChanLST, _("Select Channels to Process"));
 			if(i!=0) Cancel_SYS();
 
 			// --- Save selection ---
@@ -389,7 +393,7 @@ int         iRunMode;
 
 	iNChan = iSize_LST(SelChanLST);
 	if(iNChan==0)
-		Abort_SYS("No channels have been selected for processing");
+		Abort_SYS(_("No channels have been selected for processing"));
 
 
 	// --- Get parameters ---
@@ -399,7 +403,7 @@ int         iRunMode;
 	else // MODE_NO_UXO
 		GetString_SYS("QCEXTSTATS","FILE",sFile);
 	if (iStrMin2_STR(sFile) == 0)
-		Abort_SYS("No output stats file name has been entered.");
+		Abort_SYS(_("No output stats file name has been entered."));
 
 	if (iRunMode == MODE_UXO)
 		iHist = iGetInt_SYS("UCENOISEST","HIST");
@@ -441,17 +445,17 @@ int         iRunMode;
 
 	// --- Full line number ---
 
-	Puts_WA(hWA, "Database name: ");
+	Puts_WA(hWA, _("Database name: "));
 	Puts_WA(hWA, sData);
 	NewLine_WA(hWA);
 
 	FormatDate_STR(rDate_SYS(), sTemp, 20, DATE_FORMAT_YYYYMMDD);
-	Puts_WA(hWA, "Date         : ");
+	Puts_WA(hWA, _("Date         : "));
 	Puts_WA(hWA, sTemp);
 	NewLine_WA(hWA);
 	FormatTime_STR(rTime_SYS(), sTemp, 30, 19, TIME_FORMAT_COLON);
 	Substr_STR(sTemp, sTemp, 0, 11);
-	Puts_WA(hWA, "Time         : ");
+	Puts_WA(hWA, _("Time         : "));
 	Puts_WA(hWA, sTemp);
 	NewLine_WA(hWA);
 	Puts_WA(hWA, "");

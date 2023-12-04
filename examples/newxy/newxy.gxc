@@ -33,6 +33,7 @@ TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
 //===========================================================================
 // Revision History:
 //
+// v2023.2.0 GPHX-3172 Fix PCS decimal places to display.
 // v7.0.1: QA 13264 - Improve titles to distinguish current and new CS.
 // v7.0.0: QA 7711 - When checking for same datum but different LDT, skip
 //                   warning if we are going from datum *AMMP/SAMMP (silent No) 
@@ -58,14 +59,13 @@ RESOURCE = "newxy.gr"
 //===========================================================================
 
 #include <all.gxh>
-                                                 // clang-format on
+// clang-format on
 
-                                                 //===========================================================================
-                                                 //                                 VARIABLES
-                                                 //===========================================================================
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
 
-                                                 string(STR_DB_SYMBOL) sOldXCh,
-   sOldYCh;                              // Channel Names
+string(STR_DB_SYMBOL) sOldXCh,sOldYCh;                              // Channel Names
 string(STR_DB_SYMBOL) sNewXCh, sNewYCh;  // Channel Names
 string(STR_DB_SYMBOL) sXCh, sYCh, sXBackCh, sYBackCh;
 string(STR_DEFAULT) sTemp, sLabel, sProcess;
@@ -82,13 +82,14 @@ LST List, LineLST;       // List handle
 IPJ hOldIPJ, hNewIPJ;
 PJ hPJ;
 
-int i, iR, iLines, iNew, iInputGCS, iOutputPCS;
+int i, iR, iLines, iNew;
 
 //===========================================================================
 //                                 CODE
 //===========================================================================
 
 {
+  
    EData = Current_EDB();
    Data = Lock_EDB(EData);
 
@@ -135,12 +136,12 @@ int i, iR, iLines, iNew, iInputGCS, iOutputPCS;
 
             SetInfoSYS_DGW(Diag, _NEWXY0_0, DGW_TEXT, "NEWXY", "OLDX");
             SetInfoSYS_DGW(Diag, _NEWXY0_1, DGW_TEXT, "NEWXY", "OLDY");
-            SetInfoSYS_DGW(Diag, _NEWXY0_2, DGW_TEXT, "NEWXY", "PROCESS");
+            SetInfoSYS_DGW(Diag, _NEWXY0_2, DGW_LISTALIAS, "NEWXY", "PROCESS");
             i = iRunDialogue_DGW(Diag);
             if (i == -1) Cancel_SYS();
             GetInfoSYS_DGW(Diag, _NEWXY0_0, DGW_TEXT, "NEWXY", "OLDX");
             GetInfoSYS_DGW(Diag, _NEWXY0_1, DGW_TEXT, "NEWXY", "OLDY");
-            GetInfoSYS_DGW(Diag, _NEWXY0_2, DGW_TEXT, "NEWXY", "PROCESS");
+            GetInfoSYS_DGW(Diag, _NEWXY0_2, DGW_LISTALIAS, "NEWXY", "PROCESS");
             Destroy_DGW(Diag);
 
 
@@ -210,7 +211,6 @@ int i, iR, iLines, iNew, iInputGCS, iOutputPCS;
             else  // user cancelled
                Cancel_SYS();
 
-            iInputGCS = iIsGeographic_IPJ(hOldIPJ);
             break;
 
 
@@ -340,12 +340,18 @@ int i, iR, iLines, iNew, iInputGCS, iOutputPCS;
             LockSymb_DB(Data, NewXCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
             LockSymb_DB(Data, NewYCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
             SetIPJ_DB(Data, NewXCh, NewYCh, hNewIPJ);
-            iOutputPCS = iHasProjection_IPJ(hNewIPJ);
-            if (iInputGCS == 1 && iOutputPCS == 1)
+			
+			//Check if input IPJ is either GCS or PCS or NONE -> PCS		
+			if ((iSourceType_IPJ(hOldIPJ) == IPJ_TYPE_GCS || iSourceType_IPJ(hOldIPJ) == IPJ_TYPE_PCS || iSourceType_IPJ(hOldIPJ) == IPJ_TYPE_NONE) && iSourceType_IPJ(hNewIPJ) == IPJ_TYPE_PCS)
             {
                 SetChanDecimal_DB(Data, NewXCh, 2);
                 SetChanDecimal_DB(Data, NewYCh, 2);
             }
+			else  //going from PCS with 2 decimal places to GCS
+			{
+				SetChanDecimal_DB(Data, NewXCh, 5);
+				SetChanDecimal_DB(Data, NewYCh, 5);
+			}				
             UnLockSymb_DB(Data, NewXCh);
             UnLockSymb_DB(Data, NewYCh);
 
@@ -474,16 +480,21 @@ int i, iR, iLines, iNew, iInputGCS, iOutputPCS;
       GetString_SYS("NEWXY", "NEWIPJ_LOCALDATUM", s5);
       hNewIPJ = Create_IPJ();
       SetGXF_IPJ(hNewIPJ, s1, s2, s3, s4, s5);
-      iInputGCS = iIsGeographic_IPJ(hOldIPJ);
-      iOutputPCS = iHasProjection_IPJ(hNewIPJ);
       LockSymb_DB(Data, NewXCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
       LockSymb_DB(Data, NewYCh, DB_LOCK_READWRITE, DB_WAIT_NONE);
       SetIPJ_DB(Data, NewXCh, NewYCh, hNewIPJ);
-      if (iInputGCS == 1 && iOutputPCS == 1)
+	  
+	  //Check if input IPJ is either GCS or PCS or NONE -> PCS
+	  if ((iSourceType_IPJ(hOldIPJ) == IPJ_TYPE_GCS || iSourceType_IPJ(hOldIPJ) == IPJ_TYPE_PCS || iSourceType_IPJ(hOldIPJ) == IPJ_TYPE_NONE) && iSourceType_IPJ(hNewIPJ) == IPJ_TYPE_PCS)
       {
         SetChanDecimal_DB(Data, NewXCh, 2);
         SetChanDecimal_DB(Data, NewYCh, 2);
       }
+      else  //going from PCS with 2 decimal places to GCS
+	  {
+        SetChanDecimal_DB(Data, NewXCh, 5);
+        SetChanDecimal_DB(Data, NewYCh, 5);
+      }	  
       UnLockSymb_DB(Data, NewXCh);
       UnLockSymb_DB(Data, NewYCh);
    }

@@ -29,6 +29,7 @@ Parameters:
          .MAP     -  Map name if creating a new map
 "
 // Revision History:
+// v2023.2: GPHX-2375 avoid creating a new map when selecting the current map
 // v7.0.0: Removed reference to obsolete bclip parameter.
 // v5.1.6: Fixed double lock problem when calling NEWMAP.GX.
 // v5.1.5: New GX based on UXMGRGRD.GX and RANGRID.GX
@@ -208,7 +209,15 @@ string(STR_DEFAULT_LONG) sMsg;
 
       iNew = iGetInt_SYS("E3MGRGRD", "NEW");
 
-      if (iNew == 0 || iNew == 1)
+      if (iNew == 0)
+      {
+         // --- Ensure we have a map and that we are not drawing on grid documents ---
+
+         UnLock_EDB(EData);
+         if (iRunGX_SYS("sclgrd.gx")) Cancel_SYS();
+         Data = Lock_EDB(EData);
+      }
+      else if (iNew == 1)
       {
          // --- Run NEWMAP wizard ---
 

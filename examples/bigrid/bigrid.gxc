@@ -36,7 +36,7 @@ RESOURCE = "bigrid.gr"
    //                             GLOBAL VARIABLES
    //===========================================================================
 
-   string(STR_FILE) sGrid;        // Name of output grid
+string(STR_FILE) sGrid, sCtl;        // Name of output grid, control file
 string(STR_DEFAULT_LONG) sText;   // Line of text to write to control file
 string(STR_DEFAULT_LONG) sTitle;  //
 string(STR_DB_SYMBOL) sChan;      // Channel to grid
@@ -491,9 +491,14 @@ DB_SYMB Line;
       iTRA = FALSE;
 
 
-   // --- Create control file ---
+   // --- Write control file ---
 
-   ConFile = Create_WA("_bigrid.con", 0);
+   if (iRunMode == MODE_CONTROL_FILE || iScript_SYS() == 1)
+      GetString_SYS("BIGRID", "CONTROL_FILE", sCtl);
+   if (!iStrlen_STR(sCtl))
+      Strcpy_STR(sCtl, "_bigrid.con");
+
+   ConFile = Create_WA(sCtl, 0);
 
    Strcpy_STR(sTitle, _n("Channel "));
    Strcat_STR(sTitle, sChan);
@@ -695,7 +700,7 @@ DB_SYMB Line;
 
    // --- Load up the BIGRID control parameters ---
 
-   if (iLoadParms_BIGRID(Bigrid, "_bigrid.con"))
+   if (iLoadParms_BIGRID(Bigrid, sCtl))
       Abort_SYS(_("Bad control file"));
 
 

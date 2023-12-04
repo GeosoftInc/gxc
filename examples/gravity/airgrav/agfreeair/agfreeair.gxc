@@ -164,7 +164,7 @@ string(512)          sFormula;
       Abort_SYS(_("The Eotvos correction channel does not exist."));
    if (!iExistChan_DB(Data,sLatCh)) 
       Abort_SYS(_("The Latitude correction channel does not exist."));
-   if (!iExistChan_DB(Data,sFaCh)) 
+   if (iStrlen_STR(sFaCh)>0 && !iExistChan_DB(Data,sFaCh)) 
       Abort_SYS(_("The Free-air correction channel does not exist."));
 
    InCh = FindChan_DB(Data,sInCh);
@@ -173,8 +173,11 @@ string(512)          sFormula;
    LockSymb_DB(Data,EotvosCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
    LatCh = FindChan_DB(Data,sLatCh);
    LockSymb_DB(Data,LatCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
-   FaCh = FindChan_DB(Data,sFaCh);
-   LockSymb_DB(Data,FaCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   if (iStrlen_STR(sFaCh)>0)
+   {
+      FaCh = FindChan_DB(Data,sFaCh);
+      LockSymb_DB(Data,FaCh,DB_LOCK_READONLY,DB_WAIT_INFINITY);
+   }
 
    if(iVaccCor) {
       VaccCh = FindChan_DB(Data,sVaccCh);
@@ -257,7 +260,10 @@ string(512)          sFormula;
    UnLockSymb_DB(Data,InCh);
    UnLockSymb_DB(Data,EotvosCh);
    UnLockSymb_DB(Data,LatCh);
-   UnLockSymb_DB(Data,FaCh);
+   if (iStrlen_STR(sFaCh)>0)
+   {
+      UnLockSymb_DB(Data,FaCh);
+   }
    UnLockSymb_DB(Data,OutCh);
    if(iVaccCor)
       UnLockSymb_DB(Data,VaccCh);

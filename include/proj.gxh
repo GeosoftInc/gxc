@@ -92,6 +92,29 @@
 #define PROJ_DISPLAY_ALWAYS 2
 
 
+//===========================================================================================================
+//
+// PROJ_OMS Definitions
+//
+// Script registration
+//
+// PROJ_OMS_NAME_SIZE
+// Buffer size for script primary and secondary names
+//
+// PROJ_OMS_DATETIME_SIZE
+// Buffer size for the date/time string
+//
+// PROJ_OMS_PROCESSID_SIZE
+// Buffer size for process ID
+//
+//===========================================================================================================
+
+
+#define PROJ_OMS_NAME_SIZE 32
+#define PROJ_OMS_DATETIME_SIZE 24
+#define PROJ_OMS_PROCESSID_SIZE 16
+
+
 
 
 
@@ -562,6 +585,75 @@
 //-----------------------------------------------------------------------------------------------------------
 
 [_public_app] int HasPendingCentralPublishEvent_PROJ();
+
+
+
+//===========================================================================================================
+//
+// OMS_Scripting Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// RegisterBackgroundScript_PROJ Register an OMS script launched from the project
+//
+// Returns                       Nothing.
+//
+// Notes                         Allows the project to track the progress/failure/success of scripts launched in the background
+//
+// Available                     2022.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public_app] void RegisterBackgroundScript_PROJ(string,   // Name for the process
+                                                 string,   // Secondary name for the process
+                                                 string,   // file name of the script. Script should self-delete to indicate process has completed
+                                                 string,   // file name of the output log (optional). Will contain info about this script run
+                                                 int,      // 1 - log file is temporary and deleted on OM close. 0 - do not delete on OM close
+                                                 VV,       // List of output documents created by the script.
+                                                 string,   // File to delete (optional). Will also delete files with same name and .tmp and .xml extensions
+                                                 string);  // Process ID - used to check status or kill the process
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetRegisteredBackgroundScript_PROJ Retrieve info on a registered OMS script launched from the project
+//
+// Returns                            nothing
+//
+// Notes                              reference by index
+//
+// Available                          2022.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public_app] void GetRegisteredBackgroundScript_PROJ(int,          // Index for the process (input) 0 to N-1
+                                                      var string,   // Date/Time string in format DD/MM/YYYY hh:mm:ss
+                                                      int,          // Size of descriptive names for script process
+                                                      var string,   // Name for the process (output)
+                                                      var string,   // Secondary name for the process (output)
+                                                      int,          // Size of descriptive names for script process
+                                                      var string,   // file name of the script (output)
+                                                      var string,   // file name of the output log (returned, can be empty).
+                                                      int,          // Size of script and log filenames
+                                                      VV,           // List of output documents created by the script. of size -STR_FILE
+                                                      var string,   // Process ID (returned)
+                                                      int);         // Size of the process ID string
+#define _GetRegisteredBackgroundScript_PROJ(index, date_time, name, name2, script, log, output_files, process_id) GetRegisteredBackgroundScript_PROJ(index, date_time, sizeof(date_time), name, name2, sizeof(name2), script, log, sizeof(log), output_files, process_id, sizeof(process_id))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetNumRegisteredBackgroundScripts_PROJ Register a OMS script launched from the project
+//
+// Returns                                 The number of registered background scripts: in progress, finished, failed, deleted etc.
+//
+// Notes                                   Allows the project to track the progress/failure/success of scripts launched in the background
+//
+// Available                               2022.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public_app] int iGetNumRegisteredBackgroundScripts_PROJ();
 
 
 

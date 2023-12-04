@@ -137,9 +137,10 @@ string(STR_DEFAULT_SHORT) sFid;
 DB_SYMB Chan;
 DB_SYMB Line;
 
-int i, i2, iNLines, iFormat, iDrillHole, iInteractive, iChanDecimals, iDec;
+int i, i2, iNLines, iFormat, iDrillHole, iInteractive, iChanDecimals, iDec, iChanType;
 int iVAColumn, iStart, iEnd, iStartOld, iEndOld, iSelection, iOK;
-int iDlg, iWidth;
+int iDlg, iWidth, iStrings;
+real rNTot, rNValid, rNBlank, rNonBlank;
 
 ST hST;
 DGW Diag, Diag2;
@@ -194,6 +195,7 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
       if (iDec < 3)
          iDec = 3;
       iVAColumn = iGetColVA_DB(Data, Chan);
+      iChanType = iGetChanType_DB(Data, Chan);
       UnLockSymb_DB(Data, Chan);
 
 
@@ -347,18 +349,60 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
 
       Progress_SYS(0);
 
+      // --- Special handling for string channels with no valid numeric items ---
+
+      iStrings = 0;
+      rNTot = rGetInfo_ST(hST, ST_TOTAL);
+      rNValid = rGetInfo_ST(hST, ST_ITEMS);
+      rNBlank = rGetInfo_ST(hST, ST_NEMPTYSTRINGS);
+      if (iChanType < 0 && rNTot > 0.0)
+         iStrings = 1;
+
 
       // --- Create the Dialogue ---
 
-      if (iDrillHole == 1)
-         Diag = Create_DGW("StatFormDH");
+      if (iStrings == 1 && rNValid == 0.0)
+      {
+         Diag = Create_DGW("StatFormJustStrings");
+         iDrillHole = 0;
+      }
+      else if (iDrillHole == 1)
+      {
+         if (iStrings == 1)
+            Diag = Create_DGW("StatFormDHStrings");
+         else
+            Diag = Create_DGW("StatFormDH");
+      }
       else
-         Diag = Create_DGW("StatForm");
+      {
+         if (iStrings == 1)
+            Diag = Create_DGW("StatFormStrings");
+         else
+            Diag = Create_DGW("StatForm");
+      }
 
 
       // --- Set any Defaults ---
 
-      if (iDrillHole == 1)
+      if (iStrings && rNValid == 0.0)
+      {
+         iDlg = _STATFORMSTRINGS_0;
+         SETDIALOG_CHANNEL(Diag, sChan);
+         SetInfo_DGW(Diag, _STATFORMSTRINGS_1, DGW_TEXT, sLine);
+         SetInfo_DGW(Diag, _STATFORMSTRINGS_2, DGW_TEXT, sFid);
+
+         iDlg = _STATFORMSTRINGS_2 + 1;
+         SETDIALOG_INT(ST_TOTAL);
+
+         rNonBlank = rNTot - rNBlank;
+         FormatR2_STR(rNonBlank, Str, 20, 0);
+         SetInfo_DGW(Diag, _STATFORMSTRINGS_4, DGW_TEXT, Str);
+
+         iDlg = _STATFORMSTRINGS_4 + 1;         
+         SETDIALOG_INT(ST_NEMPTYSTRINGS);
+         SETDIALOG_INT(ST_ITEMS);
+      }
+      else if (iDrillHole == 1)
       {
          iDlg = _STATFORMDH_0;
          SETDIALOG_CHANNEL(Diag, sChan);
@@ -367,8 +411,17 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
 
          iDlg = _STATFORMDH_2 + 1;
          SETDIALOG_INT(ST_TOTAL);
-         SETDIALOG_INT(ST_ITEMS);
-         SETDIALOG_INT(ST_DUMMIES);
+
+         if (iStrings == 1)
+         {
+            SETDIALOG_INT(ST_NEMPTYSTRINGS);
+            SETDIALOG_INT(ST_ITEMS);
+         }
+         else
+         {
+            SETDIALOG_INT(ST_ITEMS);
+            SETDIALOG_INT(ST_DUMMIES);
+         }
 
          SETDIALOG_REAL(ST_MIN);
          SETDIALOG_REAL(ST_MAX);
@@ -409,8 +462,16 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
 
          iDlg = _STATFORM_2 + 1;
          SETDIALOG_INT(ST_TOTAL);
-         SETDIALOG_INT(ST_ITEMS);
-         SETDIALOG_INT(ST_DUMMIES);
+         if (iStrings == 1)
+         {
+            SETDIALOG_INT(ST_NEMPTYSTRINGS);
+            SETDIALOG_INT(ST_ITEMS);
+         }
+         else
+         {
+            SETDIALOG_INT(ST_ITEMS);
+            SETDIALOG_INT(ST_DUMMIES);
+         }
 
          SETDIALOG_REAL(ST_MIN);
          SETDIALOG_REAL(ST_MAX);
@@ -471,44 +532,62 @@ string(STR_DEFAULT_LONG) Str, sSkippedLines;
                NewLine_WA(hWA);
 
                WRITELINE_INT(ST_TOTAL, _("Number of Items:"));
-               WRITELINE_INT(ST_ITEMS, _("Number of Valid Items:"));
-               WRITELINE_INT(ST_DUMMIES, _("Number of Dummies:"));
-               NewLine_WA(hWA);
 
-               WRITELINE_REAL(ST_MIN, _("Minimum value:"));
-               WRITELINE_REAL(ST_MAX, _("Maximum value:"));
-               WRITELINE_REAL(ST_RANGE, _("Range:"));
-               NewLine_WA(hWA);
-               
-               WRITELINE_REAL(ST_MEAN, _("Mean value:"));
-
-               if (iDrillHole == 1)
+               if (iStrings == 1 && rNValid == 0.0)
                {
-                  FormatR2_STR(rWeightedMean, Str, 20, iChanDecimals);
-                  WRITELINE(_("Length Weighted Mean:"), Str);
-                  FormatR2_STR(rLength, Str, 20, iChanDecimals);
-                  WRITELINE(_("Total length:"), Str);
-               }
-               WRITELINE_REAL(ST_MEDIAN, _("Median value:"));
-               WRITELINE_REAL(ST_SIMPLE_MODE, _("Mode value:"));
-               WRITELINE_REAL(ST_SUM, _("Sum of values:"));
-               NewLine_WA(hWA);
-
-               if (iFormat == DB_CHAN_FORMAT_GEOGR)
-               {
-                  WRITELINE_REAL(ST_STDDEV, _("Standard Deviation:"));
+                  FormatR2_STR(rNonBlank, Str, 20, 0);
+                  WRITELINE(_("Number of Non-Blank Items:"), Str);               
+                  WRITELINE_INT(ST_NEMPTYSTRINGS, _("Number of Blank Items:"));
                }
                else
                {
-                  WRITELINE_REAL2(ST_STDDEV, _("Standard Deviation:"), iDec);
+                  if (iStrings == 1)
+                  {
+                     WRITELINE_INT(ST_NEMPTYSTRINGS, _("Number of Blank Items:"));
+                     WRITELINE_INT(ST_ITEMS, _("Number of Numeric Items:"));
+                  }
+                  else
+                  {
+                     WRITELINE_INT(ST_ITEMS, _("Number of Valid Items:"));
+                     WRITELINE_INT(ST_DUMMIES, _("Number of Dummies:"));
+                  }
+                  NewLine_WA(hWA);
+
+                  WRITELINE_REAL(ST_MIN, _("Minimum value:"));
+                  WRITELINE_REAL(ST_MAX, _("Maximum value:"));
+                  WRITELINE_REAL(ST_RANGE, _("Range:"));
+                  NewLine_WA(hWA);
+               
+                  WRITELINE_REAL(ST_MEAN, _("Mean value:"));
+
+                  if (iDrillHole == 1)
+                  {
+                     FormatR2_STR(rWeightedMean, Str, 20, iChanDecimals);
+                     WRITELINE(_("Length Weighted Mean:"), Str);
+                     FormatR2_STR(rLength, Str, 20, iChanDecimals);
+                     WRITELINE(_("Total length:"), Str);
+                  }
+                  WRITELINE_REAL(ST_MEDIAN, _("Median value:"));
+                  WRITELINE_REAL(ST_SIMPLE_MODE, _("Mode value:"));
+                  WRITELINE_REAL(ST_SUM, _("Sum of values:"));
+                  NewLine_WA(hWA);
+
+                  if (iFormat == DB_CHAN_FORMAT_GEOGR)
+                  {
+                     WRITELINE_REAL(ST_STDDEV, _("Standard Deviation:"));
+                  }
+                  else
+                  {
+                     WRITELINE_REAL2(ST_STDDEV, _("Standard Deviation:"), iDec);
+                  }
+
+                  WRITELINE_REAL2(ST_STDERR, _("Standard Error:"), iDec);
+                  WRITELINE_REAL2(ST_VARIANCE, _("Variance:"), iDec);
+                  WRITELINE_REAL2(ST_SKEW, _("Skew:"), iDec);
+                  WRITELINE_REAL2(ST_KURTOSIS, _("Kurtosis:"), iDec);
                }
-
-               WRITELINE_REAL2(ST_STDERR, _("Standard Error:"), iDec);
-               WRITELINE_REAL2(ST_VARIANCE, _("Variance:"), iDec);
-               WRITELINE_REAL2(ST_SKEW, _("Skew:"), iDec);
-               WRITELINE_REAL2(ST_KURTOSIS, _("Kurtosis:"), iDec);
                NewLine_WA(hWA);
-
+               
                Destroy_WA(hWA);
             }
 

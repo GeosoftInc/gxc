@@ -37,20 +37,21 @@ RESOURCE="ip3dview.gr"
    // dialogs
    //===========================================================================
 
-   //===========================================================================
-   //                                 VARIABLES
-   //===========================================================================
+//===========================================================================
+//                                 VARIABLES
+//===========================================================================
 
-   DGW Diag;
-EMAP EMap;
-MAP Map;
+DGW Diag;
+EMAP EMap, EMap3D;
+MAP Map, Map3D;
 IPJ Ipj, Ipj2;
-LST Lst, Lst3d;
-MVIEW View;
+LST Lst;
+MVIEW View2D, View3D;
 
-int i, iN, iS, iSkip, iInteractive;
-string(STR_GROUP) sView, sView3d;
-string(STR_DEFAULT_LONG) sMsg;
+int i, iN, iS, iSkip, iInteractive, iPlane;
+real rAX, rAY, rAZ, rOX, rOY, rOZ, rSX, rSY, rSZ;
+string(STR_GROUP) sPlane, sView, sMap2D, sMap3D;
+string(STR_DEFAULT_LONG) sMsg, sBuff1, sBuff2, sBuff3;
 
 //===========================================================================
 //                                 CODE
@@ -60,22 +61,19 @@ string(STR_DEFAULT_LONG) sMsg;
    // --- get current map ---
 
    EMap = Current_EMAP();
+
+   if (iPackedFiles_EMAP(EMap) > 1)
+      Abort_SYS(_("This map is packed. This GX must be run on an unpacked map."));
+
+   GetName_EMAP(EMap, sMap2D);
    Map = Lock_EMAP(EMap);
+
 
 
    // --- Get lists of the views ---
 
    Lst = Create_LST(MVIEW_NAME_LENGTH);
    ViewListEx_MAP(Map, Lst, MAP_LIST_MODE_NOT3D);
-
-   Lst3d = Create_LST(MVIEW_NAME_LENGTH);
-   ViewListEx_MAP(Map, Lst3d, MAP_LIST_MODE_3D);
-
-
-   // --- Add the default to the 3D View LST ---
-
-   AddUniqueItem_LST(Lst3d, "IP3D", "IP3D");
-
 
    // --- Create IPJs ---
 
@@ -92,9 +90,9 @@ string(STR_DEFAULT_LONG) sMsg;
       // --- Get the view and its projection ---
 
       GetItem_LST(Lst, 0, i, sView);
-      View = Create_MVIEW(Map, sView, MVIEW_READ);
-      GetIPJ_MVIEW(View, Ipj);
-      Destroy_MVIEW(View);
+      View2D = Create_MVIEW(Map, sView, MVIEW_READ);
+      GetIPJ_MVIEW(View2D, Ipj);
+      Destroy_MVIEW(View2D);
 
 
       // --- Check that it's a section view ---
@@ -117,27 +115,63 @@ string(STR_DEFAULT_LONG) sMsg;
    if (iInteractive)
    {
       Diag = Create_DGW("IP3DVIEW");
-      Copy_LST(GetList_DGW(Diag, _IP3DVIEW_0), Lst3d);
+      SetInfoSYS_DGW(Diag, _IP3DVIEW_0, DGW_FILEPATH, "IP3DVIEW", "VIEW");
 
-      SetInfoSYS_DGW(Diag, _IP3DVIEW_0, DGW_TEXT, "IP3DVIEW", "VIEW");
+      do
+      {
 
+         // --- Run the Dialogue ---
 
-      // --- Run the Dialogue ---
+         i = iRunDialogue_DGW(Diag);
+         if (i == -1) Cancel_SYS();
 
-      i = iRunDialogue_DGW(Diag);
-      if (i == -1) Cancel_SYS();
+         GetInfoSYS_DGW(Diag, _IP3DVIEW_0, DGW_FILEPATH, "IP3DVIEW", "VIEW");
 
-      GetInfoSYS_DGW(Diag, _IP3DVIEW_0, DGW_TEXT, "IP3DVIEW", "VIEW");
+         GetString_SYS("IP3DVIEW", "VIEW", sMap3D);
+
+      } while(iFileExist_SYS(sMap3D) && !iDisplayQuestion_SYS(_("Create New 3D View"), _("The 3D View exists. Do you wish to overwrite it?")));
+
 
       Destroy_DGW(Diag);
    }
 
 
-   GetString_SYS("IP3DVIEW", "VIEW", sView3d);
-   if (!iStrlen_STR(sView3d))
-      Strcpy_STR(sView3d, "IP3D");  // Set default view
+   // --- Validation ---
 
+   GetString_SYS("IP3DVIEW", "VIEW", sMap3D);
+   if (!iStrlen_STR(sMap3D))
+      Abort_SYS(_n("A 3D view name is required"));
 
+   if (iFileExist_SYS(sMap3D))
+   {
+      iRemoveDocument_PROJ(sMap3D);
+      iDeleteFile_SYS(sMap3D);
+   }
+
+   
+   // --- Create new 3D Map ---
+
+   GetString_SYS("NEW3DVIEW", "NEW", sBuff1);
+   GetString_SYS("NEW3DVIEW", "MAP", sBuff2);
+   GetString_SYS("NEW3DVIEW", "NAME", sBuff3);
+
+   SetString_SYS("NEW3DVIEW", "NEW", "1");
+   SetString_SYS("NEW3DVIEW", "MAP", sMap3D);
+   SetString_SYS("NEW3DVIEW", "NAME", "3D");
+
+   SetInteractive_SYS(0);
+   iRunGX_SYS("geogxnet.dll(Geosoft.GX.Map.New3DView;CreateNew3DView)");         
+
+   SetInteractive_SYS(iInteractive);
+
+   SetString_SYS("NEW3DVIEW", "NEW", sBuff1);
+   SetString_SYS("NEW3DVIEW", "MAP", sBuff2);
+   SetString_SYS("NEW3DVIEW", "NAME", sBuff3);
+
+   EMap3D = Load_EMAP(sMap3D);
+   Map3D = Lock_EMAP(EMap3D);
+   View3D = Create_MVIEW(Map3D, _n("3D"), MVIEW_WRITEOLD);
+      
    // Turn on progress
 
    Progress_SYS(1);
@@ -156,59 +190,46 @@ string(STR_DEFAULT_LONG) sMsg;
 
       GetItem_LST(Lst, 0, i, sView);
 
-      View = Create_MVIEW(Map, sView, MVIEW_READ);
-      GetIPJ_MVIEW(View, Ipj);
-      Destroy_MVIEW(View);
+      View2D = Create_MVIEW(Map, sView, MVIEW_READ);
+      GetIPJ_MVIEW(View2D, Ipj);
 
 
       // --- Check that it's a section view ---
 
       if (iGetOrientation_IPJ(Ipj) != IPJ_ORIENT_SECTION) continue;
 
-      SetString_SYS("V3DMAP", "VIEW", sView3d);
-      SetString_SYS("V3DMAP", "VIEWGROUP", sView);
-      SetString_SYS("V3DMAP", "PLANE", sView);
-      SetInt_SYS("V3DMAP", "ORIENT", 0);    // "RAW" Orientation
-      SetString_SYS("V3DMAP", "GRID", "");  // No relief
+      // --- See if the IPJ has changed... don't plot
+      //     overlapping sections ---
 
-      if (iS == 0)
+      if (iOrientationsAreTheSame_IPJ(Ipj, Ipj2))
       {
-         SetString_SYS("V3DMAP", "NEWVIEW", "YES");
-      }
-      else
-      {
-         // --- See if the IPJ has changed... don't plot
-         //     overlapping sections ---
-
-         if (iOrientationsAreTheSame_IPJ(Ipj, Ipj2))
-         {
-            iSkip++;
-            continue;
-         }
-
-         SetString_SYS("V3DMAP", "NEWVIEW", "NO");
+         iSkip++;
+         continue;
       }
 
-      if (iInteractive) SetInteractive_SYS(0);
-      UnLock_EMAP(EMap);
+      // --- Name plane after the view ---
 
+      Strcpy_STR(sPlane, sView);
+      iPlane = iCreatePlane_MVIEW(View3D, sPlane);
 
-      // --- If not creating a new view, then the 3D view is set
-      //     to be the current view ---
+      // --- Set the plane equation ---
 
-      if (!iScript_SYS() && iS > 0)
-         iChangeCurrentView_EMAP(EMap, sView3d);
+      GetViewPlaneEquation_MVIEW(View2D, rAX, rAY, rAZ, rOX, rOY, rOZ, rSX, rSY, rSZ);
+      SetPlaneEquation_MVIEW(View3D, iPlane, rAX, rAY, rAZ, rOX, rOY, rOZ, rSX, rSY, rSZ);
 
-      if (iRunGX_SYS("v3dmap.gx")) Cancel_SYS();
+      MarkAllGroups_MVIEW(View2D, 1);
+      CopyRawMarkedGroups_MVIEW(View2D, View3D);
 
-      Map = Lock_EMAP(EMap);
-      if (iInteractive) SetInteractive_SYS(1);
+      Destroy_MVIEW(View2D);
 
       // --- Save projection for comparison ---
 
       Copy_IPJ(Ipj, Ipj2);
       iS++;
    }
+
+   Destroy_MVIEW(View3D);
+   Commit_MAP(Map3D);
 
    ProgUpdate_SYS(100);
    Progress_SYS(0);
@@ -223,12 +244,8 @@ string(STR_DEFAULT_LONG) sMsg;
 
    // -- Clean up ---
 
+   Destroy_MVIEW(View2D);
    UnLock_EMAP(EMap);
-   if (iInteractive_SYS())
-      ActivateView_EMAP(EMap, sView3d);
-
-   Destroy_IPJ(Ipj);
-   Destroy_IPJ(Ipj2);
-   Destroy_LST(Lst);
-   Destroy_LST(Lst3d);
+   UnLock_EMAP(EMap3D);
+   MakeCurrent_EMAP(EMap3D);
 }

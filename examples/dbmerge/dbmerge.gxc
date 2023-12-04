@@ -58,7 +58,7 @@ DB_SELECT   Select;
 REG         hREG1,hREG2;
 
 DGW         Diag;
-VV          hVV,Data1VV, Data2VV;
+VV          hVV;
 VA          Data1VA, Data2VA;
 BF          hBF;
 
@@ -336,137 +336,78 @@ real rProg;
                UnLockSymb_DB(hDB1,Ch1);
                continue;
             }
-            
+                     
          
-         
-            // --- Get VV from the channel found ---
+            // --- Get data from the channel found ---
 
             iChType = iGetChanType_DB(hDB2,Ch);
             iCol    = iGetColVA_DB(hDB2,Ch);
 
-            if (iCol == 1) {
-         
-         
-               // --- create VV ---
+            // --- create VA ---
             
-               Data2VV = CreateExt_VV(iChType,0);
+            Data2VA = CreateExt_VA(iChType,0,iCol);
                
                
-               // --- get the data ---
+            // --- get the data ---
             
-               LockSymb_DB(hDB2,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);      
-               GetChanVV_DB(hDB2,Line,Ch,Data2VV);
-               UnLockSymb_DB(hDB2,Ch);
+            LockSymb_DB(hDB2,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);      
+            GetChanVA_DB(hDB2,Line,Ch,Data2VA);
+            UnLockSymb_DB(hDB2,Ch);
 
+            // --- Remove any protection ---
 
-               // --- Remove any protection ---
-
-               iProt = iGetChanProtect_DB(hDB1, Ch1);
-               SetChanProtect_DB(hDB1, Ch1, DB_CHAN_UNPROTECTED);
-         
-         
-               // --- If appending, get initial data and extend it ---
+            iProt = iGetChanProtect_DB(hDB1, Ch1);
+            SetChanProtect_DB(hDB1, Ch1, DB_CHAN_UNPROTECTED);
             
-               if(iRpl==2) {
             
-                  Data1VV = CreateExt_VV(iChType,0);
+            // --- If appending, get initial data and extend it ---
+            
+            if(iRpl==2) {            			  
+				  
+               Data1VA = CreateExt_VA(iChType,0,iCol);
 
-                  GetChanVV_DB(hDB1,Line1,Ch1,Data1VV);
+               GetChanVA_DB(hDB1,Line1,Ch1,Data1VA);
                   
+               // --- Buffer input data to longest channel's length so all input data lines up. This does NOT
+               //     account for original fiducial differences, or fiducial increments ---
                   
-                  // --- Buffer input data to longest channel's length so all input data lines up. This does NOT
-                  //     account for original fiducial differences, or fiducial increments ---
-                  
-                  iLen1 = iLength_VV(Data1VV);
-                  iLen2 = iLength_VV(Data2VV);
-                  if(iLen2>0 && iLen1<iMaxLen) {
-                     SetLen_VV(Data1VV, iMaxLen);
-                     SetIntN_VV(Data1VV, iLen1, iMaxLen-iLen1, iDUMMY);                     
-                  }
-                  
-						Append_VV(Data1VV, Data2VV);
-
-
-						// --- If there is no data in the destination to start with, use the merging fiducials ---
-
-						if (iLen1 == 0)
-						{
-							SetFidStart_VV(Data1VV, rGetFidStart_VV(Data2VV));
-							SetFidIncr_VV(Data1VV, rGetFidIncr_VV(Data2VV));
-						}
-
-						
-						// --- Output the data ---
-
-						PutChanVV_DB(hDB1,Line1,Ch1,Data1VV);                          
-
-                  Destroy_VV(Data1VV);
-
+               iLen1 = iLen_VA(Data1VA);
+               iLen2 = iLen_VA(Data2VA);
+               if(iLen2>0 && iLen1<iMaxLen) {
+                  SetLen_VA(Data1VA, iMaxLen);
+                  SetIntN_VA(Data1VA, iLen1, iMaxLen-iLen1, iDUMMY);                     
                }
-               else
-                  PutChanVV_DB(hDB1,Line1,Ch1,Data2VV);
+                  
+					Append_VA(Data1VA, Data2VA);
 
 
-               // --- Reset channel protection ---
+					// --- If there is no data in the destination to start with, use the merging fiducials ---
 
-               SetChanProtect_DB(hDB1, Ch1, iProt);
-
-               if(iLength_VV(Data2VV) > 0) iMergedData = TRUE;
-
-               Destroy_VV(Data2VV);
-            
-            
-            } else {      
-         
-         
-               // --- create VA ---
-            
-               Data2VA = CreateExt_VA(iChType,0,iCol);
-               
-               
-               // --- get the data ---
-            
-               LockSymb_DB(hDB2,Ch,DB_LOCK_READONLY,DB_WAIT_NONE);      
-               GetChanVA_DB(hDB2,Line,Ch,Data2VA);
-               UnLockSymb_DB(hDB2,Ch);
-
-               // --- Remove any protection ---
-
-               iProt = iGetChanProtect_DB(hDB1, Ch1);
-               SetChanProtect_DB(hDB1, Ch1, DB_CHAN_UNPROTECTED);
-            
-            
-               // --- If appending, get initial data and extend it ---
-            
-               if(iRpl==2) {            			  
-				  
-                  Data1VA = CreateExt_VA(iChType,0,iCol);
-
-                  GetChanVA_DB(hDB1,Line1,Ch1,Data1VA);
-                  Append_VA(Data1VA, Data2VA);
-				  
-                  SetFidStart_VA(Data1VA, rGetFidStart_VA(Data2VA));
-				  SetFidIncr_VA(Data1VA, rGetFidIncr_VA(Data2VA));
+					if (iLen1 == 0)
+					{
+						SetFidStart_VA(Data1VA, rGetFidStart_VA(Data2VA));
+						SetFidIncr_VA(Data1VA, rGetFidIncr_VA(Data2VA));
+					}
 				  
 				  
-                  PutChanVA_DB(hDB1,Line1,Ch1,Data1VA);                          
+					// --- Output the data ---
 
-                  Destroy_VA(Data1VA);
+               PutChanVA_DB(hDB1,Line1,Ch1,Data1VA);                          
 
-               }
-               else
-                  PutChanVA_DB(hDB1,Line1,Ch1,Data2VA);
+               Destroy_VA(Data1VA);
 
-
-               // --- Reset channel protection ---
-
-               SetChanProtect_DB(hDB1, Ch1, iProt);
-
-               if(iLen_VA(Data2VA) > 0) iMergedData = TRUE;
-
-               Destroy_VA(Data2VA);
-            
             }
+            else
+               PutChanVA_DB(hDB1,Line1,Ch1,Data2VA);
+
+
+            // --- Reset channel protection ---
+
+            SetChanProtect_DB(hDB1, Ch1, iProt);
+
+            if(iLen_VA(Data2VA) > 0) iMergedData = TRUE;
+
+            Destroy_VA(Data2VA);            
          
             UnLockSymb_DB(hDB1,Ch1);
          
