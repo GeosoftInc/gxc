@@ -20,7 +20,7 @@ Select a __[Release](https://github.com/GeosoftInc/gxc/releases)__ and download 
    | ___examples___ | source code for all Geosoft GXs |
    | ___include___ | GXC header files that document the GX API |
 
-The compiler and support tools are part of your Geosoft Desktop installation. You will need to add the Geosoft Desktop bin directory to your system path so the compiler programs can be found, and set the environment variable __INCLUDE__ to your ___gxc\include___ folder.  For example:
+The compiler and support tools are part of your Geosoft Desktop installation. You can add the Geosoft Desktop bin directory to your system path so the compiler programs can be found. You will need to set the environment variable __INCLUDE__ to your ___gxc\include___ folder as this folder cannot be explicitly referenced by the compilation commands.  For example:
 
 ```
 set "PATH=%PATH%;C:\Program Files\Geosoft\Desktop Applications 9\bin"
