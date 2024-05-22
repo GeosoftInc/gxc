@@ -24,7 +24,7 @@ The compiler and support tools are part of your Geosoft Desktop installation. Yo
 
 ```
 set "PATH=%PATH%;C:\Program Files\Geosoft\Desktop Applications 9\bin"
-set "INCLUDE=c:\geosoft_code\gxc\include"
+set "INCLUDE=%INCLUDE%;c:\geosoft_code\gxc\include"
 ```
 
 #### Compile a GX
