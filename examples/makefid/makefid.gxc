@@ -46,6 +46,7 @@ int i;                // Utility int
 int iLines;           // Number of Lines Processed
 int iTotLines;        // Total Number of Lines to Process
 int iLoadChan;        // Load fid channel (Yes by default)
+int iProgressState;   // Current progress bar state
 
 string(STR_DEFAULT_SHORT) sTemp;  // temporary number formating string
 string(STR_DEFAULT) sLabel;
@@ -146,11 +147,18 @@ string(STR_DEFAULT) sLabel;
 
 
    // --- Prepare to do the work ---
+   
+   iProgressState = iProgState_SYS();
 
    iLines = 0;
    iTotLines = iCountSelLines_DB(Data);
-   Progress_SYS(1);
-   ProgName_SYS(_("MAKEFID Correction"), 1);
+   
+   if (!iProgressState)
+   {
+      Progress_SYS(1);
+      ProgName_SYS(_("MAKEFID Correction"), 1);
+   }
+
 
 
    // --- Lock the channel symbols ---
@@ -171,9 +179,12 @@ string(STR_DEFAULT) sLabel;
       UnLockSymb_DB(Data, Line);
       Strcpy_STR(sLabel, _("Making fid on line: "));
       Strcat_STR(sLabel, sTemp);
-      ProgName_SYS(sLabel, 0);
-      ProgUpdateL_SYS(iLines, iTotLines);
 
+      if (!iProgressState)
+      {
+         ProgName_SYS(sLabel, 0);
+         ProgUpdateL_SYS(iLines, iTotLines);
+      }
 
       // --- Make the fiducial channel ---
 
@@ -198,7 +209,8 @@ string(STR_DEFAULT) sLabel;
 
    // --- done ---
 
-   Progress_SYS(0);
+   if (!iProgressState)
+     Progress_SYS(0);
 
    // --- Release the Database ---
 

@@ -49,6 +49,7 @@ LST List;              // list handle
 int iMethod;           // dummy method
 int i;                 // utility int
 int iLine, iTotLines;  // counters
+int iProgressState;    // Current progress bar state
 
 //===========================================================================
 //                              CODE
@@ -123,7 +124,11 @@ int iLine, iTotLines;  // counters
 
    iLine = 0;
    iTotLines = iCountSelLines_DB(Data);
-   Progress_SYS(1);
+   
+   iProgressState = iProgState_SYS();
+   
+   if (!iProgressState)
+      Progress_SYS(1);
 
 
    // --- create VV ---
@@ -132,8 +137,9 @@ int iLine, iTotLines;  // counters
 
 
    // --- Go through all selected Lines ---
-
-   ProgName_SYS("", 1);
+   
+   if (!iProgressState)
+      ProgName_SYS("", 1);
    Line = FirstSelLine_DB(Data);
    while (iIsLineValid_DB(Data, Line))
    {
@@ -144,8 +150,12 @@ int iLine, iTotLines;  // counters
       UnLockSymb_DB(Data, Line);
       Strcpy_STR(sLabel, _("Process line: "));
       Strcat_STR(sLabel, sTemp);
-      ProgName_SYS(sLabel, 0);
-      ProgUpdateL_SYS(iLine, iTotLines);
+
+      if (!iProgressState)
+      {
+         ProgName_SYS(sLabel, 0);
+         ProgUpdateL_SYS(iLine, iTotLines);
+      }
 
 
       // --- Get the current channel data into input VV ---
@@ -178,7 +188,8 @@ int iLine, iTotLines;  // counters
 
    // --- Done ---
 
-   Progress_SYS(0);
+   if (!iProgressState)
+     Progress_SYS(0);
 
    // --- Release the Database ---
 

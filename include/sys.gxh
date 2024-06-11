@@ -192,6 +192,9 @@
 // GEO_DIRECTORY_USER_GX
 // Geosoft\user\gx
 //
+// GEO_DIRECTORY_USER_TBL_FAVOURITES
+// Geosoft\user\tbl\favourites
+//
 //===========================================================================================================
 
 
@@ -219,6 +222,7 @@
 #define GEO_DIRECTORY_PYGX 24
 #define GEO_DIRECTORY_USER_PYGX 25
 #define GEO_DIRECTORY_USER_GX 26
+#define GEO_DIRECTORY_USER_TBL_FAVOURITES 27
 
 
 //===========================================================================================================
@@ -508,6 +512,44 @@
 
 #define SYS_FONT_GFN 1
 #define SYS_FONT_TT 0
+
+
+//===========================================================================================================
+//
+// SYS_FILE_FORM Definitions
+//
+// File Open Mode
+//
+// SYS_FILE_FORM_OPEN
+// Open File Mode
+//
+// SYS_FILE_FORM_SAVE
+// Save File Mode
+//
+//===========================================================================================================
+
+
+#define SYS_FILE_FORM_OPEN 0
+#define SYS_FILE_FORM_SAVE 1
+
+
+//===========================================================================================================
+//
+// SYS_DAT_FILE Definitions
+//
+// DAT File Type
+//
+// SYS_DAT_FILE_GRID
+// Grid Files
+//
+// SYS_DAT_FILE_IMAG
+// Image Files
+//
+//===========================================================================================================
+
+
+#define SYS_DAT_FILE_GRID 1
+#define SYS_DAT_FILE_IMAG 2
 
 
 //===========================================================================================================
@@ -1458,7 +1500,7 @@
 //            displayed until the "top" calling GX terminates, unless you
 //            call ShowError_SYS.
 //
-// See also   iRunGXEx_SYS, SetInteractive_SYS and iRunGS_SYS
+// See also   SetInteractive_SYS and iRunGS_SYS
 //
 // Available  5.0
 //-----------------------------------------------------------------------------------------------------------
@@ -1470,9 +1512,10 @@
 //-----------------------------------------------------------------------------------------------------------
 // iRunPython_SYS Run a Python GX script with initialization information.
 //
-// Returns        Return value of the GX set by SetReturn_SYS (0 by default). Terminates on error or cancel.
-//
-// See also       SetReturn_SYS
+// Returns        Exit status of the GX:
+//                -1 cancelled
+//                0 success
+//                1 ended with an error.
 //
 // Available      9.9
 //-----------------------------------------------------------------------------------------------------------
@@ -1483,27 +1526,12 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
-// iRunGXEx_SYS Run a GX.
-//
-// Returns      Exit status of the GX:
-//              -1 cancelled
-//              0 success
-//              1 ended with an error.
-//
-// See also     iRunGX_SYS, SetReturn_SYS
-//
-// Available    5.0
-//-----------------------------------------------------------------------------------------------------------
-
-[_public] int iRunGXEx_SYS(string,    // Name of GX to run.
-                           var int);  // Return value set in the child GX (0 by default)
-
-
-  
-//-----------------------------------------------------------------------------------------------------------
 // iRunPDF_SYS Run a PDF.
 //
-// Returns     Exit status of the task, 0 usually means success.
+// Returns     Exit status:
+//             -1 cancelled
+//             0 success
+//             1 ended with an error.
 //
 // Notes       The group name of the PDF variables will be "group_pdf",
 //             where "group" is the name given in the first argument,
@@ -1532,18 +1560,6 @@
                                 string,   // Parameters
                                 string,   // Directory
                                 int);     // SHELL_EXECUTE
-
-
-  
-//-----------------------------------------------------------------------------------------------------------
-// SetReturn_SYS Set the return value of a GX.
-//
-// Notes         This value is returned in the iRunGXEx_SYS call only.
-//
-// Available     5.0
-//-----------------------------------------------------------------------------------------------------------
-
-[_public] void SetReturn_SYS(int);  // Return Value
 
 
 
@@ -2945,6 +2961,16 @@
 [_public] void LogScriptRun_SYS(string);  // Location that launched the script
 
 
+  
+//-----------------------------------------------------------------------------------------------------------
+// LogBackgroundTask_SYS This method logs that a background task was run
+//
+// Available             2014.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void LogBackgroundTask_SYS(string);  // Location that launched the background task
+
+
 
 //===========================================================================================================
 //
@@ -3896,6 +3922,16 @@
 [_public] void SetInteractive_SYS(int);  // 0 - interactive off 1 - interative on
 
 
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetBackgroundRun_SYS Sets the environment as running in the background.
+//
+// Available            2024.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetBackgroundRun_SYS(int);  // 1 - background run is true, 0 background run is false
+
+
 
 //===========================================================================================================
 //
@@ -3993,6 +4029,29 @@
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] int IsEncryptedString_SYS(string);  // Input string to inspect.
+
+
+
+//===========================================================================================================
+//
+// Miscellaneous Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// DATListLST_SYS Returns a LST of Grid/Image types as names and qualifiers as valuesLST
+//                Example:
+//                NAME:  "Geosoft default (*.grd)"
+//                VALUE: "GRD"
+//
+// Available      2024.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] LST DATListLST_SYS(string,   // DAT type - currently only 'XGD'
+                             int,      // SYS_FILE_FORM
+                             int);     // SYS_DAT_FILE sum for both
 
 
 

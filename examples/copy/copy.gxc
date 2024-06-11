@@ -61,6 +61,8 @@ real        rFidIncr;         // Fid increment
 real        rNewStart;        // New fid start
 real        rNewIncr;         // New fid increment
 
+int         iProgressState;   // Current progress bar state
+
 string(STR_DEFAULT) sProg1;
 string(STR_DB_SYMBOL) sLine;
 
@@ -171,7 +173,11 @@ string(STR_DB_SYMBOL) sLine;
 	
    // --- Go through all selected Lines ---
 
-   ProgName_SYS("",1);
+   iProgressState = iProgState_SYS();
+   
+   if (!iProgressState)
+      ProgName_SYS("",1);
+
    Line = FirstSelLine_DB(Data);
    while (iIsLineValid_DB(Data,Line))
    {
@@ -181,9 +187,14 @@ string(STR_DB_SYMBOL) sLine;
       GetSymbName_DB(Data,Line,sLine);
       UnLockSymb_DB(Data,Line);
 
-     	Printf_STR(sProg1, sizeof(sProg1), _("Copying %s to %s: Line %s"), sInCh, sOutCh, sLine);
-      ProgName_SYS(sProg1,0);
-      ProgUpdateL_SYS(iLines,iTotLines);
+      Printf_STR(sProg1, sizeof(sProg1), _("Copying %s to %s: Line %s"), sInCh, sOutCh, sLine);
+
+      if (!iProgressState)
+      {
+        ProgName_SYS(sProg1,0);
+        ProgUpdateL_SYS(iLines,iTotLines);
+      }
+
 
 
       // --- Copy/Decimate ---

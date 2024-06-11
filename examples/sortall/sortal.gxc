@@ -51,6 +51,7 @@ int iReadOnly;         // TRUE if should process read-only channels
 int iLine, iTotLines;  // counters
 int i, iChan, iChType, iChLen, iProt, iCol, iLen;
 int iFidLen;
+int iProgressState;   // Current progress bar state
 real rChStart, rChIncr, rChEnd;
 real rFidMin, rFidMax, rFidInc;
 
@@ -121,12 +122,18 @@ real rFidMin, rFidMax, rFidInc;
 
       iLine = 0;
       iTotLines = iCountSelLines_DB(Data);
-      Progress_SYS(1);
+
+      iProgressState = iProgState_SYS();
+
+      if (!iProgressState)
+         Progress_SYS(1);
 
 
       // --- Go through all selected Lines ---
 
-      ProgName_SYS("", 1);
+      if (!iProgressState)
+          ProgName_SYS("", 1);
+
       Line = FirstSelLine_DB(Data);
       while (iIsLineValid_DB(Data, Line))
       {
@@ -137,9 +144,12 @@ real rFidMin, rFidMax, rFidInc;
          UnLockSymb_DB(Data, Line);
          Strcpy_STR(sLabel, _("Sort line: "));
          Strcat_STR(sLabel, sTemp);
-         ProgName_SYS(sLabel, 0);
-         ProgUpdateL_SYS(iLine, iTotLines);
 
+         if (!iProgressState)
+         {
+            ProgName_SYS(sLabel, 0);
+            ProgUpdateL_SYS(iLine, iTotLines);
+         }
 
          // --- index must have some data ---
 
@@ -382,5 +392,7 @@ real rFidMin, rFidMax, rFidInc;
    }
 
    UnLock_EDB(eDB);
-   Progress_SYS(0);
+   
+   if (!iProgressState)
+      Progress_SYS(0);
 }

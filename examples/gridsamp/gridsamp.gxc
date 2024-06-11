@@ -33,12 +33,12 @@ RESOURCE = "gridsamp.gr"
 #include <all.gxh>
    // clang-format on
 
-   //===========================================================================
-   //                             GLOBAL VARIABLES
-   //===========================================================================
+//===========================================================================
+//                             GLOBAL VARIABLES
+//===========================================================================
 
-   string(STR_FILE) sX,
-   sY, sZ, sIMG;  // Channel Names, grid name
+string(STR_FILE) sX,
+sY, sZ, sIMG, sInterp;  // Channel Names, grid name
 
 EDB EData;
 DB Data;              // Database handle
@@ -51,6 +51,7 @@ IPJ hIPJxy, hIPJgrd;  //
 int i;                // Utility int
 int iProgState;
 int iLoadExternalDB;
+int iInterp;
 
 string(STR_FILE) sGDB;
 
@@ -152,6 +153,7 @@ string(STR_FILE) sGDB;
    GetString_SYS("GRIDSAMP", "Y", sY);
    GetString_SYS("GRIDSAMP", "Z", sZ);
    GetString_SYS("GRIDSAMP", "GRID", sIMG);
+   GetString_SYS("GRIDSAMP", "INTERP_METHOD", sInterp);
 
 
    // --- sX and sY should not be the same ---
@@ -227,9 +229,15 @@ string(STR_FILE) sGDB;
       LoadIntoPager_IMG(hIMG);
 
 
+   // --- Smoothing or Direct Gridding? ---
+
+   iInterp = 0;  // default linear interpolation
+   if(iStrcmp_STR(sInterp, "N", STR_CASE_TOLERANT) == 0) 
+    iInterp = 1; // nearest gridding
+
    // --- Process ---
 
-   SampleIMGLineLST_DU(Data, LineLST, X, Y, Z, hIMG);
+   SampleIMGLineLSTEx_DU(Data, LineLST, X, Y, Z, hIMG, iInterp);
 
 
    // --- Add maker ---

@@ -57,6 +57,7 @@ int iLine, iTotLines;                    // counters
 int i, iChan, iChType, iChLen, iProt, iCol, iCol1, iCol2, iCol3, iCol4, iLen;
 int iFidLen;
 int iSort1, iSort2, iSort3, iSort4;
+int iProgressState;   					 // Current progress bar state
 real rChStart, rChIncr, rChEnd;
 real rFidMin, rFidMax, rFidInc;
 
@@ -276,7 +277,11 @@ real rFidMin, rFidMax, rFidInc;
 
    // --- Go through all selected Lines ---
 
-   ProgName_SYS("", 1);
+   iProgressState = iProgState_SYS();
+   
+   if (!iProgressState)
+      ProgName_SYS("", 1);
+
    Line = FirstSelLine_DB(Data);
    while (iIsLineValid_DB(Data, Line))
    {
@@ -287,8 +292,12 @@ real rFidMin, rFidMax, rFidInc;
       UnLockSymb_DB(Data, Line);
       Strcpy_STR(sLabel, _("Sort line: "));
       Strcat_STR(sLabel, sTemp);
-      ProgName_SYS(sLabel, 0);
-      ProgUpdateL_SYS(iLine, iTotLines);
+
+      if (!iProgressState)
+      {
+         ProgName_SYS(sLabel, 0);
+         ProgUpdateL_SYS(iLine, iTotLines);
+      }
 
       // --- Must first cycle through all the channels to determine the
       //     full range in FIDs. Channels must all then be re-fidded to the
@@ -646,5 +655,7 @@ real rFidMin, rFidMax, rFidInc;
    Destroy_VV(IndVV);
 
    UnLock_EDB(eDB);
-   Progress_SYS(0);
+   
+   if (!iProgressState)
+      Progress_SYS(0);
 }

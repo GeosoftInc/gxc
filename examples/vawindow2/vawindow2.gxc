@@ -51,6 +51,8 @@ int         iLines;           // Number of Lines Processed
 int         iTotLines;        // Total Number of Lines to Process
 real        rStart,rEnd;
 
+int 		iProgressState;
+
 string(STR_DEFAULT_SHORT) sTemp;            // Temp string
 string(STR_DEFAULT) sLabel;
 
@@ -173,12 +175,18 @@ string(STR_DEFAULT) sLabel;
 
    iLines = 0;
    iTotLines = iCountSelLines_DB(Data);
-   Progress_SYS(1);
+   
+   iProgressState = iProgState_SYS();
+   
+   if (!iProgressState)
+    Progress_SYS(1);
    
 
    // --- Go through all selected Lines ---
 
-   ProgName_SYS("",1);
+   if (!iProgressState)
+      ProgName_SYS("",1);
+
    Line = FirstSelLine_DB(Data);
    while (iIsLineValid_DB(Data,Line))
    {
@@ -190,7 +198,8 @@ string(STR_DEFAULT) sLabel;
       UnLockSymb_DB(Data,Line);
       Strcpy_STR(sLabel,_("Window VA line: "));
       Strcat_STR(sLabel,sTemp);
-      ProgName_SYS(sLabel,0);
+      if (!iProgressState)
+        ProgName_SYS(sLabel,0);
       ProgUpdateL_SYS(iLines,iTotLines);
 
 
@@ -232,6 +241,7 @@ string(STR_DEFAULT) sLabel;
 
    // --- done ---
 
-   Progress_SYS(0);
-   
+   if (!iProgressState)
+     Progress_SYS(0);
+
 }
