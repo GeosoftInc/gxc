@@ -230,6 +230,12 @@ int iDone, iRALines, iIndex;
 
       GetIPJ_DB(Data, ChProj, hIPJ);
       UnLockSymb_DB(Data, ChProj);
+	
+	  if (!iHasProjection_IPJ(hIPJ))
+	  {
+	     if (iDisplayQuestion_SYS(_("WARNING: Coordinate translation"), _("The selected channel does not have a Coordinate System defined.  Do you want to continue?")) == 0)
+			 Exit_SYS();
+	  }	 	
    }
 
 
@@ -258,25 +264,28 @@ int iDone, iRALines, iIndex;
       iRunGX_SYS("geogxnet.dll(Geosoft.GX.Database.FileToAndFromGDB;Run)");
 
       //open the temporary file
-
-      inputDes = Create_RA(sDesTemp);
-      outputDes = Create_WA(sDes, WA_NEW);
-      iRALines = iLen_RA(inputDes);
-      while (IiGets_RA(inputDes, sRALine, sizeof(sRALine)) == 0)
-      {
-         iIndex = iStrStr_STR(sRALine, "COMM", STR_CASE_SENSITIVE);
-         if (iIndex != 0)
-         {
-            IStrins_STR(sRALine, 0, "COMM", 4096);
-         }
-         _Puts_WA(outputDes, sRALine);
-         iRALines--;
-         if (iRALines > 0)
-            NewLine_WA(outputDes);
+	  
+	  if(iFileExist_SYS(sDesTemp) > 0)
+	  {
+		  inputDes = Create_RA(sDesTemp);
+		  outputDes = Create_WA(sDes, WA_NEW);
+		  iRALines = iLen_RA(inputDes);
+		  while (IiGets_RA(inputDes, sRALine, sizeof(sRALine)) == 0)
+		  {
+			 iIndex = iStrStr_STR(sRALine, "COMM", STR_CASE_SENSITIVE);
+			 if (iIndex != 0)
+			 {
+				IStrins_STR(sRALine, 0, "COMM", 4096);
+			 }
+			 _Puts_WA(outputDes, sRALine);
+			 iRALines--;
+			 if (iRALines > 0)
+				NewLine_WA(outputDes);
+		  }
+		  Destroy_RA(inputDes);
+		  Destroy_WA(outputDes);
+		  iDeleteFile_SYS(sDesTemp);
+		  SetInteractive_SYS(i);
       }
-      Destroy_RA(inputDes);
-      Destroy_WA(outputDes);
-      iDeleteFile_SYS(sDesTemp);
-      SetInteractive_SYS(i);
    }
 }

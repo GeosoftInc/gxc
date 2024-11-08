@@ -70,7 +70,7 @@ RESOURCE = "dbsubset.gr"
 EDB         EMaster,ESubset;
 DB          Master,Subset;
 DB_SYMB     Line,SubsetLine,Line0;
-DB_SYMB     Ch,MaskCh,SubsetCh;
+DB_SYMB     Ch,MaskCh,SubsetCh,CurLineSymb;
 DB_SYMB     Blob,SubsetBlob;
 BF          hBF;
 LST         List, LineLST, ChanLST;
@@ -82,7 +82,7 @@ VA          DataVA;
 
 string(STR_FILE) sMaster,sMasterN;
 string(STR_FILE) sSubset,sSubsetN;
-string(STR_DB_SYMBOL) sMaskCh,sCh,sLine,sBlob;
+string(STR_DB_SYMBOL) sMaskCh,sCh,sLine,sBlob,sCurLine;
 string(1024) sTemp;
 string(STR_DEFAULT_SHORT) sLines,sChans,sDummy;
 string(STR_DEFAULT_LONG) sProg, sChanList;
@@ -113,6 +113,11 @@ real rStart,rIncr,rEnd;
 		if (iMasterLoaded)
 		{
 		   EMaster = LoadNoActivate_EDB(sMaster);
+         if (iScript_SYS() == 0)
+         {
+            GetCurLine_EDB(EMaster, sCurLine);
+            CurLineSymb = GetCurLineSymb_EDB(EMaster);
+         }
 			Master = Lock_EDB(EMaster);
 		}
 		else
@@ -122,6 +127,11 @@ real rStart,rIncr,rEnd;
 	{
 		iMasterLoaded = 1;
 	   EMaster = CurrentNoActivate_EDB();
+      if (iScript_SYS() == 0)
+      {
+         GetCurLine_EDB(EMaster, sCurLine);
+         CurLineSymb = GetCurLineSymb_EDB(EMaster);
+      }
 		Master = Lock_EDB(EMaster);
 	}
 
@@ -237,6 +247,8 @@ real rStart,rIncr,rEnd;
    LineLST = CreateSymbLST_DB();
    if (iCharComp_STR(sLines,_n("A"))==1) 
 		LineLST_DB(Master, LineLST);
+   else if (iCharComp_STR(sLines,_n("D"))==1) 
+		AddSymbItem_LST(LineLST, sCurLine, CurLineSymb);
 	else	
 		SelectedLineLST_DB(Master, LineLST);
   
