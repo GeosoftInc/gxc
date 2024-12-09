@@ -12,12 +12,14 @@ Import ASEG-GDF data.
            .PROJ     : Input Projection file name (optional)
            .XCH      : Channel pair to associate with projection
            .YCH      : Channel pair to associate with projection
+		   .FIDUCIAL : Fiducial selection
 "
 
 TRANSLATIONDOMAIN = "core"
 TRANSLATIONFRIENDLYPATH = "GX/Database/Import/ASEG-GDF"
 
 // Revision History:
+// v2024.2: Allow user to select fiducial.
 // v5.1.8: Set current X and Y channels only if these values are defined.
 // v5.1.7: Delete line 0, channel loading should be done in script mode, too.
 // v5.1.3: Added projection setting if enabled.
@@ -48,7 +50,8 @@ int         i;                // Utility
 int         iLines;           
 int         iChannels;        
 int         iBlobs;           
-int         iErase;           
+int         iErase;  
+int         iFiducial;         
 
 string(STR_FILE) sDefn, sFile, sDB;
 string(STR_DEFAULT_LONG) sPr;
@@ -57,6 +60,7 @@ string(STR_FILE) sFLC;
 string(STR_FILE) sTemplate;
 string(STR_DEFAULT_SHORT) sExt;
 string(STR_DB_SYMBOL)   sXCh,sYCh;
+string(STR_FILE) sFID;
 
 //===========================================================================
 //                                   CODE
@@ -102,7 +106,8 @@ string(STR_DB_SYMBOL)   sXCh,sYCh;
       GetString_SYS("IMPASEG","TEMPLATE",sFile);
       if(!iStrlen_STR(sFile) && iStrlen_STR(sTemplate))
          SetString_SYS("IMPASEG","TEMPLATE",sTemplate);
-
+	  DefaultInt_SYS("IMPASEG", "FIDUCIAL", 0);
+		 
       // --- Set any Defaults ---
 
       SetInfoSYS_DGW(Diag,_IMPASEGFORM_0,DGW_FILEPATH,"IMPASEG","DEFN");
@@ -113,6 +118,8 @@ string(STR_DB_SYMBOL)   sXCh,sYCh;
       SetInfoSYS_DGW(Diag,_IMPASEGFORM_5,DGW_FILEPATH,"IMPASEG","PROJ");
       SetInfoSYS_DGW(Diag,_IMPASEGFORM_6,DGW_TEXT,"IMPASEG","XCH");
       SetInfoSYS_DGW(Diag,_IMPASEGFORM_7,DGW_TEXT,"IMPASEG","YCH");
+	  SetInfoSYS_DGW(Diag,_IMPASEGFORM_8,DGW_LISTALIAS,"IMPASEG","FIDUCIAL");
+
 
       // --- Run the Dialogue ---
 
@@ -130,6 +137,7 @@ string(STR_DB_SYMBOL)   sXCh,sYCh;
       GetInfoSYS_DGW(Diag,_IMPASEGFORM_5,DGW_FILEPATH,"IMPASEG","PROJ");
       GetInfoSYS_DGW(Diag,_IMPASEGFORM_6,DGW_TEXT,"IMPASEG","XCH");
       GetInfoSYS_DGW(Diag,_IMPASEGFORM_7,DGW_TEXT,"IMPASEG","YCH");
+	  GetInfoSYS_DGW(Diag,_IMPASEGFORM_8,DGW_LISTALIAS,"IMPASEG","FIDUCIAL");
 
       // --- Destroy the Dialogue ---
 
@@ -149,6 +157,13 @@ string(STR_DB_SYMBOL)   sXCh,sYCh;
    GetString_SYS("IMPASEG","PROJ",sProj);
    GetString_SYS("IMPASEG","XCH", sXCh);
    GetString_SYS("IMPASEG","YCH", sYCh);
+   
+   GetString_SYS("IMPASEG","FIDUCIAL", sFID);  
+    
+    if (iChar_STR(sFID) == iChar_STR("No"))
+      iFiducial = 0;
+   else if (iChar_STR(sFID) == iChar_STR("Yes"))
+      iFiducial = 1;
 
    // --- At least one of Data, Defn or Template file names is necessary ---
 
@@ -270,7 +285,7 @@ string(STR_DB_SYMBOL)   sXCh,sYCh;
 
    // --- import ---
 
-   ImportAsegProj_DU(Data,sTemplate,sDefn,sData,sFLC,64,sProj,sXCh,sYCh);
+   ImportAsegProj_DU(Data,sTemplate,sDefn,sData,sFLC,64,sProj,sXCh,sYCh,iFiducial);
 
 
    // --- Set the X and Y channels as current ---
