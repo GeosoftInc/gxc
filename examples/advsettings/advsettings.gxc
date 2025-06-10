@@ -11,16 +11,18 @@ TRANSLATIONDOMAIN = "core"
 TRANSLATIONFRIENDLYPATH = "GX/GX Menu/Global Settings"
 
 #include <all.gxh>
-   // clang-format on
+// clang-format on
 
 
-   //===========================================================================
-   //                               VARIABLES
-   //===========================================================================
+//===========================================================================
+//                               VARIABLES
+//===========================================================================
 
-   META Meta;
+META Meta;
 META_TOKEN maToken;
-
+META_TOKEN mClass;
+META_TOKEN mAttrib;
+string(STR_DEFAULT) sGPU, sGPU2;
 
 //===========================================================================
 //                                GX CODE
@@ -40,7 +42,23 @@ META_TOKEN maToken;
 
    maToken = ResolveUMN_META(Meta, "CLASS:/Geosoft/Core/APPSETTINGS");
 
+
+   // --- Changing GPU settings requires a restart ---
+
+   mClass = ResolveUMN_META(Meta, "CLASS:/Geosoft/Core/APPSETTINGS/OpenGL Settings");
+   mAttrib = ResolveUMN_META(Meta, "ATTRIB:/Geosoft/Core/APPSETTINGS/OpenGL Settings/Use Discrete GPU");
+
+   GetAttribString_META(Meta, mClass, mAttrib, sGPU);
+   if (iStrlen_STR(sGPU) == 0)
+      Strcpy_STR(sGPU, _n("True"));
+
    if (iMetaDataTool_GUI(Meta, maToken, FALSE) == 0)
+   {
       SetSettingsMETA_SYS(Meta);
+
+      GetAttribString_META(Meta, mClass, mAttrib, sGPU2);
+      if (iStrcmp_STR(sGPU, sGPU2, STR_CASE_TOLERANT) != 0)
+         DisplayMessage_SYS(_("Restart Required"), _("The GPU setting has been changed. Please restart Oasis montaj to apply the changes."));
+   }
    Destroy_META(Meta);
 }

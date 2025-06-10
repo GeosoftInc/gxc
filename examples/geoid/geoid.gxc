@@ -18,6 +18,7 @@ TRANSLATIONFRIENDLYPATH = "GX/Coordinates"
 
 //===========================================================================
 // Revision History:
+// v2025.1 Added support to EGM08,AUSGDA2020,Geoid18,Geoid12A,Geoid09,Geoid06
 // v6.4.0: Set default X and Y to the current X, Y.
 // v6.0.0:  First release
 //===========================================================================
@@ -45,6 +46,7 @@ RESOURCE = "geoid.gr"
 
 EDB eDB;
 DB hDB;
+VV hZVV;
 DB_SYMB X, Y, Z;      // Channel Handles
 IMG hIMG;             // Grid handle
 DB_SYMB Line;         // Line Handle
@@ -58,10 +60,14 @@ META_TOKEN maUnit;
 int i;          // Utility int
 int iLines;     // Number of Lines Processed
 int iTotLines;  // Total Number of Lines to Process
+int iCountDummies;
+int iCountElements;
 
 string(STR_DEFAULT_SHORT) sTemp;  // temporary number formating string
 string(STR_DEFAULT) sLabel;
 string(STR_DEFAULT) sUnit;
+string(STR_DEFAULT) sDbName;
+string(STR_DEFAULT_LONG) sMsg;
 
 //===========================================================================
 //                                  CODE
@@ -163,6 +169,12 @@ string(STR_DEFAULT) sUnit;
             GetInfoSYS_DGW(Diag, _GEOID1_0, DGW_FILEPATH, "GEOID", "GRID");
             Destroy_DGW(Diag);
 
+			GetString_SYS("GEOID", "GRID", sIMG);
+			iFindPathNameEx_SYS(sIMG, FIND_LOCAL_GEOSOFT, GEO_DIRECTORY_ETC, sIMGFile);
+
+			if (!iFileExist_SYS(sIMGFile))
+				i = 0;
+				
             break;
 
          default:
@@ -208,7 +220,7 @@ string(STR_DEFAULT) sUnit;
 
 
    // --- Create a grid handle ---
-
+   
    iFindPathNameEx_SYS(sIMG, FIND_GEOSOFT, GEO_DIRECTORY_ETC, sIMGFile);
    hIMG = CreateFile_IMG(GS_DOUBLE, sIMGFile, IMG_FILE_READONLY);
 
@@ -302,26 +314,77 @@ string(STR_DEFAULT) sUnit;
 
    // --- Add maker ---
 
-   EasyMakerSymb_DB(hDB, Z, _("Grid sample"), "GEOID;");
-
+   EasyMakerSymb_DB(hDB, Z, _("Geoid Height"), "GEOID;");
 
    // --- unlock the channels ---
 
    UnLockSymb_DB(hDB, X);
    UnLockSymb_DB(hDB, Y);
    UnLockSymb_DB(hDB, Z);
-
-   Destroy_IMG(hIMG);
-   Progress_SYS(0);
-
-
+   
    // --- Release the hDBbase ---
 
    UnLock_EDB(eDB);
-
-
+   
    // --- Load the new channel ---
 
    if (iInteractive_SYS())
       LoadChan_EDB(eDB, sG);
+	 
+   Progress_SYS(0);	 
+    
+   // --- Check geoid range validation ---
+   
+   iLines = 0;
+   iCountDummies = 0;
+   iCountElements = 0;
+   hZVV = Create_VV(REAL, 0);
+   
+   hDB = Lock_EDB(eDB);
+   Line = FirstSelLine_DB(hDB);
+   
+   while (iIsLineValid_DB(hDB, Line))  
+   {
+      LockSymb_DB(hDB, Z, DB_LOCK_READWRITE, DB_WAIT_NONE);
+      GetChanVV_DB(hDB,Line,Z, hZVV);
+ 	  UnLockSymb_DB(hDB, Z); 
+	 
+      iCountDummies += iCountDummies_VV(hZVV,0,-1);
+	  iCountElements += iLength_VV(hZVV);
+	 
+      Line = NextSelLine_DB(hDB, Line);
+      iLines++;	  
+   }
+    
+   if (iCountDummies > 0)
+   {  
+      if(iCountDummies == iCountElements )
+	  {
+	     IGetName_DB(hDB,DB_NAME_FILE,sDbName,sizeof(sDbName));
+         IFileNamePart_STR(sDbName,sDbName,sizeof(sDbName),STR_FILE_PART_NAME_EXTENSION);
+
+		 Printf_STR(sMsg, sizeof(sMsg),_("%s"),sIMG);
+		 IStrcat_STR(sMsg,_(" Geoid Model does not intersect ") ,sizeof(sMsg));
+		 IStrcat_STR(sMsg,sDbName,sizeof(sMsg));
+		 
+		 Abort_SYS(sMsg); 
+	  }
+	  else
+	  {		
+		 Printf_STR(sMsg, sizeof(sMsg), _("Some of the data are outside of the %s"), sIMG);
+		 IStrcat_STR(sMsg,_(" Geoid Model.") ,sizeof(sMsg));
+		 IStrcat_STR(sMsg,_("\r\rCheck the "),sizeof(sMsg));
+		 IStrcat_STR(sMsg,sG,sizeof(sMsg));
+		 IStrcat_STR(sMsg,_(" channel for unexpected or dummy values."),sizeof(sMsg));
+		 
+		 DisplayMessage_SYS(_("Geoid Height"), sMsg);
+	  }	 
+  }  
+  
+   Destroy_IMG(hIMG);
+
+   // --- Release the hDBbase ---
+
+   if(iIsLocked_EDB(eDB))
+      UnLock_EDB(eDB);
 }

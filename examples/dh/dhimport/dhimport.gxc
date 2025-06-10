@@ -95,7 +95,7 @@ int iOverrideTemplateDataFileAdo, iOverrideTemplateDataFile, bMaxwell;
 
 string(64000) sConnect, sMsg;
 string(STR_FILE) sData, sTable, sDB, sCurrentDB, sNewDB, sProject, sFile, sDirINI;
-string(STR_FILE) sVol, sDir, sDir2, sName, sName2, sTemplate, sLog, sLogTemp, sExt;
+string(STR_FILE) sVol, sDir, sDir2, sName, sName2, sTemplate, sLog, sLogTemp;
 string(STR_FILE) sLocalPath, sLocalDir, sLocalVol;
 string(STR_MULTI_FILE) sTemplates;
 string(STR_DEFAULT) sGxParam;
@@ -110,28 +110,45 @@ string(64) sLicClass;
    GetLicenseClass_SYS(sLicClass);
    iArcGISPro = iStrcmp_STR(sLicClass, _n("ArcGISPro"), STR_CASE_TOLERANT) == 0;
 
+
    // --- Get the import type ---
 
    iImpType = iGetInt_SYS("DHIMPORT","IMPTYPE");
    if(iImpType<0 || iImpType>3)
       Abort_SYS(_("This GX is intended to be called from other GXs only."));
 
-   if(iImpType==0) {
-      Strcpy_STR(sExt,"i3");
+   // --- In script mode force ASCII import for CSV files. This resolves the bizarre
+   //     circumstance of recording a script while importing a CSV using the
+   //     XLS import menu item dhimdb.gx (See GEOL-1400), which resets the
+   //     import type back to XLS and overrides the script value. ---
+
+   if (iInteractive_SYS() == 0 && iImpType==1)
+   {
+      GetString_SYS("DHIMPDB", "FILE", sData);
+      GetString_SYS("DHIMPDB", "TEMPLATE", sTemplate);
+      if (!iStrlen_STR(sData) && !iStrlen_STR(sTemplate))
+      {
+         GetString_SYS("DHIMPASC", "FILE", sData);
+         GetString_SYS("DHIMPASC", "TEMPLATE", sTemplate);
+         if (iStrlen_STR(sData) && iStrlen_STR(sTemplate))
+         {
+             FileNamePart_STR(sData, sName, STR_FILE_PART_EXTENSION);
+             if(iStrcmp_STR(sName, "csv", STR_CASE_TOLERANT)==0) 
+             {  
+               iImpType = 0;  // force back to ASCII import and recognize the ASCII template
+             }
+         }
+      }
+   }
+
+   if(iImpType==0)
       Strcpy_STR(sGxParam, "DHIMPASC");
-   }
-   else if(iImpType==1) {
-      Strcpy_STR(sExt,"i4");
+   else if(iImpType==1)
       Strcpy_STR(sGxParam, "DHIMPDB");
-   }
-   else if(iImpType==2) {
-      Strcpy_STR(sExt,"i4");
+   else if(iImpType==2)
       Strcpy_STR(sGxParam, "DHIMPODBC");
-   }
-	else if(iImpType==3) {
-      Strcpy_STR(sExt,"i4");
+	else if(iImpType==3)
       Strcpy_STR(sGxParam, "DHGEOCHEMIMPORT");
-   }
 
 
    // --- Force log file display? Set every time. ---
@@ -247,6 +264,31 @@ string(64) sLicClass;
                   GetInfoSYS_DGW(Diag,_DHIMPDB_0,DGW_FILEPATH,sGxParam,"FILE");
                   GetInfoSYS_DGW(Diag,_DHIMPDB_1,DGW_LISTALIAS,"DHIMPORT","OVERWRITE");
                   Destroy_DGW(Diag);
+
+                  // --- If someone tries to import a CSV file using "Import XLS/Database"
+                  //     then redirect them to the ASCII import wizard. ---
+
+                  if(iImpType==1) 
+                  {
+                     GetString_SYS(sGxParam, "FILE", sData);
+                     FileNamePart_STR(sData, sName, STR_FILE_PART_EXTENSION);
+                  
+                     if(iStrcmp_STR(sName, "csv", STR_CASE_TOLERANT)==0) 
+                     {                     
+                        Strcpy_STR(sMsg, _("The Excel/Database import does not support ASCII CSV files.\n\r"));
+                        Strcat_STR(sMsg, _("Would you like to run the ASCII import instead?"));
+
+                        if (iDisplayQuestion_SYS(_("Import CSV File"), sMsg) != 1) 
+                           Cancel_SYS();
+
+                        iImpType = 0;
+                        i = 1;   // run the ASCII import wizard
+                        SetInt_SYS("DHIMPORT", "IMPTYPE", 0);
+                        Strcpy_STR(sGxParam, "DHIMPASC");
+                        SetString_SYS(sGxParam, "FILE", sData);
+                     }
+                  }
+
                   break;
                }
                else if(iImpType==2) {
@@ -279,8 +321,7 @@ string(64) sLicClass;
                }
 
 
-            case 2:     // --- template creation wizard ---
-                           
+            case 2:     // --- template creation wizard ---                          
 
                // --- For ASCII, save the template using the input file name,
                //     because each saved table has an individual file. The
@@ -293,7 +334,7 @@ string(64) sLicClass;
                   GetString_SYS(sGxParam,"FILE",sData);
 
                   FileNamePart_STR(sData, sName, STR_FILE_PART_NAME);
-                  FileCombineParts_STR(sVol,sDir,sName,sExt,"",sTemplate);
+                  FileCombineParts_STR(sVol,sDir,sName,"i3","",sTemplate);
 
                   
                   // --- See if the template already exists; it may already contain
@@ -383,7 +424,7 @@ string(64) sLicClass;
                      break;
                   }
                   GetInfoSYS_DGW(Diag,_DHIMPTEMPDB_0,DGW_FILEPATH,sGxParam,"TEMPLATE");
-                  Destroy_DGW(Diag); 
+                  Destroy_DGW(Diag);
                }
                
                // --- Override the data file stored in the template with the data file entered
