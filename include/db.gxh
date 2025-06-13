@@ -647,6 +647,9 @@
 // DB_ARRAY_BASETYPE_DISCRETE_TIME_WINDOWS
 // 
 //
+// DB_ARRAY_BASETYPE_ENERGIES
+// 
+//
 //===========================================================================================================
 
 
@@ -658,6 +661,7 @@
 #define DB_ARRAY_BASETYPE_DEPTHS 5
 #define DB_ARRAY_BASETYPE_VELOCITIES 6
 #define DB_ARRAY_BASETYPE_DISCRETE_TIME_WINDOWS 7
+#define DB_ARRAY_BASETYPE_ENERGIES 8
 
 
 //===========================================================================================================
@@ -3573,7 +3577,7 @@
 [_public] void SetVABaseCoordinateInfo_DB(DB,        // hDB
                                           DB_SYMB,   // Channel (Locked DB_LOCK_READWRITE)
                                           int,       // DB_ARRAY_BASETYPE
-                                          real,      // Optional offset or base frequency
+                                          real,      // Optional offset or base value
                                           VV,        // Values (one per array channel column) (REAL)
                                           string,    // Units
                                           int);      // Allow changes to existing values?
@@ -3591,7 +3595,7 @@
 [_public] void GetVABaseCoordinateInfo_DB(DB,           // hDB
                                           DB_SYMB,      // Channel (Locked DB_LOCK_READONLY)
                                           var int,      // DB_ARRAY_BASETYPE
-                                          var real,     // Optional offset or base frequency
+                                          var real,     // Optional offset or base value
                                           VV,           // Values (one per array channel column) (REAL)
                                           var string,   // Units
                                           int);         // Size of units string
@@ -3859,6 +3863,124 @@
                                DB_SYMB,   // Channel (Locked DB_LOCK_READWRITE)
                                int,       // First window (0 to N-1, iDummy for default)
                                int);      // Last window (0 to N-1, iDummy for default)
+
+
+
+//===========================================================================================================
+//
+// deprecated Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CreateSymbEx2_DB Create a new Symbol.
+//
+// Returns          DB_SYMB handle.
+//
+// Notes            This method is identical to CreateSymbEx_DB but does not
+//                  have any restrictions based on license.
+//
+// Available        6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] DB_SYMB CreateSymbEx2_DB(DB,       // Database
+                                     string,   // Symbol Name
+                                     int,      // DB_SYMB_TYPE
+                                     int,      // DB_OWN
+                                     int,      // DB_CATEGORY_USER, DB_CATEGORY_LINE, DB_CATEGORY_CHAN, DB_CATEGORY_BLOB
+                                     int);     // Extra info, which depends on DB_SYMB_ DB_SYMB_CHAN - element width for a VA channel ignores for all other DB_SYMB types
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Current_DB This method returns the Current Database opened
+//
+// Returns    DB Object
+//
+// Notes      This method combines the operations:
+//            
+//            EData = Current_EDB();       // get current edited database
+//            Data = Lock_EDB(EData);      // lock the database
+//            
+//            and has been superseded by this construction in all Geosoft GXs.
+//
+// Available  5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public_app] DB Current_DB();
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destruct_DB Destructs a Database Object.
+//
+// Notes       This function is is called to destruct database handle object.
+//             
+//             This method has been superseded by the use of the EDB object,
+//             which when locked returns a DB object that must NOT be destroyed.
+//             
+//             EData = Current_EDB();       // get current edited database
+//             Data = Lock_EDB(EData);      // lock the database
+//             ... (Process using the DB object Data)
+//             UnLock_EDB(EData);           // unlock the database
+//
+// Available   5.1.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destruct_DB(DB);  // Database to Destroy
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// PutChanVVEx_DB Place the contents of a VV in a channel.
+//
+// Notes          This method is identical to PutChanVV_DB except that it
+//                does not have a limit for the Free viewer. It is licensed
+//                and cannot be called without a license.
+//
+// See also       VV class.
+//
+// Available      6.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_extended] void PutChanVVEx_DB(DB,        // Database
+                                DB_SYMB,   // Line
+                                DB_SYMB,   // Channel
+                                VV);       // VV from which to get the data
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetCurrent_DB Sets the current database to this database.
+//
+// Notes         This method has been superseded by the following usage:
+//               
+//               MakeCurrent_EDB(EData);
+//               Data = Lock_EDB(EData);      // lock the database
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public_app] void SetCurrent_DB(DB);  // Database
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetLength_DB Returns the # of elements in a channel.
+//
+// Returns       # of elements
+//
+// Notes         This method did not account for array channels correctly (you had to divide by the number of columns
+//               to get the correct number of rows). Superseded by iGetChannelLength_DB.
+//
+// Available     5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetLength_DB(DB,        // Database
+                            DB_SYMB,   // Line    (read or write locked)
+                            DB_SYMB);  // Channel (read or write locked)
 
 
 

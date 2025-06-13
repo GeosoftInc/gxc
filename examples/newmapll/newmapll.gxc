@@ -73,6 +73,8 @@ real rMaxLon;  // Maximum Longitude of map area
 real rMinLat;  // Minimum Latitude of map area
 real rMaxLat;  // Maximum Latitude of map area
 
+real rPadding, rAngle; //Padding around the map area
+
 int iPort;   // Portrait map? (or landscape) (FALSE by default)
 int iExact;  // Map is exactly sized to area?
 // (or trimmed to data and margins) (FALSE by default)
@@ -126,6 +128,52 @@ int iTmp, iMed;
    rMinLat = rGetReal_SYS("XYRANGE", "MIN_LAT"); \
    rMaxLon = rGetReal_SYS("XYRANGE", "MAX_LON"); \
    rMaxLat = rGetReal_SYS("XYRANGE", "MAX_LAT"); \
+   if (rMinLon > rMaxLon)                        \
+   {                                             \
+      r = rMinLon;                               \
+      rMinLon = rMaxLon;                         \
+      rMaxLon = r;                               \
+   }                                             \
+   if (rMinLat > rMaxLat)                        \
+   {                                             \
+      r = rMinLat;                               \
+      rMinLat = rMaxLat;                         \
+      rMaxLat = r;                               \
+   }                                             \
+   FormatR_STR(rMinLon, sMinLon, 12, 5);         \
+   FormatR_STR(rMinLat, sMinLat, 12, 5);         \
+   FormatR_STR(rMaxLon, sMaxLon, 12, 5);         \
+   FormatR_STR(rMaxLat, sMaxLat, 12, 5);         \
+   SetString_SYS(NEWMAP, "MIN_LON", sMinLon);    \
+   SetString_SYS(NEWMAP, "MIN_LAT", sMinLat);    \
+   SetString_SYS(NEWMAP, "MAX_LON", sMaxLon);    \
+   SetString_SYS(NEWMAP, "MAX_LAT", sMaxLat);
+   
+#define SETUP_EXTENT_MARGIN_PARAMETERS           \
+   rMinLon = rGetReal_SYS("XYRANGE", "MIN_LON"); \
+   rMinLat = rGetReal_SYS("XYRANGE", "MIN_LAT"); \
+   rMaxLon = rGetReal_SYS("XYRANGE", "MAX_LON"); \
+   rMaxLat = rGetReal_SYS("XYRANGE", "MAX_LAT"); \
+                                                 \
+   hPJ = CreateIPJ_PJ((IPJ)0, hIPJ);             \
+   rX1 = 0.5 * (rMinLon + rMaxLon);              \
+   rY1 = rMinLat;                                \
+   ConvertXY_PJ(hPJ, rX1, rY1);                  \
+   rX2 = 0.5 * (rMinLon + rMaxLon);              \
+   rY2 = rMaxLat;                                \
+   ConvertXY_PJ(hPJ, rX2, rY2);                  \
+	                                             \
+   rAngle = 90.0 - rArcTan2_MATH(rY2 - rY1, rX2 - rX1) * 57.29577951;\
+   rPadding = rAngle * 0.01;                     \
+                                                 \
+   if (rAngle < 1.0)                             \
+   {                                             \
+     rMinLon = rMinLon - rPadding;               \
+     rMaxLon = rMaxLon + rPadding;               \
+     rMinLat = rMinLat - rPadding;               \
+     rMaxLat = rMaxLat + rPadding;  		     \
+   }	                                         \
+	                                             \
    if (rMinLon > rMaxLon)                        \
    {                                             \
       r = rMinLon;                               \
@@ -353,8 +401,8 @@ int iTmp, iMed;
                      SetString_SYS(NEWMAP, "IPJ_UNITS", s4);
                      SetString_SYS(NEWMAP, "IPJ_LOCALDATUM", s5);
                   }
-
-                  SETUP_FROM_XYRANGE_PARAMETERS
+				  
+				  SETUP_EXTENT_MARGIN_PARAMETERS
 
 
                   // --- Create a default PCS if we are in Lat-Long ---
@@ -519,7 +567,7 @@ int iTmp, iMed;
 
             rRot = 0.0;
             if (iRot)
-               rRot = 90.0 - rArcTan2_MATH(rY2 - rY1, rX2 - rX1) * 57.29577951;
+               rRot = 90.0 - rArcTan2_MATH(rY2 - rY1, rX2 - rX1) * 57.29577951;                          
 
             // --- Save original top/bottom positions for warp ---
 
@@ -540,7 +588,7 @@ int iTmp, iMed;
             rX = 0.5 * (rX1 + rX2);
             rY = 0.5 * (rY1 + rY2);
             Rotate_PLY(hPLY, rX, rY, rRot);
-
+			
             Extent_PLY(hPLY, rMinX, rMinY, rMaxX, rMaxY);
 
 

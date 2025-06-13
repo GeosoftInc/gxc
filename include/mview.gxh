@@ -1505,6 +1505,22 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// SetPlaneMatrix_MVIEW Set the equation of a plane using a matrix
+//
+// Notes                Use only for special cases. The View matrix and the input IPJ must have
+//                      the same PCS (orientations ignored), and the input IPJ must have an orientation
+//                      type "IPJ_ORIENT_3D_MATRIX". Null operation if these conditions are not fulfilled.
+//
+// Available            2025.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetPlaneMatrix_MVIEW(MVIEW,   // MVIEW object
+                                    int,     // Plane index
+                                    IPJ);    // IPJ object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // SetPlaneSurface_MVIEW Set the surface image of a plane
 //
 // Available             5.1.2
@@ -2819,6 +2835,23 @@
 [_public] void Aggregate_MVIEW(MVIEW,    // View
                                AGG,      // Aggregate
                                string);  // Aggregate name Maximum length is MVIEW_NAME_LENGTH
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// AggregateToPlane_MVIEW Add an aggregate to a view plane.
+//
+// Notes                  If a plane is not horizontal, then AGG needs to know how the oriented grid
+//                        will project onto it in order to configure its rendering.
+//                        There is no need to call SetGroupToPlane_MVIEW.
+//
+// Available              2025.1
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void AggregateToPlane_MVIEW(MVIEW,    // View
+                                      AGG,      // Aggregate
+                                      string,   // Aggregate name Maximum length is MVIEW_NAME_LENGTH
+                                      int);     // Plane number
 
 
   
@@ -4838,9 +4871,155 @@
 
 //===========================================================================================================
 //
-// Obsolete Functions
+// Deprecated Functions
 //
 //===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Draw3D_MVIEW Draw a 3D object built from triangles
+//
+// Notes        This is a general 3D entity support command. You specify
+//              all the verticies and the normals at the verticies and
+//              possibly colors (optional). If the colors are not specified
+//              the default fill color will be used. The triangles are then
+//              composed using indexes into the vertices specified.
+//              As of v6.4, this method creates a single group with the name
+//              "surface". You should use the new Surface3D_MVIEW function,
+//              which allows direct specification of a single color, and the
+//              group name.
+//
+// Available    5.1.6
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Draw3D_MVIEW(MVIEW,   //
+                            VV,      // Verticies X
+                            VV,      // Verticies Y
+                            VV,      // Verticies Z
+                            VV,      // Normals X
+                            VV,      // Normals Y
+                            VV,      // Normals Z
+                            VV,      // Colors VV or COL_ANY (can be NULL)
+                            VV);     // Long VV of triangle indexes,3 per triangle
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetPlaneIPJ_MVIEW Get the Plane Projection
+//
+// Available         6.3
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetPlaneIPJ_MVIEW(MVIEW,   // MVIEW object
+                                 int,     // Plane index
+                                 IPJ);    // Projection object returning Plane Projection
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetStatusXYZ_MVIEW Get current XYZ status display parameters.
+//
+// Notes              See above SetStatusXYZ_MVIEW.
+//
+// Available          5.1.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void GetStatusXYZ_MVIEW(MVIEW,      // MVIEW object
+                                  var int,    // Enable XYZ in for status bar display
+                                  var real);  // Z value in viewed section coordinates (dummy if not defined).
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// PolyAggregate_MVIEW Add a PolyAggregate to a view.
+//
+// Notes               This creates an animation on the map.
+//
+// Available           5.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void PolyAggregate_MVIEW(MVIEW,    // View
+                                   AGG,      // PolyAggregate
+                                   string);  // PolyAggregate name (Maximum length is MVIEW_NAME_LENGTH)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetPlaneIPJ_MVIEW Set the Plane Projection
+//
+// Notes             By default it is the View's Clip Projection
+//
+// Available         5.1.4
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetPlaneIPJ_MVIEW(MVIEW,   // MVIEW object
+                                 int,     // Plane index
+                                 IPJ);    // Projection
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetStatusXYZ_MVIEW Set parameters to enable XYZ status display.
+//
+// Notes              The view coordinates are displayed in X and Y, and normally
+//                    OE performs a ConvertXY_PJ on the (X, Y) value in the view
+//                    using the UserIPJ to display the current (X, Y) in the
+//                    status bar. In some views, however, (for instance sections
+//                    in Wholeplot), A 3D conversion is required. In a Wholeplot
+//                    section, the "Z" axis is perpendicular to the screen, and
+//                    the section center has a Z value of 0.0. The User IPJ
+//                    uses the current X,Y, and the Z supplied in this function to
+//                    do a proper 3D conversion and display the X,Y and Z value at
+//                    the specific location in the view.
+//
+// Available          5.1.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetStatusXYZ_MVIEW(MVIEW,   // MVIEW object
+                                  int,     // Enable XYZ in for status bar display
+                                  real);   // Z value in viewed section coordinates
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Surface_MVIEW Add an 3d Surface to a view.
+//
+// Available     5.0.5
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Surface_MVIEW(MVIEW,     // View
+                             SURFACE,   // Surface
+                             real,      // Min X of location on map
+                             real,      // Min Y of location on map
+                             real,      // Max X of location on map
+                             real,      // Max Y of location on map
+                             string);   // Surface name (Maximum length is MVIEW_NAME_LENGTH)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// DrawSurface3D_MVIEW Draw a 3D object built from triangles
+//
+// Notes               Provide one normal per vertex.
+//                     Triangles are defined by indices into the set of vertices.
+//
+// Available           7.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void DrawSurface3D_MVIEW(MVIEW,    //
+                                   string,   // Group name
+                                   VV,       // Vertices X (GS_REAL)
+                                   VV,       // Vertices Y (GS_REAL)
+                                   VV,       // Vertices Z (GS_REAL)
+                                   VV,       // Normals X (GS_REAL)
+                                   VV,       // Normals Y (GS_REAL)
+                                   VV,       // Normals Z (GS_REAL)
+                                   VV,       // Colors VV (GS_INT) [can be NULL]
+                                   int,      // Color used if above VV is NULL [0 for MVIEW's fill color]
+                                   VV,       // Triangles Point 1 (GS_INT)
+                                   VV,       // Triangles Point 2 (GS_INT)
+                                   VV);      // Triangles Point 3 (GS_INT)
 
 
   

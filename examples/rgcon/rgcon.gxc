@@ -39,7 +39,6 @@ string(STR_FILE) sConName;               // Name of control file
 string(STR_FILE) sTemp;                  // Temporary string
 string(STR_DB_SYMBOL) sXCh, sYCh, sZCh;  // channels
 
-RGRD Rangrid;  // Handle to Rangrid object
 EDB EData;
 DB Data;   // Database handle
 DGW Diag;  // Dialogue handle
@@ -47,8 +46,8 @@ WA ConFile;
 RA BlankFile;
 LST List;
 
-int i;  // utility int
-
+int i, iValid, iDummy;
+real rMin, rMax, rMean, rStdDev;
 
 //===========================================================================
 //                           RGCON CODE
@@ -59,10 +58,6 @@ int i;  // utility int
 
    EData = Current_EDB();
    Data = Lock_EDB(EData);
-
-   // --- Make a RGCON object ---
-
-   Rangrid = Create_RGRD();
 
 
    // --- INTERACTIVE ---
@@ -192,15 +187,16 @@ int i;  // utility int
 
    iRun2_RGRD(Data, sXCh, sYCh, sZCh, sConName, sGrdName);
 
+   
+   // --- Force stats to ensure they are in the GI file for non-interactive uses ---
+
+   if (iInteractive_SYS() == 0)
+      GridStatExt_IMU(sGrdName, IMU_STAT_FORCED_YES, iValid, iDummy, rMin, rMax, rMean, rStdDev);
+
 
    // --- Turn off progress bar ---
 
    Progress_SYS(0);
-
-
-   // --- Destroy the DATs and Rangrid object ---
-
-   Destroy_RGRD(Rangrid);
 
 
    // --- Add this grid to the current project ---

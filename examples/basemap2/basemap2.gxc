@@ -45,6 +45,7 @@ string(STR_DEFAULT) sStyle, sNorth;
 string(STR_DEFAULT) sPar;
 string(2) sTemp3;
 string(STR_FILE) sTemp, sTemp2, sCon;
+string(STR_DEFAULT_LONG) sMsg;
 
 DGW Diag;
 EMAP EMap;
@@ -166,7 +167,21 @@ int iRotatedPlanMap, iOrient;
    // --- Cannot run BASEMAP2.GX on section views - direct the user to the SectionSurround GX ---
 
    if (iIsSection_MVIEW(DataView) == 1)
-      Abort_SYS(_("The current data view is a section view. This GX is designed to run only on plan views. Use the \"Draw Section Surround\" GX to plot surrounds for section views."));
+   {
+      Destroy_MVIEW(DataView);
+      UnLock_EMAP(EMap);
+
+      if (iInteractive_SYS() == 1)
+      {
+         Strcpy_STR(sMsg, _("The current data view is a section view. This GX is designed to run only on plan views."));
+         Strcat_STR(sMsg, _("\n\rWould you like to run the \"Draw Section Surround\" GX to plot surrounds for this section view?"));
+         if (iDisplayQuestion_SYS(_("Draw Base Map on Section View"), sMsg) != 1)
+            Cancel_SYS();
+      }
+
+      iRunGX_SYS("geogxnet.dll(Geosoft.GX.SectionTools.SectionSurround;Run)");
+      Exit_SYS();
+   }
 
 
    rXminD = rYminD = rXmaxD = rYmaxD = 0.0;
