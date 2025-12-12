@@ -1,12 +1,12 @@
 //===========================================================================
 // clang-format off
-NAME          = "Import an ArcView Shape file"
+NAME          = "Import an ArcView Shapefile"
 #include <version.gxh>
 DESCRIPTION   = "
 
-Import an ArcView shape file (and its related data).
+Import an ArcView shapefile (and its related data).
 
-IMPORTARC.FILE    ArcView shape file
+IMPORTARC.FILE    ArcView shapefile
 IMPORTARC.DBOUT   0: Current database, 1: New database, 2: Do not import, 3: Current database with shape database(s), 4: New database with shape database(s)
 IMPORTARC.DB      New database name (if shape database is selected _Shapes will be appended to this name for it)
 IMPORTARC.MAPOUT  0: Current map, 1: New Map, 2: Do not import
@@ -342,13 +342,13 @@ int iDatumsAreDiff;
 		if (iFields + 50 > iNewDBChannels)
 			iNewDBChannels = iFields + 50;
 
-		// --- Get the shape file's projection info. ---
+		// --- Get the shapefile's projection info. ---
 
 		hIPJ = GetIPJ_GIS(hGIS);   
 
 		if (iInteractive_SYS() && IPJ_TYPE_NONE == iSourceType_IPJ(hIPJ))
 		{
-			Strcpy_STR(sMsg, _("The shape file does not contain a defined coordinate system. Please specify one to assign to the shape file or leave as unknown."));
+			Strcpy_STR(sMsg, _("The shapefile does not contain a defined coordinate system. Please specify one to assign to the shapefile or leave as unknown."));
 			DisplayMessage_SYS(_("Unknown Coordinate System Warning"), sMsg);
 
 			// --- Run the CoordSysWizard ---
@@ -389,7 +389,7 @@ int iDatumsAreDiff;
 
 	if (1 == iInteractive_SYS() && 1 == iDatumsAreDiff && (1 == iNewMap || 1 == iDB))
 	{
-		Strcpy_STR(sMsg, _("You are attemping to import shapes files with differing datums into a NEW map/database. Please start by importing just one of these shape files, to establish which datum your new data view/channels will be using."));
+		Strcpy_STR(sMsg, _("You are attemping to import shapefiles with differing datums into a NEW map/database. Please start by importing just one of these shapefiles, to establish which datum your new data view/channels will be using."));
 		DisplayMessage_SYS(_("Differing Datums"), sMsg);
 
 		Cancel_SYS();
@@ -422,6 +422,16 @@ int iDatumsAreDiff;
 			{
 				hGIS = (GIS) iGetInt_VV(VVGIS, iFile);
 				hIPJ = GetIPJ_GIS(hGIS);   
+
+				// --- If the 3DV has no projection set, and the file does, set it. ---
+
+				if (IPJ_TYPE_NONE == iSourceType_IPJ(hViewIPJ) &&
+				    IPJ_TYPE_NONE != iSourceType_IPJ(hIPJ))
+				{
+					Copy_IPJ(hIPJ, hViewIPJ);
+					ClearOrientation_IPJ(hViewIPJ);
+					SetIPJ_MVIEW(MView, hViewIPJ);
+				}
 
 				if (IPJ_TYPE_NONE != iSourceType_IPJ(hIPJ) && IPJ_TYPE_NONE != iSourceType_IPJ(hViewIPJ) && 0 == iCompareDatums_IPJ(hIPJ, hViewIPJ))
 				{
@@ -770,7 +780,7 @@ int iDatumsAreDiff;
 			// --- import the map ---
 
 			Progress_SYS(1);
-			ProgName_SYS(_("Import Shape file map data"),1);
+			ProgName_SYS(_("Import Shapefile map data"),1);
 			LoadMAP_GIS(hGIS, MView);
 			Progress_SYS(0);      
 
@@ -842,7 +852,7 @@ int iDatumsAreDiff;
 			Data = Lock_EDB(EData);
 
 			Progress_SYS(1);
-			ProgName_SYS(_("Import Shape file GDB data"),1);
+			ProgName_SYS(_("Import Shapefile GDB data"),1);
 			LoadGDB_GIS(hGIS, Data);
 
 			if (iDBShp)

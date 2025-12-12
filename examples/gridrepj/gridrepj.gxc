@@ -86,6 +86,7 @@ PJ          hPJ;
 VV          hDVV, hXVV, hYVV;
 
 int i,iL,iR,iX,iY,iDatumError,iGrids,iMultiGrid,iSame,iOrientation,iLog,iCrooked, iResampleWarning;
+int iAskedToApplyLocalDatumTransforms, iApplyLocalDatumTransformsInPJ;
 real rXd,rYd,rX0,rY0,rRot,rOldCell,rNewCell;
 real rScale, rUnitScaleOld, rUnitScaleNew;
 
@@ -111,7 +112,8 @@ real rNCell;
    rOldCell = rDUMMY;
    iCrooked = 0;
    iResampleWarning = 0;
-
+   iAskedToApplyLocalDatumTransforms = 0;
+   iApplyLocalDatumTransformsInPJ = 0;
 
    if (iInteractive_SYS())
    {
@@ -390,8 +392,25 @@ real rNCell;
             }
             else 
             {
-               if (!iSame || (rNewCell != rOldCell))
+               if (!iSame || (rNewCell != rOldCell) || iCompareDatums_IPJ(hOldIPJ, hNewIPJ) == 1)
                {
+                  // --- If changing local datums, ensure the reprojection applies the change ---
+
+                  if ((iCompareDatums_IPJ(hOldIPJ, hNewIPJ) == 1) && 0 != iStrncmp_STR(s2, "\"*AMMP/SAMMP", 11, STR_CASE_TOLERANT))
+                  {
+                     // --- same datum, different local datums ---
+
+                     if (iDisplayQuestion_SYS(_("WARNING: Transform on the same datum"), _("You are tranforming coordinates on the same datum but with different Local Datum Transforms.  Do you want to transform between Local Datum transforms?")))
+                        SetString_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM", "Yes");
+                     else
+                        SetString_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM", "No");                     
+
+                     iAskedToApplyLocalDatumTransforms = 1;
+                        
+                     if (iGetYesNo_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM"))
+                        ApplyLocalDatumTransformsInPJ_IPJ(hNewIPJ);
+                  }
+
                   Progress_SYS(1);
                   CreateProjected2_IMG(hOldIMG, hNewIPJ, rNewCell);
                   Progress_SYS(0);
@@ -632,6 +651,28 @@ real rNCell;
          if (iSupportDatumTransform_IPJ(hOldIPJ, hNewIPJ) == 0)
             iDatumError = 1;
 
+         // --- same datum, different local datums ---
+
+         if (iDatumError == 0 &&
+             (iCompareDatums_IPJ(hOldIPJ, hNewIPJ) == 1) && 0 != iStrncmp_STR(s2, "\"*AMMP/SAMMP", 11, STR_CASE_TOLERANT))
+         {
+            if (iInteractive_SYS() && iAskedToApplyLocalDatumTransforms == 0) // only ask once
+            {
+               if (iDisplayQuestion_SYS(_("WARNING: Transform on the same datum"), _("You are tranforming coordinates on the same datum but with different Local Datum Transforms.  Do you want to transform between Local Datum transforms?")))
+                  SetString_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM", "Yes");
+               else
+                  SetString_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM", "No");                     
+   
+               iAskedToApplyLocalDatumTransforms = 1;
+            }
+
+            if (iGetYesNo_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM"))
+            {
+               ApplyLocalDatumTransformsInPJ_IPJ(hNewIPJ);
+               iApplyLocalDatumTransformsInPJ = 1;
+            }
+         }
+
 
          // --- decompose old grid file name ---
 
@@ -656,7 +697,8 @@ real rNCell;
             if (!iHasProjection_IPJ(hNewIPJ) || !iHasProjection_IPJ(hOldIPJ) ||
                (iCoordinateSystemsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
                   iWarpsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
-                  iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ)))
+                  iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+                  !iApplyLocalDatumTransformsInPJ))
                iSame = 1;
 
             if (!iSame)
@@ -872,6 +914,25 @@ real rNCell;
             Exit_SYS();
       }
 
+      // --- same datum, different local datums ---
+
+      if ((iCompareDatums_IPJ(hOldIPJ, hNewIPJ) == 1) && 0 != iStrncmp_STR(s2, "\"*AMMP/SAMMP", 11, STR_CASE_TOLERANT))
+      {
+         if (iInteractive_SYS() && iAskedToApplyLocalDatumTransforms == 0) // only ask once
+         {
+            if (iDisplayQuestion_SYS(_("WARNING: Transform on the same datum"), _("You are tranforming coordinates on the same datum but with different Local Datum Transforms.  Do you want to transform between Local Datum transforms?")))
+               SetString_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM", "Yes");
+            else
+               SetString_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM", "No");                     
+         }
+
+         if (iGetYesNo_SYS("GRIDREPJ", "TRANSFORM_ACROSS_LOCAL_DATUM"))
+         {
+            ApplyLocalDatumTransformsInPJ_IPJ(hNewIPJ);
+            iApplyLocalDatumTransformsInPJ = 1;
+         }
+      }
+
       iOrientation = iGetOrientation_IPJ(hOldIPJ);
       if (iOrientation == IPJ_ORIENT_DEFAULT || iOrientation == IPJ_ORIENT_PLAN)
       {
@@ -881,7 +942,8 @@ real rNCell;
          if (!iHasProjection_IPJ(hNewIPJ) || !iHasProjection_IPJ(hOldIPJ) ||
              (iCoordinateSystemsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
               iWarpsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
-              iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ)))
+              iOrientationsAreTheSame_IPJ(hNewIPJ, hOldIPJ) &&
+              !iApplyLocalDatumTransformsInPJ))
             iSame = 1;
 
          if (iExistReal_SYS("GRIDREPJ", "NEWCELL"))
