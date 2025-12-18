@@ -1,0 +1,282 @@
+//*** extends 'class_empty.gxh'
+
+#ifndef HNASVD_GXH_DEFINED
+#define HNASVD_GXH_DEFINED
+
+//*** block Header
+// NOTICE: Do not edit anything here, it is generated code
+//===========================================================================================================
+//
+// Class NASVD
+//
+//-----------------------------------------------------------------------------------------------------------
+//
+// The NASVD class provides functionality for Noise-Adjusted Singular Value Decomposition
+// (NASVD) analysis of spectral data. This class wraps the GamMontaj library functions
+// for performing Hovgaard-normalized SVD analysis and spectral reconstruction.
+// 
+// The database (DB) provided to the NASVD class is cached and used for later reconstruction,
+// so the database must remain valid for the lifetime of the NASVD object.
+//
+//-----------------------------------------------------------------------------------------------------------
+
+
+
+//*** endblock Header
+
+//*** block Editable
+// NOTICE: The code generator will not replace the code in this block
+//*** endblock Editable
+
+//*** block Generated
+// NOTICE: Do not edit anything here, it is generated code
+
+
+
+
+
+//===========================================================================================================
+//
+// Constructors Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Create_NASVD Create an NASVD object and perform SVD analysis
+//
+// Returns      NASVD Object
+//
+// Notes        Creates an NASVD object and performs the initial Hovgaard-normalized SVD analysis
+//              on the specified spectral channel data. The analysis extracts eigenvectors, scores,
+//              and singular values that can be used for spectral reconstruction and noise reduction.
+//              
+//              The input data is automatically normalized using the Hovgaard method before SVD.
+//              Results are stored internally in the NASVD object for later reconstruction use, including
+//              a line list of all lines that were used to calculate the eigenvectors. Subsequent spectra
+//              reconstruction will apply to the original list of lines used to create the NASVD object.
+//              
+//              It is common in radiometrics processing to exclude certain channels from smoothing operations.
+//              To facilitate this, 'start' and 'end' are provided as inclusive 1-based indices to define the range of spectral
+//              data to be used in the analysis. Use 1 or GS_S4DM for 'start' to indicate the beginning of the spectrum,
+//              and use GS_S4DM for 'end' to indicate the end of the spectrum.
+//              
+//              The optional mask channel allows the pre-selection of rows to include in the analysis.
+//              A dummy value in the mask channel indicates points not included. Valid data points should be indicated with "1".
+//
+// Available    2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] NASVD Create_NASVD(DB,       // DB Object
+                               string,   // Spectral data channel name
+                               string,   // mask_channel name (optional)
+                               int,      // Number of eigenvectors to calculate (1 to min(M,N))
+                               int,      // Inclusive starting index of the spectral data, ranging from (1, numChannels). Provide 1 or GS_S4DM to use the beginning of the spectrum.
+                               int);     // Inclusive ending index of the spectral data, ranging from (1, numChannels). Provide numChannels or GS_S4DM to use the end of the spectrum.
+
+
+
+//===========================================================================================================
+//
+// Destructors Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Destroy_NASVD Destroy an NASVD object
+//
+// Available     2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void Destroy_NASVD(NASVD);  // NASVD Object
+
+
+
+//===========================================================================================================
+//
+// Analysis Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetNumComponents_NASVD Get the number of components calculated during SVD analysis
+//
+// Returns                Number of components available
+//
+// Available              2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] int GetNumComponents_NASVD(NASVD);  // NASVD Object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetSingularValue_NASVD Get a specific singular value
+//
+// Returns                The singular value
+//
+// Available              2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] real GetSingularValue_NASVD(NASVD,   // NASVD Object
+                                        int);    // Component index (0-based)
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetEigenVector_NASVD Get eigenvector data for a specific component
+//
+// Notes                Retrieves the eigenvector data for the specified component index.
+//                      The eigenvector represents the spectral pattern for that component.
+//
+// Available            2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetEigenVector_NASVD(NASVD,   // NASVD Object
+                                      int,     // Component index (0-based)
+                                      VV);     // VV to receive eigenvector data
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetScores_NASVD Get score data for a specific component
+//
+// Notes           Retrieves the score data for the specified component index.
+//                 Scores represent the strength of each component at each spatial location.
+//
+// Available       2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetScores_NASVD(NASVD,   // NASVD Object
+                                 int,     // Component index (0-based)
+                                 VV);     // VV to receive score data
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetPartitionDetails_NASVD Get the number of pass-through (head and tail) channels, and the total number of channels (head + data + tail).
+//
+// Notes                     Retrieves the partition details for the specified NASVD object.
+//                           This includes the number of pass-through channels (head and tail) and the total number of channels.
+//
+// Available                 2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetPartitionDetails_NASVD(NASVD,     // NASVD Object
+                                           var int,   // (out) Number of head pass-through channels.
+                                           var int,   // (out) Number of tail pass-through channels.
+                                           var int);  // (out) Total number of channels, including (head + data + tail).
+
+
+
+//===========================================================================================================
+//
+// Reconstruction Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// ReconstructSpectrum_NASVD Reconstruct spectral data using selected components
+//
+// Notes                     Performs spectral reconstruction using only the first N eigenvectors/components.
+//                           This effectively filters the data by removing noise associated with higher-order
+//                           components while preserving the signal in the dominant components.
+//                           
+//                           The reconstructed data is written to the specified output channel on all lines used
+//                           to create the NASVD object originally (see NASVD::Create, for more details).
+//
+// Available                 2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void ReconstructSpectrum_NASVD(NASVD,    // NASVD Object
+                                           DB,       // DB Object
+                                           int,      // Number of leading components to use for reconstruction
+                                           string);  // Output channel name for reconstructed spectral data
+
+
+
+//===========================================================================================================
+//
+// Utilities Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetCumulativeEigenvectorContribution_NASVD Calculate the variance explained by each component
+//
+// Notes                                      Calculates cumulative eigenvector contribution percentages  for each component 
+//                                            based on their singular values. This helps determine how many components
+//                                            are needed to achieve a desired level of accuracy in the reconstruction.
+//
+// Available                                  2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetCumulativeEigenvectorContribution_NASVD(NASVD,   // NASVD Object
+                                                            VV);     // VV to receive cumulative eigenvector contribution percentages
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// GetMaximumElementCount_NASVD Get the maximum number of elements that can be processed by NASVD
+//
+// Notes                        Returns the maximum number of elements that can be processed
+//                              by the NASVD algorithm to avoid memory allocation failures. This
+//                              value is stored as an advanced setting in Oasis montaj.
+//
+// Available                    2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void GetMaximumElementCount_NASVD(var int);  // Maximum number of elements (rows * columns) that can be processed by NASVD
+
+
+
+//===========================================================================================================
+//
+// Serialization Functions
+//
+//===========================================================================================================
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Serialize_NASVD Serialize the NASVD object
+//
+// Notes           Serializes the NASVD object to a format suitable for storage or transmission.
+//
+// Available       2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void Serialize_NASVD(NASVD,    // NASVD Object
+                                 string);  // The output directory to place the serialized files. A new directory will be created if it does not exist. Any existing files in the directory will be overwritten.
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// Deserialize_NASVD Create an NASVD object and perform SVD analysis
+//
+// Returns           NASVD Object
+//
+// Notes             
+//
+// Available         2025.2
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] NASVD Deserialize_NASVD(string);  // The output directory containing the serialized files. The directory must exist and contain allrequired files, including eigenvectors, singular values, and scores.
+
+
+
+
+
+//*** endblock Generated
+
+
+#endif
