@@ -69,7 +69,7 @@
 //                             
 //                             Ref:  See the RPSWINDOW.GXC file for details and implementation of the algorithm.
 //
-// Available                   2025.2
+// Available                   2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void WindowSpectrumToChannel_RPS(DB,       // DB Object
@@ -87,7 +87,7 @@
 //
 // Notes                    
 //
-// Available                2025.2
+// Available                2026.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void FullSpectralAnalysis_RPS(DB,       // DB Object
@@ -95,30 +95,29 @@
                                           string,   // Spectral data channel name
                                           string,   // Livetime channel name - assumes 1.0 if left blank
                                           string,   // Altitude (e.g. radar altimeter) channel name - assumes 0 if left blank
-                                          int,      // Index of the first window to include in the analysis (0 to N/4)
-                                          int,      // Index of the last window to include in the analysis (3N/4 to N-1)
+                                          string,   // MCF file
                                           int,      // RPS_FITMODE
                                           string);  // Suffix for output channels
 
 
   
 //-----------------------------------------------------------------------------------------------------------
-// DeadTimeCorrection_RPS Apply the Dead-time correction to a channel for a line in a database
+// DeadTimeCorrection_RPS Apply the Dead-time correction to a channel for a line in a database, assumes one second per pulse.
 //
 // Notes                  The output dead-time corrected channel is calculated using the formula:
 //                        
-//                        deadtime_value = raw_value / (1 - raw_TC * dead_time * 0.000001)
+//                        deadtime_corrected_value = raw_value / (1 - raw_TC * dead_time * 0.000001)
 //                        
 //                        where:
 //                        
-//                        deadtime_value = output dead-time corrected value
+//                        deadtime_corrected_value = output dead-time corrected value
 //                        raw_value = raw channel value (counts)
 //                        raw_TC = raw total count channel value
 //                        dead_time = dead-time factor (microseconds/pulse)
 //                        
 //                        Ref:  See the RPSFILT.GXC file for details and implementation of the algorithm.
 //
-// Available              2025.2
+// Available              2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void DeadTimeCorrection_RPS(DB,       // DB Object
@@ -131,21 +130,75 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
-// LiveTimeCorrection_RPS Apply the Live-time correction to a channel for a line in a database
+// DeadTimeCorrectionAcqChannel_RPS Apply the Dead-time correction to a channel for a line in a database, using an acquisition time channel.
+//
+// Notes                            The output dead-time corrected channel is calculated using the formula:
+//                                  
+//                                  deadtime_corrected_value = raw_value * (acq_time_value / (acq_time_value - deadtime_value))
+//                                  
+//                                  where:
+//                                  
+//                                  deadtime_corrected_value = output dead-time corrected value
+//                                  raw_value = raw channel value (counts)
+//                                  acq_time_value = input acquisition-time channel value (same units as the dead time value)
+//                                  deadtime_value = dead time channel value (same units as the acquisition time value)
+//                                  
+//                                  Ref:  See the RPSFILT.GXC file for details and implementation of the algorithm.
+//
+// Available                        2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void DeadTimeCorrectionAcqChannel_RPS(DB,       // DB Object
+                                                  int,      // Line to process (NULLSYMB for all selected lines)
+                                                  string,   // Input raw channel name
+                                                  string,   // Dead time channel name (same units as the acquisition time channel)
+                                                  string,   // Acquisition dead channel name (same units as the dead time channel)
+                                                  string);  // Output deadtime corrected channel name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// DeadTimeCorrectionAcqValue_RPS Apply the Dead-time correction to a channel for a line in a database, using a constant acquisition time value
+//
+// Notes                          The output dead-time corrected channel is calculated using the formula:
+//                                
+//                                deadtime_corrected_value = raw_value * (acq_time_value / (acq_time_value - deadtime_value))
+//                                
+//                                where:
+//                                
+//                                deadtime_corrected_value = output dead-time corrected value
+//                                raw_value = raw channel value (counts)
+//                                acq_time_value = input acquisition-time constant value (same units as the dead time value)
+//                                deadtime_value = dead time channel (same units as the acquisition time value)
+//
+// Available                      2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void DeadTimeCorrectionAcqValue_RPS(DB,       // DB Object
+                                                int,      // Line to process (NULLSYMB for all selected lines)
+                                                string,   // Input raw channel name
+                                                string,   // Dead time channel name (same units as acqtime_constant_value)
+                                                real,     // Acquisition time constant value (same units as livetime_channel)
+                                                string);  // Output livetime corrected channel name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LiveTimeCorrection_RPS Apply the Live-time correction to a channel for a line in a database. Assumes one second per pulse.
 //
 // Notes                  The output live-time corrected channel is calculated using the formula:
 //                        
-//                        livetime_value = 1000 * raw_value / livetime_value
+//                        livetime_corrected_value = 1000 * raw_value / livetime_value
 //                        
 //                        where:
 //                        
-//                        livetime_value = output dead-time corrected value
+//                        livetime_corrected_value = output live-time corrected value
 //                        raw_value = raw channel value (counts)
 //                        livetime_value = live time channel value (milliseconds)
 //                        
 //                        Ref:  See the RPSFILT.GXC file for details and implementation of the algorithm.
 //
-// Available              2025.2
+// Available              2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void LiveTimeCorrection_RPS(DB,       // DB Object
@@ -153,6 +206,58 @@
                                         string,   // Input raw channel name
                                         string,   // Live time channel name (milliseconds)
                                         string);  // Output livetime corrected channel name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LiveTimeCorrectionAcqChannel_RPS Apply the Live-time correction to a channel for a line in a database, using an acquisition time channel
+//
+// Notes                            The output live-time corrected channel is calculated using the formula:
+//                                  
+//                                  livetime_corrected_value = acq_time_value * raw_value / livetime_value
+//                                  
+//                                  where:
+//                                  
+//                                  livetime_corrected_value = output live-time corrected value
+//                                  acq_time_value = input acquisition-time channel value (same units as the live time value)
+//                                  raw_value = raw channel value (counts)
+//                                  livetime_value = live time channel value (same units as the acquisition time value)
+//
+// Available                        2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void LiveTimeCorrectionAcqChannel_RPS(DB,       // DB Object
+                                                  int,      // Line to process (NULLSYMB for all selected lines)
+                                                  string,   // Input raw channel name
+                                                  string,   // Live time channel name (same units as the acquisition time channel)
+                                                  string,   // Acquisition time channel name (same units as the live time channel)
+                                                  string);  // Output livetime corrected channel name
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// LiveTimeCorrectionAcqValue_RPS Apply the Live-time correction to a channel for a line in a database, using a constant acquisition time value
+//
+// Notes                          The output live-time corrected channel is calculated using the formula:
+//                                
+//                                livetime_corrected_value = acq_time_value * raw_value / livetime_value
+//                                
+//                                where:
+//                                
+//                                livetime_corrected_value = output live-time corrected value
+//                                acq_time_value = input acquisition-time constant value (same units as the live time value)
+//                                raw_value = raw channel value (counts)
+//                                livetime_value = live time channel value (same units as the acquisition time value)
+//
+// Available                      2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void LiveTimeCorrectionAcqValue_RPS(DB,       // DB Object
+                                                int,      // Line to process (NULLSYMB for all selected lines)
+                                                string,   // Input raw channel name
+                                                string,   // Live time channel name (same units as acqtime_constant_value)
+                                                real,     // Acquisition time constant value (same units as livetime_channel)
+                                                string);  // Output livetime corrected channel name
 
 
   
@@ -172,7 +277,7 @@
 //                                         
 //                                         Ref:  See the RPSFILT.GXC file for details and implementation of the algorithm.
 //
-// Available                               2025.2
+// Available                               2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void STPCorrectionFromBarometricAltitude_RPS(DB,       // DB Object
@@ -198,7 +303,7 @@
 //                               P = raw pressure channel value (kPa)
 //                               temp = temperature channel value (degrees Celsius)
 //
-// Available                     2025.2
+// Available                     2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void STPCorrectionFromPressure_RPS(DB,       // DB Object
@@ -233,7 +338,7 @@
 //                         
 //                         Ref:  See the RPSCORR.GXC file for details and implementation of the algorithm.
 //
-// Available               2025.2
+// Available               2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void AltitudeAttenuation_RPS(DB,       // DB Object
@@ -288,12 +393,12 @@
 //                      and:
 //                      
 //                      RALTSTP = Input STP corrected radar altimeter channel value (m)
-//                      ALPHA = Input Compton stripping alpha factor (default: 0.24)
-//                      BETA = Input Compton stripping beta factor (default: 0.37)
-//                      GAMMA = Input Compton stripping gamma factor (default: 0.70)
-//                      ASTRIP = Input Compton stripping a factor (default: 0.05)
-//                      BSTRIP = Input Compton stripping b factor (default: 0.0)
-//                      GSTRIP = Input Compton stripping g factor (default: 0.0)
+//                      ALPHA = Input Compton stripping alpha factor
+//                      BETA = Input Compton stripping beta factor
+//                      GAMMA = Input Compton stripping gamma factor
+//                      ASTRIP = Input Compton stripping a factor
+//                      BSTRIP = Input Compton stripping b factor
+//                      GSTRIP = Input Compton stripping g factor
 //                      
 //                      and where:
 //                      
@@ -302,7 +407,7 @@
 //                      
 //                      Ref:  See the RPSCORR.GXC file for details and implementation of the algorithm.
 //
-// Available            2025.2
+// Available            2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void ComptonStripping_RPS(DB,       // DB Object
@@ -311,12 +416,12 @@
                                       string,   // Input Postassium levelelled count channel
                                       string,   // Input Uranium levelelled count channel
                                       string,   // Input Thorium levelelled count channel
-                                      real,     // Input Compton Stripping ratio alpha (default: 0.24)
-                                      real,     // Input Compton Stripping ratio beta (default: 0.37)
-                                      real,     // Input Compton Stripping ratio gamma (default: 0.70)
-                                      real,     // Input Compton Stripping ratio a (default: 0.05)
-                                      real,     // Input Compton Stripping ratio b (default: 0.0)
-                                      real,     // Input Compton Stripping ratio g (default: 0.0)
+                                      real,     // Input Compton Stripping ratio alpha
+                                      real,     // Input Compton Stripping ratio beta
+                                      real,     // Input Compton Stripping ratio gamma
+                                      real,     // Input Compton Stripping ratio a
+                                      real,     // Input Compton Stripping ratio b
+                                      real,     // Input Compton Stripping ratio g
                                       string,   // Output Compton Stripped Potassium channel (can be same channel as input)
                                       string,   // Output Compton Stripped Uranium channel (can be same channel as input)
                                       string);  // Output Compton Stripped Thorium channel (can be same channel as input)
@@ -345,14 +450,14 @@
 //                        InputTh = Input thorium channel expressed in counts
 //                        InputTC = Input total count channel expressed in counts
 //                        
-//                        SensK = Input Potassium Broad source sensitivity (default: 75 (cps/%))
-//                        SensU = Input Uranium Broad source sensitivity (default: 7.5 (cps/ppm))
-//                        SensTh = Input Thorium Broad source sensitivity (default: 4.5 (cps/ppm))
-//                        SensTC = Input Total Count Broad source sensitivity (default: 23 (uR/hr))
+//                        SensK = Input Potassium Broad source sensitivity (units: (cps/%))
+//                        SensU = Input Uranium Broad source sensitivity (units: (cps/ppm))
+//                        SensTh = Input Thorium Broad source sensitivity (units: (cps/ppm))
+//                        SensTC = Input Total Count Broad source sensitivity (units: (uR/hr))
 //                        
 //                        Ref:  See the RPSCORR.GXC file for details and implementation of the algorithm.
 //
-// Available              2025.2
+// Available              2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void ConvertToElemental_RPS(DB,       // DB Object
@@ -361,10 +466,10 @@
                                         string,   // Input Uranium count channel
                                         string,   // Input Thorium count channel
                                         string,   // Input Total Count channel
-                                        real,     // Potassium broad source sensitivity (default: 75 (cps/%))
-                                        real,     // Uranium broad source sensitivity (default: 7.5 (cps/ppm))
-                                        real,     // Thorium broad source sensitivity (default: 4.5 (cps/ppm))
-                                        real,     // Total count broad source sensitivity (default: 23 (uR/hr))
+                                        real,     // Potassium broad source sensitivity (units (cps/%))
+                                        real,     // Uranium broad source sensitivity (units (cps/ppm))
+                                        real,     // Thorium broad source sensitivity (units (cps/ppm))
+                                        real,     // Total count broad source sensitivity (units (uR/hr))
                                         string,   // Output elemental concentration Potassium channel (can be same channel as input)
                                         string,   // Output elemental concentration Uranium channel (can be same channel as input)
                                         string,   // Output elemental concentration Thorium channel (can be same channel as input)
@@ -379,7 +484,7 @@
 //                          
 //                          Ref:  See the RPSLEVT.GXC file for details and implementation of the algorithm.
 //
-// Available                2025.2
+// Available                2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadonBackgroundTable_RPS(DB,       // DB Object
@@ -412,14 +517,14 @@
 //                                 
 //                                 where:
 //                                 
-//                                  AK  = Input calibration factor ak (default: 0.8)
-//                                  BK  = Input calibration factor bk (default: 0)
-//                                  ATH  = Input calibration factor at (default: 0.1)
-//                                  BTH  = Input calibration factor bt (default: 0)
-//                                  ATC = Input calibration factor atc (default: 12)
-//                                  BTC = Input calibration factor btc (default: 0)
-//                                  AU  = Input calibration factor au (default: 0.25)
-//                                  BU  = Input calibration factor bu (default: 0)
+//                                  AK  = Input calibration factor ak
+//                                  BK  = Input calibration factor bk
+//                                  ATH  = Input calibration factor at
+//                                  BTH  = Input calibration factor bt
+//                                  ATC = Input calibration factor atc
+//                                  BTC = Input calibration factor btc
+//                                  AU  = Input calibration factor au
+//                                  BU  = Input calibration factor bu
 //                                 
 //                                 and:
 //                                 
@@ -427,8 +532,8 @@
 //                                 
 //                                 where
 //                                 
-//                                  URADREF = (UPUFILT - A1*UFILT - A2*THFILT + A2*BT - BU)/
-//                                                                     (AU-A1 - A2*AT)
+//                                  URADREF = (UPUFILT - A1*UFILT - A2*THFILT + A2*BTH - BU)/
+//                                                                     (AU-A1 - A2*ATH)
 //                                 
 //                                  THFILT  = Input Low-pass filtered thorium channel
 //                                  UFILT   = Input Low-pass filtered uranium channel
@@ -436,12 +541,12 @@
 //                                 
 //                                 and
 //                                 
-//                                  A1 = Input Skyshine coefficient A1 (default: 0.036)
-//                                  A2 = Input Skyshine coefficient A2 (default: 0.022)
+//                                  A1 = Input Skyshine coefficient A1
+//                                  A2 = Input Skyshine coefficient A2
 //                                 
 //                                 Ref: See the RPSLEVLU.GXC file for details and implementation of the algorithm.
 //
-// Available                       2025.2
+// Available                       2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadonUpwardRemovalCalculate_RPS(DB,       // DB Object
@@ -449,16 +554,16 @@
                                                  string,   // Input Low-pass filtered uranium channel
                                                  string,   // Input Low-pass filtered thorium channel
                                                  string,   // Input Low-pass filtered upward uranium channel
-                                                 real,     // Input Skyshine coefficient A1 (default: 0.036)
-                                                 real,     // Input Skyshine coefficient A2 (default: 0.022)
-                                                 real,     // Input calibration factor ak - potassium (default: 0.8)
-                                                 real,     // Input calibration factor ath - thorium (default: 0.1)
-                                                 real,     // Input calibration factor au - uranium (default: 0.25)
-                                                 real,     // Input calibration factor atc - total count (default: 12)
-                                                 real,     // Input calibration factor bk - potassium (default: 0)
-                                                 real,     // Input calibration factor bu - uranium (default: 0)
-                                                 real,     // Input calibration factor bth - thorium (default: 0)
-                                                 real,     // Input calibration factor btc - total count  (default: 0)
+                                                 real,     // Input Skyshine coefficient A1
+                                                 real,     // Input Skyshine coefficient A2
+                                                 real,     // Input calibration factor ak - potassium
+                                                 real,     // Input calibration factor ath - thorium
+                                                 real,     // Input calibration factor au - uranium
+                                                 real,     // Input calibration factor atc - total count
+                                                 real,     // Input calibration factor bk - potassium
+                                                 real,     // Input calibration factor bu - uranium
+                                                 real,     // Input calibration factor bth - thorium
+                                                 real,     // Input calibration factor btc - total count
                                                  string,   // Output potassium background to remove (channel)
                                                  string,   // Output uranium background to remove (channel)
                                                  string,   // Output thorium channel background to remove (channel)
@@ -496,7 +601,7 @@
 //                             
 //                             Ref: See the RPSLEVLU.GXC file for details and implementation of the algorithm.
 //
-// Available                   2025.2
+// Available                   2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadonUpwardRemovalApply_RPS(DB,       // DB Object
@@ -542,7 +647,7 @@
 //                                     
 //                                     Ref:  See the RPSLEVT.GXC file for details and implementation of the algorithm.
 //
-// Available                           2025.2
+// Available                           2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadonOverwaterReferenceChannels_RPS(DB,       // DB Object
@@ -567,7 +672,7 @@
 //                                         
 //                                         Ref:  See the RPSLEVT.GXC file for details and implementation of the algorithm.
 //
-// Available                               2025.2
+// Available                               2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadonOverwaterCreateBackgroundTable_RPS(DB,       // DB Object
@@ -608,7 +713,7 @@
 //                                        
 //                                        Ref:  See the RPSLEVT.GXC file for details and implementation of the algorithm.
 //
-// Available                              2025.2
+// Available                              2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadonOverwaterBackgroundCorrection_RPS(DB,       // DB Object
@@ -648,7 +753,7 @@
 //                                   
 //                                   Ref:  See the RPSLEVU.GXC file for details and implementation of the algorithm.
 //
-// Available                         2025.2
+// Available                         2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadonAircraftCosmicCorrection_RPS(DB,       // DB Object
@@ -659,21 +764,21 @@
                                                    string,   // Input filtered total count channel
                                                    string,   // Input filtered upward uranium channel (optional - can be left blank)
                                                    string,   // Input filtered cosmic channel
-                                                   real,     // Aircraft background value for potassium (cps). (Default = 12)
-                                                   real,     // Aircraft background value for uranium (cps). (Default = 2.2)
-                                                   real,     // Aircraft background value for thorium (cps). (Default = 1.5)
-                                                   real,     // Aircraft background value for total count (cps). (Default = 90)
-                                                   real,     // Aircraft background value for upward uranium (cps) (optional - can be left blank). (Default = 0.6)
-                                                   real,     // Cosmic stripping ratio for potassium (cps/cosmic cps). (Default = 0.032)
-                                                   real,     // Cosmic stripping ratio for uranium (cps/cosmic cps). (Default = 0.026)
-                                                   real,     // Cosmic stripping ratio for thorium (cps/cosmic cps). (Default = 0.03)
-                                                   real,     // Cosmic stripping ratio for total count (cps/cosmic cps). (Default = 0.6)
-                                                   real,     // Cosmic stripping ratio for upward uranium (cps/cosmic cps) (optional - can be left blank). (Default = 0.008)
+                                                   real,     // Aircraft background value for potassium (cps).
+                                                   real,     // Aircraft background value for uranium (cps).
+                                                   real,     // Aircraft background value for thorium (cps).
+                                                   real,     // Aircraft background value for total count (cps).
+                                                   real,     // Aircraft background value for upward uranium (cps) (optional - can be left blank if no upward channel is defined).
+                                                   real,     // Cosmic stripping ratio for potassium (cps/cosmic cps).
+                                                   real,     // Cosmic stripping ratio for uranium (cps/cosmic cps).
+                                                   real,     // Cosmic stripping ratio for thorium (cps/cosmic cps).
+                                                   real,     // Cosmic stripping ratio for total count (cps/cosmic cps).
+                                                   real,     // Cosmic stripping ratio for upward uranium (cps/cosmic cps) (optional - can be left blank if no upward channel is defined).
                                                    string,   // Output levelled potassium channel
                                                    string,   // Output levelled uranium channel
                                                    string,   // Output levelled thorium channel
                                                    string,   // Output levelled total count channel
-                                                   string);  // Output levelled upward uranium channel (optional - can be left blank)
+                                                   string);  // Output levelled upward uranium channel (optional - can be left blank if no upward channel is defined)
 
 
   
@@ -686,7 +791,7 @@
 //                                Ref: See the RPSFILT.GXC, RPSLEVLT.GXC, RPSLEVLU.GXC and RPSRATIO.GXC files
 //                                    for details and implementation of the algorithm.
 //
-// Available                      2025.2
+// Available                      2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadioElementBandpassFilter_RPS(DB,     // DB Object
@@ -723,7 +828,7 @@
 //                        
 //                        Ref: See the RPSRATIO.GXC file for details and implementation of the algorithm.
 //
-// Available              2025.2
+// Available              2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadioElementRatios_RPS(DB,       // DB Object
@@ -757,7 +862,7 @@
 //                                            
 //                                            Ref: See the RPSRATIO.GXC file for details and implementation of the algorithm.
 //
-// Available                                  2025.2
+// Available                                  2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadioElementMinimumConcentrationFilter_RPS(DB,       // DB Object
@@ -788,7 +893,7 @@
 //                                    
 //                                    Ref:  See the RPSCORR.GXC file for details and implementation of the algorithm.
 //
-// Available                          2025.2
+// Available                          2025.2.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_licensed] void RadioElementGroundExposureRate_RPS(DB,       // DB Object
@@ -797,6 +902,44 @@
                                                     string,   // Input Uranium corrected channel
                                                     string,   // Input Thorium corrected channel
                                                     string);  // Output ground level exposure rate channel
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// CompressSpectrum_RPS Represent a spectrum with a different number of bins
+//
+// Notes                In radiometric spectra, with n bins, the first n-1 bins represent counts from 0 to 3 MeV,
+//                      while the last bin represents counts above 3 MeV (cosmic count). 
+//                      This method uses fractional summation of bins to convert a spectrum with n bins into a spectrum with m bins,
+//                      while maintaining the original 0 to 3 MeV range in the first m-1 bins and the cosmic count in the last bin.
+//                      This method works even if n is not a multiple of m, or if n is less than m.
+//
+// Available            2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void CompressSpectrum_RPS(VA,    // VA to receive the compressed output
+                                      VA,    // VA to compress
+                                      int);  // Copy the cosmic counts bin without modification
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// StabilizeSpectra_RPS Calculate the A1 stabilization factor and output the stabilized spectra used for Full Spectrum Analysis
+//
+// Notes                Calculate the A1 stabilization factor and output the stabilized spectra used for Full Spectrum Analysis.
+//                      The stabilization factor is calculated on a per-line basis. 
+//                      The number of array elements in the output stabilized spectrum channel is less than the number of elements in the input
+//
+// Available            2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_licensed] void StabilizeSpectra_RPS(DB,       // DB Object
+                                      int,      // Line to process (NULLSYMB for all selected lines)
+                                      string,   // Input (unstabilized) spectrum channel name
+                                      string,   // MCF file
+                                      string,   // Output A1 factor channel name (optional, can be blank)
+                                      string,   // Output averaged spectrum   channel name (optional, can be blank)
+                                      string);  // Output (stabilized) spectrum channel name
 
 
 

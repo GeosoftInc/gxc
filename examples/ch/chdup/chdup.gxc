@@ -532,6 +532,8 @@ real rFidStart, rFidIncr;
          if(!iInteractive) 
 			{
             GetString_SYS("CHDUP", "CURLINE", sCurline);   
+				if (!iStrlen_STR(sCurline))
+					Abort_SYS(_("CHDUP.CURLINE value required for current line in script mode."));
             DupLn = FindSymb_DB(DupDB, sCurline, DB_SYMB_LINE);
          }
 
@@ -885,12 +887,7 @@ real rFidStart, rFidIncr;
 
    // --- clean up ---
       
-   UnLockSymb_DB(LabDB,LabDupCh);
-   UnLockSymb_DB(LabDB,LabSampleCh);
-   UnLockSymb_DB(LabDB,LabOrderCh );
-   UnLockSymb_DB(LabDB,LabLabCh   );
-   UnLockSymb_DB(LabDB,LabBatchCh );
-   UnLockSymb_DB(LabDB,LabWeightCh);
+   UnLockAllSymb_DB(LabDB);
    UnLock_EDB(ELabDB);
       
    Destroy_VV(LabChVV);
@@ -905,9 +902,10 @@ real rFidStart, rFidIncr;
 			DisplayMessage_SYS(_("Removing Duplicates"), _("No duplicate samples removed."));
 	}
    else {
-      
+     
       // --- display data ---
                
+	   UnLockAllSymb_DB(DupDB);
 	   UnLock_EDB(EDupDB);
       UnLoadAllChans_EDB(EDupDB);
       LoadChan_EDB(EDupDB,"Sample");

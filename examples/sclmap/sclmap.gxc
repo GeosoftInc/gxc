@@ -25,12 +25,12 @@ RESOURCE = "sclmap.gr"
 //===========================================================================
 
 #include <all.gxh>
-               // clang-format on
+// clang-format on
 
 
-               //===========================================================================
+//===========================================================================
 
-               string(STR_DEFAULT_LONG) sTemp;
+string(STR_DEFAULT_LONG) sTemp;
 string(64) sLicClass;
 
 EMAP EMap;
@@ -41,7 +41,7 @@ IPJ ViewIPJ;
 
 real rScale, rNewScale, rMinX, rMinY, rMaxX, rMaxY;
 
-int i, i3D, iGrid, iGridSave, iGridOnly, iPackedFiles, iReSize;
+int i, i3D, iGrid, iGridSave, iGridOnly, iPackedFiles, iProg, iReSize;
 int iArcGIS, iSection;
 int iManual;
 
@@ -223,6 +223,12 @@ string(STR_FILE) sMap;
       }
       else if (iManual)
       {
+         // --- Hide any progress bar ---
+
+         iProg = iProgState_SYS();
+         if (iProg)
+            Progress_SYS(0);
+
          // --- Create the Dialogue ---
 
          Diag = Create_DGW("SCLMAP");
@@ -230,6 +236,12 @@ string(STR_FILE) sMap;
          FormatR_STR(rScale, sTemp, 16, 10);
          SetInfo_DGW(Diag, _SCLMAP_0, DGW_TEXT, sTemp);
          i = iRunDialogue_DGW(Diag);
+
+         // --- Re-Show any progress bar ---
+
+         if (iProg)
+            Progress_SYS(iProg);
+         
          if (i == -1)
          {
             UnLock_EMAP(EMap);

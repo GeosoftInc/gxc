@@ -49,7 +49,7 @@
 //
 // Returns                  EVOOBJMETA object
 //
-// Available                2025.1
+// Available                2025.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] EVOOBJMETA CreateDefault_EVOOBJMETA();
@@ -61,7 +61,7 @@
 //
 // Returns           EVOOBJMETA object
 //
-// Available         2025.1
+// Available         2025.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] EVOOBJMETA Create_EVOOBJMETA(string);  // Evo object metadata in JSON string, refer to H_EVOOBJMETA or annotations for Seequent.Evo.Client.Api.Core.GeoscienceObjectMetadata
@@ -71,7 +71,7 @@
 //-----------------------------------------------------------------------------------------------------------
 // Destroy_EVOOBJMETA Destroy the EVOOBJMETA handle.
 //
-// Available          2025.1
+// Available          2025.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void Destroy_EVOOBJMETA(EVOOBJMETA);  // EVOOBJMETA Handle
@@ -81,7 +81,7 @@
 //-----------------------------------------------------------------------------------------------------------
 // iGetWorkspaceId_EVOOBJMETA Return the Evo workspace Id.
 //
-// Available                  2025.1
+// Available                  2025.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void iGetWorkspaceId_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
@@ -94,7 +94,7 @@
 //-----------------------------------------------------------------------------------------------------------
 // iGetObjectId_EVOOBJMETA Return the Evo object Id.
 //
-// Available               2025.1
+// Available               2025.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void iGetObjectId_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
@@ -105,9 +105,22 @@
 
   
 //-----------------------------------------------------------------------------------------------------------
+// iGetVersionId_EVOOBJMETA Return the Evo object version Id.
+//
+// Available                2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void iGetVersionId_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
+                                        var string,   // version id of the Evo object at the time of the last publish
+                                        int);         // maximum length
+#define _iGetVersionId_EVOOBJMETA(meta, version_id) iGetVersionId_EVOOBJMETA(meta, version_id, sizeof(version_id))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
 // iGetModifiedAt_EVOOBJMETA Return the Evo object modified at.
 //
-// Available                 2025.1
+// Available                 2025.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void iGetModifiedAt_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
@@ -120,13 +133,137 @@
 //-----------------------------------------------------------------------------------------------------------
 // iGetBoundingBox_EVOOBJMETA Get Evo object bounding box in JSON string.
 //
-// Available                  2025.1
+// Available                  2025.1.0
 //-----------------------------------------------------------------------------------------------------------
 
 [_public] void iGetBoundingBox_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
                                           var string,   // JSON string for bounding box, refer to H_EVOBOUNDINGBOX or annotations for Seequent.Evo.Client.Api.Core.Goose.Model.BoundingBox
                                           int);         // maximum length
 #define _iGetBoundingBox_EVOOBJMETA(meta, bounding_box) iGetBoundingBox_EVOOBJMETA(meta, bounding_box, sizeof(bounding_box))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetSourceChecksum_EVOOBJMETA Return the source file checksum stored at publish time.
+//
+// Notes                         Returns the SHA-256 checksum of the local source file (e.g. the Geosoft grid file)
+//                               that was computed when the object was last published to the Evo workspace.
+//                               Returns an empty string if no checksum has been stored.
+//                               The checksum is stored in the metadata JSON via Create_EVOOBJMETA and
+//                               is not modifiable through a setter — to update it, create a new EVOOBJMETA
+//                               from an updated JSON string that includes the source_checksum field.
+//
+// Available                     2026.1.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void iGetSourceChecksum_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
+                                             var string,   // SHA-256 checksum hex string of the source file
+                                             int);         // maximum length
+#define _iGetSourceChecksum_EVOOBJMETA(meta, checksum) iGetSourceChecksum_EVOOBJMETA(meta, checksum, sizeof(checksum))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetManifestHash_EVOOBJMETA Return the manifest hash stored after translation.
+//
+// Notes                       Returns the SHA-256 hash of the JSON manifest file that was computed after
+//                             translating the source file to a geoscience object. The manifest hash uniquely
+//                             identifies the translated object (structure + data references).
+//                             Returns an empty string if no manifest hash has been stored.
+//
+// Available                   2026.2.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void iGetManifestHash_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
+                                           var string,   // SHA-256 hash hex string of the JSON manifest
+                                           int);         // maximum length
+#define _iGetManifestHash_EVOOBJMETA(meta, manifest_hash) iGetManifestHash_EVOOBJMETA(meta, manifest_hash, sizeof(manifest_hash))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetBlobHashCount_EVOOBJMETA Return the number of blob hashes stored.
+//
+// Returns                      Number of blob hashes
+//
+// Notes                        Returns the count of blob content hashes stored in this metadata object.
+//                              Blob hashes are the content-addressable identifiers for the Parquet data files
+//                              that comprise the geoscience object.
+//
+// Available                    2026.2.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetBlobHashCount_EVOOBJMETA(EVOOBJMETA);  // EVOOBJMETA object
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// iGetBlobHash_EVOOBJMETA Return a blob hash by index.
+//
+// Returns                 0 on success, 1 if index out of range
+//
+// Notes                   Returns the blob hash at the specified index. Use iGetBlobHashCount_EVOOBJMETA
+//                         to determine the valid range of indices. Index 0 typically corresponds to the main
+//                         data blob, with subsequent indices for auxiliary data (e.g., additional elevation
+//                         grids or attributes).
+//                         Returns 0 on success, 1 if the index is out of range.
+//
+// Available               2026.2.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] int iGetBlobHash_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
+                                      int,          // zero-based index of the blob hash to retrieve
+                                      var string,   // blob content hash hex string
+                                      int);         // maximum length
+#define _iGetBlobHash_EVOOBJMETA(meta, index, blob_hash) iGetBlobHash_EVOOBJMETA(meta, index, blob_hash, sizeof(blob_hash))
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetSourceChecksum_EVOOBJMETA Set the source file checksum on an existing EVOOBJMETA object.
+//
+// Notes                        Updates the source_checksum field in place without affecting any other fields
+//                              (object id, version id, workspace id, path, etc.). Intended for cache-update
+//                              workflows where only the local-file checksum needs to be written back after a
+//                              successful translation or publish, avoiding a full JSON round-trip.
+//
+// Available                    2026.2.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetSourceChecksum_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
+                                            string);      // SHA-256 checksum hex string of the source file
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetManifestHash_EVOOBJMETA Set the manifest hash on an existing EVOOBJMETA object.
+//
+// Notes                      Updates the manifest_hash field in place without affecting any other fields.
+//                            The manifest hash is the SHA-256 hash of the translated geoscience object's JSON
+//                            manifest and is used as the Tier 2 cache key.
+//
+// Available                  2026.2.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetManifestHash_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
+                                          string);      // SHA-256 hash hex string of the JSON manifest
+
+
+  
+//-----------------------------------------------------------------------------------------------------------
+// SetBlobHashes_EVOOBJMETA Replace the blob hash list on an existing EVOOBJMETA object.
+//
+// Notes                    Replaces the entire blob_hashes list in a single call using a JSON array
+//                          string (e.g. ["hash1","hash2"]).  Passing an empty array ([]) clears
+//                          the list.  All other metadata fields are left unchanged.
+//                          Blob hashes are the content-addressable identifiers for the Parquet data files
+//                          that comprise the geoscience object.
+//
+// Available                2026.2.0
+//-----------------------------------------------------------------------------------------------------------
+
+[_public] void SetBlobHashes_EVOOBJMETA(EVOOBJMETA,   // EVOOBJMETA object
+                                        string);      // JSON array string of blob content hash hex strings, e.g. ["hash1","hash2"]
 
 
 
